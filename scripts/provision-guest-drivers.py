@@ -1,0 +1,71 @@
+#!/usr/bin/env python3
+"""Build a driver-only ARM64 disc from an independently distributed UTM disc."""
+import hashlib
+import json
+from pathlib import Path
+import shutil
+import subprocess
+import tempfile
+import urllib.request
+
+ROOT = Path(__file__).resolve().parent.parent
+DOWNLOADS = ROOT / ".tools/downloads"
+SOURCE_URL = "https://getutm.app/downloads/utm-guest-tools-latest.iso"
+# Pin the inspected artifact; a changed upstream 'latest' fails closed.
+SOURCE_SHA256 = "65b6a69b392ee01dd314c10f3dad9ebbf9c4160be43f5f0dd6bb715944d9095b"
+
+
+def digest(path):
+    h = hashlib.sha256()
+    with path.open("rb") as stream:
+        for block in iter(lambda: stream.read(1024 * 1024), b""):
+            h.update(block)
+    return h.hexdigest()
+
+
+def main():
+    extractor = shutil.which("7z") or shutil.which("7zz")
+    if not extractor:
+        raise SystemExit("Install an ISO extractor first: brew install sevenzip")
+    DOWNLOADS.mkdir(parents=True, exist_ok=True)
+    source = DOWNLOADS / "utm-guest-tools.iso"
+    if not source.exists():
+        with urllib.request.urlopen(SOURCE_URL) as response, source.open("wb") as output:
+            shutil.copyfileobj(response, output)
+    if digest(source) != SOURCE_SHA256:
+        raise SystemExit("Guest driver source checksum mismatch; inspect an updated artifact before changing the pin")
+    with tempfile.TemporaryDirectory(prefix="drivers-", dir=DOWNLOADS) as temporary:
+        staging = Path(temporary)
+        content = staging / "content"
+        subprocess.run([extractor, "x", "-y", "-o" + str(content), str(source),
+                        "Drivers/*", "virtio-win_license.txt"], check=True, stdout=subprocess.DEVNULL)
+        for path in content.rglob("*"):
+            if path.is_file() and path.name != "virtio-win_license.txt":
+                if "arm64" not in [part.lower() for part in path.relative_to(content).parts]:
+                    path.unlink()
+        for path in sorted(content.rglob("*"), key=lambda p: len(p.parts), reverse=True):
+            if path.is_dir() and not any(path.iterdir()):
+                path.rmdir()
+        drivers = sorted(path for path in (content / "Drivers").rglob("*") if path.is_file())
+        if not drivers or not (content / "virtio-win_license.txt").is_file():
+            raise SystemExit("Expected ARM64 drivers and license are missing")
+        (content / "README.txt").write_text(
+            "Perpendicular Desktop: optional ARM64 VirtIO drivers.\n"
+            "Source: " + SOURCE_URL + "\n"
+            "Includes drivers and their license only. No automatic setup or Windows policy changes.\n"
+            "In Windows, use Device Manager or pnputil to install the required signed driver.\n")
+        manifest = {"source_url": SOURCE_URL, "source_sha256": SOURCE_SHA256,
+                    "files": {str(p.relative_to(content)): digest(p) for p in drivers}}
+        (content / "driver-manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
+        image = staging / "perpendicular-drivers.iso"
+        subprocess.run(["hdiutil", "makehybrid", "-iso", "-joliet", "-default-volume-name",
+                        "PERPDRIVERS", "-o", str(image), str(content)], check=True)
+        # Atomic publication does not mutate an image already open by a VM.
+        image.replace(DOWNLOADS / "perpendicular-drivers.iso")
+        for name in ("driver-manifest.json", "virtio-win_license.txt"):
+            shutil.copy2(content / name, DOWNLOADS / name)
+        print(f"Prepared {len(drivers)} ARM64 driver files; no unattended setup files included")
+
+
+if __name__ == "__main__":
+    main()

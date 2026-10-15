@@ -1,0 +1,27 @@
+Perpendicular Desktop
+Copyright 2026 Perpendicular Desktop contributors
+
+An independent desktop virtualization project for Windows 11 ARM on Apple Silicon.
+Parallels Desktop is used as a behavioral reference. This project is not affiliated
+with Parallels and does not include its binaries, Windows installation media,
+license checks, guest tools, or copied decompiled source code.
+
+The project's original source is provided under Apache License 2.0. Runtime
+dependencies keep their respective licenses. The bundled bootstrap runtime uses
+QEMU, TianoCore EDK II firmware, swtpm/libtpms and their dependency libraries.
+Build tooling must preserve those packages' notices and source provenance.
+
+QEMU source and corresponding license:
+https://download.qemu.org/qemu-11.1.2.tar.xz
+https://www.qemu.org/docs/master/about/license.html
+
+Secure firmware development source:
+https://github.com/utmapp/edk2
+
+TPM emulation:
+https://github.com/stefanberger/swtpm
+https://github.com/stefanberger/libtpms
+
+Independently distributed Windows guest drivers/tools (optional):
+https://github.com/utmapp/UTM
+https://github.com/virtio-win/kvm-guest-drivers-windows
