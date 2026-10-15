@@ -1,0 +1,77 @@
+{
+  "date": "2026-10-15",
+  "scope": "Disposable ARM64 firmware VMs only; factory DBX semantics checkpoint",
+  "resources": {
+    "cpus_per_vm": 1,
+    "memory_mib_per_vm": 512,
+    "network": false,
+    "tpm": false,
+    "existing_vm_disks_or_stores": false
+  },
+  "firmware_code_sha256": "5604f775025d25829fd0313acea2d2aa30ff4e3befc6da2eae1e522efc9ea429",
+  "factory_variables_sha256": "415ddb9589a3a966e1ea9738265a1dae2bbec89aaa83d83bcec19a8ad402c9bf",
+  "microsoft_dbx_release": "v1.7.0",
+  "microsoft_dbx_payload_sha256": "329f9ec34a8ae3c9e7eddaeba82a84f598c44853790394314dd88b563c667e1a",
+  "factory_hash_count": 26,
+  "signed_subset_hash_count": 22,
+  "canary": {
+    "source": "ARM64 UEFI Shell built from the pinned QEMU/EDK2 source",
+    "authenticode_sha256": "50a57851f39cfbf41b9504b3e01ba5acc0920bee6c653fb33b6b176bd46f5cbb",
+    "signed_file_sha256": "27376b5c1660e1b5ea4bb1d0e9d1a3cd56b7c3d529588a2843dd5da134950a85",
+    "test_certificate_der_sha256": "e8c32e9d72d1d0cf1bb582dd6dd222f9b1c787534c2611b57fb628e4b753c380",
+    "certificate_scope": "db in disposable variable copies only; no macOS trust import",
+    "allowed_marker": "PERP_DBX_CANARY_EXECUTED",
+    "revoked_result": "Script Error Status: Access Denied (line number 4)",
+    "secure_boot": "01",
+    "setup_mode": "00",
+    "dbx_entries_before": 26,
+    "dbx_entries_after": 27,
+    "all_other_variables_identical_before_test_boots": true
+  },
+  "windows_loader": {
+    "observed_text": "Press any key to boot from CD or DVD",
+    "image": "../images/dbx-windows-loader.png",
+    "image_sha256": "791e2d9e120a0a25800b2b097e12f45cf892dbb1d535cfe9d398396738dccb38",
+    "visual_reviewed": true
+  },
+  "controlled_hash_dbx_enforcement_verified": true,
+  "real_microsoft_revoked_image_tested": false,
+  "auth2": {
+    "source": "PostSignedObjects/SignedByKEK2023/dbx_aarch64.efiauth2",
+    "source_sha256": "a9469ad3f349e0904212626f1badbb826c1a8944dd8341af57df544e8a2cad57",
+    "host_cms_and_authority_verification_passed": true,
+    "secure_boot": 1,
+    "attributes": "0x67",
+    "original_status": "EFI_SECURITY_VIOLATION",
+    "original_code": "0x800000000000001a",
+    "tamper_test": "not_executed_after_original_rejection",
+    "replay_test": "not_executed_after_original_rejection"
+  },
+  "runtime_update_verified": false,
+  "live_migration_verified": false,
+  "all_owned_qemu_children_reaped": true,
+  "source_template_unchanged": true,
+  "private_run_ids": {
+    "canary_and_auth2": "3a0dc21f-186f-46c4-8b36-dec263b01de2",
+    "windows_visual": "06d12e34-cace-4220-836a-85c815ba4b74"
+  },
+  "software_tests_passed": 9,
+  "efi_probe_build_jobs": 1,
+  "review_files": [
+    "README.md",
+    "docs/SECURE_BOOT_DBX.md",
+    "docs/images/dbx-windows-loader.png",
+    "docs/verification/dbx-enforcement.json",
+    "scripts/enroll-secure-vars.py",
+    "scripts/secure_boot_dbx.py",
+    "scripts/secure-boot-dbx-sources.json",
+    "scripts/firmware-requirements.txt",
+    "scripts/provision-secure-firmware.sh",
+    "scripts/bundle-runtime.py",
+    "scripts/tests/test_secure_boot_dbx.py",
+    "scripts/test-dbx-enforcement.py",
+    "scripts/build-dbx-auth-probe.sh",
+    "scripts/firmware-tests/DbxAuthProbe.c",
+    "scripts/firmware-tests/DbxAuthProbe.inf"
+  ]
+}

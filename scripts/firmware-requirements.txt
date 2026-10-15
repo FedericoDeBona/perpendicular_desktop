@@ -1,6 +1,8 @@
 # macOS Apple Silicon / Python 3.14 build tooling, not bundled in the app.
 # crypt_r is omitted: it is only used by virt.qemutest.cloudinit on Linux;
 # the enrolled-variable CLI does not import that module. Install with --no-deps.
+# Authenticated DBX verification also requires the OpenSSL 3 CLI. Its actual
+# version is recorded in provenance; macOS's LibreSSL CLI is not substituted.
 certifi==2026.7.22 --hash=sha256:62f22742b58a1a33014a2b6b706588a8d7e2a88ae7bd1a6ebe8c992928483775
 cffi==2.1.1 --hash=sha256:661c298b4821edebead0c91edd2b00374d67ad7c5a1f7a91d4442633b79d6a72
 charset-normalizer==3.5.2 --hash=sha256:fcff63213e8e6e47770541a4607175404f47cbb3ebea7b6058cc82d524a0e424

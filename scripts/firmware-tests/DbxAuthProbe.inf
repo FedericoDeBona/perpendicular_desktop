@@ -1,0 +1,25 @@
+# SPDX-License-Identifier: Apache-2.0
+[Defines]
+  INF_VERSION                    = 0x00010005
+  BASE_NAME                      = DbxAuthProbe
+  FILE_GUID                      = 4c9f1fb7-c606-4a64-9043-eb970c4ee778
+  MODULE_TYPE                    = UEFI_APPLICATION
+  VERSION_STRING                 = 1.0
+  ENTRY_POINT                    = UefiMain
+
+[Sources]
+  DbxAuthProbe.c
+
+[Packages]
+  MdePkg/MdePkg.dec
+
+[LibraryClasses]
+  UefiApplicationEntryPoint
+  UefiLib
+  UefiRuntimeServicesTableLib
+  MemoryAllocationLib
+  BaseMemoryLib
+
+[Guids]
+  gEfiGlobalVariableGuid
+  gEfiImageSecurityDatabaseGuid

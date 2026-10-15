@@ -13,6 +13,9 @@ import struct
 import subprocess
 import tempfile
 
+from secure_boot_dbx import (authenticated_update, dbx_hashes, load_factory_dbx,
+                             preserved_variables)
+
 ROOT = Path(__file__).resolve().parent.parent
 WORK = ROOT / ".tools"
 
@@ -21,7 +24,7 @@ def sha256(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def prepare_tools():
+def prepare_tools(offline=False):
     python = os.environ.get("PERPENDICULAR_ENROLL_PYTHON") or shutil.which("python3.14")
     if not python:
         raise SystemExit("Python 3.14 is required for the pinned macOS ARM64 build tools.")
@@ -33,11 +36,14 @@ def prepare_tools():
     environment = WORK / "firmware-venv"
     if not (environment / "bin/python").exists():
         subprocess.run([python, "-m", "venv", str(environment)], check=True)
-    subprocess.run([
+    command = [
         str(environment / "bin/python"), "-m", "pip", "install", "--no-deps",
-        "--only-binary=:all:", "--require-hashes", "--find-links",
+        "--disable-pip-version-check", "--only-binary=:all:", "--require-hashes", "--find-links",
         str(WORK / "downloads/firmware-python"), "-r",
-        str(ROOT / "scripts/firmware-requirements.txt")], check=True)
+        str(ROOT / "scripts/firmware-requirements.txt")]
+    if offline:
+        command.append("--no-index")
+    subprocess.run(command, check=True)
     return environment / "bin/virt-fw-vars"
 
 
@@ -120,6 +126,11 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--firmware-dir", type=Path, default=WORK / "edk2/output")
     parser.add_argument("--output-dir", type=Path, default=WORK / "edk2/enrolled")
+    parser.add_argument("--dbx-cache", type=Path, default=WORK / "downloads/microsoft-dbx")
+    parser.add_argument("--openssl", type=Path,
+                        default=os.environ.get("PERPENDICULAR_ENROLL_OPENSSL"))
+    parser.add_argument("--offline", action="store_true",
+                        help="Require cached, hash-verified Microsoft and Python sources")
     args = parser.parse_args()
     source, destination = args.firmware_dir.resolve(), args.output_dir.resolve()
     if source == destination:
@@ -128,28 +139,58 @@ def main():
     for name in (empty.name, "edk2-aarch64-secure-code.fd", "edk2-licenses.txt", "build-manifest.json"):
         if not (source / name).is_file():
             raise SystemExit("Build the secure firmware first; missing " + name)
-    tool = prepare_tools()
+    tool = prepare_tools(args.offline)
     cert = platform_certificate()
     destination.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="enroll-", dir=destination.parent) as temporary:
         staging = Path(temporary)
-        enrolled = staging / "edk2-arm-secure-vars.fd"
+        baseline = staging / "baseline-vars.fd"
         subprocess.run([
-            str(tool), "--input", str(empty), "--output", str(enrolled),
+            str(tool), "--input", str(empty), "--output", str(baseline),
             "--enroll-cert", str(cert), "--microsoft-db", "win11",
             "--microsoft-kek", "all", "--secure-boot"], check=True)
+        before_path = staging / "baseline-variables.json"
+        subprocess.run([str(tool), "--input", str(baseline),
+                        "--output-json", str(before_path)], check=True)
+        validate_variables(before_path, cert)
+        before = json.loads(before_path.read_text())
+        variables = {entry["name"]: entry for entry in before["variables"]}
+        dbx, dbx_sources, dbx_report = load_factory_dbx(
+            ROOT / "scripts/secure-boot-dbx-sources.json", args.dbx_cache,
+            bytes.fromhex(variables["KEK"]["data"]), offline=args.offline,
+            openssl=args.openssl)
+        dbx_entry = dict(variables["dbx"])
+        dbx_entry["data"] = dbx.hex()
+        dbx_entry["time"] = authenticated_update(dbx_sources["signed_dbx"])["timestamp_bytes"].hex()
+        patch = staging / "factory-dbx.json"
+        patch.write_text(json.dumps({"version": 2, "variables": [dbx_entry]}) + "\n")
+        enrolled = staging / "edk2-arm-secure-vars.fd"
+        subprocess.run([str(tool), "--input", str(baseline), "--output", str(enrolled),
+                        "--set-json", str(patch)], check=True)
         if enrolled.stat().st_size != 64 * 1024 * 1024:
             raise SystemExit("Enrolled ARM variable bank is not 64 MiB.")
         result = subprocess.check_output([
             str(tool), "--input", str(enrolled), "--output-json", str(staging / "variables.json"),
             "--print"], text=True)
         certificates = validate_variables(staging / "variables.json", cert)
+        after = json.loads((staging / "variables.json").read_text())
+        preserved_variables(before, after)
+        actual_dbx = next(entry for entry in after["variables"] if entry["name"] == "dbx")
+        if bytes.fromhex(actual_dbx["data"]) != dbx or len(dbx_hashes(dbx)) != dbx_report["image_hash_count"]:
+            raise SystemExit("Read-back DBX differs from the verified ARM64 factory payload.")
+        dbx_report["other_variables_preserved"] = True
+        for name in ("PK", "KEK", "db"):
+            dbx_report.setdefault("preserved_variable_payloads_sha256", {})[name] = hashlib.sha256(
+                bytes.fromhex(variables[name]["data"])).hexdigest()
+        # These working files are private intermediates, not package artifacts.
+        for path in (baseline, before_path, patch):
+            path.unlink()
         # The tool parses the generated store again; preserve its public summary.
         (staging / "enrolled-variable-summary.txt").write_text(result)
         (staging / "enrolled-variable-summary.json").write_text(json.dumps({
             "SecureBootEnable": "01", "CustomMode": "00",
             "x509_certificates": certificates,
-            "dbx": "Placeholder only; current revocations require a separate verified update.",
+            "dbx": dbx_report,
         }, indent=2) + "\n")
         manifest = json.loads((source / "build-manifest.json").read_text())
         manifest["enrolled_variables_provenance"] = {
@@ -162,7 +203,7 @@ def main():
             "platform_private_key_bundled": False,
             "db_profile": "Microsoft Windows Production PCA 2011 and Windows UEFI CA 2023",
             "kek_profile": "Local platform certificate and Microsoft KEK 2011/2023",
-            "dbx": "virt-firmware placeholder only; current Microsoft revocations are not provisioned",
+            "dbx": dbx_report,
             "guest_secure_boot_verified": False,
         }
         for name in ("edk2-aarch64-secure-code.fd", "edk2-licenses.txt"):
@@ -173,6 +214,10 @@ def main():
         package = WORK / "firmware-venv/lib/python3.14/site-packages/virt_firmware-26.10.dist-info/licenses/LICENSE"
         if package.is_file():
             shutil.copy2(package, staging / "virt-firmware-LICENSE")
+        (staging / "microsoft-secureboot-objects-LICENSE").write_bytes(dbx_sources["license"])
+        (staging / "microsoft-dbx-provenance.json").write_text(json.dumps(dbx_report, indent=2) + "\n")
+        (staging / "microsoft-arm64-dbx.esl").write_bytes(dbx)
+        (staging / "microsoft-arm64-dbx-signed-subset.efiauth2").write_bytes(dbx_sources["signed_dbx"])
         # No private key or local path is published in output metadata.
         for path in staging.iterdir():
             path.replace(destination / path.name)

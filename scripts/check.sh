@@ -28,6 +28,7 @@ xcrun swiftc -parse-as-library -D PERPENDICULAR_UI_RENDER \
   "$ROOT"/macos/PerpendicularDesktop/*.swift \
   "$ROOT/macos/Tests/DiskExportCheck.swift" -o "$OUTPUT/DiskExportCheck"
 "$OUTPUT/DiskExportCheck"
+python3 -m unittest discover -s "$ROOT/scripts/tests" -p 'test_secure_boot_dbx.py'
 if [[ -n "${PERPENDICULAR_POWERSHELL:-}" ]]; then
   "$PERPENDICULAR_POWERSHELL" -NoProfile -File "$ROOT/guest-tools/windows/tests/Test-AgentCore.ps1"
   "$PERPENDICULAR_POWERSHELL" -NoProfile -File "$ROOT/guest-tools/windows/tests/Test-GuestToolsInstaller.ps1"

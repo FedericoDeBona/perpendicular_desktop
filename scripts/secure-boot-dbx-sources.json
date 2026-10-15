@@ -1,0 +1,44 @@
+{
+  "format_version": 1,
+  "checked_at": "2026-10-15",
+  "repository": "https://github.com/microsoft/secureboot_objects",
+  "release": "v1.7.0",
+  "signed_release": "v1.7.0-signed",
+  "published_at": "2026-09-03T17:46:51Z",
+  "commit": "9a2bbf82e86b62694e44aba3a4068d8dd0c943d7",
+  "architecture": "aarch64",
+  "license": "BSD-2-Clause-Patent",
+  "default_dbx_member": "./LegacyFirmwareDefaults/Firmware/DefaultDbx.bin",
+  "default_dbx_receipt_member": "./LegacyFirmwareDefaults/Firmware/DefaultDbx.json",
+  "default_dbx_sha256": "329f9ec34a8ae3c9e7eddaeba82a84f598c44853790394314dd88b563c667e1a",
+  "default_dbx_hash_count": 26,
+  "signed_dbx_hash_count": 22,
+  "optional_image_hash_count": 4,
+  "kek_2023_certificate_sha256": "3cd3f0309edae228767a976dd40d9f4affc4fbd5218f2e8cc3c9dd97e8ac6f9d",
+  "sources": {
+    "firmware_archive": {
+      "filename": "aarch64-v1.7.0.tar.gz",
+      "url": "https://github.com/microsoft/secureboot_objects/releases/download/v1.7.0/edk2-aarch64-secureboot-binaries.tar.gz",
+      "sha256": "d5d4c716907f03772b9f5b4c1543e6add58618888041a36bbbc89219562cfdcb",
+      "maximum_bytes": 1048576
+    },
+    "signed_dbx": {
+      "filename": "dbx_aarch64.efiauth2",
+      "url": "https://raw.githubusercontent.com/microsoft/secureboot_objects/9a2bbf82e86b62694e44aba3a4068d8dd0c943d7/PostSignedObjects/SignedByKEK2023/dbx_aarch64.efiauth2",
+      "sha256": "a9469ad3f349e0904212626f1badbb826c1a8944dd8341af57df544e8a2cad57",
+      "maximum_bytes": 65536
+    },
+    "source_receipt": {
+      "filename": "dbx_info_msft_latest.json",
+      "url": "https://raw.githubusercontent.com/microsoft/secureboot_objects/9a2bbf82e86b62694e44aba3a4068d8dd0c943d7/PreSignedObjects/DBX/dbx_info_msft_latest.json",
+      "sha256": "7ddf37f639ace32004744939d9d7da820793f1728768b7b90b4de2379b3e8fbe",
+      "maximum_bytes": 1048576
+    },
+    "license": {
+      "filename": "License.txt",
+      "url": "https://raw.githubusercontent.com/microsoft/secureboot_objects/9a2bbf82e86b62694e44aba3a4068d8dd0c943d7/License.txt",
+      "sha256": "840a8918b28ff140fa720bd3d1b4845a74047914d16883ea74df6977234845fb",
+      "maximum_bytes": 65536
+    }
+  }
+}

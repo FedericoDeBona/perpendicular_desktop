@@ -67,6 +67,29 @@ def collect_notices(originals, notice):
     return packages
 
 
+def copy_dbx_notices(share, notice, bundled_share=None):
+    """Retain factory DBX provenance with its required redistributable notice."""
+    report = share / "microsoft-dbx-provenance.json"
+    license_file = share / "microsoft-secureboot-objects-licenses.txt"
+    if not report.is_file():
+        # Rebuilt bundles must not display metadata from a different template.
+        for name in (report.name, license_file.name):
+            target = notice / name
+            if target.is_file():
+                target.unlink()
+        if bundled_share is not None:
+            for name in (report.name, license_file.name, "microsoft-arm64-dbx.esl",
+                         "microsoft-arm64-dbx-signed-subset.efiauth2"):
+                target = bundled_share / name
+                if target.is_file():
+                    target.unlink()
+        return
+    if not license_file.is_file():
+        raise RuntimeError("Microsoft DBX firmware requires its corresponding license notice")
+    for source in (report, license_file):
+        shutil.copy2(source, notice / source.name)
+
+
 def main():
     app, prefix = map(lambda x: Path(x).resolve(), sys.argv[1:3])
     resources = app / "Contents/Resources"
@@ -130,6 +153,7 @@ def main():
             shutil.copy2(qemu_source / name, notice / ("QEMU-" + name))
     for license_file in share.glob("*licenses*.txt"):
         shutil.copy2(license_file, notice / license_file.name)
+    copy_dbx_notices(share, notice, runtime / "share/qemu")
     packages = collect_notices([p.resolve() for p in source_binaries] + list(copied.values()), notice)
     downloads = prefix.parent / "downloads"
     if (downloads / "perpendicular-drivers.iso").is_file():
