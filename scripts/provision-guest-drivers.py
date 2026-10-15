@@ -52,8 +52,10 @@ def main():
         agent_source = ROOT / "guest-tools/windows"
         required_agent_files = (
             "PerpendicularAgent.ps1", "PerpendicularAgent.Core.ps1",
+            "PerpendicularAgent.Display.ps1",
             "Install-PerpendicularAgent.ps1", "Uninstall-PerpendicularAgent.ps1",
-            "Install-PerpendicularGuestTools.ps1", "Install-PerpendicularGuestTools.cmd")
+            "Install-PerpendicularGuestTools.ps1", "Install-PerpendicularGuestTools.cmd",
+            "Get-PerpendicularGuestToolsDiagnostics.ps1", "Get-PerpendicularGuestToolsDiagnostics.cmd")
         for name in required_agent_files:
             if not (agent_source / name).is_file():
                 raise SystemExit("The independent Guest Tools package is incomplete: " + name)

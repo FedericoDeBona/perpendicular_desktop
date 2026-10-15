@@ -1,5 +1,6 @@
 pub mod command;
 pub mod disk;
+pub mod display;
 pub mod engine;
 pub mod error;
 pub mod export;

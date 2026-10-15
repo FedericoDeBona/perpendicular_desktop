@@ -7,8 +7,8 @@ $ErrorActionPreference = 'Stop'
 function Get-FixedDriverPackages {
     param([Parameter(Mandatory = $true)][string]$MediaRoot)
     foreach ($entry in @(
-        @{ Name = 'VirtIO network'; Directory = 'Drivers/NetKVM/w11/ARM64'; Base = 'netkvm' },
-        @{ Name = 'VirtIO serial'; Directory = 'Drivers/vioserial/w11/ARM64'; Base = 'vioser' }
+        @{ Name = 'VirtIO network'; Directory = 'Drivers/NetKVM/w11/ARM64'; Base = 'netkvm'; Service = 'netkvm'; DevicePattern = '^PCI\\VEN_1AF4&DEV_(1000|1041)(?:&|\\)' },
+        @{ Name = 'VirtIO serial'; Directory = 'Drivers/vioserial/w11/ARM64'; Base = 'vioser'; Service = 'VirtioSerial'; DevicePattern = '^PCI\\VEN_1AF4&DEV_(1003|1043)(?:&|\\)' }
     )) {
         $directory = Join-Path $MediaRoot $entry.Directory
         [pscustomobject]@{
@@ -16,6 +16,8 @@ function Get-FixedDriverPackages {
             Inf = Join-Path $directory ($entry.Base + '.inf')
             Catalog = Join-Path $directory ($entry.Base + '.cat')
             Driver = Join-Path $directory ($entry.Base + '.sys')
+            DevicePattern = $entry.DevicePattern
+            Service = $entry.Service
         }
     }
 }
@@ -54,8 +56,57 @@ function Assert-SignedArm64Package {
 }
 
 function Get-DriverExitResult {
-    param([int]$ExitCode)
-    [pscustomobject]@{ Accepted = ($ExitCode -eq 0 -or $ExitCode -eq 3010); RestartRequired = ($ExitCode -eq 3010) }
+    param([int]$ExitCode, $Package = $null)
+    $accepted = $ExitCode -eq 0 -or $ExitCode -eq 3010
+    $verification = ''
+    if ($ExitCode -eq 259 -and $null -ne $Package) {
+        $installed = Confirm-InstalledDriverPackage -Package $Package
+        $accepted = $installed.Verified
+        $verification = $installed.Details
+    }
+    [pscustomobject]@{ Accepted = $accepted; RestartRequired = ($ExitCode -eq 3010); VerificationDetails = $verification }
+}
+
+function Get-WindowsInfDirectory {
+    $windows = [Environment]::GetFolderPath([Environment+SpecialFolder]::Windows)
+    if ([string]::IsNullOrEmpty($windows)) { throw 'Windows could not locate its installed INF directory.' }
+    return (Join-Path $windows 'INF')
+}
+
+function Confirm-InstalledDriverPackage {
+    param([Parameter(Mandatory = $true)]$Package)
+    try {
+        # 259 is also returned when no device matches. Do not infer success from
+        # localized PnPUtil output or a package merely being in the driver store.
+        $sourceHash = (Get-FileHash -LiteralPath $Package.Inf -Algorithm SHA256 -ErrorAction Stop).Hash
+        $infDirectory = Get-WindowsInfDirectory
+        $drivers = @(Get-CimInstance -Namespace 'root/cimv2' -ClassName Win32_PnPSignedDriver -ErrorAction Stop)
+        $devices = @(Get-CimInstance -Namespace 'root/cimv2' -ClassName Win32_PnPEntity -ErrorAction Stop)
+        foreach ($driver in $drivers) {
+            if ($driver.IsSigned -isnot [bool] -or -not $driver.IsSigned -or $driver.DeviceID -notmatch $Package.DevicePattern -or
+                $driver.InfName -notmatch '^oem[0-9]+\.inf$') { continue }
+            # Win32_PnPSignedDriver.InfName identifies the device's installed INF.
+            # SetupAPI preserves its bytes while assigning an unpredictable OEM
+            # name in Windows/INF. Hash equality binds this device to our INF.
+            $installedInf = Join-Path $infDirectory $driver.InfName
+            if (-not (Test-Path -LiteralPath $installedInf -PathType Leaf) -or
+                ((Get-Item -LiteralPath $installedInf).Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { continue }
+            if ((Get-FileHash -LiteralPath $installedInf -Algorithm SHA256 -ErrorAction Stop).Hash -cne $sourceHash) { continue }
+            foreach ($device in $devices) {
+                if ($device.DeviceID -ieq $driver.DeviceID -and $device.Present -is [bool] -and $device.Present -and
+                    $device.ConfigManagerErrorCode -is [uint32] -and $device.ConfigManagerErrorCode -eq 0 -and
+                    $device.Service -ieq $Package.Service) {
+                    return [pscustomobject]@{
+                        Verified = $true
+                        Details = 'Independent Windows verification: signed ' + $driver.InfName + ' matches the disc INF (SHA-256); device ' + $device.DeviceID + ' is present, reports no configuration error and uses service ' + $device.Service + '. Windows result 259 is accepted for this already-installed device.'
+                    }
+                }
+            }
+        }
+        return [pscustomobject]@{ Verified = $false; Details = 'Windows result 259 remains unconfirmed: no signed, identical INF was associated with a present, healthy device using the expected VirtIO service.' }
+    } catch {
+        return [pscustomobject]@{ Verified = $false; Details = 'Windows result 259 remains unconfirmed because the independent device check failed: ' + $_.Exception.Message }
+    }
 }
 
 function Get-NativeSystemDirectory {
@@ -164,6 +215,23 @@ function Show-InstallationDetails {
     try { [void]$dialog.ShowDialog() } finally { $dialog.Dispose() }
 }
 
+function Invoke-PnpDriverPackage {
+    param([Parameter(Mandatory = $true)]$Package)
+    $start = New-Object Diagnostics.ProcessStartInfo
+    $start.FileName = Join-Path (Get-NativeSystemDirectory) 'pnputil.exe'
+    $start.Arguments = '/add-driver "' + $Package.Inf + '" /install'
+    $start.UseShellExecute = $false; $start.CreateNoWindow = $true
+    $start.RedirectStandardOutput = $true; $start.RedirectStandardError = $true
+    $process = [Diagnostics.Process]::Start($start)
+    if ($null -eq $process) { throw 'Windows could not start its driver installer.' }
+    try {
+        $output = $process.StandardOutput.ReadToEndAsync()
+        $errors = $process.StandardError.ReadToEndAsync()
+        $process.WaitForExit()
+        return [pscustomobject]@{ ExitCode = $process.ExitCode; Output = $output.GetAwaiter().GetResult(); Errors = $errors.GetAwaiter().GetResult() }
+    } finally { $process.Dispose() }
+}
+
 function Invoke-FixedDriverInstallation {
     param([string]$MediaRoot)
     $packages = @(Get-FixedDriverPackages -MediaRoot $MediaRoot)
@@ -172,26 +240,16 @@ function Invoke-FixedDriverInstallation {
     $restart = $false
     $details = New-Object Text.StringBuilder
     foreach ($package in $packages) {
-        $start = New-Object Diagnostics.ProcessStartInfo
-        $start.FileName = Join-Path (Get-NativeSystemDirectory) 'pnputil.exe'
-        $start.Arguments = '/add-driver "' + $package.Inf + '" /install'
-        $start.UseShellExecute = $false; $start.CreateNoWindow = $true
-        $start.RedirectStandardOutput = $true; $start.RedirectStandardError = $true
-        $process = [Diagnostics.Process]::Start($start)
-        if ($null -eq $process) { throw 'Windows could not start its driver installer.' }
-        try {
-            $output = $process.StandardOutput.ReadToEndAsync()
-            $errors = $process.StandardError.ReadToEndAsync()
-            $process.WaitForExit()
-            [void]$details.AppendLine($package.Name + ' (Windows result ' + $process.ExitCode + '):')
-            [void]$details.AppendLine($output.GetAwaiter().GetResult())
-            [void]$details.AppendLine($errors.GetAwaiter().GetResult())
-            $result = Get-DriverExitResult -ExitCode $process.ExitCode
-            if (-not $result.Accepted) {
-                throw ($package.Name + ' was not accepted by Windows. No security policy was changed.' + [Environment]::NewLine + $details.ToString())
-            }
-            if ($result.RestartRequired) { $restart = $true }
-        } finally { $process.Dispose() }
+        $outcome = Invoke-PnpDriverPackage -Package $package
+        [void]$details.AppendLine($package.Name + ' (Windows result ' + $outcome.ExitCode + '):')
+        [void]$details.AppendLine($outcome.Output)
+        [void]$details.AppendLine($outcome.Errors)
+        $result = Get-DriverExitResult -ExitCode $outcome.ExitCode -Package $package
+        if (-not [string]::IsNullOrEmpty($result.VerificationDetails)) { [void]$details.AppendLine($result.VerificationDetails) }
+        if (-not $result.Accepted) {
+            throw ($package.Name + ' was not accepted by Windows. No security policy was changed.' + [Environment]::NewLine + $details.ToString())
+        }
+        if ($result.RestartRequired) { $restart = $true }
     }
     return [pscustomobject]@{ RestartRequired = $restart; Details = $details.ToString() }
 }
@@ -221,7 +279,7 @@ try {
     }
     Assert-InteractiveUser -Identity $identity -Elevated $isElevated
     $agentInstaller = Join-Path $PSScriptRoot 'Install-PerpendicularAgent.ps1'
-    foreach ($file in @('Install-PerpendicularAgent.ps1', 'PerpendicularAgent.ps1', 'PerpendicularAgent.Core.ps1', 'Uninstall-PerpendicularAgent.ps1')) {
+    foreach ($file in @('Install-PerpendicularAgent.ps1', 'PerpendicularAgent.ps1', 'PerpendicularAgent.Core.ps1', 'PerpendicularAgent.Display.ps1', 'Uninstall-PerpendicularAgent.ps1')) {
         if (-not (Test-Path -LiteralPath (Join-Path $PSScriptRoot $file) -PathType Leaf)) { throw ('The Guest Tools disc is incomplete: ' + $file) }
     }
 } catch {

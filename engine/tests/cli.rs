@@ -245,6 +245,26 @@ fn guest_status_is_truthfully_unavailable_for_stopped_vm_and_transfers_validate_
         f.invoke(&["guest-status", id])["status"]["connected"],
         false
     );
+    let display = f.invoke(&["guest-display-status", id]);
+    assert_eq!(display["display"]["connected"], false);
+    assert_eq!(display["display"]["can_resize"], false);
+    assert!(display["display"]["current"].is_null());
+    let invalid = f
+        .command()
+        .args([
+            "guest-display-resize",
+            id,
+            "--width",
+            "999999",
+            "--height",
+            "720",
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(
+        serde_json::from_slice::<Value>(&invalid.stdout).unwrap()["error"]["code"],
+        "invalid_display_request"
+    );
     let output = f
         .command()
         .args(["guest-clipboard-read", id])
@@ -445,17 +465,127 @@ fn guest_ipc_never_connects_when_vm_ownership_check_fails() {
         serde_json::to_vec(&edited).unwrap(),
     )
     .unwrap();
-    let output = f.command().args(["guest-status", id]).output().unwrap();
+    let outputs: Vec<_> = [
+        vec!["guest-status", id],
+        vec!["guest-display-status", id],
+        vec![
+            "guest-display-resize",
+            id,
+            "--width",
+            "1280",
+            "--height",
+            "720",
+        ],
+    ]
+    .into_iter()
+    .map(|args| f.command().args(args).output().unwrap())
+    .collect();
     fs::write(runtime.join("runtime.json"), original).unwrap(); // restore before assertions/fixture cleanup
-    assert!(!output.status.success());
-    assert_eq!(
-        serde_json::from_slice::<Value>(&output.stdout).unwrap()["error"]["code"],
-        "ownership_mismatch"
-    );
+    for output in outputs {
+        assert!(!output.status.success());
+        assert_eq!(
+            serde_json::from_slice::<Value>(&output.stdout).unwrap()["error"]["code"],
+            "ownership_mismatch"
+        );
+    }
     assert_eq!(
         listener.accept().unwrap_err().kind(),
         std::io::ErrorKind::WouldBlock
     );
+}
+
+#[test]
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+fn display_channel_preserves_unsupported_actual_and_rejects_false_success() {
+    use serde_json::json;
+    let f = Fixture::new();
+    let vm = f.create();
+    let id = vm["id"].as_str().unwrap();
+    f.invoke(&["start", id]);
+    let socket = Path::new(vm["qmp_socket"].as_str().unwrap())
+        .parent()
+        .unwrap()
+        .join("agent.sock");
+    let listener = UnixListener::bind(&socket).unwrap();
+    let worker = std::thread::spawn(move || {
+        for index in 0..4 {
+            let (mut peer, _) = listener.accept().unwrap();
+            let mut line = String::new();
+            BufReader::new(peer.try_clone().unwrap())
+                .read_line(&mut line)
+                .unwrap();
+            let request: Value = serde_json::from_str(&line).unwrap();
+            let actual = |width: u32, height: u32| {
+                json!({"width":width,"height":height,"dpi":null,
+                "device_name":r"\\.\DISPLAY1","adapter":"Fixture driver"})
+            };
+            let result = if index == 0 {
+                assert_eq!(request["op"], "display.status");
+                json!({"can_resize":true,"reason":null,"current":actual(800,600),
+                    "modes":[{"width":800,"height":600},{"width":1280,"height":720}],"dpi_change_supported":false})
+            } else {
+                assert_eq!(request["op"], "display.resize");
+                assert_eq!(request["params"]["host_dpi"], 192);
+                let applied = index != 1;
+                json!({"applied":applied,"changed":applied,"code":if applied {"resized"} else {"display_mode_unsupported"},
+                    "reason":null,"requested":request["params"],"actual":if index==2 {actual(1280,720)} else {actual(800,600)},
+                    "dpi_changed":false,"retry_after_ms":0})
+            };
+            writeln!(
+                peer,
+                "{}",
+                json!({"id":request["id"],"ok":true,"result":result})
+            )
+            .unwrap();
+        }
+    });
+    let status = f.invoke(&["guest-display-status", id]);
+    assert_eq!(status["display"]["current"]["width"], 800);
+    assert_eq!(status["display"]["limits"]["min_interval_ms"], 750);
+    let unsupported = f.invoke(&[
+        "guest-display-resize",
+        id,
+        "--width",
+        "1366",
+        "--height",
+        "768",
+        "--host-dpi",
+        "192",
+    ]);
+    assert_eq!(unsupported["display"]["applied"], false);
+    assert_eq!(unsupported["display"]["actual"]["width"], 800);
+    let success = f.invoke(&[
+        "guest-display-resize",
+        id,
+        "--width",
+        "1280",
+        "--height",
+        "720",
+        "--host-dpi",
+        "192",
+    ]);
+    assert_eq!(success["display"]["applied"], true);
+    assert_eq!(success["display"]["actual"]["width"], 1280);
+    let mismatch = f
+        .command()
+        .args([
+            "guest-display-resize",
+            id,
+            "--width",
+            "1920",
+            "--height",
+            "1080",
+            "--host-dpi",
+            "192",
+        ])
+        .output()
+        .unwrap();
+    assert!(!mismatch.status.success());
+    assert_eq!(
+        serde_json::from_slice::<Value>(&mismatch.stdout).unwrap()["error"]["code"],
+        "guest_agent_protocol"
+    );
+    worker.join().unwrap();
 }
 
 #[test]

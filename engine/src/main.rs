@@ -23,6 +23,18 @@ enum Commands {
     GuestStatus {
         id: String,
     },
+    GuestDisplayStatus {
+        id: String,
+    },
+    GuestDisplayResize {
+        id: String,
+        #[arg(long)]
+        width: u32,
+        #[arg(long)]
+        height: u32,
+        #[arg(long, default_value_t = 96)]
+        host_dpi: u32,
+    },
     GuestClipboardRead {
         id: String,
     },
@@ -152,6 +164,13 @@ fn run(command: Commands) -> Result<Value> {
         Commands::SystemInfo => Ok(engine.system_info()),
         Commands::List => engine.list(),
         Commands::GuestStatus { id } => engine.guest_status(&id),
+        Commands::GuestDisplayStatus { id } => engine.guest_display_status(&id),
+        Commands::GuestDisplayResize {
+            id,
+            width,
+            height,
+            host_dpi,
+        } => engine.guest_display_resize(&id, width, height, host_dpi),
         Commands::GuestClipboardRead { id } => engine.guest_clipboard_read(&id),
         Commands::GuestClipboardWrite {
             id,

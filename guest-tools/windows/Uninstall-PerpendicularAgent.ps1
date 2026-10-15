@@ -37,7 +37,7 @@ if (Test-Path -LiteralPath $directory) {
         throw 'The directory ownership check failed. The task was removed, but files were preserved.'
     }
     # Delete only known package files, never recursively remove a user directory.
-    foreach ($file in @('PerpendicularAgent.ps1', 'PerpendicularAgent.Core.ps1', 'Uninstall-PerpendicularAgent.ps1', 'install.json')) {
+    foreach ($file in @('PerpendicularAgent.ps1', 'PerpendicularAgent.Core.ps1', 'PerpendicularAgent.Display.ps1', 'Uninstall-PerpendicularAgent.ps1', 'install.json')) {
         $path = Join-Path $directory $file
         if (Test-Path -LiteralPath $path -PathType Leaf) { Remove-Item -LiteralPath $path -Force }
     }

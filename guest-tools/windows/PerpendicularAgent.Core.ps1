@@ -3,13 +3,14 @@
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-$script:AgentVersion = '0.1.0'
+$script:AgentVersion = '0.2.0'
 $script:MaximumRequestBytes = 1572864
 $script:MaximumResponseBytes = 1048576
 $script:MaximumClipboardBytes = 262144
 $script:MaximumFileBytes = 1048576
 $script:StrictUTF8 = New-Object System.Text.UTF8Encoding($false, $true)
 $script:ClipboardAvailable = $false
+. (Join-Path $PSScriptRoot 'PerpendicularAgent.Display.ps1')
 
 function New-AgentError {
     param([string]$Code, [string]$Message)
@@ -343,6 +344,7 @@ function Get-AgentStatus {
         secure_boot = $secureBoot; tpm = $tpm
         capabilities = @{
             clipboard = $script:ClipboardAvailable; file_write = $true
+            display_channel = $true
             max_request_bytes = $script:MaximumRequestBytes; max_response_bytes = $script:MaximumResponseBytes
             max_line_bytes = $script:MaximumRequestBytes; max_response_line_bytes = $script:MaximumResponseBytes
             max_clipboard_bytes = $script:MaximumClipboardBytes; max_file_bytes = $script:MaximumFileBytes
@@ -361,6 +363,14 @@ function Invoke-AgentRequest {
             'clipboard.read' {
                 Assert-ObjectFields $Request.params @() @()
                 $result = Get-AgentClipboard
+            }
+            'display.status' {
+                Assert-ObjectFields $Request.params @() @()
+                $result = Get-AgentDisplayStatus
+            }
+            'display.resize' {
+                Assert-ObjectFields $Request.params @('width', 'height', 'host_dpi') @('width', 'height', 'host_dpi')
+                $result = Set-AgentDisplay $Request.params.width $Request.params.height $Request.params.host_dpi
             }
             'clipboard.write' {
                 Assert-ObjectFields $Request.params @('text') @('text')

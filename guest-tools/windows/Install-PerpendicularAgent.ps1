@@ -17,7 +17,7 @@ $manifestPath = Join-Path $directory 'install.json'
 $agentPath = Join-Path $directory 'PerpendicularAgent.ps1'
 $executable = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
 $arguments = '-NoLogo -NoProfile -NonInteractive -STA -WindowStyle Hidden -ExecutionPolicy Bypass -File "' + $agentPath + '"'
-$runtimeFiles = @('PerpendicularAgent.ps1', 'PerpendicularAgent.Core.ps1', 'Uninstall-PerpendicularAgent.ps1')
+$runtimeFiles = @('PerpendicularAgent.ps1', 'PerpendicularAgent.Core.ps1', 'PerpendicularAgent.Display.ps1', 'Uninstall-PerpendicularAgent.ps1')
 foreach ($file in $runtimeFiles) {
     if (-not (Test-Path -LiteralPath (Join-Path $PSScriptRoot $file) -PathType Leaf)) {
         throw "The Guest Tools package is incomplete: $file"

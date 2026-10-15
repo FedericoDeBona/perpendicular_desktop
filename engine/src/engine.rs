@@ -479,6 +479,33 @@ impl Engine {
         Ok(json!({"text":text}))
     }
 
+    pub fn guest_display_status(&self, id: &str) -> Result<Value> {
+        self.config(id)?;
+        match self
+            .guest_request(id, "display.status", json!({}))
+            .and_then(crate::display::validate_status)
+        {
+            Ok(display) => Ok(json!({"display":display})),
+            Err(error) if error.code == "ownership_mismatch" => Err(error),
+            Err(error) => {
+                Ok(json!({"display":crate::display::unavailable(&error.code, &error.message)}))
+            }
+        }
+    }
+
+    pub fn guest_display_resize(
+        &self,
+        id: &str,
+        width: u32,
+        height: u32,
+        host_dpi: u32,
+    ) -> Result<Value> {
+        let requested = crate::display::request(width, height, host_dpi)?;
+        let result = self.guest_request(id, "display.resize", requested.clone())?;
+        let result = crate::display::validate_resize(result, &requested)?;
+        Ok(json!({"display":result}))
+    }
+
     pub fn guest_clipboard_write(&self, id: &str, text: &str) -> Result<Value> {
         guest::validate_clipboard(text)?;
         let result = self

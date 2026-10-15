@@ -447,6 +447,17 @@ pub fn validate_status(result: Value) -> Result<Value> {
             ));
         }
     }
+    let display_channel = match capabilities.get("display_channel") {
+        None => false,
+        Some(Value::Bool(value)) => *value,
+        _ => {
+            return Err(Error::new(
+                "guest_agent_protocol",
+                "Guest display_channel capability must be boolean",
+            ))
+        }
+    };
+    capabilities.insert("display_channel".into(), json!(display_channel));
     // The host's enforced limits remain authoritative even if the guest claims
     // to accept larger messages or requests additional host functionality.
     capabilities.insert("max_request_bytes".into(), json!(MAX_REQUEST_BYTES));
