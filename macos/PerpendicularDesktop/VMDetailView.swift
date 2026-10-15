@@ -36,6 +36,7 @@ struct VMDetailView: View {
                 Menu {
                     Button("Configure…", systemImage: "slider.horizontal.3") { showConfiguration = true }.disabled(!vm.isStopped)
                     Button("Clone…", systemImage: "square.on.square") { NotificationCenter.default.post(name: .cloneVirtualMachine, object: nil) }.disabled(!vm.isStopped)
+                    Button("Export Disk…", systemImage: "square.and.arrow.up") { NotificationCenter.default.post(name: .exportVirtualDisk, object: nil) }.disabled(vm.state != "stopped")
                     Button("Guest Tools…", systemImage: "arrow.left.arrow.right") { tab = "guest_tools" }
                     if vm.isoPath != nil {
                         Button("Eject Installation Disc", systemImage: "eject") { Task { await library.action(["eject-iso", vm.id], operation: "Ejecting installation disc…") } }

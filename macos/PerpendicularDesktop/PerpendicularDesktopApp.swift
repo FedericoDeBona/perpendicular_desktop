@@ -29,9 +29,9 @@ struct PerpendicularDesktopApp: App {
         .commands {
             CommandGroup(replacing: .newItem) {
                 Button("New Virtual Machine…") { NotificationCenter.default.post(name: .createVirtualMachine, object: nil) }
-                    .keyboardShortcut("n")
+                    .keyboardShortcut("n").disabled(library.isBusy)
                 Button("Import Existing Disk…") { NotificationCenter.default.post(name: .importVirtualDisk, object: nil) }
-                    .keyboardShortcut("o")
+                    .keyboardShortcut("o").disabled(library.isBusy)
             }
             CommandMenu("Virtual Machine") {
                 Button("Start") { if let vm = library.selectedVM { Task { await library.action(["start", vm.id], operation: "Starting \(vm.name)…") } } }
@@ -46,9 +46,11 @@ struct PerpendicularDesktopApp: App {
                 Divider()
                 Button("Clone…") { NotificationCenter.default.post(name: .cloneVirtualMachine, object: nil) }
                     .disabled(library.selectedVM?.isStopped != true || !library.canControl)
+                Button("Export Disk…") { NotificationCenter.default.post(name: .exportVirtualDisk, object: nil) }
+                    .disabled(library.selectedVM?.state != "stopped" || !library.canControl)
                 Divider()
                 Button("Refresh Library") { Task { await library.refresh() } }
-                    .keyboardShortcut("r")
+                    .keyboardShortcut("r").disabled(library.isBusy)
             }
         }
         Settings {
@@ -61,6 +63,7 @@ extension Notification.Name {
     static let createVirtualMachine = Notification.Name("PerpendicularCreateVirtualMachine")
     static let importVirtualDisk = Notification.Name("PerpendicularImportVirtualDisk")
     static let cloneVirtualMachine = Notification.Name("PerpendicularCloneVirtualMachine")
+    static let exportVirtualDisk = Notification.Name("PerpendicularExportVirtualDisk")
 }
 
 struct PerpendicularMark: View {

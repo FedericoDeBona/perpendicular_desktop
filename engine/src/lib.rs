@@ -2,6 +2,7 @@ pub mod command;
 pub mod disk;
 pub mod engine;
 pub mod error;
+pub mod export;
 pub mod firmware;
 pub mod guest;
 pub mod model;

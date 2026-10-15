@@ -7,6 +7,7 @@ struct LibraryView: View {
     @ViewState<Bool> private var showImport = false
     @ViewState<VirtualMachine?> private var deleteVM: VirtualMachine?
     @ViewState<VirtualMachine?> private var cloneVM: VirtualMachine?
+    @ViewState<DiskExportRequest?> private var exportRequest: DiskExportRequest?
     @StateObject private var presentation: WindowPresentation
     @ViewState<NavigationSplitViewVisibility> private var columns: NavigationSplitViewVisibility = .all
 
@@ -43,6 +44,7 @@ struct LibraryView: View {
                             .contextMenu {
                                 Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: vm.directory)]) }
                                 Button("Clone…") { cloneVM = vm }.disabled(!vm.isStopped || !library.canControl)
+                                Button("Export Disk…") { exportRequest = chooseDiskExport(for: vm) }.disabled(vm.state != "stopped" || !library.canControl)
                                 Divider()
                                 Button("Move to Trash…", role: .destructive) { deleteVM = vm }
                                     .disabled(!vm.isStopped || !library.canControl)
@@ -122,9 +124,13 @@ struct LibraryView: View {
         .sheet(isPresented: $showCreate) { CreateVMView().environmentObject(library) }
         .sheet(isPresented: $showImport) { ImportDiskView().environmentObject(library) }
         .sheet(item: $cloneVM) { vm in CloneVMView(vm: vm).environmentObject(library) }
+        .sheet(item: $exportRequest) { request in DiskExportProgressView(request: request).environmentObject(library) }
         .onReceive(NotificationCenter.default.publisher(for: .createVirtualMachine)) { _ in showCreate = true }
         .onReceive(NotificationCenter.default.publisher(for: .importVirtualDisk)) { _ in showImport = true }
         .onReceive(NotificationCenter.default.publisher(for: .cloneVirtualMachine)) { _ in if let vm = library.selectedVM, vm.isStopped { cloneVM = vm } }
+        .onReceive(NotificationCenter.default.publisher(for: .exportVirtualDisk)) { _ in
+            if let vm = library.selectedVM, vm.state == "stopped", library.canControl { exportRequest = chooseDiskExport(for: vm) }
+        }
         .alert(library.errorMessage != nil ? "Couldn’t Complete the Action" : "Virtual Machine Added", isPresented: Binding(
             get: { library.errorMessage != nil || (library.noticeMessage != nil && !showCreate && !showImport && cloneVM == nil) },
             set: { if !$0 { library.errorMessage = nil; library.noticeMessage = nil } }

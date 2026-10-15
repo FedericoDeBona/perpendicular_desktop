@@ -11,6 +11,7 @@ Additional implemented commands:
 - `guest-file-push ID --source ABS_PATH --name NAME`: explicitly transfers a regular file of at most 1 MiB into guest Downloads. Names must be safe Windows basenames. Guest paths are informational and are never opened on the host.
 - `update ID --keyboard-layout en-us|it --audio-output true|false`: saves settings for the next VM start. Old VM metadata defaults to US keyboard and disabled audio. Optional CoreAudio playback uses an HDA output codec with no microphone device.
 - `clone ID --name NAME`: fully copies an offline VM into independent qcow2 storage with a new VM UUID, MAC address and NVMe serial. EFI and TPM state remain coherent with the copied disk. If TPM is enabled its cryptographic state is copied; the result reports this and warns about activation and BitLocker recovery.
+- `export-disk ID --destination ABS_PATH --format qcow2|raw`: exports only a stopped VM's disk into an independent image. Format is required, the destination folder must already exist, and any existing destination entry (including a broken symlink) is refused. A private temporary directory on the destination filesystem holds conversion output until atomic publication without replacement. The result is `{"export":{"vm_id":"…","path":"/canonical/path","format":"qcow2","virtual_size_bytes":0,"size_bytes":0}}`, with actual byte counts. EFI variables, TPM state and snapshots are separate VM data and are not included. SIGINT or SIGTERM cancels an unfinished conversion, stops only its owned converter and removes its staging files; after publication the completed export remains. SIGKILL or a power loss can leave a private staging directory for manual recovery.
 - `import-disk --name NAME --disk ABS_PATH [--cpus N] [--memory-mib M] [--iso ABS_PATH]`: imports a self-contained offline raw or qcow2 disk into independent qcow2 storage. Backing chains and encrypted qcow2 containers are rejected. Capacity expands to at least 64 GiB; expanding a guest partition is separate. New EFI and TPM state may require an encrypted guest's recovery key. Disk format alone does not establish ARM64 guest compatibility.
 - `update ID --guest-tools-iso ABS_PATH` and `eject-guest-tools ID`: attach an offline driver's disc or independently eject it. An optional sanitized `perpendicular-drivers.iso` is discovered beside the bundled engine or under `.tools/downloads/`; `PERPENDICULAR_GUEST_TOOLS_ISO` overrides this path. The original upstream guest-tools disc is deliberately not auto-discovered because its unattended answer file changes Windows setup and bypasses hardware checks.
 
@@ -22,9 +23,11 @@ Guest-agent IPC uses a VirtIO serial port named `org.perpendicular.guest_agent.0
 
 Windows hardware currently includes NVMe, VirtIO networking, a linear RAM framebuffer with UEFI GOP, USB input and an optional persistent swtpm TPM 2.0. TPM physical-presence MMIO is disabled on HVF because QEMU 11's 0x400-byte region is incompatible with Apple's 16 KiB host page mappings. Guest TPM functionality and Secure Boot must be checked inside Windows; a secure firmware filename is not evidence of enrolled keys or enabled guest Secure Boot. ARM flash variables are decoded from qcow2 when necessary and normalized to 64 MiB raw flash. Existing offline bootstrap variables are repaired atomically with a backup.
 
+Physical USB passthrough remains unavailable. The [read-only USB investigation](USB_RESEARCH.md) records the confirmed inventory path, missing macOS capture authorization and upstream QEMU selection behavior that must be resolved before exposing explicit attach/detach.
+
 Run `cargo test` and `cargo clippy --all-targets -- -D warnings`. The normal suite uses synthetic disks, fake firmware/image tools and an actual Unix QMP fixture; it does not claim Windows boot validation. Fixture cleanup stops owned mock VMs even after assertion failures.
 
-Two additional real-image tests are opt-in, keeping CI independent of a local QEMU installation:
+Additional real-image tests are opt-in, keeping CI independent of a local QEMU installation:
 
 ```sh
 PERPENDICULAR_TEST_QEMU_IMG=/absolute/path/qemu-img \
@@ -33,6 +36,9 @@ cargo test real_qcow2_template_conversion_and_offline_repair_preserve_guest_byte
 
 PERPENDICULAR_TEST_QEMU_IMG=/absolute/path/qemu-img \
 cargo test real_image_import_and_clone_are_independent_qcow2_and_preserve_source_bytes -- --ignored
+
+PERPENDICULAR_TEST_QEMU_IMG=/absolute/path/qemu-img \
+cargo test real_disk_exports_are_standalone_preserve_bytes_and_refuse_replacement -- --ignored
 ```
 
 These verify real image conversion, byte equivalence, firmware repair backups, independent clone/import storage and integrity after source deletion. They operate on fresh temporary data and never execute an existing Parallels VM.

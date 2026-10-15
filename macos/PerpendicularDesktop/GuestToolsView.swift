@@ -25,6 +25,16 @@ struct GuestToolsView: View {
         default: return "Unknown"
         }
     }
+    private var connectionInstruction: String {
+        if library.connectionError != nil { return "Check the app’s connection, then try Guest Tools again." }
+        if vm.state == "paused" { return "Resume Windows, then check the connection again." }
+        if vm.state != "running" { return "Start Windows to connect Guest Tools." }
+        switch status?.code {
+        case "guest_agent_timeout": return "Windows has not responded yet. Wait for Windows to finish starting, then check the connection again."
+        case "guest_agent_unavailable": return "Install or start Perpendicular Guest Tools inside Windows, then check the connection again."
+        default: return "Guest Tools are not connected. Make sure Windows is running and Guest Tools are installed, then check the connection again."
+        }
+    }
 
     var body: some View {
         ScrollView {
@@ -48,8 +58,13 @@ struct GuestToolsView: View {
                         Button("Check Connection") { Task { await tools.checkStatus(for: vm) } }.disabled(tools.isBusy || !library.canControl)
                     }
                     if !connected {
-                        Text(library.connectionError != nil ? "Reconnect to the virtualization engine to check Guest Tools." : (status?.reason ?? "Install Perpendicular Guest Tools inside Windows, then check the connection."))
+                        Text(connectionInstruction)
                             .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                        if let reason = status?.reason, vm.state == "running" {
+                            DisclosureGroup("Connection Details") {
+                                Text(reason).font(.caption).foregroundStyle(.secondary).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
+                            }.font(.caption).foregroundStyle(.secondary)
+                        }
                     } else if let version = status?.agentVersion {
                         Text("Perpendicular Guest Tools \(version)").font(.caption).foregroundStyle(.secondary)
                     }

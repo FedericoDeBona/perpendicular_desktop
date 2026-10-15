@@ -2,6 +2,27 @@
 
 Run `scripts/check.sh` from the repository root for the normal engine, console and native client checks. These checks do not require a Windows installation.
 
+## Offline disk export
+
+```sh
+swiftc -parse-as-library -D PERPENDICULAR_UI_RENDER \
+  -target arm64-apple-macosx14.0 -swift-version 6 \
+  macos/PerpendicularDesktop/*.swift macos/Tests/DiskExportCheck.swift \
+  -o /tmp/perpendicular-export-check
+/tmp/perpendicular-export-check
+```
+
+The harness uses a real subprocess fixture and a native `NSSavePanel`. It never starts a VM, contacts a guest, or accesses the system clipboard. It checks:
+
+- Export is rejected before invoking the engine unless the current state is exactly stopped, including crashed launches that still need acknowledgement.
+- A deliberately held export leaves the main actor responsive while blocking start, clone, and library, host and snapshot polls.
+- Both explicit disk formats follow the JSON contract; canonical paths, VM identity, artifact existence and byte counts are verified before reporting success.
+- Engine errors and missing or mismatched output clear the busy state and remain failures.
+- Existing files remain unchanged, and native destination validation rejects existing files and dangling symbolic links.
+- Changing the format updates the visible filename extension between `.qcow2` and `.img`.
+
+This is an independent disk copy. EFI firmware state, TPM state and snapshots are excluded; these limits appear in both the destination panel and export progress sheet.
+
 ## Guest Tools boundary and clipboard privacy
 
 ```sh

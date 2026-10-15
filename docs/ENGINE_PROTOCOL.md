@@ -13,6 +13,7 @@ The executable is `perpendicular-engine`. Every invocation prints one JSON objec
 - `update ID [--name NAME] [--cpus N] [--memory-mib M] [--iso PATH] [--keyboard-layout en-us|it] [--audio-output true|false]`: stopped VM configuration, returns `{"vm":Vm}`. Keyboard layout and output-only CoreAudio apply at the next start; no microphone device is exposed.
 - `clone ID --name NAME`: stopped source only; independent storage, new identity/MAC and returned guest activation/TPM warnings.
 - `import-disk --name NAME --disk PATH [--cpus N] [--memory-mib M] [--iso PATH]`: independent import of self-contained raw/qcow2, no backing chains. Returns the new VM and relevant recovery warnings.
+- `export-disk ID --destination ABS_PATH --format qcow2|raw`: stopped VM only. Converts to an independent disk and publishes it without replacement at a new destination. Returns `{"export":{"vm_id":"...","path":"...","format":"qcow2","virtual_size_bytes":68719476736,"size_bytes":...}}`. The disk export excludes firmware, TPM state and snapshots. SIGINT/SIGTERM terminates and reaps only the owned conversion child and removes its staging area; abrupt power loss or SIGKILL can leave an unpublished private staging folder.
 - `update ID --guest-tools-iso PATH`, `eject-guest-tools ID`: attach a stopped VM's optional driver disc or eject it independently.
 - `delete ID`: stopped VM only, moves its directory to an application-owned recoverable trash and returns `{"deleted":ID}`.
 - `snapshots ID`: returns `{"snapshots":[{"id":"...","name":"...","created_at":"ISO8601"}]}`.

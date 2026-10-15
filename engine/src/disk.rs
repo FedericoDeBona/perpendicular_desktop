@@ -33,7 +33,7 @@ pub fn inspect_import(image_tool: &Path, source: &Path) -> Result<DiskInfo> {
     Ok(info)
 }
 
-fn validate_import(info: &DiskInfo) -> Result<()> {
+pub(crate) fn validate_import(info: &DiskInfo) -> Result<()> {
     if info.format != "raw" && info.format != "qcow2" {
         return Err(Error::new(
             "unsupported_disk_format",

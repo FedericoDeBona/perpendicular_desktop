@@ -23,6 +23,11 @@ xcrun swiftc -parse-as-library -target arm64-apple-macosx14.0 -swift-version 6 \
   "$ROOT/macos/PerpendicularDesktop/GuestTools.swift" \
   "$ROOT/macos/Tests/GuestToolsCheck.swift" -o "$OUTPUT/GuestToolsCheck"
 "$OUTPUT/GuestToolsCheck"
+xcrun swiftc -parse-as-library -D PERPENDICULAR_UI_RENDER \
+  -target arm64-apple-macosx14.0 -swift-version 6 \
+  "$ROOT"/macos/PerpendicularDesktop/*.swift \
+  "$ROOT/macos/Tests/DiskExportCheck.swift" -o "$OUTPUT/DiskExportCheck"
+"$OUTPUT/DiskExportCheck"
 if [[ -n "${PERPENDICULAR_POWERSHELL:-}" ]]; then
   "$PERPENDICULAR_POWERSHELL" -NoProfile -File "$ROOT/guest-tools/windows/tests/Test-AgentCore.ps1"
 fi

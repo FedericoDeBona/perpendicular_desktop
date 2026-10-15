@@ -61,6 +61,13 @@ enum Commands {
         #[arg(long)]
         name: String,
     },
+    ExportDisk {
+        id: String,
+        #[arg(long)]
+        destination: PathBuf,
+        #[arg(long, value_parser = ["qcow2", "raw"])]
+        format: String,
+    },
     ImportDisk {
         #[arg(long)]
         name: String,
@@ -167,6 +174,11 @@ fn run(command: Commands) -> Result<Value> {
             disk_gib,
         } => engine.create(&name, &iso, cpus, memory_mib, disk_gib),
         Commands::Clone { id, name } => engine.clone_vm(&id, &name),
+        Commands::ExportDisk {
+            id,
+            destination,
+            format,
+        } => engine.export_disk(&id, &destination, &format),
         Commands::ImportDisk {
             name,
             disk,

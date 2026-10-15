@@ -405,6 +405,16 @@ impl Engine {
         result
     }
 
+    pub fn export_disk(&self, id: &str, destination: &Path, format: &str) -> Result<Value> {
+        self.require_stopped(id)?;
+        let source = self.store.vm_dir(id)?.join("system.qcow2");
+        let exported =
+            crate::export::export_disk(&image_tool(&self.tools)?, &source, destination, format)?;
+        let mut result = serde_json::to_value(exported)?;
+        result["vm_id"] = json!(id);
+        Ok(json!({"export":result}))
+    }
+
     fn guest_request(&self, id: &str, op: &str, params: Value) -> Result<Value> {
         self.config(id)?;
         let qmp = if let Some(runtime) = self.runtime(id)? {

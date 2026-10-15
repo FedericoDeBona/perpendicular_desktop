@@ -83,6 +83,14 @@ struct VMListResult: Decodable, Sendable { let vms: [VirtualMachine]; let errors
 struct VMResult: Decodable, Sendable { let vm: VirtualMachine; let warnings: [String]? }
 struct SnapshotListResult: Decodable, Sendable { let snapshots: [VMSnapshot] }
 struct CommandResult: Decodable, Sendable {}
+struct DiskExportResult: Decodable, Sendable { let export: ExportedDisk }
+struct ExportedDisk: Decodable, Sendable {
+    let vmId: String
+    let path: String
+    let format: String
+    let virtualSizeBytes: UInt64
+    let sizeBytes: UInt64
+}
 private struct FailureResponse: Decodable {
     struct Detail: Decodable { let code: String; let message: String }
     let error: Detail
@@ -148,7 +156,7 @@ final class EngineClient: @unchecked Sendable {
         process.standardInput = FileHandle.nullDevice
         try process.run()
         // Full copies can legitimately take much longer than lifecycle queries.
-        let transfer = ["clone", "import-disk"].contains(arguments.first ?? "")
+        let transfer = ["clone", "import-disk", "export-disk"].contains(arguments.first ?? "")
         let deadline = Date().addingTimeInterval(transfer ? 3600 : 180)
         while process.isRunning && Date() < deadline { Thread.sleep(forTimeInterval: 0.05) }
         if process.isRunning {
@@ -203,6 +211,7 @@ final class LibraryModel: ObservableObject {
     var canControl: Bool { didLoad && connectionError == nil && !isBusy }
 
     func load() async {
+        guard !isBusy else { return }
         do { host = try await engine.execute(["system-info"]); hostError = nil }
         catch { hostError = error.localizedDescription }
         await refresh()
@@ -261,6 +270,41 @@ final class LibraryModel: ObservableObject {
         var arguments = ["import-disk", "--name", name, "--disk", disk, "--cpus", String(cpus), "--memory-mib", String(memory)]
         if let iso { arguments += ["--iso", iso] }
         try await createFromCommand(arguments, operation: "Importing virtual disk…")
+    }
+
+    func exportDisk(vmID: String, destination: URL, format: String) async throws -> ExportedDisk {
+        guard !isBusy else { throw EngineFailure(message: "Another action is still in progress. Wait for it to finish, then try again.") }
+        guard connectionError == nil, let vm = machines.first(where: { $0.id == vmID }), vm.state == "stopped" else {
+            throw EngineFailure(message: "Shut down the virtual machine and refresh its status before exporting its disk.")
+        }
+        guard ["qcow2", "raw"].contains(format), destination.isFileURL, destination.path.hasPrefix("/") else {
+            throw EngineFailure(message: "Choose a local destination and a supported disk format.")
+        }
+        isBusy = true
+        operation = "Exporting \(vm.name)’s disk…"
+        do {
+            let result: DiskExportResult = try await engine.execute(["export-disk", vmID, "--destination", destination.path, "--format", format])
+            let exportedURL = URL(fileURLWithPath: result.export.path)
+            guard result.export.vmId == vmID, result.export.format == format,
+                  result.export.virtualSizeBytes > 0, result.export.sizeBytes > 0,
+                  exportedURL.resolvingSymlinksInPath().standardizedFileURL == destination.resolvingSymlinksInPath().standardizedFileURL else {
+                throw EngineFailure(message: "The engine did not confirm the requested disk export. Check the destination before trying again.")
+            }
+            let attributes = try FileManager.default.attributesOfItem(atPath: exportedURL.path)
+            guard attributes[.type] as? FileAttributeType == .typeRegular,
+                  let size = attributes[.size] as? NSNumber, size.uint64Value == result.export.sizeBytes else {
+                throw EngineFailure(message: "The exported disk could not be verified at the selected destination.")
+            }
+            isBusy = false
+            operation = ""
+            await refresh()
+            return result.export
+        } catch {
+            isBusy = false
+            operation = ""
+            await refresh()
+            throw error
+        }
     }
 
     private func createFromCommand(_ arguments: [String], operation: String) async throws {

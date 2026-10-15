@@ -509,6 +509,369 @@ fn import_copies_a_standalone_disk_without_mutating_source() {
 }
 
 #[test]
+fn offline_disk_export_preserves_source_and_never_replaces_existing_entries() {
+    let f = Fixture::new();
+    let vm = f.create();
+    let id = vm["id"].as_str().unwrap();
+    let source = Path::new(vm["disk_path"].as_str().unwrap());
+    let original = fs::read(source).unwrap();
+    for format in ["qcow2", "raw"] {
+        let destination = f._temp.path().join(format!("Windows exported.{format}"));
+        let exported = f.invoke(&[
+            "export-disk",
+            id,
+            "--destination",
+            destination.to_str().unwrap(),
+            "--format",
+            format,
+        ]);
+        assert_eq!(exported["export"]["vm_id"], id);
+        assert_eq!(
+            exported["export"]["path"],
+            destination.canonicalize().unwrap().to_str().unwrap()
+        );
+        assert_eq!(exported["export"]["format"], format);
+        assert_eq!(exported["export"]["virtual_size_bytes"], 8589934592u64);
+        assert_eq!(exported["export"]["size_bytes"], original.len());
+        assert_eq!(fs::read(&destination).unwrap(), original);
+        assert_eq!(
+            fs::metadata(&destination).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+        let retry = f
+            .command()
+            .args([
+                "export-disk",
+                id,
+                "--destination",
+                destination.to_str().unwrap(),
+                "--format",
+                format,
+            ])
+            .output()
+            .unwrap();
+        assert!(!retry.status.success());
+        assert_eq!(
+            serde_json::from_slice::<Value>(&retry.stdout).unwrap()["error"]["code"],
+            "destination_exists"
+        );
+        assert_eq!(fs::read(destination).unwrap(), original);
+    }
+    let broken = f._temp.path().join("broken-link.qcow2");
+    std::os::unix::fs::symlink("absent-target", &broken).unwrap();
+    let directory = f._temp.path().join("existing-folder");
+    fs::create_dir(&directory).unwrap();
+    for destination in [&broken, &directory, source] {
+        let output = f
+            .command()
+            .args([
+                "export-disk",
+                id,
+                "--destination",
+                destination.to_str().unwrap(),
+                "--format",
+                "qcow2",
+            ])
+            .output()
+            .unwrap();
+        assert!(!output.status.success());
+        assert_eq!(
+            serde_json::from_slice::<Value>(&output.stdout).unwrap()["error"]["code"],
+            "destination_exists"
+        );
+    }
+    assert_eq!(fs::read_link(broken).unwrap(), Path::new("absent-target"));
+    assert!(directory.is_dir());
+    assert_eq!(fs::read(source).unwrap(), original);
+    let invalid = f
+        .command()
+        .args([
+            "export-disk",
+            id,
+            "--destination",
+            "relative.qcow2",
+            "--format",
+            "qcow2",
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(
+        serde_json::from_slice::<Value>(&invalid.stdout).unwrap()["error"]["code"],
+        "invalid_destination"
+    );
+    assert_no_export_staging(f._temp.path());
+}
+
+#[test]
+fn failed_and_raced_exports_keep_destination_and_source_intact_and_clean_only_their_staging() {
+    let f = Fixture::new();
+    let vm = f.create();
+    let id = vm["id"].as_str().unwrap();
+    let source = Path::new(vm["disk_path"].as_str().unwrap());
+    let sentinel = f._temp.path().join(".perpendicular-export-user-data");
+    fs::create_dir(&sentinel).unwrap();
+    fs::write(sentinel.join("keep"), b"user data").unwrap();
+    for mode in ["fail", "race"] {
+        let destination = f._temp.path().join(format!("{mode}.qcow2"));
+        let tool = f._temp.path().join(format!("image-{mode}"));
+        fs::write(&tool, EXPORT_IMAGE).unwrap();
+        fs::set_permissions(&tool, fs::Permissions::from_mode(0o700)).unwrap();
+        let output = f
+            .command()
+            .env("PERPENDICULAR_QEMU_IMG", tool)
+            .env("PERPENDICULAR_EXPORT_MODE", mode)
+            .env("PERPENDICULAR_EXPORT_DESTINATION", &destination)
+            .args([
+                "export-disk",
+                id,
+                "--destination",
+                destination.to_str().unwrap(),
+                "--format",
+                "qcow2",
+            ])
+            .output()
+            .unwrap();
+        assert!(!output.status.success());
+        let error: Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(
+            error["error"]["code"],
+            if mode == "fail" {
+                "export_failed"
+            } else {
+                "destination_exists"
+            }
+        );
+        if mode == "fail" {
+            assert!(error["error"]["message"]
+                .as_str()
+                .unwrap()
+                .contains("synthetic conversion failure"));
+            assert!(!destination.exists());
+        } else {
+            assert_eq!(
+                fs::read(destination).unwrap(),
+                b"racing user's existing data"
+            );
+        }
+        assert_eq!(fs::read(source).unwrap(), b"original-disk");
+    }
+    assert_eq!(fs::read(sentinel.join("keep")).unwrap(), b"user data");
+    fs::remove_file(sentinel.join("keep")).unwrap();
+    fs::remove_dir(sentinel).unwrap();
+    assert_no_export_staging(f._temp.path());
+}
+
+#[test]
+fn export_cancellation_stops_only_its_owned_converter_and_removes_partial_output() {
+    struct RunningExport(Option<std::process::Child>);
+    impl Drop for RunningExport {
+        fn drop(&mut self) {
+            if let Some(child) = &mut self.0 {
+                if child.try_wait().ok().flatten().is_none() {
+                    // This unreaped child cannot have a reused process ID.
+                    // Give the engine time to clean its converter on panic.
+                    unsafe {
+                        libc::kill(child.id() as i32, libc::SIGTERM);
+                    }
+                    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+                    while child.try_wait().ok().flatten().is_none()
+                        && std::time::Instant::now() < deadline
+                    {
+                        std::thread::sleep(std::time::Duration::from_millis(10));
+                    }
+                    let _ = child.kill();
+                    let _ = child.wait();
+                }
+            }
+        }
+    }
+    let f = Fixture::new();
+    let vm = f.create();
+    let id = vm["id"].as_str().unwrap();
+    let tool = f._temp.path().join("slow-image");
+    fs::write(&tool, EXPORT_IMAGE).unwrap();
+    fs::set_permissions(&tool, fs::Permissions::from_mode(0o700)).unwrap();
+    let ready = f._temp.path().join("converter-ready");
+    let destination = f._temp.path().join("cancelled.qcow2");
+    let mut command = f.command();
+    let mut child = RunningExport(Some(
+        command
+            .env("PERPENDICULAR_QEMU_IMG", tool)
+            .env("PERPENDICULAR_EXPORT_MODE", "slow")
+            .env("PERPENDICULAR_EXPORT_READY", &ready)
+            .args([
+                "export-disk",
+                id,
+                "--destination",
+                destination.to_str().unwrap(),
+                "--format",
+                "qcow2",
+            ])
+            .stdout(std::process::Stdio::piped())
+            .spawn()
+            .unwrap(),
+    ));
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while !ready.exists() && std::time::Instant::now() < deadline {
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    assert!(ready.exists(), "converter did not become ready");
+    let converter: i32 = fs::read_to_string(&ready).unwrap().parse().unwrap();
+    assert_eq!(
+        unsafe { libc::kill(child.0.as_ref().unwrap().id() as i32, libc::SIGTERM) },
+        0
+    );
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while child.0.as_mut().unwrap().try_wait().unwrap().is_none() {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "export did not stop after cancellation"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    let output = child.0.take().unwrap().wait_with_output().unwrap();
+    assert!(!output.status.success());
+    assert_eq!(
+        serde_json::from_slice::<Value>(&output.stdout).unwrap()["error"]["code"],
+        "export_cancelled"
+    );
+    assert_eq!(
+        unsafe { libc::kill(converter, 0) },
+        -1,
+        "owned converter must be reaped"
+    );
+    assert!(!destination.exists());
+    assert_eq!(
+        fs::read(vm["disk_path"].as_str().unwrap()).unwrap(),
+        b"original-disk"
+    );
+    assert_no_export_staging(f._temp.path());
+}
+
+fn assert_no_export_staging(parent: &Path) {
+    assert!(!fs::read_dir(parent).unwrap().any(|entry| entry
+        .unwrap()
+        .file_name()
+        .to_string_lossy()
+        .starts_with(".perpendicular-export-")));
+}
+
+const EXPORT_IMAGE: &str = r#"#!/usr/bin/python3
+import json, os, shutil, sys, time
+args=sys.argv[1:]
+if args[0]=='info':
+    print(json.dumps({'format':args[args.index('-f')+1],'virtual-size':8589934592}))
+elif args[0]=='convert':
+    mode=os.environ['PERPENDICULAR_EXPORT_MODE']
+    with open(args[-1],'wb') as disk: disk.write(b'partial export')
+    if mode=='fail':
+        print('synthetic conversion failure',file=sys.stderr);sys.exit(9)
+    if mode=='race':
+        with open(os.environ['PERPENDICULAR_EXPORT_DESTINATION'],'xb') as rival: rival.write(b"racing user's existing data")
+    if mode=='slow':
+        with open(os.environ['PERPENDICULAR_EXPORT_READY'],'w') as ready: ready.write(str(os.getpid()))
+        while True: time.sleep(1)
+    shutil.copyfile(args[-2],args[-1])
+else: sys.exit(3)
+"#;
+
+#[test]
+#[ignore = "requires PERPENDICULAR_TEST_QEMU_IMG"]
+fn real_disk_exports_are_standalone_preserve_bytes_and_refuse_replacement() {
+    let image =
+        PathBuf::from(std::env::var_os("PERPENDICULAR_TEST_QEMU_IMG").expect("set qemu-img path"));
+    let f = Fixture::new();
+    let vm = f.create();
+    let id = vm["id"].as_str().unwrap();
+    let disk = Path::new(vm["disk_path"].as_str().unwrap());
+    let raw_source = f._temp.path().join("original-content.raw");
+    let mut content = vec![0; 65536];
+    content[..20].copy_from_slice(b"Windows ARM testdisk");
+    content[49152..49160].copy_from_slice(b"end-data");
+    fs::write(&raw_source, &content).unwrap();
+    fs::remove_file(disk).unwrap();
+    let created = Command::new(&image)
+        .args(["convert", "-f", "raw", "-O", "qcow2"])
+        .arg(&raw_source)
+        .arg(disk)
+        .output()
+        .unwrap();
+    assert!(created.status.success());
+    let original_container = fs::read(disk).unwrap();
+    let mut exports = Vec::new();
+    for format in ["qcow2", "raw"] {
+        let destination = f._temp.path().join(format!("real-export.{format}"));
+        let args = [
+            "export-disk",
+            id,
+            "--destination",
+            destination.to_str().unwrap(),
+            "--format",
+            format,
+        ];
+        let output = f
+            .command()
+            .env("PERPENDICULAR_QEMU_IMG", &image)
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stdout)
+        );
+        let response: Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(response["export"]["virtual_size_bytes"], content.len());
+        assert_eq!(response["export"]["format"], format);
+        let exported_bytes = fs::read(&destination).unwrap();
+        let info = Command::new(&image)
+            .args(["info", "--output=json"])
+            .arg(&destination)
+            .output()
+            .unwrap();
+        assert!(info.status.success());
+        let info: Value = serde_json::from_slice(&info.stdout).unwrap();
+        assert_eq!(info["format"], format);
+        assert!(info.get("backing-filename").is_none());
+        let retry = f
+            .command()
+            .env("PERPENDICULAR_QEMU_IMG", &image)
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(!retry.status.success());
+        assert_eq!(
+            serde_json::from_slice::<Value>(&retry.stdout).unwrap()["error"]["code"],
+            "destination_exists"
+        );
+        assert_eq!(fs::read(&destination).unwrap(), exported_bytes);
+        assert_eq!(
+            fs::read(disk).unwrap(),
+            original_container,
+            "conversion must not mutate its source container"
+        );
+        exports.push((destination, format));
+    }
+    let deleted = f.invoke(&["delete", id]);
+    fs::remove_dir_all(deleted["trash_directory"].as_str().unwrap()).unwrap();
+    assert!(!disk.exists());
+    for (export, format) in exports {
+        let compared = Command::new(&image)
+            .args(["compare", "-f", "raw", "-F", format])
+            .arg(&raw_source)
+            .arg(&export)
+            .output()
+            .unwrap();
+        assert!(
+            compared.status.success(),
+            "{}",
+            String::from_utf8_lossy(&compared.stdout)
+        );
+    }
+    assert_no_export_staging(f._temp.path());
+}
+
+#[test]
 #[ignore = "requires PERPENDICULAR_TEST_QEMU_IMG"]
 fn real_image_import_and_clone_are_independent_qcow2_and_preserve_source_bytes() {
     let image =
@@ -736,6 +1099,25 @@ fn qmp_lifecycle_reports_real_server_state_and_blocks_live_mutations() {
         .unwrap()
         .status
         .success());
+    let export = f._temp.path().join("unsafe-live-export.qcow2");
+    let output = f
+        .command()
+        .args([
+            "export-disk",
+            id,
+            "--destination",
+            export.to_str().unwrap(),
+            "--format",
+            "qcow2",
+        ])
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert_eq!(
+        serde_json::from_slice::<Value>(&output.stdout).unwrap()["error"]["code"],
+        "vm_running"
+    );
+    assert!(!export.exists());
     assert_eq!(f.invoke(&["resume", id])["vm"]["state"], "running");
     assert!(f.invoke(&["eject-iso", id])["vm"]["iso_path"].is_null());
     f.invoke(&["pause", id]);
@@ -777,7 +1159,7 @@ const MOCK_IMAGE: &str = r#"#!/bin/sh
 case "$1" in
 create) printf 'original-disk' > "$4";;
 convert) while [ "$#" -gt 2 ]; do shift; done; /bin/cp "$1" "$2";;
-info) printf '{"format":"qcow2","virtual-size":8589934592}\n';;
+info) format=qcow2; shift; while [ "$#" -gt 0 ]; do if [ "$1" = '-f' ]; then shift; format="$1"; fi; shift; done; printf '{"format":"%s","virtual-size":8589934592}\n' "$format";;
 resize) exit 0;;
 *) exit 3;;
 esac
