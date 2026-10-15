@@ -17,7 +17,9 @@ function Initialize-ChannelAccess {
     $tokens = $null; $errors = $null
     $ast = [Management.Automation.Language.Parser]::ParseFile($path, [ref]$tokens, [ref]$errors)
     if ($errors.Count -ne 0) { throw 'The packaged ownership validator did not parse.' }
-    foreach ($name in @('ConvertTo-DiagnosticWindowsPath', 'Test-DiagnosticWindowsPath', 'Get-DiagnosticExpectedTask', 'Test-DiagnosticAgentArguments', 'Test-DiagnosticOwnedTask')) {
+    foreach ($name in @('ConvertTo-DiagnosticWindowsPath', 'Test-DiagnosticWindowsPath', 'Get-DiagnosticExpectedTask', 'Test-DiagnosticAgentArguments',
+        'Get-DiagnosticValueKind', 'Get-DiagnosticEnumToken', 'Resolve-DiagnosticPrincipalSid', 'Test-DiagnosticCanonicalSid', 'Get-DiagnosticPrincipalIdentity',
+        'Get-DiagnosticTaskOwnershipChecks', 'ConvertTo-DiagnosticTaskOwnershipReport', 'Test-DiagnosticOwnedTask')) {
         $definitions = @($ast.FindAll({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -ceq $name }, $false))
         if ($definitions.Count -ne 1) { throw 'The packaged ownership validator is incomplete.' }
         # Function definitions must survive this initializer's local scope.
@@ -54,7 +56,10 @@ function Get-ChannelOwner {
     $expected = Get-DiagnosticExpectedTask -Sid $sid -Account $identity.Name -Directory $directory -WindowsDirectory ([Environment]::GetFolderPath('Windows'))
     if ($manifest.product -cne 'Perpendicular Desktop Guest Agent' -or $manifest.owner_sid -cne $sid -or $manifest.task_name -cne $expected.Name) { throw 'Installed package ownership was not confirmed.' }
     $task = Get-ScheduledTask -TaskPath '\' -TaskName $expected.Name -ErrorAction Stop
-    if (-not (Test-DiagnosticOwnedTask -Task $task -Expected $expected)) { throw 'The exact limited interactive Guest Agent task was not confirmed.' }
+    $taskChecks = Get-DiagnosticTaskOwnershipChecks -Task $task -Expected $expected
+    # Information/host stream keeps the report out of the returned owner value.
+    Write-Host (ConvertTo-DiagnosticTaskOwnershipReport $taskChecks)
+    if (-not $taskChecks.Owned) { throw 'The exact limited interactive Guest Agent task was not confirmed.' }
     [pscustomobject]@{ Sid = $sid; Directory = $directory; Session = $session }
 }
 
@@ -73,6 +78,37 @@ function Get-ChannelPlan {
     $after = [Perpendicular.ChannelAccess.Descriptor]::AddReadWrite($source, $Sid)
     [pscustomobject]@{ Sid = $Sid; Port = $Port; SourceDescriptor = $source; Before = $Port.Property; After = $after
         Changed = (-not [Perpendicular.ChannelAccess.Descriptor]::Equal($source, $after)) }
+}
+
+function ConvertTo-ChannelPortIdentityReport {
+    param([Perpendicular.ChannelAccess.PortIdentityChecks]$Checks)
+    return ('GuestChannelPortIdentityChecks=' + ($Checks | ConvertTo-Json -Depth 3 -Compress))
+}
+
+function Get-ChannelPortIdentityFailureReport {
+    param([Exception]$ErrorItem)
+    for ($depth = 0; $depth -lt 8 -and $null -ne $ErrorItem; $depth++) {
+        if ($ErrorItem -is [Perpendicular.ChannelAccess.PortIdentityException]) {
+            return (ConvertTo-ChannelPortIdentityReport $ErrorItem.Checks)
+        }
+        $ErrorItem = $ErrorItem.InnerException
+    }
+    return $null
+}
+
+function Get-ChannelPortInspection {
+    try {
+        $port = [Perpendicular.ChannelAccess.Device]::Inspect()
+        Write-Host (ConvertTo-ChannelPortIdentityReport ([Perpendicular.ChannelAccess.Device]::GetIdentityChecks($port, $port.PdoName)))
+        return $port
+    } catch {
+        # PowerShell wraps a native static call. Walk only the bounded exception
+        # chain and print only our typed, fixed-schema report; never exception
+        # data, raw Port fields, paths, SID values or security descriptors.
+        $report = Get-ChannelPortIdentityFailureReport $_.Exception
+        if ($null -ne $report) { Write-Host $report }
+        throw
+    }
 }
 
 function ConvertTo-ChannelReceipt {
@@ -170,6 +206,29 @@ function Assert-ChannelReadonlyPackage {
     if ($drive.DriveType -ne [IO.DriveType]::CDRom) { throw 'Run the reviewed helper from the mounted read-only Guest Tools disc.' }
 }
 
+function Get-ChannelElevationArguments {
+    param([string]$ScriptPath, [ValidateSet('Inspect', 'Apply', 'Rollback')][string]$Mode, [string]$ReceiptId)
+    $path = ConvertTo-DiagnosticWindowsPath $ScriptPath
+    if ($null -eq $path -or -not $path.EndsWith('\Set-PerpendicularGuestChannelAccess.ps1', [StringComparison]::OrdinalIgnoreCase)) { throw 'Invalid fixed helper path.' }
+    $canonicalMode = switch ($Mode) { 'Inspect' { 'Inspect' } 'Apply' { 'Apply' } 'Rollback' { 'Rollback' } }
+    if (@('Inspect', 'Apply', 'Rollback') -cnotcontains $canonicalMode) { throw 'Invalid helper mode.' }
+    if ($canonicalMode -eq 'Rollback') {
+        $id = [guid]::Parse($ReceiptId)
+        if ($id.ToString('D') -cne $ReceiptId) { throw 'Use the exact canonical receipt UUID.' }
+    } elseif (-not [string]::IsNullOrEmpty($ReceiptId)) { throw 'A receipt is accepted only for rollback.' }
+    # -File on Windows PowerShell 5.1 cannot bind an explicit switch Boolean.
+    # Encode fixed PowerShell syntax instead: the path is one literal (never
+    # interpolated), and $false reaches the common parameter as a real Boolean.
+    $payload = '$ErrorActionPreference = ''Stop''; & ''' + $path.Replace("'", "''") + ''' -Mode ''' + $canonicalMode + ''' -UacChild -Confirm:$false'
+    if ($canonicalMode -eq 'Rollback') { $payload += ' -ReceiptId ''' + $ReceiptId + "'" }
+    $payload += '; if (-not $?) { exit 1 }'
+    $encoding = [Text.UnicodeEncoding]::new($false, $false, $true)
+    $encoded = [Convert]::ToBase64String($encoding.GetBytes($payload))
+    $arguments = '-NoLogo -NoProfile -NonInteractive -STA -ExecutionPolicy Bypass -EncodedCommand ' + $encoded
+    if ($arguments.Length -gt 30000) { throw 'The encoded helper command exceeds the Windows command-line bound.' }
+    return $arguments
+}
+
 if ([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT -or $PSVersionTable.PSEdition -ne 'Desktop') { throw 'Use Windows PowerShell 5.1 inside the logged-in guest desktop.' }
 if ($Mode -ne 'Rollback' -and -not [string]::IsNullOrEmpty($ReceiptId)) { throw 'A receipt is accepted only for rollback.' }
 if ($Mode -eq 'Rollback') { $id = [guid]::Parse($ReceiptId); if ($id.ToString('D') -cne $ReceiptId) { throw 'Use the exact canonical receipt UUID.' } }
@@ -180,12 +239,10 @@ if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administra
     if (-not $RequestElevation -or $UacChild) { throw 'Administrator consent is required to inspect the actual PDO DACL or prepare its per-instance override. Nothing was changed.' }
     Assert-ChannelReadonlyPackage
     $scriptPath = Join-Path $PSScriptRoot 'Set-PerpendicularGuestChannelAccess.ps1'
-    if ($scriptPath -match '["\r\n]') { throw 'Invalid helper path.' }
     if (-not $PSCmdlet.ShouldProcess('Only the fixed Guest Tools port', 'Request administrator consent for ' + $Mode)) { return }
     # Parent ShouldProcess has already accepted this explicit operation. The
     # fresh child is noninteractive; it must not ask the same console question.
-    $arguments = '-NoLogo -NoProfile -NonInteractive -STA -ExecutionPolicy Bypass -File "' + $scriptPath + '" -Mode ' + $Mode + ' -UacChild -Confirm:$false'
-    if ($Mode -eq 'Rollback') { $arguments += ' -ReceiptId ' + $ReceiptId }
+    $arguments = Get-ChannelElevationArguments -ScriptPath $scriptPath -Mode $Mode -ReceiptId $ReceiptId
     $process = Start-Process -FilePath (Join-Path ([Environment]::GetFolderPath('Windows')) 'System32\WindowsPowerShell\v1.0\powershell.exe') -ArgumentList $arguments -Verb RunAs -PassThru -Wait
     exit $process.ExitCode
 }
@@ -203,7 +260,7 @@ if ($Mode -eq 'Rollback') {
     }
     return
 }
-$port = [Perpendicular.ChannelAccess.Device]::Inspect()
+$port = Get-ChannelPortInspection
 $plan = Get-ChannelPlan -Port $port -Sid $owner.Sid
 Write-Output ('FixedGuestChannelIdentified=True; ExactDesktopPackageAndLimitedTaskOwned=True; AdditionalOneSidReadWriteNeeded=' + $plan.Changed)
 Write-Output 'This is a per-instance property proposal. It does not prove live access or persistence after device recreation. No device is restarted automatically.'

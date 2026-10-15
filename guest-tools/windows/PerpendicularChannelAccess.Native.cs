@@ -78,12 +78,48 @@ namespace Perpendicular.ChannelAccess {
         }
     }
 
+    public enum ClassGuidReadState { NotRead, Observed, Unavailable, Invalid, Absent }
+    public enum CapabilitiesReadState { NotRead, Observed, Unavailable, Invalid }
+
     public sealed class Port {
         public string InstanceId, PdoName, ParentId, ParentService;
-        public Guid ClassGuid;
+        public Guid ClassGuid, InterfaceDetailClassGuid;
+        public ClassGuidReadState ClassGuidState;
+        public int ClassGuidPropertyError;
+        public Guid UnifiedClassGuid;
+        public ClassGuidReadState UnifiedClassGuidState;
+        public int UnifiedClassGuidPropertyError;
+        public uint Capabilities;
+        public CapabilitiesReadState CapabilitiesState;
+        public int CapabilitiesPropertyError;
         public string[] HardwareIds, ParentHardwareIds;
         public uint Status, Problem, ParentStatus, ParentProblem;
         public byte[] Property, LiveDaclDescriptor;
+    }
+
+    // Only fixed labels, bounded counts and booleans may leave the native
+    // identity gate. Never include a device path, instance ID, SID or DACL.
+    public sealed class PortIdentityChecks {
+        public bool CandidatePresent, ClassGuidMatches, HardwareIdsPresent, HardwareIdSingle, HardwareIdExact;
+        public bool InstancePrefixMatches, InstanceSuffixValid, AliasMatches, PdoNameSyntax;
+        public bool ParentServiceMatches, ParentPciIdentityValid, ParentHardwareIdsPresent, ParentHardwareMatchesInstance;
+        public bool ChildProblemZero, ParentProblemZero, ParentStarted, ChildNoProblemFlag, ParentNoProblemFlag;
+        public bool RawPortIdentity, InstanceIdentity, FixedAlias, ParentIdentity, ParentHardwareAvailable, Healthy, Valid;
+        // -1 means unavailable; 65 means more than the accepted 64 entries.
+        public int HardwareIdCount = -1, ParentHardwareIdCount = -1;
+        public string ClassGuidKind = "unavailable", InterfaceDetailClassGuidKind = "unavailable", ClassGuidSource = "unavailable", ClassGuidReadCode = "not_read", HardwareIdKind = "unavailable", FailureCode = "raw_port_identity";
+        public int ClassGuidPropertyError;
+        public bool ClasslessConfirmed, ExpectedSetupClassConfirmed, SetupClassAccepted;
+        public string UnifiedClassGuidKind = "unavailable", UnifiedClassGuidSource = "unavailable", UnifiedClassGuidReadCode = "not_read", SetupClassIdentityCode = "rejected";
+        public int UnifiedClassGuidPropertyError;
+        public bool CapabilitiesObserved, RawDeviceOk;
+        public string CapabilitiesSource = "unavailable", CapabilitiesReadCode = "not_read";
+        public int CapabilitiesPropertyError;
+    }
+
+    public sealed class PortIdentityException : Exception {
+        public readonly PortIdentityChecks Checks;
+        public PortIdentityException(string message, PortIdentityChecks checks, Exception inner) : base(message, inner) { Checks = checks; }
     }
 
     public static class Device {
@@ -93,6 +129,10 @@ namespace Perpendicular.ChannelAccess {
         public const string Hardware = @"{6FDE7547-1B65-48ae-B628-80BE62016026}\VIOSerialPort";
         static readonly Guid PortClass = new Guid("6fde7547-1b65-48ae-b628-80be62016026");
         static readonly Guid PortInterface = new Guid("6fde7521-1b65-48ae-b628-80be62016026");
+        const uint ClassGuidRegistryProperty = 8; // SPDRP_CLASSGUID, REG_SZ
+        const uint CapabilitiesRegistryProperty = 15; // SPDRP_CAPABILITIES, REG_DWORD
+        const uint RawDeviceOkCapability = 0x40; // CM_DEVCAP_RAWDEVICEOK
+        static readonly PropertyKey DeviceClass = new PropertyKey(new Guid("a45c254e-df1c-4efd-8020-67d146a850e0"), 10); // DEVPKEY_Device_ClassGuid
         static readonly PropertyKey Security = new PropertyKey(new Guid("a45c254e-df1c-4efd-8020-67d146a850e0"), 25);
         [StructLayout(LayoutKind.Sequential)] struct PropertyKey { public Guid Guid; public uint Id; public PropertyKey(Guid guid, uint id) { Guid = guid; Id = id; } }
         [StructLayout(LayoutKind.Sequential)] struct Info { public uint Size; public Guid ClassGuid; public uint DevInst; public UIntPtr Reserved; }
@@ -138,8 +178,120 @@ namespace Perpendicular.ChannelAccess {
             Need(count <= text.Length, "DOS mapping exceeded bound"); string[] names = new string(text, 0, (int)count).TrimEnd('\0').Split('\0');
             Need(names.Length == 1 && Regex.IsMatch(names[0], @"\A\\Device\\[A-Za-z0-9_]{1,128}\z"), "Fixed global DOS alias is missing or ambiguous"); return names[0];
         }
+        static string ClassGuidKind(Guid value) {
+            return value == PortClass ? "expected_raw_port" : value == PortInterface ? "port_interface" :
+                value == Guid.Empty ? "empty" : value == new Guid("4d36e97d-e325-11ce-bfc1-08002be10318") ? "system" :
+                value == new Guid("4d36e978-e325-11ce-bfc1-08002be10318") ? "ports" : "other";
+        }
+        public static void ObserveClassGuid(Port port, string property) {
+            Need(port != null, "Port metadata unavailable");
+            port.ClassGuid = Guid.Empty; port.ClassGuidState = ClassGuidReadState.Invalid; port.ClassGuidPropertyError = 0;
+            Guid observed = Guid.Empty;
+            Need(property != null && property.Length <= 38 && String.Equals(property, property.Trim(), StringComparison.Ordinal) && (Guid.TryParseExact(property, "B", out observed) || Guid.TryParseExact(property, "D", out observed)), "Invalid observed device setup class");
+            port.ClassGuid = observed; port.ClassGuidState = ClassGuidReadState.Observed; port.ClassGuidPropertyError = 0;
+        }
+        static void ReadClassGuid(IntPtr set, ref Info info, Port port) {
+            // The raw WDF security-override GUID does not set the PnP setup
+            // class. Observe SPDRP_CLASSGUID on this exact mapped devnode; do
+            // not substitute a driver constant or the parent/probe class.
+            port.InterfaceDetailClassGuid = info.ClassGuid;
+            try { ObserveClassGuid(port, One(set, ref info, ClassGuidRegistryProperty)); }
+            catch (Win32Exception error) {
+                port.ClassGuidState = ClassGuidReadState.Unavailable; port.ClassGuidPropertyError = error.NativeErrorCode;
+            } catch (InvalidDataException) {
+                port.ClassGuidState = ClassGuidReadState.Invalid;
+            }
+        }
+        public static void ObserveUnifiedClassGuid(Port port, bool success, int error, uint propertyType, byte[] bytes, uint required) {
+            Need(port != null, "Port metadata unavailable");
+            port.UnifiedClassGuid = Guid.Empty; port.UnifiedClassGuidState = ClassGuidReadState.Invalid; port.UnifiedClassGuidPropertyError = 0;
+            if (!success) {
+                port.UnifiedClassGuidState = error == 1168 ? ClassGuidReadState.Absent : ClassGuidReadState.Unavailable;
+                port.UnifiedClassGuidPropertyError = error; return;
+            }
+            Need(error == 0 && propertyType == 0x0d && bytes != null && bytes.Length == 16 && required == 16, "Expected one device setup-class GUID");
+            port.UnifiedClassGuid = new Guid(bytes); port.UnifiedClassGuidState = ClassGuidReadState.Observed;
+        }
+        static void ReadUnifiedClassGuid(IntPtr set, ref Info info, Port port) {
+            PropertyKey key = DeviceClass; uint type, required; byte[] bytes = new byte[16];
+            bool success = SetupDiGetDevicePropertyW(set, ref info, ref key, out type, bytes, 16, out required, 0);
+            int error = success ? 0 : Marshal.GetLastWin32Error();
+            try { ObserveUnifiedClassGuid(port, success, error, type, bytes, required); }
+            catch (InvalidDataException) { port.UnifiedClassGuidState = ClassGuidReadState.Invalid; }
+        }
+        public static void ObserveCapabilities(Port port, uint registryType, byte[] bytes, uint required) {
+            Need(port != null, "Port metadata unavailable");
+            port.Capabilities = 0; port.CapabilitiesState = CapabilitiesReadState.Invalid; port.CapabilitiesPropertyError = 0;
+            Need(registryType == 4 && bytes != null && bytes.Length == 4 && required == 4, "Expected one device capabilities DWORD");
+            port.Capabilities = BitConverter.ToUInt32(bytes, 0); port.CapabilitiesState = CapabilitiesReadState.Observed; port.CapabilitiesPropertyError = 0;
+        }
+        static void ReadCapabilities(IntPtr set, ref Info info, Port port) {
+            uint type, required; byte[] bytes = new byte[4];
+            if (!SetupDiGetDeviceRegistryPropertyW(set, ref info, CapabilitiesRegistryProperty, out type, bytes, 4, out required)) {
+                port.CapabilitiesState = CapabilitiesReadState.Unavailable; port.CapabilitiesPropertyError = Marshal.GetLastWin32Error(); return;
+            }
+            try { ObserveCapabilities(port, type, bytes, required); }
+            catch (InvalidDataException) { port.CapabilitiesState = CapabilitiesReadState.Invalid; }
+        }
+        public static PortIdentityChecks GetIdentityChecks(Port port, string target) {
+            PortIdentityChecks c = new PortIdentityChecks(); c.CandidatePresent = port != null;
+            if (port == null) return c;
+            c.ClassGuidMatches = port.ClassGuid == PortClass;
+            c.ClassGuidKind = ClassGuidKind(port.ClassGuid); c.InterfaceDetailClassGuidKind = ClassGuidKind(port.InterfaceDetailClassGuid);
+            c.ClassGuidSource = port.ClassGuidState == ClassGuidReadState.Observed ? "spdrp_classguid" : "unavailable";
+            c.ClassGuidReadCode = port.ClassGuidState == ClassGuidReadState.Observed ? "observed" : port.ClassGuidState == ClassGuidReadState.Unavailable ? "api_unavailable" : port.ClassGuidState == ClassGuidReadState.Invalid ? "invalid_property" : "not_read";
+            c.ClassGuidPropertyError = port.ClassGuidPropertyError;
+            c.UnifiedClassGuidKind = ClassGuidKind(port.UnifiedClassGuid);
+            c.UnifiedClassGuidSource = port.UnifiedClassGuidState == ClassGuidReadState.Observed || port.UnifiedClassGuidState == ClassGuidReadState.Absent ? "devpkey_device_classguid" : "unavailable";
+            c.UnifiedClassGuidReadCode = port.UnifiedClassGuidState == ClassGuidReadState.Observed ? "observed" : port.UnifiedClassGuidState == ClassGuidReadState.Absent ? "not_found" : port.UnifiedClassGuidState == ClassGuidReadState.Unavailable ? "api_unavailable" : port.UnifiedClassGuidState == ClassGuidReadState.Invalid ? "invalid_property" : "not_read";
+            c.UnifiedClassGuidPropertyError = port.UnifiedClassGuidPropertyError;
+            // WDF's raw-device security GUID does not itself install a PnP
+            // setup class. Permit classlessness only on these independent,
+            // exact observations, never on legacy ERROR_INVALID_DATA alone.
+            c.ClasslessConfirmed = port.UnifiedClassGuidState == ClassGuidReadState.Absent && port.UnifiedClassGuidPropertyError == 1168 && port.UnifiedClassGuid == Guid.Empty &&
+                port.ClassGuidState == ClassGuidReadState.Unavailable && port.ClassGuidPropertyError == 13 && port.ClassGuid == Guid.Empty && port.InterfaceDetailClassGuid == Guid.Empty;
+            c.ExpectedSetupClassConfirmed = port.UnifiedClassGuidState == ClassGuidReadState.Observed && port.UnifiedClassGuidPropertyError == 0 && port.UnifiedClassGuid == PortClass &&
+                port.ClassGuidState == ClassGuidReadState.Observed && port.ClassGuidPropertyError == 0 && port.ClassGuid == PortClass &&
+                (port.InterfaceDetailClassGuid == Guid.Empty || port.InterfaceDetailClassGuid == PortClass);
+            c.SetupClassAccepted = c.ClasslessConfirmed || c.ExpectedSetupClassConfirmed;
+            c.SetupClassIdentityCode = c.ClasslessConfirmed ? "classless_confirmed" : c.ExpectedSetupClassConfirmed ? "expected_class" : "rejected";
+            c.CapabilitiesObserved = port.CapabilitiesState == CapabilitiesReadState.Observed;
+            c.CapabilitiesSource = c.CapabilitiesObserved ? "spdrp_capabilities" : "unavailable";
+            c.CapabilitiesReadCode = c.CapabilitiesObserved ? "observed" : port.CapabilitiesState == CapabilitiesReadState.Unavailable ? "api_unavailable" : port.CapabilitiesState == CapabilitiesReadState.Invalid ? "invalid_property" : "not_read";
+            c.CapabilitiesPropertyError = port.CapabilitiesPropertyError;
+            c.RawDeviceOk = c.CapabilitiesObserved && port.CapabilitiesPropertyError == 0 && (port.Capabilities & RawDeviceOkCapability) != 0;
+            c.HardwareIdsPresent = port.HardwareIds != null;
+            c.HardwareIdCount = port.HardwareIds == null ? -1 : Math.Min(port.HardwareIds.Length, 65);
+            c.HardwareIdSingle = port.HardwareIds != null && port.HardwareIds.Length == 1;
+            c.HardwareIdExact = c.HardwareIdSingle && String.Equals(port.HardwareIds[0], Hardware, StringComparison.OrdinalIgnoreCase);
+            c.HardwareIdKind = c.HardwareIdExact ? "expected_single" : !c.HardwareIdsPresent ? "unavailable" : c.HardwareIdCount == 0 ? "empty" : c.HardwareIdSingle ? "other_single" : "multiple";
+            c.RawPortIdentity = c.SetupClassAccepted && c.RawDeviceOk && c.HardwareIdExact;
+            c.InstancePrefixMatches = port.InstanceId != null && port.InstanceId.Length <= 1024 && port.InstanceId.StartsWith(Hardware + "\\", StringComparison.OrdinalIgnoreCase);
+            c.InstanceSuffixValid = c.InstancePrefixMatches && Regex.IsMatch(port.InstanceId.Substring(Hardware.Length + 1), @"\A[A-Za-z0-9_&-]{1,512}\z");
+            c.InstanceIdentity = c.InstancePrefixMatches && c.InstanceSuffixValid;
+            c.AliasMatches = String.Equals(port.PdoName, target, StringComparison.OrdinalIgnoreCase);
+            c.PdoNameSyntax = target != null && Regex.IsMatch(target, @"\A\\Device\\[A-Za-z0-9_]{1,128}\z");
+            c.FixedAlias = c.AliasMatches && c.PdoNameSyntax;
+            c.ParentServiceMatches = String.Equals(port.ParentService, "VirtioSerial", StringComparison.OrdinalIgnoreCase);
+            c.ParentPciIdentityValid = port.ParentId != null && Regex.IsMatch(port.ParentId, @"\APCI\\VEN_1AF4&DEV_(1003|1043)(?:&|\\)[A-Za-z0-9_&\\]+\z", RegexOptions.IgnoreCase);
+            c.ParentIdentity = c.ParentServiceMatches && c.ParentPciIdentityValid;
+            c.ParentHardwareIdsPresent = port.ParentHardwareIds != null;
+            c.ParentHardwareIdCount = port.ParentHardwareIds == null ? -1 : Math.Min(port.ParentHardwareIds.Length, 65);
+            c.ParentHardwareAvailable = port.ParentHardwareIds != null && port.ParentHardwareIds.Length > 0 && port.ParentHardwareIds.Length <= 64;
+            if (c.ParentPciIdentityValid && c.ParentHardwareAvailable) {
+                string device = Regex.Match(port.ParentId, @"DEV_(1003|1043)", RegexOptions.IgnoreCase).Groups[1].Value;
+                foreach (string id in port.ParentHardwareIds) if (id != null && id.Length <= 1024 && Regex.IsMatch(id, @"\APCI\\VEN_1AF4&DEV_" + device + @"(?:&|\z)", RegexOptions.IgnoreCase)) c.ParentHardwareMatchesInstance = true;
+            }
+            c.ChildProblemZero = port.Problem == 0; c.ParentProblemZero = port.ParentProblem == 0;
+            c.ParentStarted = (port.ParentStatus & 8) != 0; c.ChildNoProblemFlag = (port.Status & 0x400) == 0; c.ParentNoProblemFlag = (port.ParentStatus & 0x400) == 0;
+            c.Healthy = c.ParentHardwareMatchesInstance && c.ChildProblemZero && c.ParentProblemZero && c.ParentStarted && c.ChildNoProblemFlag && c.ParentNoProblemFlag;
+            c.Valid = c.RawPortIdentity && c.InstanceIdentity && c.FixedAlias && c.ParentIdentity && c.ParentHardwareAvailable && c.Healthy;
+            c.FailureCode = !c.RawPortIdentity ? "raw_port_identity" : !c.InstanceIdentity ? "port_instance" : !c.FixedAlias ? "fixed_alias" :
+                !c.ParentIdentity ? "parent_identity" : !c.ParentHardwareAvailable ? "parent_hardware_unavailable" : !c.Healthy ? "port_health" : "none";
+            return c;
+        }
         public static void ValidatePort(Port port, string target) {
-            Need(port != null && port.ClassGuid == PortClass && port.HardwareIds != null && port.HardwareIds.Length == 1 && String.Equals(port.HardwareIds[0], Hardware, StringComparison.OrdinalIgnoreCase), "Unexpected raw-port identity");
+            Need(GetIdentityChecks(port, target).RawPortIdentity, "Unexpected raw-port identity");
             Need(port.InstanceId != null && port.InstanceId.Length <= 1024 && port.InstanceId.StartsWith(Hardware + "\\", StringComparison.OrdinalIgnoreCase) && Regex.IsMatch(port.InstanceId.Substring(Hardware.Length + 1), @"\A[A-Za-z0-9_&-]{1,512}\z"), "Unexpected port instance");
             Need(String.Equals(port.PdoName, target, StringComparison.OrdinalIgnoreCase) && Regex.IsMatch(target, @"\A\\Device\\[A-Za-z0-9_]{1,128}\z"), "Fixed alias does not uniquely identify this PDO");
             Need(String.Equals(port.ParentService, "VirtioSerial", StringComparison.OrdinalIgnoreCase) && port.ParentId != null && Regex.IsMatch(port.ParentId, @"\APCI\\VEN_1AF4&DEV_(1003|1043)(?:&|\\)[A-Za-z0-9_&\\]+\z", RegexOptions.IgnoreCase), "Unexpected parent service/PCI identity");
@@ -149,7 +301,10 @@ namespace Perpendicular.ChannelAccess {
             Need(match && port.Problem == 0 && port.ParentProblem == 0 && (port.ParentStatus & 8) != 0 && (port.ParentStatus & 0x400) == 0 && (port.Status & 0x400) == 0, "Port/controller is not healthy and started");
         }
         public static Port AcceptMatch(Port previous, Port candidate, string target) {
-            Need(previous == null, "Multiple devnodes map to fixed guest channel"); ValidatePort(candidate, target); return candidate;
+            Need(previous == null, "Multiple devnodes map to fixed guest channel");
+            try { ValidatePort(candidate, target); }
+            catch (InvalidDataException error) { throw new PortIdentityException(error.Message, GetIdentityChecks(candidate, target), error); }
+            return candidate;
         }
         public static void ValidateConditional(Port port, string instance, string parent, byte[] expectedProperty, byte[] expectedLiveDacl, byte[] actualLiveDescriptor) {
             ValidatePort(port, port.PdoName);
@@ -168,10 +323,15 @@ namespace Perpendicular.ChannelAccess {
                 uint parent; Need(CM_Get_Parent(out parent, info.DevInst, 0) == 0, "Parent unavailable");
                 Info parentInfo = new Info(); parentInfo.Size = (uint)Marshal.SizeOf(typeof(Info)); string parentId = Instance(parent);
                 if (!SetupDiOpenDeviceInfoW(set, parentId, IntPtr.Zero, 0, ref parentInfo)) Last();
-                Port port = new Port(); port.InstanceId = Instance(info.DevInst); port.PdoName = pdo; port.ClassGuid = info.ClassGuid;
+                Port port = new Port(); port.InstanceId = Instance(info.DevInst); port.PdoName = pdo;
                 port.HardwareIds = Strings(set, ref info, 1, 7); port.ParentId = parentId; port.ParentService = One(set, ref parentInfo, 4); port.ParentHardwareIds = Strings(set, ref parentInfo, 1, 7);
                 Need(CM_Get_DevNode_Status(out port.Status, out port.Problem, info.DevInst, 0) == 0 && CM_Get_DevNode_Status(out port.ParentStatus, out port.ParentProblem, parent, 0) == 0, "Device state unavailable");
-                port.Property = Property(set, ref info); found = AcceptMatch(found, port, target); matched = info;
+                // Collect every observation, then validate the complete exact
+                // identity. Only unified ERROR_NOT_FOUND can prove absence;
+                // legacy ERROR_INVALID_DATA alone cannot distinguish it.
+                ReadClassGuid(set, ref info, port); ReadUnifiedClassGuid(set, ref info, port); ReadCapabilities(set, ref info, port);
+                // Reject identity before even reading the security property.
+                found = AcceptMatch(found, port, target); port.Property = Property(set, ref info); matched = info;
             }
             Need(found != null, "No present per-port PDO uniquely matches the fixed guest channel"); return found;
         }

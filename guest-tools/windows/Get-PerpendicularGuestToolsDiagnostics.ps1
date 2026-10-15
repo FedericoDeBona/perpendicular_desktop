@@ -58,17 +58,146 @@ function Test-DiagnosticAgentArguments {
     return (Test-DiagnosticWindowsPath $path $Expected.Agent)
 }
 
+function Get-DiagnosticValueKind {
+    param($Value)
+    if ($null -eq $Value) { return 'null' }
+    if ($Value -is [string]) { return 'string' }
+    if ($Value -is [enum]) { return 'enum' }
+    if ($Value -is [array]) { return 'array' }
+    if ($Value -is [bool]) { return 'boolean' }
+    if ($Value -is [byte] -or $Value -is [sbyte] -or $Value -is [int16] -or $Value -is [uint16] -or
+        $Value -is [int32] -or $Value -is [uint32] -or $Value -is [int64] -or $Value -is [uint64]) { return 'integer' }
+    if ($Value.GetType().FullName -ceq 'Microsoft.Management.Infrastructure.CimInstance') { return 'cim_instance' }
+    if ($Value -is [Collections.IEnumerable]) { return 'enumerable' }
+    return 'object'
+}
+
+function Get-DiagnosticEnumToken {
+    param($Value, [ValidateSet('LogonType', 'RunLevel')][string]$Kind)
+    if ($null -eq $Value) { return 'null' }
+    $text = [string]$Value
+    $allowed = if ($Kind -eq 'LogonType') { @('None', 'Password', 'S4U', 'Interactive', 'Group', 'ServiceAccount', 'InteractiveOrPassword') } else { @('Limited', 'Highest') }
+    foreach ($token in $allowed) { if ([string]::Equals($text, $token, [StringComparison]::OrdinalIgnoreCase)) { return $token } }
+    # Neutral representation codes only. Numeric values are not accepted as
+    # equivalent enum names by the ownership predicate without live evidence.
+    if (@('0', '1', '2', '3', '4', '5', '6') -ccontains $text) {
+        if ($Value -is [string]) { return ('numeric_text_' + $text) }
+        return ('numeric_' + $text)
+    }
+    return 'other'
+}
+
+function Resolve-DiagnosticPrincipalSid {
+    param([string]$PrincipalUserId)
+    if ($PrincipalUserId -match '\AS-[0-9]+-[0-9]+(?:-[0-9]+)+\z') {
+        return (New-Object Security.Principal.SecurityIdentifier($PrincipalUserId)).Value
+    }
+    $account = New-Object Security.Principal.NTAccount($PrincipalUserId)
+    return $account.Translate([Security.Principal.SecurityIdentifier]).Value
+}
+
+function Test-DiagnosticCanonicalSid {
+    param($Value)
+    if ($Value -isnot [string] -or $Value -cnotmatch '\AS-1-(?:0|[1-9][0-9]{0,14})(?:-(?:0|[1-9][0-9]{0,9})){1,15}\z') { return $false }
+    $parts = $Value.Split('-')
+    [uint64]$authority = 0
+    if (-not [uint64]::TryParse($parts[2], [ref]$authority) -or $authority -gt 281474976710655) { return $false }
+    for ($index = 3; $index -lt $parts.Length; $index++) {
+        [uint32]$subAuthority = 0
+        if (-not [uint32]::TryParse($parts[$index], [ref]$subAuthority)) { return $false }
+    }
+    return $true
+}
+
+function Get-DiagnosticPrincipalIdentity {
+    param($PrincipalUserId, [string]$ExpectedSid, [scriptblock]$Resolver)
+    # Resolve the exact OS principal, never a guessed domain/name spelling.
+    # A canonical SID match was separately confirmed in the real guest before
+    # replacing the old textual principal comparison with this identity gate.
+    $kind = 'invalid'; $resolved = $false; $matches = $false; $code = 'invalid_input'
+    if ($PrincipalUserId -is [string] -and $PrincipalUserId.Length -gt 0 -and $PrincipalUserId.Length -le 1024 -and
+        $PrincipalUserId -notmatch '[\x00-\x1f\x7f]' -and -not [string]::IsNullOrWhiteSpace($PrincipalUserId)) {
+        if ($PrincipalUserId -match '\AS-[0-9]+-[0-9]+(?:-[0-9]+)+\z') { $kind = 'sid' }
+        elseif ($PrincipalUserId.Contains('\') -or $PrincipalUserId.Contains('@')) { $kind = 'qualified' }
+        else { $kind = 'unqualified' }
+        try {
+            if ($null -eq $Resolver) { $actualSid = Resolve-DiagnosticPrincipalSid $PrincipalUserId }
+            else { $actualSid = & $Resolver $PrincipalUserId }
+            # Resolver output is private. Require a single canonical SID-shaped
+            # string, never coerce an array/object or return it in the report.
+            if (-not (Test-DiagnosticCanonicalSid $actualSid) -or -not (Test-DiagnosticCanonicalSid $ExpectedSid)) {
+                $code = 'invalid_resolution'
+            } else {
+                $resolved = $true
+                $matches = [string]::Equals($actualSid, $ExpectedSid, [StringComparison]::Ordinal)
+                $code = if ($matches) { 'sid_match' } else { 'sid_mismatch' }
+            }
+        } catch { $code = 'resolution_unavailable' }
+    }
+    [pscustomobject]@{ PrincipalSidResolved = $resolved; PrincipalSidMatchesOwner = $matches; PrincipalIdentityKind = $kind; PrincipalIdentityCode = $code }
+}
+
+function Get-DiagnosticTaskOwnershipChecks {
+    param($Task, $Expected, [scriptblock]$PrincipalResolver)
+    try { $principalIdentity = Get-DiagnosticPrincipalIdentity -PrincipalUserId $Task.Principal.UserId -ExpectedSid $Expected.Sid -Resolver $PrincipalResolver }
+    catch { $principalIdentity = [pscustomobject]@{ PrincipalSidResolved = $false; PrincipalSidMatchesOwner = $false; PrincipalIdentityKind = 'invalid'; PrincipalIdentityCode = 'metadata_unavailable' } }
+    # All other predicates retain their original comparisons. UserId now needs
+    # successful OS resolution to the exact owner SID, including when its name
+    # happens to match the old spelling. There is no name fallback on failure.
+    $predicates = [ordered]@{
+        Name = { $Task.TaskName -ceq $Expected.Name }
+        Path = { $Task.TaskPath -ceq '\' }
+        Description = { $Task.Description -ceq $Expected.Description }
+        UserId = { $principalIdentity.PrincipalSidResolved -and $principalIdentity.PrincipalSidMatchesOwner }
+        LogonType = { [string]$Task.Principal.LogonType -eq 'Interactive' }
+        RunLevel = { [string]$Task.Principal.RunLevel -eq 'Limited' }
+        Actions = { @($Task.Actions).Count -eq 1 }
+        Execute = { Test-DiagnosticWindowsPath $Task.Actions[0].Execute $Expected.Execute }
+        Arguments = { Test-DiagnosticAgentArguments $Task.Actions[0].Arguments $Expected }
+        WorkingDirectory = { Test-DiagnosticWindowsPath $Task.Actions[0].WorkingDirectory $Expected.Directory }
+    }
+    $checks = [ordered]@{}; $codes = [ordered]@{}; $owned = $true
+    foreach ($name in $predicates.Keys) {
+        try {
+            $checks[$name] = [bool](& $predicates[$name])
+            $codes[$name] = if ($checks[$name]) { 'match' } else { 'mismatch' }
+        } catch { $checks[$name] = $false; $codes[$name] = 'unavailable' }
+        if (-not $checks[$name]) { $owned = $false }
+    }
+    if (-not $principalIdentity.PrincipalSidResolved) { $codes['UserId'] = 'unavailable' }
+    $representations = [ordered]@{}
+    foreach ($entry in @(
+        @('Task', { Get-DiagnosticValueKind $Task }),
+        @('Principal', { Get-DiagnosticValueKind $Task.Principal }),
+        @('UserId', { Get-DiagnosticValueKind $Task.Principal.UserId }),
+        @('LogonType', { Get-DiagnosticValueKind $Task.Principal.LogonType }),
+        @('LogonTypeToken', { Get-DiagnosticEnumToken $Task.Principal.LogonType 'LogonType' }),
+        @('RunLevel', { Get-DiagnosticValueKind $Task.Principal.RunLevel }),
+        @('RunLevelToken', { Get-DiagnosticEnumToken $Task.Principal.RunLevel 'RunLevel' }),
+        @('Actions', { Get-DiagnosticValueKind $Task.Actions }),
+        @('FirstAction', { Get-DiagnosticValueKind $Task.Actions[0] }),
+        @('Execute', { Get-DiagnosticValueKind $Task.Actions[0].Execute }),
+        @('Arguments', { Get-DiagnosticValueKind $Task.Actions[0].Arguments }),
+        @('WorkingDirectory', { Get-DiagnosticValueKind $Task.Actions[0].WorkingDirectory })
+    )) {
+        try { $representations[$entry[0]] = & $entry[1] } catch { $representations[$entry[0]] = 'unavailable' }
+    }
+    $actionCount = $null
+    try { $count = @($Task.Actions).Count; if ($count -ge 0 -and $count -le 256) { $actionCount = $count } } catch { }
+    [pscustomobject]@{ Owned = $owned; Checks = [pscustomobject]$checks; Codes = [pscustomobject]$codes
+        Representations = [pscustomobject]$representations; ActionsArrayCount = $actionCount
+        PrincipalIdentity = $principalIdentity }
+}
+
+function ConvertTo-DiagnosticTaskOwnershipReport {
+    param($Checks)
+    # Only pass our fixed-schema bool/code object; no source task is serialized.
+    return ('ScheduledTaskOwnershipChecks=' + ($Checks | ConvertTo-Json -Depth 4 -Compress))
+}
+
 function Test-DiagnosticOwnedTask {
     param($Task, $Expected)
-    try {
-        return ($Task.TaskName -ceq $Expected.Name -and $Task.TaskPath -ceq '\' -and
-            $Task.Description -ceq $Expected.Description -and @($Expected.Sid, $Expected.Account) -contains $Task.Principal.UserId -and
-            [string]$Task.Principal.LogonType -eq 'Interactive' -and [string]$Task.Principal.RunLevel -eq 'Limited' -and
-            @($Task.Actions).Count -eq 1 -and
-            (Test-DiagnosticWindowsPath $Task.Actions[0].Execute $Expected.Execute) -and
-            (Test-DiagnosticAgentArguments $Task.Actions[0].Arguments $Expected) -and
-            (Test-DiagnosticWindowsPath $Task.Actions[0].WorkingDirectory $Expected.Directory))
-    } catch { return $false }
+    return [bool](Get-DiagnosticTaskOwnershipChecks -Task $Task -Expected $Expected).Owned
 }
 
 function Test-DiagnosticOwnedProcess {
@@ -157,7 +286,9 @@ try {
 $taskOwned = $false
 try {
     $task = Get-ScheduledTask -TaskPath '\' -TaskName $expected.Name -ErrorAction Stop
-    $taskOwned = Test-DiagnosticOwnedTask -Task $task -Expected $expected
+    $taskChecks = Get-DiagnosticTaskOwnershipChecks -Task $task -Expected $expected
+    Write-Output (ConvertTo-DiagnosticTaskOwnershipReport $taskChecks)
+    $taskOwned = $taskChecks.Owned
     Write-Output ('ScheduledTaskOwned=' + $taskOwned)
     if ($taskOwned) {
         $info = Get-ScheduledTaskInfo -InputObject $task -ErrorAction Stop

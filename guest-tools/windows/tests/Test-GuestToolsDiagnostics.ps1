@@ -11,8 +11,36 @@ if ($errors.Count -ne 0) { throw ($errors | Out-String) }
 foreach ($function in $ast.FindAll({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] }, $false)) {
     . ([scriptblock]::Create($function.Extent.Text))
 }
+# All resolver calls in this fixture are injected/private lookups. The real
+# NTAccount/SecurityIdentifier translation is never invoked, even on Windows.
+$script:principalResolverCalls = 0
+function Resolve-DiagnosticPrincipalSid {
+    param([string]$PrincipalUserId)
+    $script:principalResolverCalls++
+    if ($PrincipalUserId -ceq 'S-1-5-21-123-456-789-1001' -or $PrincipalUserId -ceq 'PRIVATE-ACCOUNT') { return 'S-1-5-21-123-456-789-1001' }
+    if ($PrincipalUserId -ceq 'OTHER-OWNER') { return 'S-1-5-21-123-456-789-1002' }
+    throw [InvalidOperationException]::new('PRIVATE-RESOLVER-FAILURE')
+}
 $script:checks = 0
 function Assert-True { param([bool]$Value, [string]$Message) if (-not $Value) { throw $Message }; $script:checks++ }
+function Test-FixtureLegacyOwnedTask {
+    param($Task, $Expected)
+    try {
+        return ($Task.TaskName -ceq $Expected.Name -and $Task.TaskPath -ceq '\' -and
+            $Task.Description -ceq $Expected.Description -and @($Expected.Sid, $Expected.Account) -contains $Task.Principal.UserId -and
+            [string]$Task.Principal.LogonType -eq 'Interactive' -and [string]$Task.Principal.RunLevel -eq 'Limited' -and
+            @($Task.Actions).Count -eq 1 -and
+            (Test-DiagnosticWindowsPath $Task.Actions[0].Execute $Expected.Execute) -and
+            (Test-DiagnosticAgentArguments $Task.Actions[0].Arguments $Expected) -and
+            (Test-DiagnosticWindowsPath $Task.Actions[0].WorkingDirectory $Expected.Directory))
+    } catch { return $false }
+}
+Add-Type -TypeDefinition @'
+public enum DiagnosticFixtureLogon { None = 0, Password = 1, S4U = 2, Interactive = 3, Group = 4, ServiceAccount = 5, InteractiveOrPassword = 6 }
+public enum DiagnosticFixtureRunLevel { Limited = 0, Highest = 1 }
+public sealed class DiagnosticFixtureStringWrapper { public string Value; public override string ToString() { return Value; } }
+public sealed class DiagnosticFixtureCimLikeAction { public string Execute, Arguments, WorkingDirectory; public override string ToString() { return "PRIVATE-CIM-OBJECT"; } }
+'@
 $expected = Get-DiagnosticExpectedTask -Sid 'S-1-5-21-123-456-789-1001' -Account 'PRIVATE-ACCOUNT' -Directory 'C:/Users/PRIVATE-ACCOUNT/AppData/Local/Perpendicular Desktop/Guest Agent' -WindowsDirectory 'C:/Windows'
 function New-FixtureTask {
     [pscustomobject]@{
@@ -22,6 +50,11 @@ function New-FixtureTask {
     }
 }
 Assert-True (Test-DiagnosticOwnedTask (New-FixtureTask) $expected) 'The exact owned interactive limited task should match.'
+$fullReport = Get-DiagnosticTaskOwnershipChecks (New-FixtureTask) $expected
+Assert-True ($fullReport.Owned -and @($fullReport.Checks.PSObject.Properties).Count -eq 10 -and @($fullReport.Codes.PSObject.Properties).Count -eq 10) 'Every original task clause must have an independent boolean and code.'
+foreach ($property in $fullReport.Checks.PSObject.Properties) { Assert-True ($property.Value -is [bool] -and $property.Value) 'Task clause results must be fixed booleans.' }
+$reportText = ConvertTo-DiagnosticTaskOwnershipReport $fullReport
+Assert-True (-not $reportText.Contains('PRIVATE') -and -not $reportText.Contains($expected.Sid) -and -not $reportText.Contains($expected.Arguments) -and -not $reportText.Contains($expected.Directory)) 'Structured ownership report leaked a source value.'
 Assert-True ($expected.Directory -ceq 'C:\Users\PRIVATE-ACCOUNT\AppData\Local\Perpendicular Desktop\Guest Agent' -and
     $expected.Execute -ceq 'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe' -and
     $expected.Arguments.EndsWith('-File "C:\Users\PRIVATE-ACCOUNT\AppData\Local\Perpendicular Desktop\Guest Agent\PerpendicularAgent.ps1"')) 'Diagnostic expected paths must match the installer Windows layout independently of the fixture host.'
@@ -40,7 +73,105 @@ foreach ($case in @('wrong-name', 'wrong-task-path', 'wrong-user', 'wrong-descri
         'extra-action' { $task.Actions += $task.Actions[0] }
     }
     Assert-True (-not (Test-DiagnosticOwnedTask $task $expected)) ('Unowned task accepted: ' + $case)
+    $clause = @{ 'wrong-name' = 'Name'; 'wrong-task-path' = 'Path'; 'wrong-user' = 'UserId'; 'wrong-description' = 'Description'; elevated = 'RunLevel'; service = 'LogonType'; 'wrong-executable' = 'Execute'; 'wrong-arguments' = 'Arguments'; 'wrong-directory' = 'WorkingDirectory'; 'extra-action' = 'Actions' }[$case]
+    $report = Get-DiagnosticTaskOwnershipChecks $task $expected
+    Assert-True (-not $report.Checks.$clause -and $report.Codes.$clause -eq 'mismatch' -and @($report.Checks.PSObject.Properties | Where-Object { -not $_.Value }).Count -eq 1) ('Task clause failure was not isolated: ' + $case)
+    Assert-True ($report.Owned -eq (Test-FixtureLegacyOwnedTask $task $expected)) 'The structured predicate broadened legacy ownership acceptance.'
 }
+foreach ($case in @('named-enums', 'numeric-logon', 'numeric-level', 'numeric-text', 'enum-highest', 'unknown-enum', 'scalar-action', 'cim-like-action', 'nested-actions', 'string-wrapper')) {
+    $task = New-FixtureTask
+    switch ($case) {
+        'named-enums' { $task.Principal.LogonType = [DiagnosticFixtureLogon]::Interactive; $task.Principal.RunLevel = [DiagnosticFixtureRunLevel]::Limited }
+        'numeric-logon' { $task.Principal.LogonType = [uint32]3 }
+        'numeric-level' { $task.Principal.RunLevel = [uint32]0 }
+        'numeric-text' { $task.Principal.LogonType = '3'; $task.Principal.RunLevel = '0' }
+        'enum-highest' { $task.Principal.RunLevel = [DiagnosticFixtureRunLevel]::Highest }
+        'unknown-enum' { $task.Principal.LogonType = [Enum]::ToObject([DiagnosticFixtureLogon], 99) }
+        'scalar-action' { $task.Actions = $task.Actions[0] }
+        'cim-like-action' {
+            $action = New-Object DiagnosticFixtureCimLikeAction
+            $action.Execute = $expected.Execute; $action.Arguments = $expected.Arguments; $action.WorkingDirectory = $expected.Directory
+            $task.Actions = $action
+        }
+        'nested-actions' { $task.Actions = ,@($task.Actions[0], $task.Actions[0]) }
+        'string-wrapper' {
+            $value = New-Object DiagnosticFixtureStringWrapper; $value.Value = 'Interactive'; $task.Principal.LogonType = $value
+        }
+    }
+    $report = Get-DiagnosticTaskOwnershipChecks $task $expected
+    Assert-True ($report.Owned -eq (Test-FixtureLegacyOwnedTask $task $expected)) ('PS enum/action representation changed ownership criteria: ' + $case)
+    switch ($case) {
+        'named-enums' { Assert-True ($report.Owned -and $report.Representations.LogonType -eq 'enum' -and $report.Representations.RunLevelToken -eq 'Limited') 'Named enum fixture must expose enum spelling without numeric reinterpretation.' }
+        'numeric-logon' { Assert-True (-not $report.Checks.LogonType -and $report.Representations.LogonType -eq 'integer' -and $report.Representations.LogonTypeToken -eq 'numeric_3') 'Numeric logon values must be diagnosed without newly accepting them.' }
+        'numeric-level' { Assert-True (-not $report.Checks.RunLevel -and $report.Representations.RunLevelToken -eq 'numeric_0') 'Numeric run level must remain a mismatch pending evidence.' }
+        'numeric-text' { Assert-True ($report.Representations.LogonTypeToken -eq 'numeric_text_3') 'Numeric strings must remain distinguishable from enum/integer representations.' }
+        'unknown-enum' { Assert-True (-not $report.Owned -and $report.Representations.LogonTypeToken -eq 'other') 'An unknown enum must not leak an arbitrary token or become accepted.' }
+        'scalar-action' { Assert-True ($report.Owned -and $report.ActionsArrayCount -eq 1 -and $report.Representations.Actions -eq 'object') 'A scalar action must show the actual array-subexpression count behavior.' }
+        'cim-like-action' { Assert-True ($report.Owned -and $report.ActionsArrayCount -eq 1 -and $report.Representations.FirstAction -eq 'object') 'A CIM-like scalar action must retain the original index/count semantics.' }
+        'nested-actions' { Assert-True (-not $report.Owned -and $report.Representations.FirstAction -eq 'array') 'Nested actions cannot hide a second program through scalar count semantics.' }
+    }
+    Assert-True (-not (ConvertTo-DiagnosticTaskOwnershipReport $report).Contains('PRIVATE')) 'Representation reporting leaked a private task value.'
+}
+$task = New-FixtureTask
+$task.Principal | Add-Member -MemberType ScriptProperty -Name LogonType -Value { throw 'PRIVATE-EXCEPTION-CONTENT' } -Force
+$report = Get-DiagnosticTaskOwnershipChecks $task $expected
+Assert-True (-not $report.Owned -and @('unavailable', 'mismatch') -contains $report.Codes.LogonType -and @('null', 'unavailable') -contains $report.Representations.LogonType -and $report.Checks.RunLevel -and $report.Checks.Execute) 'An unreadable/null clause must not hide independent remaining checks.'
+Assert-True (-not (ConvertTo-DiagnosticTaskOwnershipReport $report).Contains('PRIVATE')) 'A throwing CIM-like getter leaked its exception content.'
+$missingReport = Get-DiagnosticTaskOwnershipChecks ([pscustomobject]@{}) $expected
+Assert-True (-not $missingReport.Owned -and $missingReport.Codes.Name -eq 'unavailable') 'Missing task metadata must fail closed with an unavailable code.'
+$script:principalInput = $null
+foreach ($case in @(
+    @('PRIVATE-MACHINE\PRIVATE-NORMALIZED', 'qualified'),
+    @('PRIVATE-NORMALIZED', 'unqualified'),
+    @('PRIVATE-NORMALIZED@PRIVATE-DOMAIN', 'qualified'),
+    @('S-PRIVATE-NAME', 'unqualified'),
+    @($expected.Sid, 'sid')
+)) {
+    $identity = Get-DiagnosticPrincipalIdentity -PrincipalUserId $case[0] -ExpectedSid $expected.Sid -Resolver { param($value) $script:principalInput = $value; return 'S-1-5-21-123-456-789-1001' }
+    Assert-True ($identity.PrincipalSidResolved -and $identity.PrincipalSidMatchesOwner -and $identity.PrincipalIdentityKind -eq $case[1] -and $identity.PrincipalIdentityCode -eq 'sid_match') 'Injected OS identity resolution was not compared by exact SID.'
+    Assert-True ($script:principalInput -ceq $case[0]) 'Principal input was stripped, trimmed, qualified or guessed before the resolver.'
+    Assert-True (-not ($identity | ConvertTo-Json -Compress).Contains('PRIVATE') -and -not ($identity | ConvertTo-Json -Compress).Contains($expected.Sid)) 'Principal identity evidence leaked an account or SID.'
+}
+$task = New-FixtureTask; $task.Principal.UserId = 'PRIVATE-MACHINE\PRIVATE-NORMALIZED'
+$report = Get-DiagnosticTaskOwnershipChecks -Task $task -Expected $expected -PrincipalResolver { param($value) return 'S-1-5-21-123-456-789-1001' }
+Assert-True ($report.PrincipalIdentity.PrincipalSidMatchesOwner -and $report.Checks.UserId -and $report.Owned -and -not (Test-FixtureLegacyOwnedTask $task $expected)) 'An OS-confirmed exact SID must accept the normalized name that the old textual comparison rejected.'
+foreach ($property in $report.Checks.PSObject.Properties | Where-Object { $_.Name -ne 'UserId' }) { Assert-True $property.Value 'A normalized principal must not alter any other ownership clause.' }
+$sameSpelling = New-FixtureTask
+foreach ($principal in @($expected.Sid, $expected.Account)) {
+    $sameSpelling.Principal.UserId = $principal
+    $failedLookup = Get-DiagnosticTaskOwnershipChecks -Task $sameSpelling -Expected $expected -PrincipalResolver { param($value) throw 'PRIVATE-LOOKUP-FAILURE' }
+    Assert-True (-not $failedLookup.Owned -and -not $failedLookup.Checks.UserId -and $failedLookup.Codes.UserId -eq 'unavailable' -and (Test-FixtureLegacyOwnedTask $sameSpelling $expected)) 'Lookup failure must fail closed even for the old exact account/SID spelling; there is no name fallback.'
+    $wrongSid = Get-DiagnosticTaskOwnershipChecks -Task $sameSpelling -Expected $expected -PrincipalResolver { param($value) return 'S-1-5-21-123-456-789-1002' }
+    Assert-True (-not $wrongSid.Owned -and -not $wrongSid.Checks.UserId -and $wrongSid.Codes.UserId -eq 'mismatch') 'A different resolved SID must reject even the previously accepted name/SID text.'
+}
+foreach ($case in @('qualified', 'unqualified')) {
+    $task = New-FixtureTask
+    $task.Principal.UserId = if ($case -eq 'qualified') { 'OTHER-DOMAIN\PRIVATE-NORMALIZED' } else { 'PRIVATE-NORMALIZED' }
+    $mismatch = Get-DiagnosticTaskOwnershipChecks -Task $task -Expected $expected -PrincipalResolver { param($value) return 'S-1-5-21-123-456-789-1002' }
+    Assert-True (-not $mismatch.Owned -and $mismatch.PrincipalIdentity.PrincipalSidResolved -and -not $mismatch.PrincipalIdentity.PrincipalSidMatchesOwner) 'A similar account in another identity must remain rejected by exact SID.'
+}
+$identity = Get-DiagnosticPrincipalIdentity -PrincipalUserId 'PRIVATE-MACHINE\PRIVATE-NORMALIZED' -ExpectedSid $expected.Sid -Resolver { param($value) return 'S-1-5-21-123-456-789-1002' }
+Assert-True ($identity.PrincipalSidResolved -and -not $identity.PrincipalSidMatchesOwner -and $identity.PrincipalIdentityCode -eq 'sid_mismatch') 'A different OS-resolved SID must remain an explicit mismatch.'
+foreach ($case in @('exception', 'null', 'array', 'object', 'name', 'overflow', 'noncanonical')) {
+    $resolver = switch ($case) {
+        'exception' { { param($value) throw 'PRIVATE-IDENTITY-EXCEPTION' } }
+        'null' { { param($value) return $null } }
+        'array' { { param($value) return @('S-1-5-21-123-456-789-1001', 'S-1-5-21-123-456-789-1001') } }
+        'object' { { param($value) return [pscustomobject]@{ SID = 'PRIVATE-VALUE' } } }
+        'name' { { param($value) return 'PRIVATE-ACCOUNT' } }
+        'overflow' { { param($value) return 'S-1-5-21-1-2-3-4294967296' } }
+        'noncanonical' { { param($value) return 'S-1-5-21-01-2-3-1001' } }
+    }
+    $identity = Get-DiagnosticPrincipalIdentity -PrincipalUserId 'PRIVATE-ACCOUNT' -ExpectedSid $expected.Sid -Resolver $resolver
+    Assert-True (-not $identity.PrincipalSidResolved -and -not $identity.PrincipalSidMatchesOwner) ('An invalid resolution became identity evidence: ' + $case)
+    Assert-True (-not ($identity | ConvertTo-Json -Compress).Contains('PRIVATE')) 'Resolver failure leaked private values or its exception.'
+}
+$script:invalidResolverCalls = 0
+foreach ($bad in @($null, 123, @('a', 'b'), '', '   ', "PRIVATE`nNAME", ('x' * 1025))) {
+    $identity = Get-DiagnosticPrincipalIdentity -PrincipalUserId $bad -ExpectedSid $expected.Sid -Resolver { param($value) $script:invalidResolverCalls++; return 'S-1-5-21-123-456-789-1001' }
+    Assert-True (-not $identity.PrincipalSidResolved -and $identity.PrincipalIdentityKind -eq 'invalid' -and $identity.PrincipalIdentityCode -eq 'invalid_input') 'Invalid principal metadata reached identity resolution.'
+}
+Assert-True ($script:invalidResolverCalls -eq 0) 'Invalid metadata must not invoke a resolver.'
 $task = New-FixtureTask
 $task.Principal.UserId = $expected.Account
 Assert-True (Test-DiagnosticOwnedTask $task $expected) 'The installer account principal spelling must match without changing logon or run level.'
