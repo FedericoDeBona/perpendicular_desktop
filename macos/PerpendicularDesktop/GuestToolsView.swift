@@ -31,7 +31,11 @@ struct GuestToolsView: View {
         if vm.state != "running" { return "Start Windows to connect Guest Tools." }
         switch status?.code {
         case "guest_agent_timeout": return "Windows has not responded yet. Wait for Windows to finish starting, then check the connection again."
-        case "guest_agent_unavailable": return "Install or start Perpendicular Guest Tools inside Windows, then check the connection again."
+        case "guest_agent_unavailable":
+            if vm.guestToolsIsoPath != nil {
+                return "In Windows, open the Perpendicular driver disc, open GuestTools, and double-click Install-PerpendicularGuestTools.cmd. Then check the connection again."
+            }
+            return "Shut down Windows and attach the Perpendicular driver disc in Configure. Then start Windows and open the installer in the disc’s GuestTools folder."
         default: return "Guest Tools are not connected. Make sure Windows is running and Guest Tools are installed, then check the connection again."
         }
     }

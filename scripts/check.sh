@@ -30,5 +30,6 @@ xcrun swiftc -parse-as-library -D PERPENDICULAR_UI_RENDER \
 "$OUTPUT/DiskExportCheck"
 if [[ -n "${PERPENDICULAR_POWERSHELL:-}" ]]; then
   "$PERPENDICULAR_POWERSHELL" -NoProfile -File "$ROOT/guest-tools/windows/tests/Test-AgentCore.ps1"
+  "$PERPENDICULAR_POWERSHELL" -NoProfile -File "$ROOT/guest-tools/windows/tests/Test-GuestToolsInstaller.ps1"
 fi
 echo "Rust engine and native console/client/window checks passed."

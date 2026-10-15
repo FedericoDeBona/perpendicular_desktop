@@ -10,13 +10,13 @@ Development host: Apple M4, 24 GiB RAM, macOS 27.2. Checks below were performed 
 - Creation through the actual native app selected the supplied ARM64 ISO and created a stopped VM with 4 CPUs, 8 GiB RAM and an 80 GiB sparse disk. The library displayed the result.
 - Rust unit/integration tests, native console/client/window tests and lint checks run with `scripts/check.sh`. The initial console cancellation fixture had a handshake/request race; its fix passed ten consecutive complete console runs.
 - Independent raw import and stopped clone were checked with real qemu-img: source bytes preserved, no backing-file dependencies, source unchanged, clone still valid after the disposable source was removed.
-- QCOW2/raw export was checked with real qemu-img for bytes, capacity, no backing chains and independence after removing the disposable source. The source was unchanged; existing destinations, dangling symlinks and publication races are refused. Cancellation tests verify that the exact conversion child is reaped and staging is cleaned. The actual native model also exported a stopped, empty private fixture and verified its returned artifact. The save-panel click path still needs the next GUI bundle check.
+- QCOW2/raw export was checked with real qemu-img for bytes, capacity, no backing chains and independence after removing the disposable source. The source was unchanged; existing destinations, dangling symlinks and publication races are refused. Cancellation tests verify that the exact conversion child is reaped and staging is cleaned. The actual native model also exported a stopped, empty private fixture and verified its returned artifact. A separate test app using the real optimized GUI then completed the menu → native save panel → owned test folder → Disk Exported flow; qemu-img independently confirmed the exported disk's contents match the source.
 
 ## Windows runtime
 
 A separate private VM uses 4 CPUs, 8 GiB RAM, a 64 GiB qcow2 disk and the user-supplied Windows ARM64 ISO. Windows PE reports version 10.0.26100.9457. The guest reached the Italian Windows 11 installation language screen.
 
-The successful combination is QEMU/HVF, the upstream EDK2 ArmVirt build with RAMFB, explicit USB-BOT/SCSI CD-ROMs, NVMe, USB input and swtpm. Windows 11 Pro was explicitly selected and the installer is writing the new private disk. The guest has **not yet completed Windows installation or reached a Windows desktop**.
+The successful combination is QEMU/HVF, the upstream EDK2 ArmVirt build with RAMFB, explicit USB-BOT/SCSI CD-ROMs, NVMe, USB input and swtpm. Windows 11 Pro completed its installation-file stage, rebooted and booted Windows Boot Manager from the private disk into its initial configuration. At the network page, the signed NetKVM Windows 11 ARM64 driver was selected from the sanitized driver disc; Windows displayed **Rete — Connessa** and proceeded to its online update check. The guest has **not yet reached a Windows desktop**.
 
 Windows PE's own registry reports:
 
@@ -50,6 +50,8 @@ A separate negative-control store with SecureBootEnable disabled executed that e
 ## Guest integration checks
 
 The Rust guest transport, native explicit clipboard/file controller and independent Windows PowerShell agent pass the normal checks. The native harness uses a recording clipboard and proves that readiness never accesses clipboard contents, failed reads preserve existing text, private clipboard payloads are cleaned up, capabilities gate operations and partial transfers do not count as success. The PowerShell core passed 51 checks in the verified official PowerShell 7.6.7 runtime on macOS, including a full 1 MiB file and strict framing/encoding/path validation. These are **not yet Windows PowerShell 5.1, device, scheduled-task or live clipboard results**.
+
+The driver disc also includes an explicit Windows GUI installer. It separates the elevated, fixed signed-driver helper from the original desktop user's limited agent installation. Its 25 portable checks pass; the mounted ISO was rebuilt and replaced through QMP without disturbing the Windows disk. Actual Windows Forms, UAC, Windows signature checks, scheduled-task installation and live communication remain required runtime checks.
 
 Saved keyboard layout and output-audio configuration have engine/native tests. A separate paused HVF smoke exposes the output-only HDA controller; actual Windows sound and Italian punctuation still require guest runtime verification.
 

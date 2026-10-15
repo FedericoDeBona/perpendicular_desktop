@@ -52,7 +52,8 @@ def main():
         agent_source = ROOT / "guest-tools/windows"
         required_agent_files = (
             "PerpendicularAgent.ps1", "PerpendicularAgent.Core.ps1",
-            "Install-PerpendicularAgent.ps1", "Uninstall-PerpendicularAgent.ps1")
+            "Install-PerpendicularAgent.ps1", "Uninstall-PerpendicularAgent.ps1",
+            "Install-PerpendicularGuestTools.ps1", "Install-PerpendicularGuestTools.cmd")
         for name in required_agent_files:
             if not (agent_source / name).is_file():
                 raise SystemExit("The independent Guest Tools package is incomplete: " + name)
@@ -68,9 +69,9 @@ def main():
             "Source: " + SOURCE_URL + "\n"
             "Includes signed drivers and independent Perpendicular Guest Tools. No automatic setup.\n"
             "In Windows, use Device Manager or pnputil to install the required signed driver.\n"
-            "From a logged-in Windows desktop, install Guest Tools explicitly:\n"
-            "powershell.exe -NoProfile -ExecutionPolicy Bypass -File GuestTools\\Install-PerpendicularAgent.ps1\n"
-            "The policy option applies only to that process; system policies are unchanged.\n")
+            "From a logged-in Windows desktop, open GuestTools and double-click\n"
+            "Install-PerpendicularGuestTools.cmd. Only the signed-driver step requests administrator permission.\n"
+            "The guest agent runs as your desktop user. System execution policies are unchanged.\n")
         manifest = {"source_url": SOURCE_URL, "source_sha256": SOURCE_SHA256,
                     "files": {str(p.relative_to(content)): digest(p) for p in drivers},
                     "independent_guest_tools": {

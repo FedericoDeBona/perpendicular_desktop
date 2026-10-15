@@ -6,17 +6,22 @@ The agent uses Windows PowerShell 5.1 in STA mode, .NET Framework, and the signe
 
 ## Install in the Windows desktop
 
-The distribution should put the contents of `windows/` in `GuestTools/` on the driver disc, alongside `Drivers/vioser/w11/ARM64/`. The root build owns the actual disc packaging; the source folder alone does not prove a packaged ISO contains these files.
+The distribution should put the contents of `windows/` in `GuestTools/` on the driver disc, alongside `Drivers/NetKVM/w11/ARM64/` and `Drivers/vioserial/w11/ARM64/`. The root build owns the actual disc packaging; the source folder alone does not prove a packaged ISO contains these files.
 
-1. Install the signed `vioser` ARM64 driver from the driver disc if it is not already installed. Driver installation may need Windows administrator permission. The agent itself runs with the logged-in user's limited privileges.
-2. Open Windows PowerShell in the Windows desktop as the user whose clipboard and Downloads folder should be used. Replace `D:` below with the actual driver disc letter:
+1. In the logged-in Windows desktop, open the driver disc, then `GuestTools`, and double-click **Install-PerpendicularGuestTools.cmd**. Open it normally; do not choose Run as administrator.
+2. Choose **Install drivers (administrator)**. Windows requests administrator permission for a separate helper that installs only the fixed NetKVM and vioser Windows 11 ARM64 packages. It verifies both ARM64 images and their catalogs before running Windows PnPUtil, which checks catalog membership and driver policy. An invalid/untrusted signature is an error; the installer does not import certificates, enable test signing, change machine execution policy, or weaken Windows security. It runs from the read-only mounted driver disc, with no driver path or command picker.
+3. Read and close the administrator results window. Exit code 3010 is preserved as a restart requirement; the installer does not restart Windows automatically. Windows accepting a package does not prove that its device is active.
+4. Choose **Install tools for my account**. This calls the existing agent installer without elevation. The GUI rejects an elevated launch and checks that its current SID matches the logged-in user of its Windows session, so credentials supplied for the driver step cannot change the agent's owner. The agent itself runs with the logged-in user's limited privileges.
+5. The agent installer copies three owned runtime/uninstaller files into `%LOCALAPPDATA%\Perpendicular Desktop\Guest Agent`, registers a user-specific AtLogOn task and starts it immediately. The task uses `Interactive` logon, limited privileges and `powershell.exe -STA`. It does not install a Session 0 service or save a Windows password. The process-only execution-policy option does not change the machine's execution policy.
+6. If requested, restart Windows after both steps. Check the Mac app's Guest Tools connection result. A successful installer message proves task registration, not communication with the VirtIO port. The source has not yet been verified against Windows PowerShell 5.1 or the running Windows guest.
 
-   ```powershell
-   powershell.exe -NoProfile -ExecutionPolicy Bypass -File "D:\GuestTools\Install-PerpendicularAgent.ps1"
-   ```
+There is no autorun. Driver errors appear in the administrator results window; the main window offers **View Details** for user-installation errors and the driver's actual exit result. Closing or refusing UAC does not report success. The GUI remains responsive while its separate installation process runs.
 
-3. The installer copies three owned runtime/uninstaller files into `%LOCALAPPDATA%\Perpendicular Desktop\Guest Agent`, registers a user-specific AtLogOn task and starts it immediately. The task uses `Interactive` logon, limited privileges and `powershell.exe -STA`. It does not install a Session 0 service or save a Windows password. The process-only execution-policy option does not change the machine's execution policy.
-4. Check the Mac app's Guest Tools connection result. A successful installer message proves task registration, not communication with the VirtIO port. The source has not yet been verified against Windows PowerShell 5.1 or the running Windows guest.
+For an agent-only installation after manually installing the signed serial driver, open Windows PowerShell as the desktop user whose clipboard and Downloads folder should be used. Replace `D:` with the actual driver disc letter:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "D:\GuestTools\Install-PerpendicularAgent.ps1"
+```
 
 The task is named `Perpendicular Desktop Guest Agent (USER-SID)`. After guest reboot, it runs when this user logs in. If the port is absent or disconnected, the agent closes its current handle, discards incomplete framing and retries after one second. Only one agent can own the exclusive device handle at a time; concurrent Windows user sessions are not a verified feature.
 
@@ -75,6 +80,8 @@ powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File "D:\GuestTools\test
 
 A portable PowerShell 7.6.7 build on macOS was downloaded from the official Microsoft release and its published SHA-256 was verified. Core checks and parsing were run there. This is evidence for protocol, framing, validation and file behavior; it does not verify Windows PowerShell 5.1, Windows device opening, task registration, permissions, secure firmware queries or live clipboard integration. Windows end-to-end validation remains required.
 
+`tests/Test-GuestToolsInstaller.ps1` parses the new GUI script and loads only its function definitions for portable fixture checks. It verifies the two fixed package paths, ARM64 INF/PE checks, rejected unsigned/untrusted catalogs, missing files, result codes including 3010, constrained subprocess arguments and refusal of an elevated GUI. The signature API is mocked in these checks; no real driver, scheduled task, guest port or clipboard is touched. Windows Forms rendering, UAC, actual Windows certificate validation, PnPUtil, desktop SID checks and agent installation remain Windows runtime acceptance tests.
+
 ## Primary implementation references
 
 - [QEMU `qga/main.c`](https://github.com/qemu/qemu/blob/master/qga/main.c) defines the Windows VirtIO default alias under `\\.\Global\`; this agent uses its own port name.
@@ -82,3 +89,6 @@ A portable PowerShell 7.6.7 build on macOS was downloaded from the official Micr
 - [VirtIO Windows QEMU agent documentation](https://virtio-win.github.io/Knowledge-Base/Qemu-ga-win.html) describes the `virtserialport`/chardev connection.
 - [Microsoft scheduled-task principals](https://learn.microsoft.com/en-us/powershell/module/scheduledtasks/new-scheduledtaskprincipal) documents interactive logon and limited privileges.
 - [Microsoft Windows Forms Clipboard](https://learn.microsoft.com/en-us/dotnet/api/system.windows.forms.clipboard) documents the real clipboard API and its STA requirement.
+- [Microsoft PnPUtil syntax](https://learn.microsoft.com/en-us/windows-hardware/drivers/devtest/pnputil-command-syntax) documents adding a fixed INF and installing it on matching devices; the installer does not request automatic reboot or force a driver rank.
+- [Microsoft Authenticode checks](https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.security/get-authenticodesignature?view=powershell-5.1) documents the catalog signature preflight; final Windows driver acceptance remains separate.
+- [Microsoft Windows session information](https://learn.microsoft.com/en-us/windows/win32/api/wtsapi32/nf-wtsapi32-wtsquerysessioninformationw) documents resolving the current Windows session's account before installing its user agent.
