@@ -34,7 +34,20 @@ The existing base experiment binaries and pinned source trees remain unchanged.
 This synthetic producer supplies an explicit ready event and immutable read
 lease; actual Neptune handle-only frames remain rejected. The next step is to
 prove and bridge the real renderer's producer completion and buffer-reuse
-contract before any guest-driver experiment. No fluidity result is claimed.
+contract before an accelerated guest-driver experiment. No fluidity result is claimed.
+
+A separate real DXMT producer and ANGLE consumer now pass an ordered snapshot
+test across Unix descriptor transfer: **7,042,042 exact snapshot pixels** and
+the same number of independently verified overwrite pixels. Copy-before-Signal
+and ACK-after-read preserve the snapshot even when the original texture is
+reused; a withheld Signal is rejected before reading. This proves the identified
+single-producer primitive, while actual Neptune resource ownership and RPC
+integration remain unfinished. See [the test and source evidence](../experimental/producer-sync/README.md)
+and [the paused HVF/TPM/PCI checks and Windows trial plan](../experimental/producer-sync/COMPATIBILITY.md).
+
+The [REA inspection of the installed Parallels executable](PARALLELS_GRAPHICS_REA.md)
+records static Metal/IOSurface/display-link imports and explicit analysis limits.
+It supplies no recovered guest GPU protocol or runtime performance claim.
 
 ## Earlier source inspection and capability checks
 
