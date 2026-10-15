@@ -1,0 +1,105 @@
+{
+  "date": "2026-10-15",
+  "scope": "Isolated authenticated-variable compatibility comparison; no live migration or deployed runtime change",
+  "resources": {
+    "cpus_per_vm": 1,
+    "memory_mib_per_vm": 512,
+    "sequential_vms": true,
+    "network": false,
+    "tpm": false,
+    "existing_vm_disks_or_stores": false,
+    "readonly_test_fat_media": true
+  },
+  "patch": {
+    "upstream_commit": "ccbe6f5030bb0ac6a098592c3ecfbf35838e5191",
+    "upstream_url": "https://github.com/tianocore/edk2/commit/ccbe6f5030bb0ac6a098592c3ecfbf35838e5191",
+    "patch_sha256": "6db7b0f3bee5503ca752b8934a0d241180c321929d80094b873152a529a57a81",
+    "source_file": "CryptoPkg/Library/BaseCryptLib/SysCall/RuntimeMemAllocation.c",
+    "preimage_sha256": "5df4133ff8de926590cc57d1df79065cbe7c04feb375f4266ba5950abd962b18",
+    "postimage_sha256": "30017b6881a561c6e4aedea7f807b518e7fd393ca18f51a6ccf55ff0dbd5c07b"
+  },
+  "scratch_allocated_bytes": {
+    "baseline600": 614400,
+    "candidate1100": 1126400,
+    "allocator_metadata_and_512_byte_granularity_reduce_usable_capacity": true
+  },
+  "shared_inputs": {
+    "source_variables_sha256": "405f27b5a9972077d3065cbe0d9b64007eb549a8f14af01af9ca000500d0ce30",
+    "probe_unsigned_sha256": "8306f2165c787116fe432f62c98e8d7a3a3dd602cd1d338190ed40bf5aea0614",
+    "probe_signed_sha256": "6ab0c3cb9c84b96b8eb655acbffc1282717b4a23bfdb5120742021a77e23efc9",
+    "probe_c_sha256": "aa7b4247fddb55597b054cedc9f960d4c1c00c6164c9a54a7415839bc94ca658",
+    "microsoft_auth2_packet_sha256": "a9469ad3f349e0904212626f1badbb826c1a8944dd8341af57df544e8a2cad57"
+  },
+  "probe_buffer_fix": "Each SetVariable call receives a fresh AllocateCopyPool buffer; immutable signed fixture preserved; EDK2 FilterSignatureList modifies input after verification",
+  "test_results": [
+    {
+      "name": "baseline600",
+      "code_sha256": "5604f775025d25829fd0313acea2d2aa30ff4e3befc6da2eae1e522efc9ea429",
+      "observed": {
+        "original": {
+          "status": "Security Violation",
+          "code": "0x800000000000001a"
+        },
+        "tamper": {
+          "status": "not_executed",
+          "code": null
+        },
+        "replay": {
+          "status": "not_executed",
+          "code": null
+        },
+        "tamper_unchanged": false,
+        "replay_unchanged": false
+      },
+      "key_variables_preserved": true,
+      "dbx_before_entries": 1,
+      "dbx_after_entries": 1,
+      "dbx_unchanged": true,
+      "signed_subset_hashes_present": false,
+      "verified": false
+    },
+    {
+      "name": "candidate1100",
+      "code_sha256": "e40adedd2f8e6ec37882600f95e05564a191c4b83f55e28c862d6e880e448c0e",
+      "observed": {
+        "original": {
+          "status": "Success",
+          "code": "0x0"
+        },
+        "tamper": {
+          "status": "Security Violation",
+          "code": "0x800000000000001a"
+        },
+        "replay": {
+          "status": "Success",
+          "code": "0x0"
+        },
+        "tamper_unchanged": true,
+        "replay_unchanged": true
+      },
+      "key_variables_preserved": true,
+      "dbx_before_entries": 1,
+      "dbx_after_entries": 23,
+      "dbx_unchanged": false,
+      "signed_subset_hashes_present": true,
+      "verified": true
+    }
+  ],
+  "runtime_update_verified": false,
+  "candidate_auth2_runtime_update_verified": true,
+  "live_migration_verified": false,
+  "shared_runtime_or_app_updated": false,
+  "candidate_windows_loader_and_canary_retested": false,
+  "real_microsoft_revoked_image_executed": false,
+  "all_owned_qemu_children_reaped": true,
+  "source_template_unchanged": true,
+  "host_buffer_regression_test": "Real probe C compiled with a host firmware shim that mutates every SetVariable buffer; signed fixture, fresh replay bytes and allocation failure cleanup checked",
+  "historical_const_probe_comparison": {
+    "candidate1100_code_sha256": "e40adedd2f8e6ec37882600f95e05564a191c4b83f55e28c862d6e880e448c0e",
+    "old_const_probe_signed_sha256": "7ed7cf756a9cf318afed3e651fdf4f9725cb3f74bac4140b3725a583ba80fa72",
+    "observed": "Synchronous Exception before SetVariable returned",
+    "exception_pc": "0x000000005c342da4",
+    "original_update_success_not_claimed": true,
+    "all_owned_qemu_children_reaped": true
+  }
+}

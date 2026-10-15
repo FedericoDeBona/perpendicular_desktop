@@ -11,6 +11,25 @@
 
 STATIC
 EFI_STATUS
+SetDbx (IN CONST UINT8 *Data, IN UINTN Size)
+{
+  EFI_STATUS Status;
+  VOID       *Writable;
+
+  // EDK2 filters duplicate append entries in-place after signature validation.
+  // Keep the signed fixture pristine and give each call a fresh writable copy.
+  Writable = AllocateCopyPool (Size, Data);
+  if (Writable == NULL) {
+    return EFI_OUT_OF_RESOURCES;
+  }
+  Status = gRT->SetVariable (L"dbx", &gEfiImageSecurityDatabaseGuid, 0x67,
+                            Size, Writable);
+  FreePool (Writable);
+  return Status;
+}
+
+STATIC
+EFI_STATUS
 ReadDbx (OUT VOID **Buffer, OUT UINTN *Size)
 {
   EFI_STATUS Status;
@@ -54,8 +73,7 @@ UefiMain (IN EFI_HANDLE ImageHandle, IN EFI_SYSTEM_TABLE *SystemTable)
   if (EFI_ERROR (Status)) {
     return Status;
   }
-  Status = gRT->SetVariable (L"dbx", &gEfiImageSecurityDatabaseGuid, 0x67,
-                            sizeof (mDbxAuth2Payload), (VOID *)mDbxAuth2Payload);
+  Status = SetDbx (mDbxAuth2Payload, sizeof (mDbxAuth2Payload));
   Print (L"PERP_AUTH2_ORIGINAL_STATUS=%r CODE=%Lx\n", Status, (UINT64)Status);
   if (EFI_ERROR (Status)) {
     FreePool (Before);
@@ -74,8 +92,7 @@ UefiMain (IN EFI_HANDLE ImageHandle, IN EFI_SYSTEM_TABLE *SystemTable)
     return EFI_OUT_OF_RESOURCES;
   }
   Altered[sizeof (mDbxAuth2Payload) - 1] ^= 1;
-  Status = gRT->SetVariable (L"dbx", &gEfiImageSecurityDatabaseGuid, 0x67,
-                            sizeof (mDbxAuth2Payload), Altered);
+  Status = SetDbx (Altered, sizeof (mDbxAuth2Payload));
   Print (L"PERP_AUTH2_TAMPER_STATUS=%r CODE=%Lx\n", Status, (UINT64)Status);
   Status = ReadDbx (&Checked, &CheckedSize);
   Print (L"PERP_AUTH2_TAMPER_UNCHANGED=%u\n",
@@ -85,8 +102,7 @@ UefiMain (IN EFI_HANDLE ImageHandle, IN EFI_SYSTEM_TABLE *SystemTable)
     FreePool (Checked);
     Checked = NULL;
   }
-  Status = gRT->SetVariable (L"dbx", &gEfiImageSecurityDatabaseGuid, 0x67,
-                            sizeof (mDbxAuth2Payload), (VOID *)mDbxAuth2Payload);
+  Status = SetDbx (mDbxAuth2Payload, sizeof (mDbxAuth2Payload));
   Print (L"PERP_AUTH2_REPLAY_STATUS=%r CODE=%Lx\n", Status, (UINT64)Status);
   Status = ReadDbx (&Checked, &CheckedSize);
   Print (L"PERP_AUTH2_REPLAY_UNCHANGED=%u\n",

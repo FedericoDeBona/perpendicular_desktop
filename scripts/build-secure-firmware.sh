@@ -34,6 +34,8 @@ if marker not in data:
     data=data.replace(b'[BuildOptions]\r\n',b'[BuildOptions]\r\n'+marker,1)
     path.write_bytes(data)
 PY
+"$PERP_FIRMWARE_PYTHON" "$PERP_FIRMWARE_ROOT/scripts/firmware_source.py" \
+  --source "$PERP_EDK2_SOURCE" --receipt "$PERP_FIRMWARE_WORK/source-patch-receipt.json"
 export GCC5_AARCH64_PREFIX="$PERP_AARCH64_PREFIX"
 export PYTHON_COMMAND="$PERP_FIRMWARE_PYTHON"
 export SOURCE_DATE_EPOCH=0
@@ -112,7 +114,7 @@ else
   done
   echo "Empty variables built. Run python3 scripts/enroll-secure-vars.py to enroll an independent platform key and public Microsoft certificates." >&2
 fi
-"$PERP_FIRMWARE_PYTHON" - "$PERP_FIRMWARE_OUTPUT" "$PERP_QEMU_SHA256" "$PERP_FIRMWARE_TARGET" "${PERP_AARCH64_PREFIX}gcc" "$PERP_ENROLLED_TEMPLATE" <<'PY'
+"$PERP_FIRMWARE_PYTHON" - "$PERP_FIRMWARE_OUTPUT" "$PERP_QEMU_SHA256" "$PERP_FIRMWARE_TARGET" "${PERP_AARCH64_PREFIX}gcc" "$PERP_ENROLLED_TEMPLATE" "$PERP_FIRMWARE_WORK/source-patch-receipt.json" <<'PY'
 import hashlib,json,pathlib,subprocess,sys
 output=pathlib.Path(sys.argv[1]);files={path.name:hashlib.sha256(path.read_bytes()).hexdigest() for path in output.glob('*.fd')}
 report={'source':'https://download.qemu.org/qemu-11.1.2.tar.xz','source_sha256':sys.argv[2],'platform':'ArmVirtPkg/ArmVirtQemu.dsc','target':sys.argv[3],
@@ -120,6 +122,12 @@ report={'source':'https://download.qemu.org/qemu-11.1.2.tar.xz','source_sha256':
         'compiler':subprocess.check_output([sys.argv[4],'--version'],text=True).splitlines()[0],'compiler_compatibility':{'firmware_c_standard':'gnu11','host_apple_clang':'Wno-error=macro-redefined'},'files_sha256':files,'guest_secure_boot_verified':False}
 template=pathlib.Path(sys.argv[5])
 report['code_provenance']={'source_archive':report['source'],'source_archive_sha256':sys.argv[2],'license_aggregation':'edk2-licenses.txt'}
+patches=json.loads(pathlib.Path(sys.argv[6]).read_text())
+if patches['base_source']!={'url':report['source'],'sha256':sys.argv[2]}:
+    raise SystemExit('Firmware patch base source differs from the verified archive')
+report['code_provenance']['upstream_patches']=patches['patches']
+report['source_patch_application']=patches['applications']
+report['runtime_update_verified']=False
 report['enrolled_variables_provenance']=({'source_template_name':template.name,'source_template_sha256':hashlib.sha256(template.read_bytes()).hexdigest(),
     'description':'Explicitly supplied enrolled variable template.',
     'normalization':'qemu-img convert -O raw; authenticated store layout and active PK/KEK/db are validated.','certificate_summary':'enrolled-variable-summary.json'} if sys.argv[5] else None)

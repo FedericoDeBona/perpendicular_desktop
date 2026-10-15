@@ -22,9 +22,10 @@ The legacy `PostSignedObjects/DBX/arm64/DBXUpdate.bin` URL is deliberately not u
 
 ## Build, review and packaging
 
-Build the secure firmware first, then generate a separate output directory for review:
+Build the secure firmware first, then generate a separate output directory for review. The build applies the single hash-pinned upstream runtime-crypto allocation fix described below; it never provisions the runtime or app:
 
 ```sh
+PERPENDICULAR_BUILD_JOBS=1 bash scripts/build-secure-firmware.sh
 python3 scripts/enroll-secure-vars.py --output-dir .tools/edk2/enrolled-dbx
 # Once the pinned Microsoft objects and Python wheels are cached:
 python3 scripts/enroll-secure-vars.py --offline --output-dir .tools/edk2/enrolled-dbx
@@ -67,9 +68,35 @@ The canary's Authenticode SHA-256 was `50a57851f39cfbf41b9504b3e01ba5acc0920bee6
 
 ![Current Windows ARM64 loader accepted with the new factory DBX](images/dbx-windows-loader.png)
 
-The runtime Auth2 probe's original-packet rejection is a real unresolved compatibility limit. Host CMS/authority verification succeeded, but firmware acceptance did not. The test stops after that rejection, so firmware tamper and replay tests were **not executed**. `runtime_update_verified=false` and live migration remains unverified. No verification workaround, security setting change, runtime provisioning or installed-app replacement was applied.
+The original rejection remains recorded for the unpatched firmware. Its first probe stopped there, so tamper and replay were not executed in that run. The controlled comparison below isolates the runtime-crypto allocation limit and validates the corrected candidate. `runtime_update_verified=false` still describes the stable deployed runtime; no runtime provisioning, installed-app replacement or live migration was performed.
 
-An identical signed append is not required to be rejected merely because it is repeated: [UEFI 2.10 section 8.2.6](https://uefi.org/specs/UEFI/2.10/08_Services_Runtime_Services.html#using-the-efi-variable-authentication-2-descriptor) exempts append operations from timestamp verification and requires duplicate signature entries to be omitted without turning that into an error. This describes expected specification behavior; no replay result was observed in the failed firmware update case.
+An identical signed append is not required to be rejected merely because it is repeated: [UEFI 2.10 section 8.2.6](https://uefi.org/specs/UEFI/2.10/08_Services_Runtime_Services.html#using-the-efi-variable-authentication-2-descriptor) exempts append operations from timestamp verification and requires duplicate signature entries to be omitted without turning that into an error. The failed baseline run has no replay result; the corrected candidate below demonstrates successful, unchanged repetition.
+
+## Auth2 compatibility correction and causal comparison
+
+The normal firmware build retains the exact upstream patch [TianoCore commit `ccbe6f5030bb0ac6a098592c3ecfbf35838e5191`](https://github.com/tianocore/edk2/commit/ccbe6f5030bb0ac6a098592c3ecfbf35838e5191), which raises `MIN_REQUIRED_BLOCKS` from 600 to 1100. The constructor multiplies that value by 1024 **bytes**, so the reservation grows from 600 KiB to 1100 KiB before allocator metadata and 512-byte allocation granularity. Signature, certificate-chain, timestamp and Secure Boot verification policies are unchanged. Upstream documents the increased OpenSSL 3 provisioning memory requirement.
+
+[scripts/firmware-source-patches.json](../scripts/firmware-source-patches.json) pins the original mail patch SHA-256 `6db7b0f3bee5503ca752b8934a0d241180c321929d80094b873152a529a57a81`, exact source preimage and postimage. The original BSD-2-Clause-Patent patch is retained in `scripts/firmware-patches/`. Application refuses unexpected bytes or a changed patch; an already matching postimage is accepted without rewriting it. The build manifest distinguishes the QEMU source archive from this upstream backport and records whether application was new or already complete.
+
+The test-only EFI probe also needed a writable buffer: EDK2 `FilterSignatureList()` copies its duplicate-filtered payload into the caller's data. Passing the immutable embedded packet produced a synchronous exception after increasing crypto capacity. Each call now gets a fresh `AllocateCopyPool` buffer; the original Microsoft fixture stays immutable. A host test compiles the real probe C with a firmware shim that writes into every call buffer and checks restoration, idempotent repeat input and allocation-failure cleanup.
+
+The [compact causal evidence](verification/dbx-auth2-comparison.json) records two sequential disposable VMs using the **same corrected signed probe, same initial variables and same official Microsoft packet**:
+
+| Firmware | Original signed append | Altered payload | Repeated original append |
+| --- | --- | --- | --- |
+| Baseline, 600 KiB scratch, SHA-256 `5604f775…` | `EFI_SECURITY_VIOLATION` | Not executed after rejection | Not executed after rejection |
+| Candidate, 1100 KiB scratch, SHA-256 `e40adedd…` | Success; dummy DBX plus all 22 signed hashes, 1 → 23 entries | `EFI_SECURITY_VIOLATION`, DBX unchanged | Success, DBX unchanged; no duplicate entries |
+
+PK, KEK and db remained identical; source variables remained intact and both QEMU children were stopped and reaped. No test certificates entered macOS trust. This validates authenticated append compatibility and tamper rejection for the candidate's 22-entry Microsoft subset. It does not test all 26 factory revocations, a real revoked Microsoft image, Windows servicing, or an existing VM migration. Current Windows-loader and canary controls must be repeated with the final new firmware/template before provisioning. The public evidence therefore separates `candidate_auth2_runtime_update_verified=true` from stable `runtime_update_verified=false`.
+
+Run the source-patch and compiled-buffer regression tests without QEMU:
+
+The subsequent normal source build completed with one compiler job and code SHA-256 `f86ccf3e1170bf512eb46b57f3acf84e6d488f0108fd20b08cae51888f83fb87`. It differs from the isolated candidate above and has not inherited its runtime verification. It was not provisioned into the runtime, installed app or existing Windows VM.
+
+```sh
+python3 -m unittest discover -s scripts/tests -p 'test_firmware_source.py' -v
+python3 -m unittest discover -s scripts/tests -p 'test_dbx_probe.py' -v
+```
 
 The repeatable runner is opt-in:
 
@@ -80,10 +107,10 @@ bash scripts/build-dbx-auth-probe.sh
 python3 scripts/test-dbx-enforcement.py --run --auth2 --windows-iso /absolute/path/Windows-ARM64.iso
 ```
 
-The optional `--auth2` run currently fails and records the real firmware rejection. The runner retains exact QEMU child handles and cleans them up on completion, failed assertions, SIGINT or SIGTERM; SIGKILL or host failure cannot provide that cleanup guarantee. Windows' optical prompt is graphical, so its captured screenshot requires visual review; the program does not automatically equate a saved image with successful boot. Test binaries, private test keys, copied variable banks and full logs remain in the ignored `.tools/dbx-enforcement/` area. Public sources for the small Auth2 probe are in `scripts/firmware-tests/`; they are not included in the installed app.
+The optional `--auth2` run records the actual result of the selected firmware; an old unpatched template still records the real rejection. Generate and review a new template before testing the patched build. The runner retains exact QEMU child handles and cleans them up on completion, failed assertions, SIGINT or SIGTERM; SIGKILL or host failure cannot provide that cleanup guarantee. Windows' optical prompt is graphical, so its captured screenshot requires visual review; the program does not automatically equate a saved image with successful boot. Test binaries, private test keys, copied variable banks and full logs remain in the ignored `.tools/dbx-enforcement/` area. Public sources for the small Auth2 probe are in `scripts/firmware-tests/`; they are not included in the installed app.
 
 ## Further isolated validation
 
 Any further test must continue to use a fresh disposable VM with copies of firmware and variables, no existing disk and no changes to the installed VM. An already unsigned/rejected Shell is not sufficient to prove DBX enforcement. If a legitimately obtained Microsoft-signed revoked ARM64 image is available, match its Authenticode hash to a real entry and compare acceptance before/after the production DBX. A canary test alone does not validate all 26 Microsoft entries.
 
-The firmware's rejection of the original Auth2 packet must be understood before retrying runtime-update verification. Once that path works in isolation, a modified packet must fail while leaving variables unchanged; timestamp and append/replay behavior must be checked separately. No live variable migration is implemented or authorized by this provisioning workflow.
+The original Auth2 rejection is isolated by the corrected-probe comparison above. Final firmware/template review must still repeat current Windows-loader and controlled DBX enforcement tests. Append repetition is idempotent; non-append timestamp policy is a separate validation. No live variable migration is implemented or authorized by this provisioning workflow.

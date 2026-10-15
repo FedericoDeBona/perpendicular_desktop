@@ -1,0 +1,24 @@
+{
+  "format_version": 1,
+  "base_source": {
+    "url": "https://download.qemu.org/qemu-11.1.2.tar.xz",
+    "sha256": "731b5681e4bb18be313231579b8efd0296c5b015fa36dc533874b639ba838016"
+  },
+  "patches": [
+    {
+      "id": "runtime-crypto-scratch-1100kib",
+      "upstream_commit": "ccbe6f5030bb0ac6a098592c3ecfbf35838e5191",
+      "upstream_url": "https://github.com/tianocore/edk2/commit/ccbe6f5030bb0ac6a098592c3ecfbf35838e5191",
+      "patch_url": "https://github.com/tianocore/edk2/commit/ccbe6f5030bb0ac6a098592c3ecfbf35838e5191.patch",
+      "patch_file": "firmware-patches/0001-runtime-crypto-scratch.patch",
+      "patch_sha256": "6db7b0f3bee5503ca752b8934a0d241180c321929d80094b873152a529a57a81",
+      "license": "BSD-2-Clause-Patent",
+      "source_file": "CryptoPkg/Library/BaseCryptLib/SysCall/RuntimeMemAllocation.c",
+      "preimage_sha256": "5df4133ff8de926590cc57d1df79065cbe7c04feb375f4266ba5950abd962b18",
+      "postimage_sha256": "30017b6881a561c6e4aedea7f807b518e7fd393ca18f51a6ccf55ff0dbd5c07b",
+      "old_line": "#define MIN_REQUIRED_BLOCKS  600",
+      "new_line": "#define MIN_REQUIRED_BLOCKS  1100",
+      "scope": "Runtime crypto allocation only: 600*1024 to 1100*1024 bytes before allocator metadata; signature policy unchanged"
+    }
+  ]
+}
