@@ -1,0 +1,575 @@
+--- a/include/ui/input.h
++++ b/include/ui/input.h
+@@ -21,6 +21,7 @@
+ typedef void (*QemuInputHandlerEvent)(DeviceState *dev, QemuConsole *src,
+                                       InputEvent *evt);
+ typedef void (*QemuInputHandlerSync)(DeviceState *dev);
++typedef bool (*QemuInputKeyboardReady)(DeviceState *dev);
+ 
+ struct QemuInputHandler {
+     const char             *name;
+@@ -33,6 +34,9 @@
+                                             const QemuInputHandler *handler);
+ void qemu_input_handler_activate(QemuInputHandlerState *s);
+ void qemu_input_handler_deactivate(QemuInputHandlerState *s);
++void qemu_input_handler_set_keyboard_ready(QemuInputHandlerState *s,
++                                           QemuInputKeyboardReady ready);
++bool qemu_input_keyboard_ready(QemuConsole *con);
+ void qemu_input_handler_unregister(QemuInputHandlerState *s);
+ void qemu_input_handler_bind(QemuInputHandlerState *s,
+                              const char *device_id, int head,
+--- a/ui/input.c
++++ b/ui/input.c
+@@ -13,6 +13,7 @@
+     const QemuInputHandler *handler;
+     int               id;
+     int               events;
++    QemuInputKeyboardReady keyboard_ready;
+     QemuConsole       *con;
+     QTAILQ_ENTRY(QemuInputHandlerState) node;
+ };
+@@ -231,6 +232,25 @@
+     }
+ }
+ 
++void qemu_input_handler_set_keyboard_ready(QemuInputHandlerState *s,
++                                           QemuInputKeyboardReady ready)
++{
++    s->keyboard_ready = ready;
++}
++
++bool qemu_input_keyboard_ready(QemuConsole *con)
++{
++    QemuInputHandlerState *s;
++
++    /* VNC admits one complete transition only after its predecessors have
++     * passed both the delayed-input queue and the active device's FIFO. */
++    if (!QTAILQ_EMPTY(&kbd_queue)) {
++        return false;
++    }
++    s = qemu_input_find_handler(INPUT_EVENT_MASK_KEY, con);
++    return !s || !s->keyboard_ready || s->keyboard_ready(s->dev);
++}
++
+ static void qemu_input_queue_process(void *opaque)
+ {
+     QemuInputEventQueueHead *queue = opaque;
+--- a/hw/input/hid.c
++++ b/hw/input/hid.c
+@@ -511,6 +511,15 @@
+     hid_del_idle_timer(hs);
+ }
+ 
++static bool hid_keyboard_ready(DeviceState *dev)
++{
++    HIDState *hs = (HIDState *)dev;
++
++    /* A transition's E0/E1 prefix and payload must all reach a guest poll
++     * before the next VNC transition can be admitted. No FIFO size guessing. */
++    return hs->n == 0;
++}
++
+ static const QemuInputHandler hid_keyboard_handler = {
+     .name  = "QEMU HID Keyboard",
+     .mask  = INPUT_EVENT_MASK_KEY,
+@@ -539,6 +548,7 @@
+     if (hs->kind == HID_KEYBOARD) {
+         hs->s = qemu_input_handler_register((DeviceState *)hs,
+                                             &hid_keyboard_handler);
++        qemu_input_handler_set_keyboard_ready(hs->s, hid_keyboard_ready);
+         qemu_input_handler_activate(hs->s);
+     } else if (hs->kind == HID_MOUSE) {
+         hs->s = qemu_input_handler_register((DeviceState *)hs,
+--- a/ui/vnc.h
++++ b/ui/vnc.h
+@@ -185,6 +185,9 @@
+ #endif
+ 
+     AudioState *audio_state;
++    /* Fixed-size ownership cleanup, independent of disconnected client lifetime. */
++    DECLARE_BITMAP(input_releases, Q_KEY_CODE__MAX);
++    QEMUTimer *input_release_timer;
+ };
+ 
+ typedef struct VncTight {
+@@ -352,6 +355,11 @@
+     uint32_t cbpending;
+ 
+     QTAILQ_ENTRY(VncState) next;
++    bool input_blocked;
++    QEMUTimer *input_retry_timer;
++    DECLARE_BITMAP(input_keys, Q_KEY_CODE__MAX);
++    bool input_switch_pending;
++    unsigned int input_switch_index;
+ };
+ 
+ 
+@@ -545,6 +553,7 @@
+  *****************************************************************************/
+ 
+ /* Event loop functions */
++GIOCondition vnc_client_io_flags(VncState *vs, bool writing);
+ gboolean vnc_client_io(QIOChannel *ioc,
+                        GIOCondition condition,
+                        void *opaque);
+--- a/ui/vnc.c
++++ b/ui/vnc.c
+@@ -1299,6 +1299,150 @@
+     }
+ }
+ 
++static void vnc_input_retry(void *opaque);
++
++static bool vnc_input_display_idle(VncDisplay *vd)
++{
++    VncState *client;
++
++    if (!bitmap_empty(vd->input_releases, Q_KEY_CODE__MAX) ||
++        !qemu_input_keyboard_ready(vd->dcl.con)) {
++        return false;
++    }
++    QTAILQ_FOREACH(client, &vd->clients, next) {
++        if (!client->disconnecting &&
++            (client->input_blocked ||
++             !bitmap_empty(client->input_keys, Q_KEY_CODE__MAX))) {
++            return false;
++        }
++    }
++    return true;
++}
++
++static void vnc_input_schedule_retry(VncState *vs)
++{
++    if (!vs->input_retry_timer) {
++        vs->input_retry_timer = timer_new_ms(QEMU_CLOCK_REALTIME,
++                                            vnc_input_retry, vs);
++    }
++    timer_mod(vs->input_retry_timer,
++              qemu_clock_get_ms(QEMU_CLOCK_REALTIME) + 10);
++}
++
++static void vnc_input_queue_switch(VncState *vs, unsigned int index)
++{
++    vs->input_switch_pending = true;
++    vs->input_switch_index = index;
++    vnc_input_schedule_retry(vs);
++}
++
++static bool vnc_input_try_switch(VncState *vs)
++{
++    QemuConsole *con;
++
++    if (!vs->input_switch_pending) {
++        return true;
++    }
++    if (!vnc_input_display_idle(vs->vd)) {
++        return false;
++    }
++    /* Look the index up again: never retain a possibly hot-unplugged console. */
++    con = qemu_console_lookup_by_index(vs->input_switch_index);
++    vs->input_switch_pending = false;
++    if (con && con != vs->vd->dcl.con) {
++        unregister_displaychangelistener(&vs->vd->dcl);
++        qkbd_state_switch_console(vs->vd->kbd, con);
++        vs->vd->dcl.con = con;
++        register_displaychangelistener(&vs->vd->dcl);
++    }
++    return true;
++}
++
++static bool vnc_input_key_owned(VncDisplay *vd, VncState *except, int qcode)
++{
++    VncState *client;
++
++    QTAILQ_FOREACH(client, &vd->clients, next) {
++        if (client != except && !client->disconnecting &&
++            test_bit(qcode, client->input_keys)) {
++            return true;
++        }
++    }
++    return false;
++}
++
++static bool vnc_input_track_key(VncState *vs, int qcode, bool down)
++{
++    if (down) {
++        set_bit(qcode, vs->input_keys);
++        clear_bit(qcode, vs->vd->input_releases);
++        return true;
++    }
++    if (!test_bit(qcode, vs->input_keys)) {
++        return false;
++    }
++    clear_bit(qcode, vs->input_keys);
++    return !vnc_input_key_owned(vs->vd, vs, qcode);
++}
++
++static void vnc_input_release_pending(void *opaque)
++{
++    VncDisplay *vd = opaque;
++    int qcode;
++
++    for (qcode = 0; qcode < Q_KEY_CODE__MAX; qcode++) {
++        if (!test_bit(qcode, vd->input_releases)) {
++            continue;
++        }
++        if (vnc_input_key_owned(vd, NULL, qcode)) {
++            clear_bit(qcode, vd->input_releases);
++            continue;
++        }
++        if (!qemu_input_keyboard_ready(vd->dcl.con)) {
++            timer_mod(vd->input_release_timer,
++                      qemu_clock_get_ms(QEMU_CLOCK_REALTIME) + 10);
++            return;
++        }
++        clear_bit(qcode, vd->input_releases);
++        qkbd_state_key_event(vd->kbd, qcode, false);
++    }
++    timer_free(vd->input_release_timer);
++    vd->input_release_timer = NULL;
++}
++
++static void vnc_input_disconnect(VncState *vs)
++{
++    VncDisplay *vd = vs->vd;
++    int qcode;
++
++    if (vs->input_retry_timer) {
++        timer_free(vs->input_retry_timer);
++        vs->input_retry_timer = NULL;
++    }
++    vs->input_blocked = false;
++    vs->input_switch_pending = false;
++    for (qcode = 0; qcode < Q_KEY_CODE__MAX; qcode++) {
++        if (test_bit(qcode, vs->input_keys) &&
++            !vnc_input_key_owned(vd, vs, qcode)) {
++            set_bit(qcode, vd->input_releases);
++        }
++    }
++    bitmap_zero(vs->input_keys, Q_KEY_CODE__MAX);
++    if (!bitmap_empty(vd->input_releases, Q_KEY_CODE__MAX)) {
++        if (!vd->input_release_timer) {
++            vd->input_release_timer = timer_new_ms(QEMU_CLOCK_REALTIME,
++                                                  vnc_input_release_pending, vd);
++        }
++        vnc_input_release_pending(vd);
++    }
++}
++
++GIOCondition vnc_client_io_flags(VncState *vs, bool writing)
++{
++    return G_IO_HUP | G_IO_ERR | (vs->input_blocked ? 0 : G_IO_IN) |
++           (writing ? G_IO_OUT : 0);
++}
++
+ static void vnc_disconnect_start(VncState *vs)
+ {
+     if (vs->disconnecting) {
+@@ -1312,6 +1456,7 @@
+     }
+     qio_channel_close(vs->ioc, NULL);
+     vs->disconnecting = TRUE;
++    vnc_input_disconnect(vs);
+ }
+ 
+ void vnc_disconnect_finish(VncState *vs)
+@@ -1338,7 +1483,8 @@
+     vnc_sasl_client_cleanup(vs);
+ #endif /* CONFIG_VNC_SASL */
+     audio_del(vs);
+-    qkbd_state_lift_all_keys(vs->vd->kbd);
++    /* Ownership cleanup was transferred to the display's bounded release
++     * bitmap before closing the socket. Never clear another client's keys. */
+ 
+     if (vs->mouse_mode_notifier.notify != NULL) {
+         qemu_remove_mouse_mode_change_notifier(&vs->mouse_mode_notifier);
+@@ -1478,7 +1624,7 @@
+             g_source_remove(vs->ioc_tag);
+         }
+         vs->ioc_tag = qio_channel_add_watch(
+-            vs->ioc, G_IO_IN | G_IO_HUP | G_IO_ERR,
++            vs->ioc, vnc_client_io_flags(vs, false),
+             vnc_client_io, vs, NULL);
+     }
+ 
+@@ -1516,7 +1662,7 @@
+             g_source_remove(vs->ioc_tag);
+         }
+         vs->ioc_tag = qio_channel_add_watch(
+-            vs->ioc, G_IO_IN | G_IO_HUP | G_IO_ERR,
++            vs->ioc, vnc_client_io_flags(vs, false),
+             vnc_client_io, vs, NULL);
+     }
+     vnc_unlock_output(vs);
+@@ -1590,6 +1736,8 @@
+  * SASL SSF layers are enabled (thus requiring decryption calls)
+  * Returns 0 on success, -1 if client disconnected
+  */
++static int vnc_client_process_input(VncState *vs);
++
+ static int vnc_client_read(VncState *vs)
+ {
+     size_t sz;
+@@ -1608,6 +1756,11 @@
+         return 0;
+     }
+ 
++    return vnc_client_process_input(vs);
++}
++
++static int vnc_client_process_input(VncState *vs)
++{
+     while (vs->read_handler && vs->input.offset >= vs->read_handler_expect) {
+         size_t len = vs->read_handler_expect;
+         int ret;
+@@ -1618,6 +1771,10 @@
+             return -1;
+         }
+ 
++        if (ret == -2) {
++            assert(vs->input_blocked);
++            break;
++        }
+         if (!ret) {
+             buffer_advance(&vs->input, len);
+         } else {
+@@ -1639,7 +1796,7 @@
+         return TRUE;
+     }
+ 
+-    if (condition & G_IO_IN) {
++    if ((condition & G_IO_IN) && !vs->input_blocked) {
+         if (vnc_client_read(vs) < 0) {
+             /* vs is free()ed here */
+             return TRUE;
+@@ -1700,7 +1857,7 @@
+             g_source_remove(vs->ioc_tag);
+         }
+         vs->ioc_tag = qio_channel_add_watch(
+-            vs->ioc, G_IO_IN | G_IO_HUP | G_IO_ERR | G_IO_OUT,
++            vs->ioc, vnc_client_io_flags(vs, true),
+             vnc_client_io, vs, NULL);
+     }
+ 
+@@ -1885,10 +2042,7 @@
+             qkbd_state_modifier_get(vs->vd->kbd, QKBD_MOD_ALT)) {
+             QemuConsole *con = qemu_console_lookup_by_index(qcode - Q_KEY_CODE_1);
+             if (con) {
+-                unregister_displaychangelistener(&vs->vd->dcl);
+-                qkbd_state_switch_console(vs->vd->kbd, con);
+-                vs->vd->dcl.con = con;
+-                register_displaychangelistener(&vs->vd->dcl);
++                vnc_input_queue_switch(vs, qcode - Q_KEY_CODE_1);
+             }
+             return;
+         }
+@@ -1942,6 +2096,9 @@
+         }
+     }
+ 
++    if (!vnc_input_track_key(vs, qcode, down)) {
++        return;
++    }
+     qkbd_state_key_event(vs->vd->kbd, qcode, down);
+     if (QEMU_IS_TEXT_CONSOLE(vs->vd->dcl.con)) {
+         QemuTextConsole *con = QEMU_TEXT_CONSOLE(vs->vd->dcl.con);
+@@ -2394,6 +2551,69 @@
+     }
+ }
+ 
++static void vnc_input_update_watch(VncState *vs)
++{
++    vnc_lock_output(vs);
++    if (vs->ioc_tag) {
++        g_source_remove(vs->ioc_tag);
++    }
++    vs->ioc_tag = qio_channel_add_watch(vs->ioc,
++                                      vnc_client_io_flags(vs, vs->output.offset != 0),
++                                      vnc_client_io, vs, NULL);
++    vnc_unlock_output(vs);
++}
++
++static void vnc_input_retry(void *opaque)
++{
++    VncState *vs = opaque;
++
++    if (vs->disconnecting) {
++        return;
++    }
++    if (!vnc_input_try_switch(vs)) {
++        vnc_input_schedule_retry(vs);
++    }
++    if (!vs->input_blocked) {
++        return;
++    }
++    if (!qemu_input_keyboard_ready(vs->vd->dcl.con)) {
++        timer_mod(vs->input_retry_timer,
++                  qemu_clock_get_ms(QEMU_CLOCK_REALTIME) + 10);
++        return;
++    }
++    vs->input_blocked = false;
++    if (vnc_client_process_input(vs) < 0) {
++        return; /* The parser freed this VncState. */
++    }
++    if (!vs->input_blocked) {
++        vnc_input_update_watch(vs);
++    }
++}
++
++static bool vnc_input_admit(VncState *vs)
++{
++    /* One 4 KiB socket read plus the largest incomplete key message. Stop
++     * reading while blocked; do not accumulate an unbounded second queue. */
++    if (vs->input.offset > 4096 + 12) {
++        error_report("VNC keyboard backpressure buffer limit exceeded");
++        vnc_client_error(vs);
++        return false;
++    }
++    /* A busy surviving client cannot starve a disconnected client's owned
++     * releases by repeatedly taking the next available device slot. */
++    if (!bitmap_empty(vs->vd->input_releases, Q_KEY_CODE__MAX)) {
++        vnc_input_release_pending(vs->vd);
++    }
++    if (!qemu_console_is_graphic(vs->vd->dcl.con) ||
++        qemu_input_keyboard_ready(vs->vd->dcl.con)) {
++        return true;
++    }
++    vs->input_blocked = true;
++    vnc_input_schedule_retry(vs);
++    vnc_input_update_watch(vs);
++    return false;
++}
++
+ static int protocol_client_msg(VncState *vs, uint8_t *data, size_t len)
+ {
+     int i;
+@@ -2446,6 +2666,9 @@
+         if (len == 1)
+             return 8;
+ 
++        if (!vnc_input_admit(vs)) {
++            return -2; /* Retain the whole message, including its release. */
++        }
+         key_event(vs, read_u8(data, 1), read_u32(data, 4));
+         break;
+     case VNC_MSG_CLIENT_POINTER_EVENT:
+@@ -2533,6 +2756,9 @@
+             if (len == 2)
+                 return 12;
+ 
++            if (!vnc_input_admit(vs)) {
++                return -2;
++            }
+             ext_key_event(vs, read_u16(data, 2),
+                           read_u32(data, 4), read_u32(data, 8));
+             break;
+@@ -3349,7 +3575,7 @@
+         }
+     } else {
+         vs->ioc_tag = qio_channel_add_watch(
+-            vs->ioc, G_IO_IN | G_IO_HUP | G_IO_ERR,
++            vs->ioc, vnc_client_io_flags(vs, false),
+             vnc_client_io, vs, NULL);
+     }
+ 
+@@ -4066,6 +4292,29 @@
+         error_setg(errp, "VNC display not active");
+         return;
+     }
++    /* Resolve/reject a rebind before closing listeners or changing auth.
++     * Pending input must remain attached to its original console. */
++    if (opts) {
++        device_id = qemu_opt_get(opts, "display");
++        if (device_id) {
++            int head = qemu_opt_get_number(opts, "head", 0);
++            Error *err = NULL;
++
++            con = qemu_console_lookup_by_device_name(device_id, head, &err);
++            if (err) {
++                error_propagate(errp, err);
++                return;
++            }
++        } else {
++            con = qemu_console_lookup_default();
++        }
++        if (con != vd->dcl.con && !vnc_input_display_idle(vd)) {
++            error_setg(errp, "Cannot rebind the VNC display while keyboard input is pending");
++            return;
++        }
++    } else {
++        con = vd->dcl.con;
++    }
+     vnc_display_close(vd);
+ 
+     if (!opts) {
+@@ -4227,21 +4476,13 @@
+         vd->audio_state = audio_get_default_audio_state(NULL);
+     }
+ 
+-    device_id = qemu_opt_get(opts, "display");
+-    if (device_id) {
+-        int head = qemu_opt_get_number(opts, "head", 0);
+-        Error *err = NULL;
+-
+-        con = qemu_console_lookup_by_device_name(device_id, head, &err);
+-        if (err) {
+-            error_propagate(errp, err);
+-            goto fail;
+-        }
+-    } else {
+-        con = qemu_console_lookup_default();
+-    }
+ 
+     if (con != vd->dcl.con) {
++        VncState *client;
++
++        QTAILQ_FOREACH(client, &vd->clients, next) {
++            client->input_switch_pending = false;
++        }
+         qkbd_state_free(vd->kbd);
+         unregister_displaychangelistener(&vd->dcl);
+         vd->dcl.con = con;
+--- a/ui/vnc-jobs.c
++++ b/ui/vnc-jobs.c
+@@ -168,7 +168,7 @@
+             }
+             if (vs->disconnecting == FALSE) {
+                 vs->ioc_tag = qio_channel_add_watch(
+-                    vs->ioc, G_IO_IN | G_IO_HUP | G_IO_ERR | G_IO_OUT,
++                    vs->ioc, vnc_client_io_flags(vs, true),
+                     vnc_client_io, vs, NULL);
+             }
+         }
+--- a/ui/vnc-auth-sasl.c
++++ b/ui/vnc-auth-sasl.c
+@@ -131,7 +131,7 @@
+             g_source_remove(vs->ioc_tag);
+         }
+         vs->ioc_tag = qio_channel_add_watch(
+-            vs->ioc, G_IO_IN | G_IO_HUP | G_IO_ERR,
++            vs->ioc, vnc_client_io_flags(vs, false),
+             vnc_client_io, vs, NULL);
+     }
+ 
+--- a/ui/vnc-auth-vencrypt.c
++++ b/ui/vnc-auth-vencrypt.c
+@@ -79,7 +79,7 @@
+             g_source_remove(vs->ioc_tag);
+         }
+         vs->ioc_tag = qio_channel_add_watch(
+-            vs->ioc, G_IO_IN | G_IO_HUP | G_IO_ERR | G_IO_OUT,
++            vs->ioc, vnc_client_io_flags(vs, true),
+             vnc_client_io, vs, NULL);
+         start_auth_vencrypt_subauth(vs);
+     }
+--- a/ui/vnc-ws.c
++++ b/ui/vnc-ws.c
+@@ -111,7 +111,7 @@
+             g_source_remove(vs->ioc_tag);
+         }
+         vs->ioc_tag = qio_channel_add_watch(
+-            vs->ioc, G_IO_IN | G_IO_HUP | G_IO_ERR,
++            vs->ioc, vnc_client_io_flags(vs, false),
+             vnc_client_io, vs, NULL);
+     }
+ }

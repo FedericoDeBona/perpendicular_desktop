@@ -1,0 +1,26 @@
+{
+  "schema": 1,
+  "source_revision": "88e5ee7ec6703662fec7b638cca74c4769e683d6",
+  "files": {
+    "include/ui/input.h": "69efe9f954bf6937994eead227ce21b9ead6dd90b0ea610eace70849e8b3c4f4",
+    "ui/input.c": "e7307b5d131c9ae0ac94fb1030ee071b9959a5fd9468fec6e55104c2f339cd14",
+    "hw/input/hid.c": "93cd188f44c159a6f57261c7d23b4085cf214f26da69f3f313342c32e2480a58",
+    "ui/vnc.h": "198f16c78c4dc16abcab8e8683af004399722772f3be9752a2b09d71afa20091",
+    "ui/vnc.c": "e3d98bfaeae5a02efd6dbc78f86f124d3cd0fd0eecf3b81ffff6841bf4c1a553",
+    "ui/vnc-jobs.c": "b5a98964023f213aa9653cccd389ee9fa5c49f1cf6a0e6e6f877e4b53df540bc",
+    "ui/vnc-auth-sasl.c": "25ee9583cd4780de7a30d18892d331f5ebbd3253632454610d019ac04d8c3902",
+    "ui/vnc-auth-vencrypt.c": "2e76c5e5a6b0ab7554559188e534854a460a415fe20beddac6e1d9b0703e136e",
+    "ui/vnc-ws.c": "3c3759aadce9e573ec37e1799129867afbbdca3393b1e56e4c4b4ca9e4233865"
+  },
+  "patched_files": {
+    "include/ui/input.h": "85a61a9722ba4ece4b5c4b08f7b2e0c9d139c1cda972e62090a3db1d3ec68096",
+    "ui/input.c": "77b0c7e7558f7ab011f95a199c9d7344d1abf4198d831e1e345b9784f134f617",
+    "hw/input/hid.c": "fa54cf45a75205f36e81f31f27f7f32fb8c86fefc1c44a017124a9abab4ddcf8",
+    "ui/vnc.h": "bdb911e480a8b2129e90e4ed064078a0c9a3b9cd99e766cfca60c4616873e3a2",
+    "ui/vnc.c": "811b165a552bcb1b2d957c1f22649818183b146fec393923570b03e671df6470",
+    "ui/vnc-jobs.c": "f823f51708d000c834ef08059593cfe1a8ad004a519f39a3e688ca5a20ec4dd1",
+    "ui/vnc-auth-sasl.c": "6cd53718fb610723d2a229c666c6b1cc56a27b82b22d3fc62cd0fad0e4d1715f",
+    "ui/vnc-auth-vencrypt.c": "e2e48b9b54c20203f0a6e14244a5b565e0eb35c876a2d0367ff661b10a466367",
+    "ui/vnc-ws.c": "9f738c3d44824d76b86045875c73b65e6e9b015de85aac2d81acc6e1c8b1d8da"
+  }
+}

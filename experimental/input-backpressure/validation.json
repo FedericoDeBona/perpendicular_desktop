@@ -1,0 +1,30 @@
+{
+  "schema": 1,
+  "source_revision": "88e5ee7ec6703662fec7b638cca74c4769e683d6",
+  "production_patch_sha256": "9c91efe7f93137a32cccb34471c766eb8954ba583f73640025ef5f8a9458479e",
+  "production_binary": ".tools/input-backpressure/full-build/qemu-system-aarch64",
+  "production_binary_sha256": "937c116d4cd95a9efb3825b419e71e532f130e549c1039172d4d196bd98a71ee",
+  "qa_binary": ".tools/input-backpressure/full-build/qemu-system-aarch64-qtest-probe",
+  "qa_binary_sha256": "4cff1a55421c7693dcd4f7e635cc87f104738dff86b1da0ea6eeb0b8045a08c9",
+  "full_fresh_build": true,
+  "production_binary_contains_qa_probe": false,
+  "configured_vnc_header_consumers_rebuilt": [
+    "libcommon.a.p/ui_vnc.c.o",
+    "libcommon.a.p/ui_vnc-enc-zlib.c.o",
+    "libcommon.a.p/ui_vnc-enc-hextile.c.o",
+    "libcommon.a.p/ui_vnc-enc-tight.c.o",
+    "libcommon.a.p/ui_vnc-enc-zrle.c.o",
+    "libcommon.a.p/ui_vnc-auth-vencrypt.c.o",
+    "libcommon.a.p/ui_vnc-ws.c.o",
+    "libcommon.a.p/ui_vnc-jobs.c.o",
+    "libcommon.a.p/ui_vnc-clipboard.c.o",
+    "libcommon.a.p/ui_vnc-auth-sasl.c.o"
+  ],
+  "validation": {
+    "native_C_ASan_UBSan": "PASS; exact production bodies with narrow outer-service stubs",
+    "real_QEMU_RFB_QMP_qtest": "PASS; diskless owned qtest child, QA device-only probe",
+    "real_QEMU_negative": "PASS; bypassing only HID readiness produces exactly 10 FIFO drops",
+    "probe_free_QMP_RFB_smoke": "PASS; real framebuffer, QA QOM property absent, clean shutdown",
+    "Windows_guest_acceptance": "NOT RUN; root owns runtime"
+  }
+}
