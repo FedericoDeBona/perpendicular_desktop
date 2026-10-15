@@ -3,25 +3,54 @@ import Darwin
 import IOKit.hidsystem
 import SwiftUI
 
+struct VMConsoleResizeRequest: Equatable, Sendable {
+    let id: UUID
+    let connectionID: UUID
+    let width: Int
+    let height: Int
+    let screenID: UInt32
+}
+
+enum VMConsoleDisplayEvent: Sendable {
+    case connection(UUID?)
+    case layout(UUID, RFBDesktopLayout)
+    case framebuffer(UUID, width: Int, height: Int)
+    case viewport(points: CGSize, backingScale: CGFloat)
+    case requestQueued(UUID, accepted: Bool)
+}
+
 /// An embedded framebuffer for the engine's private Unix-domain VNC socket.
 /// VM lifecycle belongs to the engine; attaching this view never starts a VM.
 struct VMConsoleView: NSViewRepresentable {
     let socketPath: String
     let isActive: Bool
+    let keyboardLayout: String
+    let resizeRequest: VMConsoleResizeRequest?
+    let onDisplayEvent: (@MainActor (VMConsoleDisplayEvent) -> Void)?
 
-    init(socketPath: String, isActive: Bool) {
+    init(socketPath: String, isActive: Bool, keyboardLayout: String = "en-us", resizeRequest: VMConsoleResizeRequest? = nil,
+         onDisplayEvent: (@MainActor (VMConsoleDisplayEvent) -> Void)? = nil) {
         self.socketPath = socketPath
         self.isActive = isActive
+        self.keyboardLayout = keyboardLayout
+        self.resizeRequest = resizeRequest
+        self.onDisplayEvent = onDisplayEvent
     }
 
     func makeNSView(context: Context) -> VMFramebufferView {
         let view = VMFramebufferView()
+        view.onDisplayEvent = onDisplayEvent
+        view.configureKeyboardLayout(keyboardLayout)
         view.configure(socketPath: socketPath, isActive: isActive)
+        view.requestDesktopSize(resizeRequest)
         return view
     }
 
     func updateNSView(_ nsView: VMFramebufferView, context: Context) {
+        nsView.onDisplayEvent = onDisplayEvent
+        nsView.configureKeyboardLayout(keyboardLayout)
         nsView.configure(socketPath: socketPath, isActive: isActive)
+        nsView.requestDesktopSize(resizeRequest)
     }
 
     static func dismantleNSView(_ nsView: VMFramebufferView, coordinator: ()) {
@@ -35,15 +64,30 @@ final class VMFramebufferView: NSView {
     private var configuredPath = ""
     private var active = false
     private var generation = 0
+    private var connectionID: UUID?
+    private var lastResizeRequestID: UUID?
+    private var latestLayout: RFBDesktopLayout?
+    var onDisplayEvent: (@MainActor (VMConsoleDisplayEvent) -> Void)?
     private var reconnectWork: DispatchWorkItem?
     private var framebuffer: CGImage?
+    private var latestFrame: RFBFrame?
+    private var metalDisplay: VMMetalDisplayView?
     private var framebufferSize = CGSize.zero
     private var status = "Console is stopped"
     private var tracking: NSTrackingArea?
     private var focusObserver: RFBFocusObserver?
+    private var keyReleaseMonitor: RFBKeyReleaseMonitor?
+    private let inputDiagnosticsEnabled = ProcessInfo.processInfo.environment["PERPENDICULAR_INPUT_DIAGNOSTICS"] == "1"
+    private var inputDiagnostics: RFBInputDiagnostics?
     private var pressedKeys: [UInt16: [UInt32]] = [:]
     private var pressedModifiers: [UInt16: UInt32] = [:]
+    private var physicalModifiers: [UInt16: UInt32] = [:]
     private var synthesizedModifiers: Set<UInt16> = []
+    private var textStrokes: [UInt16: VMKeyboardTextStroke] = [:]
+    private var textStrokeOrder: [UInt16] = []
+    private var guestKeyboardLayout = "en-us"
+    private enum OptionIntent { case none, pending, text, shortcut }
+    private var optionIntent = OptionIntent.none
     private var pointerButtons: UInt8 = 0
     private var lastPointer = (x: UInt16(0), y: UInt16(0))
 
@@ -55,11 +99,12 @@ final class VMFramebufferView: NSView {
         super.init(frame: frameRect)
         setAccessibilityLabel("Virtual machine display")
         setAccessibilityHelp("Click the display to send keyboard and mouse input to the virtual machine.")
+        installMetalPresenter()
     }
 
     convenience init() { self.init(frame: .zero) }
 
-    required init?(coder: NSCoder) { super.init(coder: coder) }
+    required init?(coder: NSCoder) { super.init(coder: coder); installMetalPresenter() }
 
     deinit { connection?.stop() }
 
@@ -68,27 +113,41 @@ final class VMFramebufferView: NSView {
         disconnect()
         configuredPath = socketPath
         active = isActive
+        updateKeyReleaseMonitor()
         framebuffer = nil
+        latestFrame = nil
         framebufferSize = .zero
         status = isActive ? "Connecting to display…" : "Console is stopped"
         needsDisplay = true
+        updatePresenterVisibility()
         if isActive && !socketPath.isEmpty { connect() }
     }
 
     func disconnect() {
         active = false
+        keyReleaseMonitor = nil
         generation &+= 1
         reconnectWork?.cancel()
         reconnectWork = nil
         releaseInput()
         connection?.stop()
         connection = nil
+        inputDiagnostics = nil
+        metalDisplay?.reset()
+        connectionID = nil
+        latestLayout = nil
+        lastResizeRequestID = nil
+        onDisplayEvent?(.connection(nil))
     }
 
     private func connect() {
         guard active, connection == nil else { return }
         generation &+= 1
         let currentGeneration = generation
+        let currentConnectionID = UUID()
+        let diagnostics = inputDiagnosticsEnabled ? RFBInputDiagnostics(generation: currentGeneration) : nil
+        inputDiagnostics = diagnostics
+        connectionID = currentConnectionID
         // Coalesce frames if the server outpaces the main thread. Keep only the newest
         // pending image instead of retaining an unbounded queue of framebuffer copies.
         let frameRelay = RFBFrameRelay { [weak self] frame in
@@ -102,24 +161,42 @@ final class VMFramebufferView: NSView {
                 Task { @MainActor in
                     guard let self, self.generation == currentGeneration, self.active else { return }
                     self.status = "Waiting for display…"
+                    self.onDisplayEvent?(.connection(currentConnectionID))
+                    self.reportViewport()
                     self.setAccessibilityHelp("\(name). Click to send keyboard and mouse input to the virtual machine.")
                     self.needsDisplay = true
+                    self.updatePresenterVisibility()
                 }
             },
             // ServerCutText is unsolicited guest input. Clipboard access belongs
             // to the explicit Guest Tools actions, so display traffic cannot
             // replace the Mac user's clipboard.
             onCutText: { _ in },
+            onLayout: { [weak self] layout in
+                Task { @MainActor in
+                    guard let self, self.generation == currentGeneration, self.active else { return }
+                    self.latestLayout = layout
+                    self.onDisplayEvent?(.layout(currentConnectionID, layout))
+                }
+            },
+            inputDiagnostics: diagnostics,
             onFailure: { [weak self] message in
                 Task { @MainActor in
                     guard let self, self.generation == currentGeneration, self.active else { return }
                     self.connection = nil
+                    self.connectionID = nil
+                    self.latestLayout = nil
+                    self.lastResizeRequestID = nil
+                    self.onDisplayEvent?(.connection(nil))
                     self.pressedKeys.removeAll()
                     self.pressedModifiers.removeAll()
+                    self.physicalModifiers.removeAll()
                     self.synthesizedModifiers.removeAll()
+                    self.textStrokes.removeAll(); self.textStrokeOrder.removeAll(); self.optionIntent = .none
                     self.pointerButtons = 0
                     self.status = "\(message)\nReconnecting…"
                     self.needsDisplay = true
+                    self.updatePresenterVisibility()
                     let work = DispatchWorkItem { [weak self] in
                         guard let self, self.generation == currentGeneration, self.active else { return }
                         self.connect()
@@ -133,6 +210,39 @@ final class VMFramebufferView: NSView {
     }
 
     private func present(_ frame: RFBFrame) {
+        latestFrame = frame
+        framebufferSize = CGSize(width: frame.width, height: frame.height)
+        status = ""
+        if let metalDisplay, window != nil {
+            framebuffer = nil
+            metalDisplay.present(VMDisplayFrame(width: frame.width, height: frame.height, pixels: frame.pixels,
+                hasReceivedPixels: frame.hasReceivedPixels))
+        } else { framebuffer = Self.makeImage(frame) }
+        updatePresenterVisibility()
+        needsDisplay = true
+        if frame.hasReceivedPixels, let connectionID {
+            onDisplayEvent?(.framebuffer(connectionID, width: frame.width, height: frame.height))
+        }
+    }
+
+    func requestDesktopSize(_ request: VMConsoleResizeRequest?) {
+        guard let request, request.id != lastResizeRequestID else { return }
+        lastResizeRequestID = request.id
+        let accepted: Bool
+        if active, request.connectionID == connectionID, latestLayout?.singleScreenID == request.screenID {
+            accepted = connection?.requestDesktopSize(width: request.width, height: request.height, screenID: request.screenID) ?? false
+        } else { accepted = false }
+        Task { @MainActor [weak self] in self?.onDisplayEvent?(.requestQueued(request.id, accepted: accepted)) }
+    }
+
+    override func layout() { super.layout(); reportViewport() }
+    override func viewDidChangeBackingProperties() { super.viewDidChangeBackingProperties(); reportViewport() }
+    private func reportViewport() {
+        guard bounds.width > 0, bounds.height > 0 else { return }
+        onDisplayEvent?(.viewport(points: bounds.size, backingScale: window?.backingScaleFactor ?? 1))
+    }
+
+    private static func makeImage(_ frame: RFBFrame) -> CGImage? {
         guard let provider = CGDataProvider(data: frame.pixels as CFData),
               let image = CGImage(width: frame.width, height: frame.height,
                                   bitsPerComponent: 8, bitsPerPixel: 32,
@@ -141,19 +251,37 @@ final class VMFramebufferView: NSView {
                                   bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.noneSkipFirst.rawValue)
                                     .union(.byteOrder32Little),
                                   provider: provider, decode: nil, shouldInterpolate: false,
-                                  intent: .defaultIntent) else { return }
-        framebuffer = image
-        framebufferSize = CGSize(width: frame.width, height: frame.height)
-        status = ""
-        needsDisplay = true
+                                  intent: .defaultIntent) else { return nil }
+        return image
+    }
+
+    private func installMetalPresenter() {
+        guard let presenter = VMMetalDisplayView.make() else { VMDisplayDiagnostics.fallback(width: 0, height: 0); return }
+        presenter.frame = bounds
+        presenter.autoresizingMask = [.width, .height]
+        presenter.isHidden = true
+        presenter.onFailure = { [weak self] in
+            guard let self else { return }
+            self.metalDisplay?.stop()
+            self.metalDisplay?.removeFromSuperview()
+            self.metalDisplay = nil
+            self.framebuffer = self.latestFrame.flatMap(Self.makeImage)
+            VMDisplayDiagnostics.fallback(width: Int(self.framebufferSize.width), height: Int(self.framebufferSize.height))
+            self.needsDisplay = true
+        }
+        addSubview(presenter)
+        metalDisplay = presenter
+    }
+
+    private func updatePresenterVisibility() {
+        metalDisplay?.isHidden = window == nil || !status.isEmpty || latestFrame == nil
+        if metalDisplay?.isHidden != false, framebuffer == nil, let latestFrame {
+            framebuffer = Self.makeImage(latestFrame)
+        }
     }
 
     private var displayRect: CGRect {
-        guard framebufferSize.width > 0, framebufferSize.height > 0 else { return .zero }
-        let scale = min(bounds.width / framebufferSize.width, bounds.height / framebufferSize.height)
-        let size = CGSize(width: framebufferSize.width * scale, height: framebufferSize.height * scale)
-        return CGRect(x: bounds.midX - size.width / 2, y: bounds.midY - size.height / 2,
-                      width: size.width, height: size.height)
+        VMDisplayGeometry.fit(source: framebufferSize, destination: bounds.size).offsetBy(dx: bounds.minX, dy: bounds.minY)
     }
 
     override func draw(_ dirtyRect: NSRect) {
@@ -165,7 +293,8 @@ final class VMFramebufferView: NSView {
             // Core Graphics images have a bottom-left origin, while input uses a top-left origin.
             context.translateBy(x: rect.minX, y: rect.maxY)
             context.scaleBy(x: 1, y: -1)
-            context.interpolationQuality = .none
+            context.interpolationQuality = VMDisplayGeometry.usesNearest(source: framebufferSize,
+                destination: convertToBacking(bounds).size) ? .none : .low
             context.draw(framebuffer, in: CGRect(origin: .zero, size: rect.size))
             context.restoreGState()
         }
@@ -195,6 +324,13 @@ final class VMFramebufferView: NSView {
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
+        updateKeyReleaseMonitor()
+        reportViewport()
+        updatePresenterVisibility()
+        if let latestFrame, window != nil {
+            metalDisplay?.present(VMDisplayFrame(width: latestFrame.width, height: latestFrame.height, pixels: latestFrame.pixels,
+                hasReceivedPixels: latestFrame.hasReceivedPixels))
+        }
         focusObserver = nil
         if let window {
             window.acceptsMouseMovedEvents = true
@@ -221,7 +357,9 @@ final class VMFramebufferView: NSView {
         for keysym in pressedModifiers.values { connection?.sendKey(keysym, down: false) }
         pressedKeys.removeAll()
         pressedModifiers.removeAll()
+        physicalModifiers.removeAll()
         synthesizedModifiers.removeAll()
+        textStrokes.removeAll(); textStrokeOrder.removeAll(); optionIntent = .none
         if pointerButtons != 0 {
             connection?.sendPointer(x: lastPointer.x, y: lastPointer.y, buttons: 0)
             pointerButtons = 0
@@ -230,8 +368,15 @@ final class VMFramebufferView: NSView {
 
     override func keyDown(with event: NSEvent) {
         guard active else { return }
+        inputDiagnostics?.record("responder_down")
+        if event.isARepeat { inputDiagnostics?.record("responder_repeat") }
+        let stroke = VMKeyboardTextStroke.resolve(event, layout: guestKeyboardLayout)
+        textStrokes[event.keyCode] = stroke
+        textStrokeOrder.removeAll { $0 == event.keyCode }
+        if stroke != nil { textStrokeOrder.append(event.keyCode) }
+        if event.modifierFlags.contains(.option) { optionIntent = stroke == nil ? .shortcut : .text }
         synchronizeModifiers(with: event)
-        let keysyms = pressedKeys[event.keyCode] ?? Self.keysyms(for: event)
+        let keysyms = pressedKeys[event.keyCode] ?? stroke.map { [$0.base] } ?? Self.keysyms(for: event)
         pressedKeys[event.keyCode] = keysyms
         for keysym in keysyms { connection?.sendKey(keysym, down: true) }
     }
@@ -247,13 +392,63 @@ final class VMFramebufferView: NSView {
 
     override func keyUp(with event: NSEvent) {
         guard active else { return }
-        let keysyms = pressedKeys.removeValue(forKey: event.keyCode) ?? Self.keysyms(for: event)
+        inputDiagnostics?.record("responder_up")
+        guard let keysyms = pressedKeys.removeValue(forKey: event.keyCode) else {
+            inputDiagnostics?.record("unmatched_up")
+            synchronizeModifiers(with: event)
+            return
+        }
         for keysym in keysyms { connection?.sendKey(keysym, down: false) }
+        textStrokes[event.keyCode] = nil
+        textStrokeOrder.removeAll { $0 == event.keyCode }
         synchronizeModifiers(with: event)
+    }
+
+    func configureKeyboardLayout(_ layout: String) {
+        guard guestKeyboardLayout != layout else { return }
+        releaseInput()
+        guestKeyboardLayout = layout
+    }
+
+    private func updateKeyReleaseMonitor() {
+        keyReleaseMonitor = nil
+        guard active, let window else { return }
+        let mask: NSEvent.EventTypeMask = inputDiagnosticsEnabled ? [.keyDown, .keyUp, .flagsChanged] : .keyUp
+        let token = NSEvent.addLocalMonitorForEvents(matching: mask) { [weak self, weak window] event in
+            guard let self, let window, self.active, event.window === window,
+                  window.firstResponder === self else { return event }
+            if let diagnostics = self.inputDiagnostics {
+                switch event.type {
+                case .keyDown: diagnostics.record("application_down", nativeKey: true)
+                case .keyUp: diagnostics.record("application_up", nativeKey: true)
+                case .flagsChanged: diagnostics.record("application_flags")
+                default: break
+                }
+            }
+            guard event.type == .keyUp, self.pressedKeys[event.keyCode] != nil else { return event }
+            // AppKit routes key equivalents separately from ordinary keys. See
+            // the actual release before later routing can consume it. Returning
+            // nil prevents a second release through the responder chain.
+            self.keyUp(with: event)
+            return nil
+        }
+        if let token { keyReleaseMonitor = RFBKeyReleaseMonitor(token) }
     }
 
     override func flagsChanged(with event: NSEvent) {
         guard active else { return }
+        inputDiagnostics?.record("responder_flags")
+        if !event.modifierFlags.contains(.option) {
+            if optionIntent == .pending { sendGuestModifier(58, down: true) }
+            optionIntent = .none
+        } else if event.keyCode == 0, optionIntent == .none,
+                  event.modifierFlags.rawValue & (Self.modifierKeys[58]!.sideMask | Self.modifierKeys[61]!.sideMask) == 0,
+                  Set(physicalModifiers.keys).intersection([58, 61]).isSubset(of: synthesizedModifiers) {
+            // The recorded automation events use keyCode 0 and aggregate flags.
+            // Wait for the base key to distinguish printable AltGr text from an
+            // Alt shortcut. Real left/right Option events retain their timing.
+            optionIntent = .pending
+        } else if [58, 61].contains(event.keyCode), optionIntent == .pending { optionIntent = .none }
         synchronizeModifiers(with: event)
         if event.keyCode == 57 { // Caps Lock is a toggle, not a held modifier.
             connection?.sendKey(0xffe5, down: true)
@@ -264,7 +459,7 @@ final class VMFramebufferView: NSView {
     private func synchronizeModifiers(with event: NSEvent) {
         for group in Self.modifierGroups {
             let keys: Set<UInt16> = [group.left, group.right]
-            let held = keys.intersection(pressedModifiers.keys)
+            let held = keys.intersection(physicalModifiers.keys)
             var desired: Set<UInt16> = []
             let sideMask = Self.modifierKeys[group.left]!.sideMask | Self.modifierKeys[group.right]!.sideMask
             if event.modifierFlags.contains(group.flag) {
@@ -294,13 +489,44 @@ final class VMFramebufferView: NSView {
             // so the guest never observes a transient unmodified state.
             for key in desired.subtracting(held).sorted() {
                 let keysym = Self.modifierKeys[key]!.keysym
-                pressedModifiers[key] = keysym
-                connection?.sendKey(keysym, down: true)
+                physicalModifiers[key] = keysym
+                if textStrokes.isEmpty && !(group.flag == .option && [.pending, .text].contains(optionIntent)) {
+                    sendGuestModifier(key, down: true)
+                }
             }
             for key in held.subtracting(desired).sorted() {
-                if let keysym = pressedModifiers.removeValue(forKey: key) { connection?.sendKey(keysym, down: false) }
+                if physicalModifiers.removeValue(forKey: key) != nil,
+                   textStrokes.isEmpty && !(group.flag == .option && [.pending, .text].contains(optionIntent)) {
+                    sendGuestModifier(key, down: false)
+                }
             }
         }
+        reconcileGuestModifiers()
+    }
+
+    private func sendGuestModifier(_ key: UInt16, down: Bool) {
+        guard let keysym = Self.modifierKeys[key]?.keysym else { return }
+        if down {
+            guard pressedModifiers[key] == nil else { return }
+            pressedModifiers[key] = keysym
+        } else { guard pressedModifiers.removeValue(forKey: key) != nil else { return } }
+        connection?.sendKey(keysym, down: down)
+    }
+
+    private func reconcileGuestModifiers() {
+        var desired = Set(physicalModifiers.keys)
+        if [.pending, .text].contains(optionIntent) { desired.subtract([58, 61]) }
+        if let last = textStrokeOrder.last, let stroke = textStrokes[last] {
+            desired.subtract([56, 60, 58, 61])
+            if stroke.shift {
+                let physicalShift = Set(physicalModifiers.keys).intersection([56, 60])
+                desired.formUnion(physicalShift.isEmpty ? [56] : physicalShift)
+            }
+            if stroke.altGr { desired.insert(61) }
+        }
+        let current = Set(pressedModifiers.keys)
+        for key in desired.subtracting(current).sorted() { sendGuestModifier(key, down: true) }
+        for key in current.subtracting(desired).sorted() { sendGuestModifier(key, down: false) }
     }
 
     /// Standard RFB text clipboard. A guest agent is needed for Windows clipboard integration.
@@ -403,12 +629,23 @@ private struct RFBFrame: Sendable {
     let width: Int
     let height: Int
     let pixels: Data
+    let hasReceivedPixels: Bool
+    init(width: Int, height: Int, pixels: Data, hasReceivedPixels: Bool = true) {
+        self.width = width; self.height = height; self.pixels = pixels
+        self.hasReceivedPixels = hasReceivedPixels
+    }
 }
 
 private final class RFBFocusObserver: @unchecked Sendable {
     let token: NSObjectProtocol
     init(_ token: NSObjectProtocol) { self.token = token }
     deinit { NotificationCenter.default.removeObserver(token) }
+}
+
+private final class RFBKeyReleaseMonitor: @unchecked Sendable {
+    let token: Any
+    init(_ token: Any) { self.token = token }
+    deinit { NSEvent.removeMonitor(token) }
 }
 
 private final class RFBFrameRelay: @unchecked Sendable {
@@ -442,6 +679,96 @@ private final class RFBFrameRelay: @unchecked Sendable {
     }
 }
 
+/// Opt-in burst summaries contain only counts and timing. Never retain key
+/// codes, keysyms, characters, modifier values, clipboard contents or VM paths.
+private final class RFBInputDiagnostics: @unchecked Sendable {
+    private let lock = NSLock()
+    private let generation: Int
+    private var fields: [String: UInt64] = [:]
+    private var firstActivity: UInt64 = 0
+    private var lastActivity: UInt64 = 0
+    private var lastNativeKey: UInt64 = 0
+    private var lastWireKey: UInt64 = 0
+    private var scheduled = false
+    private static let idleNanoseconds: UInt64 = 250_000_000
+
+    init(generation: Int) { self.generation = generation }
+
+    func record(_ counter: String, nativeKey: Bool = false) {
+        update { fields, now in
+            fields[counter, default: 0] += 1
+            if nativeKey {
+                Self.gap(now, previous: &lastNativeKey, prefix: "application", fields: &fields)
+            }
+        }
+    }
+
+    func accepted(down: Bool, messages: Int, bytes: Int) {
+        update { fields, _ in
+            fields[down ? "accepted_down" : "accepted_up", default: 0] += 1
+            fields["queue_peak_messages"] = max(fields["queue_peak_messages", default: 0], UInt64(messages))
+            fields["queue_peak_bytes"] = max(fields["queue_peak_bytes", default: 0], UInt64(bytes))
+        }
+    }
+
+    func written(down: Bool, queuedAt: UInt64) {
+        update { fields, now in
+            fields[down ? "written_down" : "written_up", default: 0] += 1
+            fields["queue_max_wait_us"] = max(fields["queue_max_wait_us", default: 0], (now - queuedAt) / 1_000)
+            Self.gap(now, previous: &lastWireKey, prefix: "wire", fields: &fields)
+        }
+    }
+
+    private static func gap(_ now: UInt64, previous: inout UInt64, prefix: String, fields: inout [String: UInt64]) {
+        if previous != 0 {
+            let value = (now - previous) / 1_000
+            fields[prefix + "_min_gap_us"] = min(fields[prefix + "_min_gap_us"] ?? UInt64.max, value)
+            fields[prefix + "_max_gap_us"] = max(fields[prefix + "_max_gap_us", default: 0], value)
+        }
+        previous = now
+    }
+
+    private func update(_ change: (inout [String: UInt64], UInt64) -> Void) {
+        lock.lock()
+        let now = DispatchTime.now().uptimeNanoseconds
+        if firstActivity == 0 { firstActivity = now }
+        lastActivity = now
+        change(&fields, now)
+        let needsTimer = !scheduled
+        scheduled = true
+        lock.unlock()
+        if needsTimer { schedule(after: Self.idleNanoseconds) }
+    }
+
+    private func schedule(after nanoseconds: UInt64) {
+        DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + .nanoseconds(Int(nanoseconds))) { [self] in
+            flushWhenIdle()
+        }
+    }
+
+    private func flushWhenIdle() {
+        lock.lock()
+        let now = DispatchTime.now().uptimeNanoseconds
+        let idle = now - lastActivity
+        if idle < Self.idleNanoseconds {
+            lock.unlock()
+            schedule(after: Self.idleNanoseconds - idle)
+            return
+        }
+        var report = fields
+        report["generation"] = UInt64(bitPattern: Int64(generation))
+        report["duration_ms"] = (lastActivity - firstActivity) / 1_000_000
+        fields.removeAll(keepingCapacity: true)
+        firstActivity = 0; lastNativeKey = 0; lastWireKey = 0; scheduled = false
+        lock.unlock()
+        if let data = try? JSONSerialization.data(withJSONObject: report, options: [.sortedKeys]) {
+            var line = Data("input_diagnostics ".utf8)
+            line.append(data); line.append(0x0a)
+            FileHandle.standardError.write(line)
+        }
+    }
+}
+
 private enum RFBError: LocalizedError {
     case protocolError(String)
     case socketError(String)
@@ -464,13 +791,29 @@ private final class RFBConnection: @unchecked Sendable {
     private let onFrame: @Sendable (RFBFrame) -> Void
     private let onReady: @Sendable (String) -> Void
     private let onCutText: @Sendable (String) -> Void
+    private let onLayout: @Sendable (RFBDesktopLayout) -> Void
     private let onFailure: @Sendable (String) -> Void
+    private let inputDiagnostics: RFBInputDiagnostics?
     private let stateLock = NSLock()
     private let writeLock = NSLock()
     private let writer = DispatchQueue(label: "app.perpendicular.rfb.input", qos: .userInteractive)
     private var descriptor: Int32 = -1
     private var cancelled = false
     private var ready = false
+    // Protected by stateLock; reservations include the in-flight write. Close
+    // on overflow instead of dropping an individual key/button release.
+    private var queuedInputMessages = 0
+    private var queuedInputBytes = 0
+    private var inputFailure: String?
+    private static let maximumQueuedInputMessages = 1_024
+    private static let maximumQueuedInputBytes = 2 * 1024 * 1024
+    // Only the serial input writer touches this clock.
+    private var lastKeyWrite: UInt64 = 0
+    // QEMU's VNC keyboard defaults to a 10 ms delay per transition. Its finite
+    // delayed-input queue silently drops events once full, including releases.
+    // Rate only bursts on this background writer; ordinary slower input pays
+    // no extra wait, and modifiers/presses/releases remain strictly ordered.
+    private static let minimumKeyInterval: UInt64 = 10_000_000
     private var width = 0
     private var height = 0
     private var pixels = Data()
@@ -481,12 +824,16 @@ private final class RFBConnection: @unchecked Sendable {
          onFrame: @escaping @Sendable (RFBFrame) -> Void,
          onReady: @escaping @Sendable (String) -> Void,
          onCutText: @escaping @Sendable (String) -> Void,
+         onLayout: @escaping @Sendable (RFBDesktopLayout) -> Void = { _ in },
+         inputDiagnostics: RFBInputDiagnostics? = nil,
          onFailure: @escaping @Sendable (String) -> Void) {
         self.socketPath = socketPath
         self.onFrame = onFrame
         self.onReady = onReady
         self.onCutText = onCutText
+        self.onLayout = onLayout
         self.onFailure = onFailure
+        self.inputDiagnostics = inputDiagnostics
     }
 
     func start() {
@@ -497,7 +844,10 @@ private final class RFBConnection: @unchecked Sendable {
                 try handshake()
                 try receiveMessages()
             } catch {
-                if !isCancelled { onFailure(error.localizedDescription) }
+                stateLock.lock()
+                let message = cancelled ? nil : inputFailure ?? error.localizedDescription
+                stateLock.unlock()
+                if let message { onFailure(message) }
             }
         }
     }
@@ -597,10 +947,11 @@ private final class RFBConnection: @unchecked Sendable {
         let name = String(decoding: try read(count: nameLength), as: UTF8.self)
         // SetPixelFormat: 32 bits, depth 24, little endian, RGB888, shifts 16/8/0.
         try send(Data([0, 0, 0, 0, 32, 24, 0, 1, 0, 255, 0, 255, 0, 255, 16, 8, 0, 0, 0, 0]))
-        var encodings = Data([2, 0, 0, 3])
+        var encodings = Data([2, 0, 0, 4])
         encodings.appendUInt32(0) // Raw
         encodings.appendUInt32(UInt32(bitPattern: Int32(-223))) // DesktopSize
         encodings.appendUInt32(UInt32(bitPattern: Int32(-224))) // LastRect
+        encodings.appendUInt32(UInt32(bitPattern: RFBDesktopResize.encoding))
         try send(encodings)
         stateLock.lock()
         ready = !cancelled
@@ -616,6 +967,7 @@ private final class RFBConnection: @unchecked Sendable {
                 let header = try read(count: 3)
                 let count = Int(header.uint16(at: 1))
                 var receivedPixels = false
+                var receivedRawPixels = false
                 var resized = false
                 for _ in 0..<count {
                     let rect = try read(count: 12)
@@ -623,9 +975,28 @@ private final class RFBConnection: @unchecked Sendable {
                     let w = Int(rect.uint16(at: 4)), h = Int(rect.uint16(at: 6))
                     let encoding = Int32(bitPattern: rect.uint32(at: 8))
                     if encoding == -224 { break }
-                    if encoding == -223 {
+                    if encoding == RFBDesktopResize.encoding {
+                        let layout: RFBDesktopLayout
+                        do {
+                            let layoutHeader = try read(count: 4)
+                            let length = try RFBDesktopResize.payloadLength(header: layoutHeader)
+                            var payload = layoutHeader
+                            payload.append(try read(count: length - 4))
+                            layout = try RFBDesktopResize.decode(width: w, height: h,
+                                reason: UInt16(x), status: UInt16(y), payload: payload)
+                        } catch is RFBDesktopResizeError { throw RFBError.protocolError("Invalid display layout") }
+                        onLayout(layout)
+                        // Only an announcement describes the server's actual layout.
+                        // Forwarded/rejected hints must never allocate a new framebuffer.
+                        if layout.acknowledgement == .announcement, w != width || h != height {
+                            try resize(width: w, height: h)
+                            receivedRawPixels = false
+                            resized = true
+                        }
+                    } else if encoding == -223 {
                         guard x == 0, y == 0 else { throw RFBError.protocolError("Invalid display resize") }
                         try resize(width: w, height: h)
+                        receivedRawPixels = false
                         resized = true
                         receivedPixels = true
                     } else if encoding == 0 {
@@ -649,12 +1020,15 @@ private final class RFBConnection: @unchecked Sendable {
                                 }
                             }
                             receivedPixels = true
+                            receivedRawPixels = true
                         }
                     } else {
                         throw RFBError.protocolError("Unsupported framebuffer encoding \(encoding)")
                     }
                 }
-                if receivedPixels { onFrame(RFBFrame(width: width, height: height, pixels: pixels)) }
+                if receivedPixels {
+                    onFrame(RFBFrame(width: width, height: height, pixels: pixels, hasReceivedPixels: receivedRawPixels))
+                }
                 try requestUpdate(incremental: !resized)
             case 1: // SetColourMapEntries is legal even though this client requests true colour.
                 let header = try read(count: 5)
@@ -694,7 +1068,12 @@ private final class RFBConnection: @unchecked Sendable {
     func sendKey(_ keysym: UInt32, down: Bool) {
         var event = Data([4, down ? 1 : 0, 0, 0])
         event.appendUInt32(keysym)
-        enqueue(event)
+        enqueue(event, paceKey: true)
+    }
+
+    func requestDesktopSize(width: Int, height: Int, screenID: UInt32) -> Bool {
+        guard let bytes = try? RFBDesktopResize.request(width: width, height: height, screenID: screenID) else { return false }
+        return enqueue(bytes)
     }
 
     func sendPointer(x: UInt16, y: UInt16, buttons: UInt8) {
@@ -713,13 +1092,48 @@ private final class RFBConnection: @unchecked Sendable {
         enqueue(event)
     }
 
-    private func enqueue(_ bytes: Data) {
+    @discardableResult
+    private func enqueue(_ bytes: Data, paceKey: Bool = false) -> Bool {
         stateLock.lock()
-        let canSend = ready && !cancelled
-        stateLock.unlock()
-        guard canSend else { return }
+        guard ready && !cancelled else { stateLock.unlock(); return false }
+        guard queuedInputMessages < Self.maximumQueuedInputMessages,
+              bytes.count <= Self.maximumQueuedInputBytes - queuedInputBytes else {
+            inputFailure = "Too much input arrived at once. Try a shorter input."
+            inputDiagnostics?.record("queue_overflow")
+            ready = false
+            if descriptor >= 0 { _ = Darwin.shutdown(descriptor, SHUT_RDWR) }
+            stateLock.unlock()
+            return false
+        }
+        queuedInputMessages += 1
+        queuedInputBytes += bytes.count
+        let queuedAt = inputDiagnostics == nil ? 0 : DispatchTime.now().uptimeNanoseconds
+        if paceKey { inputDiagnostics?.accepted(down: bytes[1] != 0, messages: queuedInputMessages, bytes: queuedInputBytes) }
+        // Reserve and submit while holding the same lock, so concurrent callers
+        // cannot reorder accepted presses/releases around each other.
         writer.async { [self] in
-            do { try send(bytes) }
+            defer {
+                stateLock.lock()
+                queuedInputMessages -= 1
+                queuedInputBytes -= bytes.count
+                stateLock.unlock()
+            }
+            stateLock.lock()
+            let stillReady = ready && !cancelled && descriptor >= 0
+            stateLock.unlock()
+            guard stillReady else { return }
+            if paceKey, lastKeyWrite != 0 {
+                let deadline = lastKeyWrite + Self.minimumKeyInterval
+                var now = DispatchTime.now().uptimeNanoseconds
+                while now < deadline {
+                    Thread.sleep(forTimeInterval: Double(deadline - now) / 1_000_000_000)
+                    now = DispatchTime.now().uptimeNanoseconds
+                }
+            }
+            do {
+                try send(bytes)
+                if paceKey { inputDiagnostics?.written(down: bytes[1] != 0, queuedAt: queuedAt) }
+            }
             catch {
                 // Wake the reader so it reports the transport failure and the view can
                 // reconnect. User cancellation is the only path that suppresses errors.
@@ -728,7 +1142,10 @@ private final class RFBConnection: @unchecked Sendable {
                 if descriptor >= 0 { _ = Darwin.shutdown(descriptor, SHUT_RDWR) }
                 stateLock.unlock()
             }
+            if paceKey { lastKeyWrite = DispatchTime.now().uptimeNanoseconds }
         }
+        stateLock.unlock()
+        return true
     }
 
     private func send(_ bytes: Data) throws {

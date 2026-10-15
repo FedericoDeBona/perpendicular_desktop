@@ -202,6 +202,7 @@ final class LibraryModel: ObservableObject {
     @Published private(set) var snapshotVMID: String?
     private let engine: EngineClient
     let guestTools: GuestToolsController
+    var displayEngine: EngineClient { engine }
     init() {
         let engine = EngineClient()
         self.engine = engine

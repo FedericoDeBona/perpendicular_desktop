@@ -8,6 +8,9 @@ import SwiftUI
 @MainActor
 struct RenderLibrary {
     static func main() async throws {
+        // Native bitmap caching excludes CAMetalLayer. GPU correctness has its
+        // own real-device harness; this renderer captures the CG fallback.
+        setenv("PERPENDICULAR_DISPLAY_RENDERER", "coregraphics", 1)
         let args = CommandLine.arguments
         guard args.count >= 2 else {
             print("Usage: render-library /absolute/output.png [--create|--import|--clone|--system|--configure|--guest-tools|--display-only]")

@@ -28,10 +28,27 @@ private final class ConsoleTestState: @unchecked Sendable {
     }
 }
 
+private extension RFBConnection {
+    func holdTestWriter(started: DispatchSemaphore, release: DispatchSemaphore) {
+        writer.async { started.signal(); release.wait() }
+    }
+    func signalTestWriterDrained(_ signal: DispatchSemaphore) {
+        writer.async { signal.signal() }
+    }
+    var testInputReservations: (messages: Int, bytes: Int) {
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        return (queuedInputMessages, queuedInputBytes)
+    }
+}
+
 @MainActor
 private extension VMFramebufferView {
     var testFramebufferWidth: Int { Int(framebufferSize.width) }
     var testHeldInputCount: Int { pressedKeys.count + pressedModifiers.count + Int(pointerButtons) }
+    var testUsesMetal: Bool { metalDisplay != nil }
+    var testHasFallbackFrame: Bool { framebuffer != nil }
+    func injectPresenterFailure() { metalDisplay?.onFailure?() }
     func injectTestFrame() {
         present(RFBFrame(width: 2, height: 2, pixels: Data([
             0, 0, 255, 0, 0, 255, 0, 0,
@@ -121,6 +138,38 @@ private func runDrawingTest() {
                      abs(color.blueComponent - blue) < 0.2, "Framebuffer drawing mismatch")
     }
     print("native drawing, colour channels, orientation and aspect fit PASS")
+}
+
+@MainActor
+private func runPresenterFallbackTest() {
+    _ = NSApplication.shared
+    let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 240, height: 200),
+        styleMask: [], backing: .buffered, defer: false)
+    window.isReleasedWhenClosed = false
+    let view = VMFramebufferView(frame: NSRect(x: 0, y: 0, width: 240, height: 200))
+    window.contentView = view
+    view.injectTestFrame()
+    // A missing device uses this same fallback without requiring a simulated GPU.
+    view.injectPresenterFailure()
+    precondition(!view.testUsesMetal, "Failed Metal presenter was not removed")
+    precondition(view.testHasFallbackFrame, "Metal failure discarded the real frame")
+    view.displayIfNeeded()
+    CATransaction.flush()
+    let bitmap = view.bitmapImageRepForCachingDisplay(in: view.bounds)!
+    view.cacheDisplay(in: view.bounds, to: bitmap)
+    let color = bitmap.colorAt(x: 60 * bitmap.pixelsWide / 240,
+                               y: 50 * bitmap.pixelsHigh / 200)!.usingColorSpace(.deviceRGB)!
+    // A real window's HDR/profile conversion differs from an unattached bitmap;
+    // require red dominance, detecting a black/stale frame or swapped channels.
+    precondition(color.redComponent > 0.7 && color.redComponent - color.greenComponent > 0.4 &&
+                 color.redComponent - color.blueComponent > 0.4,
+                 "Metal failure lost the last real framebuffer")
+    precondition(window.makeFirstResponder(view) && window.firstResponder === view,
+                 "Renderer failure changed the console input owner")
+    view.disconnect()
+    window.contentView = nil
+    window.close()
+    print("Metal failure preserves real frame, Core Graphics drawing and parent input focus PASS")
 }
 
 @MainActor
@@ -239,6 +288,20 @@ private func runModifierTest(socket: String, scenario: String) {
             } else { down(modifier, 7, text) }
             up([], 7, text)
         }
+    case "synthetic-option-shortcut":
+        flags(0, .option); flags(0, .option)
+        down(.option, 3, "f"); up(.option, 3, "f"); flags(0, [])
+    case "synthetic-option-tap":
+        flags(0, .option); flags(0, .option); flags(0, [])
+    case "control-symbol":
+        view.configureKeyboardLayout("it")
+        down(.control, 75, "/"); up([], 75, "/")
+    case "right-shift-symbol":
+        view.configureKeyboardLayout("it")
+        let right: NSEvent.ModifierFlags = [.shift, NSEvent.ModifierFlags(rawValue: 0x4)]
+        flags(60, right); flags(60, right)
+        down(right, 75, "/"); flags(60, right)
+        up(right, 75, "/"); flags(60, [])
     default: preconditionFailure("Unknown modifier scenario")
     }
     precondition(view.testHeldInputCount == 0, "Completed modifier sequence left guest input held")
@@ -250,13 +313,189 @@ private func runModifierTest(socket: String, scenario: String) {
     print("modifier \(scenario) exact wire order and release PASS")
 }
 
+@MainActor
+private func runApplicationReleaseTest(socket: String, scenario: String) {
+    let app = NSApplication.shared
+    let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 300, height: 200),
+        styleMask: [], backing: .buffered, defer: false)
+    window.isReleasedWhenClosed = false
+    let view = VMFramebufferView(frame: window.contentLayoutRect)
+    window.contentView = view
+    view.configure(socketPath: socket, isActive: true)
+    waitForView { view.testFramebufferWidth == 4 }
+    precondition(window.makeFirstResponder(view))
+    func event(_ type: NSEvent.EventType, code: UInt16, text: String,
+               flags: NSEvent.ModifierFlags = [], windowNumber: Int? = nil) -> NSEvent {
+        NSEvent.keyEvent(with: type, location: .zero, modifierFlags: flags,
+            timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: windowNumber ?? window.windowNumber,
+            context: nil, characters: text, charactersIgnoringModifiers: text, isARepeat: false, keyCode: code)!
+    }
+    if scenario == "duplicate-release" {
+        let down = event(.keyDown, code: 15, text: "r")
+        let up = event(.keyUp, code: 15, text: "r")
+        view.keyDown(with: down)
+        app.sendEvent(up)
+        precondition(view.testHeldInputCount == 0, "Application key release never reached the focused console")
+        view.keyUp(with: up) // Duplicate responder delivery must not emit another key-up.
+    } else {
+        precondition(view.performKeyEquivalent(with: event(.keyDown, code: 15, text: "r", flags: .command)))
+        if scenario == "window-scope" {
+            let other = NSWindow(contentRect: .init(x: 0, y: 0, width: 100, height: 100),
+                styleMask: [], backing: .buffered, defer: false)
+            other.isReleasedWhenClosed = false
+            app.sendEvent(event(.keyUp, code: 15, text: "r", flags: .command, windowNumber: other.windowNumber))
+            precondition(view.testHeldInputCount == 2, "Another window released this console's key")
+            other.close()
+        }
+        // Exercise NSApplication's real local-monitor stage before native
+        // responder routing. No window is ordered and no system input is posted.
+        app.sendEvent(event(.keyUp, code: 15, text: "r", flags: .command))
+        precondition(view.testHeldInputCount == 1, "Command key-equivalent release never reached the focused console")
+        view.flagsChanged(with: event(.flagsChanged, code: 55, text: ""))
+        precondition(view.testHeldInputCount == 0, "Command+R left a key held")
+        if scenario == "text-burst" {
+            let codes: [Character: UInt16] = ["p": 35, "o": 31, "w": 13, "e": 14, "r": 15, "s": 1,
+                "h": 4, "l": 37, ".": 47, "x": 7, " ": 49, "-": 27, "n": 45, "f": 3, "i": 34]
+            for character in "powershell.exe -NoProfile" {
+                let text = String(character)
+                let code = codes[text.lowercased().first!]!
+                let flags: NSEvent.ModifierFlags = text == text.uppercased() && text != text.lowercased() ? .shift : []
+                view.keyDown(with: event(.keyDown, code: code, text: text, flags: flags))
+                app.sendEvent(event(.keyUp, code: code, text: text))
+                RunLoop.current.run(until: Date().addingTimeInterval(0.001))
+            }
+            view.keyDown(with: event(.keyDown, code: 36, text: "\r", flags: [.control, .shift]))
+            app.sendEvent(event(.keyUp, code: 36, text: "\r"))
+            precondition(view.testHeldInputCount == 0, "Text/Control+Shift+Return left held input")
+        }
+    }
+    waitForView { view.testFramebufferWidth == 3 }
+    view.configure(socketPath: socket, isActive: false)
+    app.sendEvent(event(.keyUp, code: 15, text: "r")) // Safe after monitor teardown.
+    window.contentView = nil
+    window.close()
+    RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+    print("application key release \(scenario), exact text wire sequence and held-state cleanup PASS")
+}
+
+@MainActor
+private func runRecordedKeyboardTest(socket: String, fixture: String, layout: String) throws {
+    struct Recording: Decodable {
+        struct Event: Decodable {
+            let kind: UInt; let code: UInt16; let flags: UInt
+            let characters: String?; let ignoring: String?; let `repeat`: Bool
+        }
+        let events: [Event]
+    }
+    let recording = try JSONDecoder().decode(Recording.self, from: Data(contentsOf: URL(fileURLWithPath: fixture)))
+    let app = NSApplication.shared
+    let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 300, height: 200), styleMask: [], backing: .buffered, defer: false)
+    window.isReleasedWhenClosed = false
+    let view = VMFramebufferView(frame: window.contentLayoutRect)
+    window.contentView = view
+    view.configureKeyboardLayout(layout)
+    view.configure(socketPath: socket, isActive: true)
+    waitForView { view.testFramebufferWidth == 4 }
+    precondition(window.makeFirstResponder(view))
+    for item in recording.events {
+        let type = NSEvent.EventType(rawValue: item.kind)!
+        let event = NSEvent.keyEvent(with: type, location: .zero,
+            modifierFlags: NSEvent.ModifierFlags(rawValue: item.flags), timestamp: 0,
+            windowNumber: window.windowNumber, context: nil, characters: item.characters ?? "",
+            charactersIgnoringModifiers: item.ignoring ?? "", isARepeat: item.repeat, keyCode: item.code)!
+        if type == .flagsChanged { view.flagsChanged(with: event) }
+        else if type == .keyUp { app.sendEvent(event) }
+        else if event.modifierFlags.contains(.command) { precondition(view.performKeyEquivalent(with: event)) }
+        else { view.keyDown(with: event) }
+    }
+    precondition(view.testHeldInputCount == 0, "Recorded CUA events left guest keys or modifiers held")
+    waitForView { view.testFramebufferWidth == 3 }
+    view.configure(socketPath: socket, isActive: false)
+    window.contentView = nil; window.close()
+    if ProcessInfo.processInfo.environment["PERPENDICULAR_INPUT_DIAGNOSTICS"] == "1" {
+        RunLoop.current.run(until: Date().addingTimeInterval(0.35))
+    }
+    print("recorded CUA keyboard \(layout): exact Windows key locations/modifiers and matching releases PASS")
+}
+
+private func runRapidKeyboardTest(socket: String) {
+    let state = ConsoleTestState()
+    let client = RFBConnection(socketPath: socket, onFrame: { state.frame($0) },
+        onReady: { _ in state.ready.signal() }, onCutText: { _ in state.clipboardReceived.signal() },
+        onFailure: { state.failed($0) })
+    client.start()
+    precondition(state.ready.wait(timeout: .now() + 5) == .success)
+    // Deliberately enqueue a long paste-sized burst instantly, with no sleeps
+    // in the caller. Only the production serial writer can protect the guest.
+    for _ in 0..<220 { client.sendKey(0x35, down: true); client.sendKey(0x35, down: false) }
+    precondition(state.clipboardReceived.wait(timeout: .now() + 12) == .success, "Paced input peer did not acknowledge every transition")
+    precondition(state.snapshot().error == nil)
+    client.stop()
+    print("rapid 440-transition burst: ordered writer pacing and final release PASS")
+}
+
+private func runInputOverflowTest(socket: String, scenario: String) {
+    let state = ConsoleTestState()
+    let failed = DispatchSemaphore(value: 0)
+    let client = RFBConnection(socketPath: socket, onFrame: { _ in },
+        onReady: { _ in state.ready.signal() }, onCutText: { _ in state.clipboardReceived.signal() },
+        onFailure: { state.failed($0); failed.signal() })
+    client.start()
+    precondition(state.ready.wait(timeout: .now() + 5) == .success)
+    precondition(state.clipboardReceived.wait(timeout: .now() + 2) == .success,
+        "Peer did not acknowledge the initial framebuffer request")
+    // Hold only this disposable connection's background writer. The queue
+    // reaches its exact limit deterministically, independent of CPU scheduling.
+    let writerStarted = DispatchSemaphore(value: 0)
+    let releaseWriter = DispatchSemaphore(value: 0)
+    client.holdTestWriter(started: writerStarted, release: releaseWriter)
+    precondition(writerStarted.wait(timeout: .now() + 2) == .success)
+    let expectedMessages: Int
+    let expectedBytes: Int
+    if scenario == "messages" {
+        for index in 0..<1_024 { client.sendKey(0x35, down: index % 2 == 0) }
+        expectedMessages = 1_024; expectedBytes = 1_024 * 8
+        client.sendPointer(x: 1, y: 1, buttons: 1) // The next message must close, not skip.
+    } else {
+        let knownText = String(repeating: "x", count: 1024 * 1024)
+        client.sendCutText(knownText)
+        expectedMessages = 1; expectedBytes = 1024 * 1024 + 8
+        client.sendCutText(knownText) // Header bytes count towards the memory limit.
+    }
+    let reserved = client.testInputReservations
+    let bounded = reserved.messages == expectedMessages && reserved.bytes == expectedBytes
+    let reported = failed.wait(timeout: .now() + 1) == .success
+    let reason = state.snapshot().error
+    // Failure must reject everything after overflow, including a release or a
+    // desktop resize, rather than letting later messages overtake the backlog.
+    client.sendKey(0x35, down: false)
+    let resizeAccepted = client.requestDesktopSize(width: 800, height: 600, screenID: 0)
+    releaseWriter.signal()
+    let cleaned = DispatchSemaphore(value: 0)
+    client.signalTestWriterDrained(cleaned)
+    precondition(cleaned.wait(timeout: .now() + 1) == .success, "Overflow retained a paced input backlog")
+    let remaining = client.testInputReservations
+    let empty = remaining.messages == 0 && remaining.bytes == 0
+    client.stop()
+    precondition(bounded, "Input queue exceeded its declared bound")
+    precondition(reported && reason == "Too much input arrived at once. Try a shorter input.", "Overflow did not report the actual input error")
+    precondition(!resizeAccepted && empty, "Failed input connection accepted more work or retained its backlog")
+    precondition(failed.wait(timeout: .now() + 0.05) == .timedOut, "Overflow was reported more than once")
+    print("input \(scenario) overflow: bounded reservation, explicit connection failure, rejected later input and complete cleanup PASS")
+}
+
 precondition(CommandLine.arguments.count >= 2, "Expected console test mode")
 switch CommandLine.arguments[1] {
 case "protocol": runProtocolTest(socket: CommandLine.arguments[2])
 case "bad": runBadMessageTest(socket: CommandLine.arguments[2], expected: CommandLine.arguments[3])
 case "drawing": runDrawingTest()
+case "presenter-fallback": runPresenterFallbackTest()
 case "reconnect": runReconnectTest(socket: CommandLine.arguments[2])
 case "focus": runFocusTest(socket: CommandLine.arguments[2])
 case "modifiers": runModifierTest(socket: CommandLine.arguments[2], scenario: CommandLine.arguments[3])
+case "application-release": runApplicationReleaseTest(socket: CommandLine.arguments[2], scenario: CommandLine.arguments[3])
+case "recorded-keyboard": try runRecordedKeyboardTest(socket: CommandLine.arguments[2], fixture: CommandLine.arguments[3], layout: CommandLine.arguments[4])
+case "rapid-keyboard": runRapidKeyboardTest(socket: CommandLine.arguments[2])
+case "input-overflow": runInputOverflowTest(socket: CommandLine.arguments[2], scenario: CommandLine.arguments[3])
 default: preconditionFailure("Unknown console test mode")
 }

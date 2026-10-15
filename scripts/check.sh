@@ -8,7 +8,8 @@ mkdir -p "$OUTPUT"
 "$CARGO" clippy --manifest-path "$ROOT/engine/Cargo.toml" --locked --all-targets -- -D warnings
 "$CARGO" test --manifest-path "$ROOT/engine/Cargo.toml" --locked
 "$ROOT/macos/Tests/run-console-tests.sh"
-for pair in 'Engine.swift EngineClientCheck.swift' 'WindowPresentation.swift WindowPresentationCheck.swift'; do
+"$ROOT/macos/Tests/run-display-sizing-tests.sh"
+for pair in 'Engine.swift EngineClientCheck.swift' 'WindowPresentation.swift WindowPresentationCheck.swift' 'RFBDesktopResize.swift RFBDesktopResizeCheck.swift'; do
   read -r source test <<< "$pair"
   check_sources=("$ROOT/macos/PerpendicularDesktop/$source")
   if [[ "$source" == Engine.swift ]]; then
@@ -28,9 +29,16 @@ xcrun swiftc -parse-as-library -D PERPENDICULAR_UI_RENDER \
   "$ROOT"/macos/PerpendicularDesktop/*.swift \
   "$ROOT/macos/Tests/DiskExportCheck.swift" -o "$OUTPUT/DiskExportCheck"
 "$OUTPUT/DiskExportCheck"
-python3 -m unittest discover -s "$ROOT/scripts/tests" -p 'test_secure_boot_dbx.py'
+python3 -m unittest discover -s "$ROOT/scripts/tests" -p 'test_*.py'
+python3 "$ROOT/scripts/graphics-tests.py"
 if [[ -n "${PERPENDICULAR_POWERSHELL:-}" ]]; then
   "$PERPENDICULAR_POWERSHELL" -NoProfile -File "$ROOT/guest-tools/windows/tests/Test-AgentCore.ps1"
+  "$PERPENDICULAR_POWERSHELL" -NoProfile -File "$ROOT/guest-tools/windows/tests/Test-AgentDisplay.ps1"
   "$PERPENDICULAR_POWERSHELL" -NoProfile -File "$ROOT/guest-tools/windows/tests/Test-GuestToolsInstaller.ps1"
+  "$PERPENDICULAR_POWERSHELL" -NoProfile -File "$ROOT/guest-tools/windows/tests/Test-GuestToolsDiagnostics.ps1"
+  "$PERPENDICULAR_POWERSHELL" -NoProfile -File "$ROOT/guest-tools/windows/tests/Test-GuestChannelAccess.ps1"
+fi
+if [[ "${PERPENDICULAR_METAL_TESTS:-0}" == 1 ]]; then
+  "$ROOT/macos/Tests/run-display-presenter-tests.sh"
 fi
 echo "Rust engine and native console/client/window checks passed."

@@ -13,6 +13,7 @@ struct VMDetailView: View {
     @ViewState<String> private var snapshotName = ""
     @ViewState<VMSnapshot?> private var restoreSnapshot: VMSnapshot?
     @ViewState<VMSnapshot?> private var deleteSnapshot: VMSnapshot?
+    @StateObject private var displaySizing = DisplaySizingController()
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -71,9 +72,21 @@ struct VMDetailView: View {
                 Spacer()
                 if tab == "display", vm.isActive {
                     Text("Click the display to use your keyboard.").font(.caption).foregroundStyle(.secondary)
+                    displayOptions
                     Button(action: toggleFullScreen) { Image(systemName: "arrow.up.left.and.arrow.down.right") }.buttonStyle(.plain).help("Enter Full Screen")
                 }
             }.padding(.horizontal, 30).padding(.bottom, 14)
+            if tab == "display", vm.isActive {
+                HStack(spacing: 8) {
+                    if [.checking, .adjusting, .waiting].contains(displaySizing.phase) { ProgressView().controlSize(.mini) }
+                    Text(displaySizing.message).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                    Spacer()
+                    if displaySizing.phase == .unavailable || displaySizing.phase == .failed {
+                        Button("Check Display") { displaySizing.checkAgain() }
+                            .font(.caption).disabled(!displaySizing.canCheckAgain || !library.canControl)
+                    }
+                }.frame(height: 28).padding(.horizontal, 30).padding(.bottom, 12)
+            }
             }
 
             if let error = vm.lastError, !error.isEmpty {
@@ -115,6 +128,28 @@ struct VMDetailView: View {
         } message: { Text("The saved restore point will be permanently removed.") }
         .task(id: "\(vm.id)-\(tab)") { if tab == "snapshots" { await library.loadSnapshots(for: vm) } }
         .onChange(of: vm.id) { _, _ in tab = "display" }
+        .onAppear { configureDisplaySizing() }
+        .onChange(of: displayContext) { _, _ in configureDisplaySizing() }
+        .onDisappear { displaySizing.stop() }
+    }
+
+    private var displayContext: String { "\(vm.id)|\(vm.backend)|\(vm.vncSocket)|\(vm.state)|\(library.canControl)" }
+    private func configureDisplaySizing() {
+        displaySizing.configure(vmID: vm.id, backendIdentity: "\(vm.backend)|\(vm.vncSocket)",
+            running: vm.state == "running", allowed: library.canControl, client: library.displayEngine)
+    }
+    private var displayOptions: some View {
+        Menu {
+            Toggle("Fit Windows to Window", isOn: $displaySizing.enabled)
+            Text("Windows text scaling stays the same.")
+            Divider()
+            Text(displaySizing.message)
+            Button("Check Display") { displaySizing.checkAgain() }.disabled(!displaySizing.canCheckAgain || !library.canControl)
+            if let details = displaySizing.details {
+                Menu("Display Details") { Text(details) }
+            }
+        } label: { Label("Display", systemImage: "display") }
+            .help("Choose whether Windows changes resolution to fit this window.")
     }
 
     @ViewBuilder private var lifecycleButtons: some View {
@@ -136,7 +171,11 @@ struct VMDetailView: View {
         return ZStack {
             RoundedRectangle(cornerRadius: radius).fill(Color(red: 0.065, green: 0.075, blue: 0.095))
             if vm.isActive {
-                VMConsoleView(socketPath: vm.vncSocket, isActive: vm.state == "running" || vm.state == "paused")
+                VMConsoleView(socketPath: vm.vncSocket, isActive: vm.state == "running" || vm.state == "paused", keyboardLayout: vm.keyboardLayout ?? "en-us",
+                    resizeRequest: displaySizing.request, onDisplayEvent: { event in
+                        let id = vm.id
+                        Task { @MainActor in displaySizing.receive(event, vmID: id) }
+                    })
                     .clipShape(RoundedRectangle(cornerRadius: radius))
                 if vm.state == "paused" {
                     VStack(spacing: 12) {
@@ -164,6 +203,12 @@ struct VMDetailView: View {
                     Button(action: toggleFullScreen) { Label("Exit Full Screen", systemImage: "arrow.down.right.and.arrow.up.left").font(.caption).padding(9) }
                         .buttonStyle(.plain).foregroundStyle(.white).background(.black.opacity(0.65), in: Capsule()).padding(14)
                         .help("Return to the virtual machine library")
+                }
+            }
+            .overlay(alignment: .topLeading) {
+                if immersive {
+                    displayOptions.buttonStyle(.plain).foregroundStyle(.white)
+                        .padding(9).background(.black.opacity(0.65), in: Capsule()).padding(14)
                 }
             }
             .padding(.horizontal, immersive ? 0 : 30).padding(.bottom, immersive ? 0 : 18)
