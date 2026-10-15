@@ -1,5 +1,40 @@
 # Windows ARM graphics: evidence and isolated experiment
 
+## Latest host experiment checkpoint — 2026-10-15
+
+The Xcode/Metal dependency below is now resolved: Xcode 27.0 and Apple's Metal
+toolchain are verified locally, and official Homebrew LLVM 15.0.7 static
+libraries/headers were hash-verified and extracted privately. Pinned ANGLE,
+libepoxy, native DXMT, Neptune/virglrenderer and QEMU 10.0.12 have built under
+`.tools/graphics-experiment` with at most two compiler jobs and functional
+optimization level 0. The QEMU private copy passes strict signature verification
+with only the public Hypervisor entitlement, and `--version` succeeds. The
+packaged runtime and live VM were not replaced or reconfigured by this work.
+
+The host-only Metal → ANGLE EGLImage → ES3 framebuffer → pixel-pack-buffer → CPU
+test passes **16 trials / 14,084,084 exact pixel comparisons**: private and shared
+linear textures, surfaceless and pbuffer contexts, growth/shrinkage through
+800×600 → 1920×1080 → 803×607 → 800×600, BGRA/RGBA colors and constant top-row
+orientation. The direct CPU readback route crashed on private textures; the
+verified PBO route needs no ANGLE source patch. This uses a completed producer
+and same-process buffers: it does not test render-server IPC, live guest fences,
+or an accelerated Windows desktop. No graphics performance measurement is
+claimed, and these host builds do not establish macOS 14 runtime compatibility.
+
+See the [repeatable fetch/build instructions and actual limits](../scripts/graphics-README.md)
+and [immutable source/dependency lock](../scripts/graphics-sources.json).
+**Guest GPU acceleration, signed-driver load and integration into the native
+VNC console remain unverified.** The next concrete step is an isolated macOS
+QEMU display backend using the verified PBO transfer to a bounded DisplaySurface,
+with explicit pixel-format conversion, native texture lifetime, crop/orientation and producer synchronization
+checked before any guest-driver experiment.
+
+## Earlier source inspection and capability checks
+
+The research below preserves the earlier observations and proposals. Statements
+such as “Xcode pending” and “proposal not executed” describe that earlier stage;
+the host checkpoint above records the work completed since then.
+
 Research snapshot: 2026-10-15. This document records source inspection and local capability checks. **Windows GPU acceleration has not been demonstrated in Perpendicular Desktop.** No graphics driver was installed and no running VM, firmware setting, security policy, or engine configuration was changed for this research.
 
 ## Current working display
