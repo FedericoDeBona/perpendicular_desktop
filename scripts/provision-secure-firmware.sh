@@ -17,6 +17,9 @@ fi
 if [[ -f "$SOURCE/enrolled-variable-summary.json" ]]; then
   cp "$SOURCE/enrolled-variable-summary.json" "$DESTINATION/enrolled-variable-summary.json"
 fi
+if [[ -f "$SOURCE/virt-firmware-LICENSE" ]]; then
+  cp "$SOURCE/virt-firmware-LICENSE" "$DESTINATION/virt-firmware-licenses.txt"
+fi
 shasum -a 256 "$DESTINATION/edk2-aarch64-secure-code.fd" "$DESTINATION/edk2-arm-secure-vars.fd"
 echo "Provisioned secure ARM firmware; its notices and available build provenance are retained beside the files."
 echo "See scripts/build-secure-firmware.sh for the verified QEMU/EDK2 source build."

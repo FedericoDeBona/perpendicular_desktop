@@ -15,8 +15,13 @@ QEMU source and corresponding license:
 https://download.qemu.org/qemu-11.1.2.tar.xz
 https://www.qemu.org/docs/master/about/license.html
 
-Secure firmware development source:
-https://github.com/utmapp/edk2
+Secure firmware source (also included in the pinned QEMU source archive):
+https://github.com/tianocore/edk2
+
+Optional offline variable-enrollment build tool (GPL-2.0-only, not linked into
+the app); its notices and public certificate provenance are retained:
+https://gitlab.com/kraxel/virt-firmware
+https://github.com/microsoft/secureboot_objects
 
 TPM emulation:
 https://github.com/stefanberger/swtpm

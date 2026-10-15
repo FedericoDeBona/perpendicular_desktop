@@ -20,6 +20,8 @@ struct VirtualMachine: Codable, Identifiable, Hashable, Sendable {
     var tpmEnabled: Bool?
     var secureBootState: String?
     var guestToolsIsoPath: String?
+    var keyboardLayout: String?
+    var audioOutput: Bool?
 
     var isActive: Bool { ["running", "paused", "starting", "stopping"].contains(state) }
     var isStopped: Bool { ["stopped", "crashed"].contains(state) }
@@ -190,7 +192,13 @@ final class LibraryModel: ObservableObject {
     @Published private(set) var operation = ""
     @Published private(set) var snapshots: [VMSnapshot] = []
     @Published private(set) var snapshotVMID: String?
-    private let engine = EngineClient()
+    private let engine: EngineClient
+    let guestTools: GuestToolsController
+    init() {
+        let engine = EngineClient()
+        self.engine = engine
+        self.guestTools = GuestToolsController(engine: engine)
+    }
     var selectedVM: VirtualMachine? { machines.first { $0.id == selectedID } }
     var canControl: Bool { didLoad && connectionError == nil && !isBusy }
 

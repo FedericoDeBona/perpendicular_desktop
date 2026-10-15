@@ -12,19 +12,20 @@ Requires an Apple Silicon Mac with macOS 14+, Apple's Command Line Tools and Hom
 ./scripts/bootstrap.sh
 ```
 
-Build the secure ARM firmware from the pinned QEMU/EDK2 source snapshot. It includes the linear framebuffer driver needed by Windows. During development, an installed UTM distribution supplies the separate variable template containing public platform and Microsoft trust certificates:
+Build the secure ARM firmware from the pinned QEMU/EDK2 source snapshot. It includes the linear framebuffer driver needed by Windows. Enroll an independent local platform certificate and the public Microsoft Windows 2011/2023 trust certificates:
 
 ```sh
-brew install aarch64-elf-gcc acpica
-PERPENDICULAR_ENROLLED_VARS="/Applications/UTM.app/Contents/Resources/qemu/edk2-arm-secure-vars.fd" ./scripts/build-secure-firmware.sh
-./scripts/provision-secure-firmware.sh
+brew install aarch64-elf-gcc acpica python@3.14
+./scripts/build-secure-firmware.sh
+python3 scripts/enroll-secure-vars.py
+./scripts/provision-secure-firmware.sh .tools/edk2/enrolled
 ./scripts/build-app.sh
 open "build/Perpendicular Desktop.app"
 ```
 
-The provisioning script also accepts an explicit directory containing the code, variables and corresponding `edk2-licenses.txt`. The source archive, compiler flags and separate variable-template provenance are recorded in generated manifests. Supplying and enrolling public certificates without an installed UTM template remains follow-up work. EDK2 currently requires the project path to contain no spaces.
+The enrollment tools are pinned by version and SHA-256 for macOS ARM64/Python 3.14. The private platform key stays in `.tools/secure-boot/` with restricted permissions and is never bundled. Generated manifests record source, compiler flags and certificate provenance. This development template currently has a placeholder revocation database; current Microsoft DBX revocations and update behavior still require a verified provisioning path. EDK2 currently requires the project path to contain no spaces. Existing VMs keep their own persistent variable stores; these scripts do not replace them.
 
-Optional ARM64 VirtIO drivers can be prepared before packaging with `brew install sevenzip` and `python3 scripts/provision-guest-drivers.py`. This verifies a pinned source hash, includes the driver license, and builds a driver-only disc without unattended Windows setup or security-policy changes. If the upstream download changes, review and update the artifact pin explicitly.
+Optional ARM64 VirtIO drivers and the independently written Guest Tools can be prepared before packaging with `brew install sevenzip` and `python3 scripts/provision-guest-drivers.py`. This verifies a pinned driver-source hash, preserves licenses, and adds the project's explicit Windows installer without unattended Windows setup or system policy changes. If the upstream download changes, review and update the artifact pin explicitly. See [Guest Tools setup and limits](guest-tools/README.md).
 
 The app bundle contains the Rust engine, QEMU executables, private runtime libraries and firmware. Development builds use ad-hoc code signatures, including the hypervisor entitlement. Signing/notarization for a distributed release remains separate work.
 

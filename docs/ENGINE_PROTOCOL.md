@@ -10,13 +10,17 @@ The executable is `perpendicular-engine`. Every invocation prints one JSON objec
 - `list`: returns `{"vms":[Vm],"errors":[]}`. Per-VM read errors remain visible without hiding successfully loaded VMs.
 - `create --name NAME --iso PATH --cpus 4 --memory-mib 8192 --disk-gib 64`: creates a new VM and returns `{"vm":Vm}`.
 - `start ID`, `pause ID`, `resume ID`, `stop ID [--force]`, `eject-iso ID`: return `{"vm":Vm}`. Stop without force requests guest shutdown; state is refreshed by list. Force stops only the owned QEMU process for this VM.
-- `update ID [--name NAME] [--cpus N] [--memory-mib M] [--iso PATH]`: stopped VM configuration, returns `{"vm":Vm}`.
+- `update ID [--name NAME] [--cpus N] [--memory-mib M] [--iso PATH] [--keyboard-layout en-us|it] [--audio-output true|false]`: stopped VM configuration, returns `{"vm":Vm}`. Keyboard layout and output-only CoreAudio apply at the next start; no microphone device is exposed.
 - `clone ID --name NAME`: stopped source only; independent storage, new identity/MAC and returned guest activation/TPM warnings.
 - `import-disk --name NAME --disk PATH [--cpus N] [--memory-mib M] [--iso PATH]`: independent import of self-contained raw/qcow2, no backing chains. Returns the new VM and relevant recovery warnings.
 - `update ID --guest-tools-iso PATH`, `eject-guest-tools ID`: attach a stopped VM's optional driver disc or eject it independently.
 - `delete ID`: stopped VM only, moves its directory to an application-owned recoverable trash and returns `{"deleted":ID}`.
 - `snapshots ID`: returns `{"snapshots":[{"id":"...","name":"...","created_at":"ISO8601"}]}`.
 - `snapshot-create ID --name NAME`, `snapshot-restore ID SNAPSHOT_ID`, `snapshot-delete ID SNAPSHOT_ID`: return JSON and support stopped VMs initially. Online snapshot support remains in the feature checklist until implemented and verified.
+- `guest-status ID`: returns `{"status":{...}}` with `connected`, explicit capabilities and guest-reported security values. A stopped guest, absent channel, timeout or unavailable agent returns an unavailable status with its actual reason.
+- `guest-clipboard-read ID`: returns `{"text":"..."}` only on an explicit successful guest read.
+- `guest-clipboard-write ID --text-file PATH` (or `--text TEXT`): returns `{"written":true}` only after a guest acknowledgement. The GUI uses a private temporary UTF-8 file to keep clipboard text out of arguments.
+- `guest-file-push ID --source PATH --name BASENAME`: sends at most 1 MiB to the logged-in Windows user's Downloads folder without replacement; returns `name`, `bytes_written` and the guest-only path.
 
 `Vm` has these fields:
 
@@ -29,7 +33,7 @@ The executable is `perpendicular-engine`. Every invocation prints one JSON objec
   "backend":"qemu-hvf", "qmp_socket":"/tmp/.../qmp.sock",
   "vnc_socket":"/tmp/.../vnc.sock", "last_error":null,
   "tpm_enabled":true, "secure_boot_state":"unverified",
-  "guest_tools_iso_path":null
+  "guest_tools_iso_path":null, "keyboard_layout":"en-us", "audio_output":false
 }
 ```
 
@@ -48,3 +52,5 @@ QEMU aarch64 `virt`, HVF accelerator, host CPU, UEFI firmware and private writab
 Optical media uses explicit USB-BOT and `scsi-cd` devices. A generic storage frontend does not convey CD-ROM media type for a pure QAPI block node. TPM2 uses persistent swtpm state, with physical-presence MMIO disabled for QEMU 11/HVF page compatibility. Secure Boot capability is separate from a verified guest observation; filenames and provisioned configuration must not make the app report guest verification automatically.
 
 The macOS app locates the engine via `PERPENDICULAR_ENGINE`, `Contents/Resources/perpendicular-engine`, or the repository build output. The framebuffer component accepts a Unix VNC socket path and forwards keyboard and pointer events. It does not own VM lifecycle.
+
+Guest Tools use an additional private VirtIO serial Unix socket. Each exchange first verifies the VM's identity through its owned QMP channel, then applies a five-second absolute deadline, strict correlated response IDs and bounded UTF-8 NDJSON. Requests are at most 1.5 MiB, responses 1 MiB, clipboard text 256 KiB and decoded files 1 MiB. Readiness never fetches clipboard contents. The protocol and the interactive-user Windows installer are documented in [guest-tools/README.md](../guest-tools/README.md).

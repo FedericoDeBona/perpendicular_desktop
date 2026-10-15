@@ -19,7 +19,11 @@ pub fn qemu_arguments(
 ) -> Result<Vec<String>> {
     let qmp = runtime_dir.join("qmp.sock");
     let vnc = runtime_dir.join("vnc.sock");
-    if qmp.as_os_str().len() >= 104 || vnc.as_os_str().len() >= 104 {
+    let agent = runtime_dir.join("agent.sock");
+    if qmp.as_os_str().len() >= 104
+        || vnc.as_os_str().len() >= 104
+        || agent.as_os_str().len() >= 104
+    {
         return Err(Error::new(
             "socket_path_too_long",
             "VM control socket path exceeds macOS sockaddr_un limit",
@@ -43,6 +47,8 @@ pub fn qemu_arguments(
         ),
         "-m".into(),
         config.memory_mib.to_string(),
+        "-k".into(),
+        config.keyboard_layout.clone(),
         "-nodefaults".into(),
         "-display".into(),
         "none".into(),
@@ -145,6 +151,30 @@ pub fn qemu_arguments(
             "tpm-tis-device,tpmdev=tpm0,ppi=off".into(),
         ]);
     }
+    // Keep newly introduced PCI devices after the existing NVMe controller so
+    // older VM UEFI boot device paths retain the same PCI slot assignment.
+    args.extend([
+        "-device".into(),
+        "virtio-serial-pci,id=guestserial".into(),
+        "-chardev".into(),
+        format!(
+            "socket,id=guestagent,path={},server=on,wait=off",
+            path_text(&agent)?
+        ),
+        "-device".into(),
+        "virtserialport,bus=guestserial.0,chardev=guestagent,name=org.perpendicular.guest_agent.0"
+            .into(),
+    ]);
+    if config.audio_output {
+        args.extend([
+            "-audiodev".into(),
+            "coreaudio,id=audio0".into(),
+            "-device".into(),
+            "ich9-intel-hda,id=hda0".into(),
+            "-device".into(),
+            "hda-output,bus=hda0.0,audiodev=audio0".into(),
+        ]);
+    }
     Ok(args)
 }
 
@@ -189,6 +219,8 @@ mod tests {
             tpm_enabled: true,
             secure_boot_state: "unverified".into(),
             mac_address: "52:54:00:12:34:56".into(),
+            keyboard_layout: "en-us".into(),
+            audio_output: false,
         }
     }
     #[test]
@@ -214,6 +246,20 @@ mod tests {
             .iter()
             .any(|arg| arg == "tpm-tis-device,tpmdev=tpm0,ppi=off"));
         assert!(!args.iter().any(|arg| arg.contains("tcp:")));
+        assert!(args.iter().any(|arg|arg=="virtserialport,bus=guestserial.0,chardev=guestagent,name=org.perpendicular.guest_agent.0"));
+        assert!(
+            args.iter()
+                .position(|arg| arg.starts_with("nvme,drive=system"))
+                .unwrap()
+                < args
+                    .iter()
+                    .position(|arg| arg == "virtio-serial-pci,id=guestserial")
+                    .unwrap()
+        );
+        assert!(args
+            .iter()
+            .any(|arg| arg
+                == "socket,id=guestagent,path=/tmp/perp/unit/agent.sock,server=on,wait=off"));
         let block = args
             .iter()
             .filter_map(|arg| serde_json::from_str::<serde_json::Value>(arg).ok())
@@ -242,5 +288,24 @@ mod tests {
             .iter()
             .any(|arg| arg == "if=none,media=cdrom,id=installiso,readonly=on"));
         assert!(!args.iter().any(|arg| arg == "-tpmdev"));
+    }
+
+    #[test]
+    fn italian_keyboard_and_optional_coreaudio_have_output_codec_only() {
+        let mut c = config();
+        c.keyboard_layout = "it".into();
+        c.audio_output = true;
+        let args =
+            qemu_arguments(&c, Path::new("/vm"), Path::new("/tmp/runtime"), "launch").unwrap();
+        assert!(args.windows(2).any(|pair| pair == ["-k", "it"]));
+        assert!(args
+            .windows(2)
+            .any(|pair| pair == ["-audiodev", "coreaudio,id=audio0"]));
+        assert!(args
+            .iter()
+            .any(|arg| arg == "hda-output,bus=hda0.0,audiodev=audio0"));
+        assert!(!args.iter().any(|arg| arg.contains("hda-duplex")
+            || arg.contains("hda-micro")
+            || arg.contains("capture")));
     }
 }

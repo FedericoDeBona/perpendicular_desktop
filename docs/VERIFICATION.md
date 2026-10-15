@@ -6,6 +6,7 @@ Development host: Apple M4, 24 GiB RAM, macOS 27.2. Checks below were performed 
 
 - Optimized Swift 6 application built targeting macOS 14. The app bundle was signed ad hoc and passed `codesign --verify --deep --strict`.
 - QEMU, qemu-img, swtpm and 23 private runtime libraries were bundled. Inspection found no non-system absolute dylib dependencies. Executables run from the generated bundle, and engine discovery selects its bundled paths.
+- The complete bundle was installed under the user's Applications directory and passed deep/strict signature verification there. Its real Windows VM runs with the installed bundled engine and QEMU; all discovered runtime, firmware and driver paths resolve inside that moved app.
 - Creation through the actual native app selected the supplied ARM64 ISO and created a stopped VM with 4 CPUs, 8 GiB RAM and an 80 GiB sparse disk. The library displayed the result.
 - Rust unit/integration tests, native console/client/window tests and lint checks run with `scripts/check.sh`. The initial console cancellation fixture had a handshake/request race; its fix passed ten consecutive complete console runs.
 - Independent raw import and stopped clone were checked with real qemu-img: source bytes preserved, no backing-file dependencies, source unchanged, clone still valid after the disposable source was removed.
@@ -14,7 +15,7 @@ Development host: Apple M4, 24 GiB RAM, macOS 27.2. Checks below were performed 
 
 A separate private VM uses 4 CPUs, 8 GiB RAM, a 64 GiB qcow2 disk and the user-supplied Windows ARM64 ISO. Windows PE reports version 10.0.26100.9457. The guest reached the Italian Windows 11 installation language screen.
 
-The successful combination is QEMU/HVF, the upstream EDK2 ArmVirt build with RAMFB, explicit USB-BOT/SCSI CD-ROMs, NVMe, USB input and swtpm. The guest has **not yet completed Windows installation or reached a Windows desktop**.
+The successful combination is QEMU/HVF, the upstream EDK2 ArmVirt build with RAMFB, explicit USB-BOT/SCSI CD-ROMs, NVMe, USB input and swtpm. Windows 11 Pro was explicitly selected and the installer is writing the new private disk. The guest has **not yet completed Windows installation or reached a Windows desktop**.
 
 Windows PE's own registry reports:
 
@@ -33,7 +34,23 @@ The actual native `VMConsoleView` received an 800×600 framebuffer. Its raw RGB 
 
 An isolated 60-frame, 1920×1080 raw transport benchmark measured a five-run median improvement from 0.612 to 0.505 seconds after contiguous full-width reads. This measures decoder transport, not Windows rendering frame rate or GPU acceleration.
 
-Actual fullscreen testing exposed an observer/state mismatch despite synthetic window tests passing. That behavior is being repaired and requires a fresh native transition check.
+Actual fullscreen testing exposed a race where a retiring SwiftUI accessor could clear its replacement's native window. A causal regression check fails with the old implementation and passes with the repair. The real bundled SwiftUI integration check passed, and the installed app was independently exercised through both native Enter Full Screen and Exit Full Screen transitions: sidebar/controls disappear and return, and AppKit style bits agree with the UI model.
+
+## Independent certificate enrollment
+
+The new offline enrollment path starts with the source-built empty ArmVirt store, creates a local RSA-3072 platform certificate and enrolls it with pinned `virt-firmware 26.10`. The database includes Microsoft Windows Production PCA 2011 and Windows UEFI CA 2023; KEK includes the local public certificate and Microsoft KEK 2011/2023. The private key stays in the ignored build area with mode 0600 and is never packaged. No installed UTM variable template is needed by this path.
+
+An isolated QEMU/HVF firmware VM, separate from the ongoing Windows installation, reported `SecureBoot=01` and `SetupMode=00`. The supplied Windows ISO's signed ARM64 boot loader was accepted and reached its own “Press any key to boot from CD or DVD” prompt. An unsigned ARM64 Shell.efi built from the same EDK2 sources was refused with `Command Error Status: Access Denied`. This checks firmware enforcement, not Windows desktop provisioning or current revocations. The generated DBX is only virt-firmware's placeholder; provisioning current Microsoft revocation lists and validating updates remains required.
+
+A separate negative-control store with SecureBootEnable disabled executed that exact unsigned file and started a second shell, while reporting `SecureBoot=00`. That control was confined to the disposable firmware VM; the Windows installation retained Secure Boot throughout. Both firmware test processes were stopped after capture.
+
+![Independent enrollment rejects unsigned EFI code](images/independent-secure-boot.png)
+
+## Guest integration checks
+
+The Rust guest transport, native explicit clipboard/file controller and independent Windows PowerShell agent pass the normal checks. The native harness uses a recording clipboard and proves that readiness never accesses clipboard contents, failed reads preserve existing text, private clipboard payloads are cleaned up, capabilities gate operations and partial transfers do not count as success. The PowerShell core passed 51 checks in the verified official PowerShell 7.6.7 runtime on macOS, including a full 1 MiB file and strict framing/encoding/path validation. These are **not yet Windows PowerShell 5.1, device, scheduled-task or live clipboard results**.
+
+Saved keyboard layout and output-audio configuration have engine/native tests. A separate paused HVF smoke exposes the output-only HDA controller; actual Windows sound and Italian punctuation still require guest runtime verification.
 
 ## Diagnosed compatibility failures
 
@@ -44,4 +61,4 @@ Actual fullscreen testing exposed an observer/state mismatch despite synthetic w
 
 ## Remaining required work
 
-Complete installation and reach a usable Windows desktop; verify Windows TPM and networking; audio; guest tools and integration channel; clipboard, shared folders/transfers and USB integration; native display resizing and graphics acceleration; actual Windows snapshot recovery; standalone moved-app runtime verification; independent public-certificate enrollment and release packaging. The authoritative feature checklist remains [FEATURES.md](FEATURES.md).
+Complete installation and reach a usable Windows desktop; verify Windows TPM and networking; audio; live guest tools and integration channel; clipboard, shared folders/transfers and USB integration; native display resizing and graphics acceleration; actual Windows snapshot recovery; current DBX revocation provisioning and release packaging. The authoritative feature checklist remains [FEATURES.md](FEATURES.md).

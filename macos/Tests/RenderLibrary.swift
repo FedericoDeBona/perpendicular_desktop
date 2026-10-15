@@ -10,7 +10,7 @@ struct RenderLibrary {
     static func main() async throws {
         let args = CommandLine.arguments
         guard args.count >= 2 else {
-            print("Usage: render-library /absolute/output.png [--create|--import|--clone|--system|--configure|--display-only]")
+            print("Usage: render-library /absolute/output.png [--create|--import|--clone|--system|--configure|--guest-tools|--display-only]")
             return
         }
         let app = NSApplication.shared
@@ -23,14 +23,17 @@ struct RenderLibrary {
         let system = args.contains("--system")
         let configure = args.contains("--configure")
         let displayOnly = args.contains("--display-only")
-        let size = NSSize(width: creation ? 790 : importing ? 610 : cloning ? 530 : system ? 640 : configure ? 580 : 1280,
-                          height: creation ? 660 : importing ? 620 : cloning ? 300 : system ? 460 : configure ? 590 : 820)
+        let guestTools = args.contains("--guest-tools")
+        if guestTools, let vm = model.selectedVM { await model.guestTools.checkStatus(for: vm) }
+        let size = NSSize(width: creation ? 790 : importing ? 610 : cloning ? 530 : system ? 640 : configure ? 580 : guestTools ? 1000 : 1280,
+                          height: creation ? 660 : importing ? 620 : cloning ? 300 : system ? 460 : configure ? 660 : guestTools ? 600 : 820)
         let root: AnyView
         if creation { root = AnyView(CreateVMView().environmentObject(model)) }
         else if importing { root = AnyView(ImportDiskView().environmentObject(model)) }
         else if cloning, let vm = model.selectedVM { root = AnyView(CloneVMView(vm: vm).environmentObject(model)) }
         else if system { root = AnyView(AppSettingsView(initialTab: "system").environmentObject(model)) }
         else if configure, let vm = model.selectedVM { root = AnyView(ConfigurationView(vm: vm).environmentObject(model)) }
+        else if guestTools, let vm = model.selectedVM { root = AnyView(GuestToolsView(vm: vm, tools: model.guestTools).environmentObject(model)) }
         else if displayOnly, let vm = model.selectedVM { root = AnyView(VMDetailView(vm: vm, immersive: true).environmentObject(model)) }
         else { root = AnyView(LibraryView().environmentObject(model)) }
         let host = NSHostingView(rootView: root.frame(width: size.width, height: size.height).tint(.blue).background(Color(nsColor: .windowBackgroundColor)))

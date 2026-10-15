@@ -132,6 +132,8 @@ struct ConfigurationView: View {
     @ViewState<Int> private var memory = 8192
     @ViewState<String?> private var iso: String?
     @ViewState<String?> private var driverISO: String?
+    @ViewState<String> private var keyboardLayout = "en-us"
+    @ViewState<Bool> private var audioOutput = false
     @ViewState<String?> private var localError: String?
 
     var body: some View {
@@ -143,6 +145,11 @@ struct ConfigurationView: View {
                 Stepper("Processors: \(cpus)", value: $cpus, in: 1...max(cpus, ProcessInfo.processInfo.activeProcessorCount))
                 Stepper(String(format: "Memory: %g GB", Double(memory) / 1024), value: $memory, in: 4096...max(memory, (library.host?.memoryGib ?? 16) * 1024 - 2048), step: 1024)
                 LabeledContent("Disk size", value: "\(vm.diskGib) GB")
+                Picker("Keyboard layout", selection: $keyboardLayout) {
+                    Text("U.S. English").tag("en-us")
+                    Text("Italian").tag("it")
+                }
+                Toggle("Play Windows audio on this Mac", isOn: $audioOutput)
                 if let tpm = vm.tpmEnabled { LabeledContent("TPM 2.0", value: tpm ? "Enabled" : "Disabled") }
                 if let secureBoot = vm.secureBootState {
                     LabeledContent("Secure Boot", value: secureBoot == "verified" ? "Verified in guest" : "Not yet verified in guest")
@@ -166,6 +173,7 @@ struct ConfigurationView: View {
                 Button("Save Changes") {
                     Task {
                         var args = ["update", vm.id, "--name", name.trimmingCharacters(in: .whitespacesAndNewlines), "--cpus", String(cpus), "--memory-mib", String(memory)]
+                        args += ["--keyboard-layout", keyboardLayout, "--audio-output", audioOutput ? "true" : "false"]
                         if let iso, iso != vm.isoPath { args += ["--iso", iso] }
                         if let driverISO, driverISO != vm.guestToolsIsoPath { args += ["--guest-tools-iso", driverISO] }
                         do {
@@ -175,10 +183,13 @@ struct ConfigurationView: View {
                     }
                 }.buttonStyle(.borderedProminent).keyboardShortcut(.defaultAction).disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !library.canControl || !vm.isStopped)
             }
-        }.padding(26).frame(width: 580, height: 590).interactiveDismissDisabled(library.isBusy)
+        }.padding(26).frame(width: 580, height: 660).interactiveDismissDisabled(library.isBusy)
             .alert("Couldn’t Save Configuration", isPresented: Binding(get: { localError != nil }, set: { if !$0 { localError = nil } })) {
                 Button("OK", role: .cancel) { localError = nil }
             } message: { Text(localError ?? "") }
-            .onAppear { name = vm.name; cpus = vm.cpus; memory = vm.memoryMib; iso = vm.isoPath; driverISO = vm.guestToolsIsoPath }
+            .onAppear {
+                name = vm.name; cpus = vm.cpus; memory = vm.memoryMib; iso = vm.isoPath; driverISO = vm.guestToolsIsoPath
+                keyboardLayout = vm.keyboardLayout ?? "en-us"; audioOutput = vm.audioOutput ?? false
+            }
     }
 }

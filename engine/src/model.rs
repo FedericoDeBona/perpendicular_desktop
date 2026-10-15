@@ -1,6 +1,21 @@
 use crate::error::{Error, Result};
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+
+fn default_keyboard_layout() -> String {
+    "en-us".into()
+}
+
+#[derive(Default)]
+pub struct UpdateOptions<'a> {
+    pub name: Option<&'a str>,
+    pub cpus: Option<u16>,
+    pub memory_mib: Option<u64>,
+    pub iso: Option<&'a Path>,
+    pub guest_tools_iso: Option<&'a Path>,
+    pub keyboard_layout: Option<&'a str>,
+    pub audio_output: Option<bool>,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
@@ -20,6 +35,10 @@ pub struct Config {
     /// Secure Boot is enabled in the guest; runtime verification is required.
     pub secure_boot_state: String,
     pub mac_address: String,
+    #[serde(default = "default_keyboard_layout")]
+    pub keyboard_layout: String,
+    #[serde(default)]
+    pub audio_output: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -51,6 +70,8 @@ pub struct Vm {
     pub tpm_enabled: bool,
     pub secure_boot_state: String,
     pub mac_address: String,
+    pub keyboard_layout: String,
+    pub audio_output: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -67,6 +88,16 @@ pub fn validate_name(name: &str) -> Result<()> {
         return Err(Error::new(
             "invalid_name",
             "Name must contain 1–100 visible characters",
+        ));
+    }
+    Ok(())
+}
+
+pub fn validate_keyboard_layout(layout: &str) -> Result<()> {
+    if !matches!(layout, "en-us" | "it") {
+        return Err(Error::new(
+            "invalid_keyboard_layout",
+            "Keyboard layout must be en-us or it",
         ));
     }
     Ok(())

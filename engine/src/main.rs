@@ -1,6 +1,7 @@
 use clap::{Parser, Subcommand};
 use perpendicular_engine::engine::Engine;
 use perpendicular_engine::error::{Error, Result};
+use perpendicular_engine::model::UpdateOptions;
 use serde_json::{json, Value};
 use std::path::PathBuf;
 
@@ -19,6 +20,30 @@ struct Cli {
 enum Commands {
     SystemInfo,
     List,
+    GuestStatus {
+        id: String,
+    },
+    GuestClipboardRead {
+        id: String,
+    },
+    GuestClipboardWrite {
+        id: String,
+        #[arg(
+            long,
+            conflicts_with = "text_file",
+            required_unless_present = "text_file"
+        )]
+        text: Option<String>,
+        #[arg(long, conflicts_with = "text")]
+        text_file: Option<PathBuf>,
+    },
+    GuestFilePush {
+        id: String,
+        #[arg(long)]
+        source: PathBuf,
+        #[arg(long)]
+        name: String,
+    },
     Create {
         #[arg(long)]
         name: String,
@@ -80,6 +105,10 @@ enum Commands {
         iso: Option<PathBuf>,
         #[arg(long)]
         guest_tools_iso: Option<PathBuf>,
+        #[arg(long,value_parser=["en-us","it"])]
+        keyboard_layout: Option<String>,
+        #[arg(long,action=clap::ArgAction::Set)]
+        audio_output: Option<bool>,
     },
     Delete {
         id: String,
@@ -115,6 +144,21 @@ fn run(command: Commands) -> Result<Value> {
     match command {
         Commands::SystemInfo => Ok(engine.system_info()),
         Commands::List => engine.list(),
+        Commands::GuestStatus { id } => engine.guest_status(&id),
+        Commands::GuestClipboardRead { id } => engine.guest_clipboard_read(&id),
+        Commands::GuestClipboardWrite {
+            id,
+            text,
+            text_file,
+        } => match (text, text_file) {
+            (Some(text), None) => engine.guest_clipboard_write(&id, &text),
+            (None, Some(path)) => engine.guest_clipboard_write_file(&id, &path),
+            _ => Err(Error::new(
+                "invalid_arguments",
+                "Choose exactly one clipboard text source",
+            )),
+        },
+        Commands::GuestFilePush { id, source, name } => engine.guest_file_push(&id, &source, &name),
         Commands::Create {
             name,
             iso,
@@ -143,13 +187,19 @@ fn run(command: Commands) -> Result<Value> {
             memory_mib,
             iso,
             guest_tools_iso,
+            keyboard_layout,
+            audio_output,
         } => engine.update(
             &id,
-            name.as_deref(),
-            cpus,
-            memory_mib,
-            iso.as_deref(),
-            guest_tools_iso.as_deref(),
+            UpdateOptions {
+                name: name.as_deref(),
+                cpus,
+                memory_mib,
+                iso: iso.as_deref(),
+                guest_tools_iso: guest_tools_iso.as_deref(),
+                keyboard_layout: keyboard_layout.as_deref(),
+                audio_output,
+            },
         ),
         Commands::Delete { id } => engine.delete(&id),
         Commands::Snapshots { id } => engine.snapshots(&id),

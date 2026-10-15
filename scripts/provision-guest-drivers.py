@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build a driver-only ARM64 disc from an independently distributed UTM disc."""
+"""Build an ARM64 driver disc with the independently written guest agent."""
 import hashlib
 import json
 from pathlib import Path
@@ -49,13 +49,34 @@ def main():
         drivers = sorted(path for path in (content / "Drivers").rglob("*") if path.is_file())
         if not drivers or not (content / "virtio-win_license.txt").is_file():
             raise SystemExit("Expected ARM64 drivers and license are missing")
+        agent_source = ROOT / "guest-tools/windows"
+        required_agent_files = (
+            "PerpendicularAgent.ps1", "PerpendicularAgent.Core.ps1",
+            "Install-PerpendicularAgent.ps1", "Uninstall-PerpendicularAgent.ps1")
+        for name in required_agent_files:
+            if not (agent_source / name).is_file():
+                raise SystemExit("The independent Guest Tools package is incomplete: " + name)
+        agent_destination = content / "GuestTools"
+        agent_destination.mkdir()
+        for name in required_agent_files:
+            shutil.copy2(agent_source / name, agent_destination / name)
+        shutil.copytree(agent_source / "tests", agent_destination / "tests")
+        shutil.copy2(ROOT / "guest-tools/README.md", agent_destination / "README.md")
+        shutil.copy2(ROOT / "LICENSE", agent_destination / "LICENSE.txt")
         (content / "README.txt").write_text(
             "Perpendicular Desktop: optional ARM64 VirtIO drivers.\n"
             "Source: " + SOURCE_URL + "\n"
-            "Includes drivers and their license only. No automatic setup or Windows policy changes.\n"
-            "In Windows, use Device Manager or pnputil to install the required signed driver.\n")
+            "Includes signed drivers and independent Perpendicular Guest Tools. No automatic setup.\n"
+            "In Windows, use Device Manager or pnputil to install the required signed driver.\n"
+            "From a logged-in Windows desktop, install Guest Tools explicitly:\n"
+            "powershell.exe -NoProfile -ExecutionPolicy Bypass -File GuestTools\\Install-PerpendicularAgent.ps1\n"
+            "The policy option applies only to that process; system policies are unchanged.\n")
         manifest = {"source_url": SOURCE_URL, "source_sha256": SOURCE_SHA256,
-                    "files": {str(p.relative_to(content)): digest(p) for p in drivers}}
+                    "files": {str(p.relative_to(content)): digest(p) for p in drivers},
+                    "independent_guest_tools": {
+                        "source": "guest-tools/windows", "license": "Apache-2.0",
+                        "files": {str(p.relative_to(content)): digest(p)
+                                  for p in sorted(agent_destination.rglob("*")) if p.is_file()}}}
         (content / "driver-manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
         image = staging / "perpendicular-drivers.iso"
         subprocess.run(["hdiutil", "makehybrid", "-iso", "-joliet", "-default-volume-name",

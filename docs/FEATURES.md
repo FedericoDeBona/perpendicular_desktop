@@ -4,7 +4,7 @@ The requested outcome is a functioning independent reconstruction of the Paralle
 
 ## Required product behavior
 
-- [ ] Standalone native macOS application, with a bundled working runtime and reproducible build.
+- [x] Standalone native macOS application, with a bundled working runtime and documented source build.
 - [x] Create and configure a Windows 11 ARM VM from a user-supplied ISO.
 - [ ] Install and boot Windows to a usable desktop on a private test disk.
 - [ ] Embedded interactive display with keyboard, pointer, resize, fullscreen and usable scaling.

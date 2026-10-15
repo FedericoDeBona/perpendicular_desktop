@@ -2,13 +2,18 @@ use crate::command::image_tool;
 use crate::disk::inspect_import;
 use crate::error::{Error, Result};
 use crate::firmware::{prepare_variables, repair_variables};
-use crate::model::{validate_name, validate_resources, Config, Runtime, Snapshot, Vm};
+use crate::guest;
+use crate::model::{
+    validate_keyboard_layout, validate_name, validate_resources, Config, Runtime, Snapshot,
+    UpdateOptions, Vm,
+};
 use crate::process::{
     launch_process_exists, launch_supervisor, process_state, ExitRecord, LaunchJob, ProcessState,
 };
 use crate::qmp::Qmp;
 use crate::storage::{assert_regular, atomic_json, copy_tree, private_dir, read_json, Store};
 use crate::tools::{host_memory_bytes, hypervisor_available, run_output, Tools};
+use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use fs2::FileExt;
 use serde_json::{json, Value};
 use std::fs::{self, File, OpenOptions};
@@ -78,6 +83,7 @@ impl Engine {
         }
         validate_name(&config.name)?;
         validate_resources(config.cpus, config.memory_mib, config.disk_gib)?;
+        validate_keyboard_layout(&config.keyboard_layout)?;
         let octets: Vec<_> = config.mac_address.split(':').collect();
         if octets.len() != 6
             || octets
@@ -265,6 +271,8 @@ impl Engine {
             tpm_enabled: config.tpm_enabled,
             secure_boot_state: config.secure_boot_state.clone(),
             mac_address: config.mac_address.clone(),
+            keyboard_layout: config.keyboard_layout.clone(),
+            audio_output: config.audio_output,
         })
     }
 
@@ -335,6 +343,8 @@ impl Engine {
             }
             .into(),
             mac_address: new_mac(&id)?,
+            keyboard_layout: "en-us".into(),
+            audio_output: false,
         };
         let result = (|| {
             run_output(
@@ -393,6 +403,206 @@ impl Engine {
             let _ = fs::remove_dir_all(&staging);
         }
         result
+    }
+
+    fn guest_request(&self, id: &str, op: &str, params: Value) -> Result<Value> {
+        self.config(id)?;
+        let qmp = if let Some(runtime) = self.runtime(id)? {
+            self.qmp(id, &runtime)
+        } else if let Some(job) = self.launch_job(id)? {
+            self.launch_qmp(id, &job)
+        } else {
+            return Err(Error::new(
+                "guest_agent_unavailable",
+                "VM is stopped; start it and run Perpendicular Guest Tools inside Windows",
+            ));
+        };
+        let mut qmp = qmp.map_err(|error| {
+            if error.code == "ownership_mismatch" {
+                error
+            } else {
+                Error::new(
+                    "guest_agent_unavailable",
+                    format!(
+                        "Cannot establish the owned running VM before guest IPC: {}",
+                        error.message
+                    ),
+                )
+            }
+        })?;
+        if qmp.status()? != "running" {
+            return Err(Error::new(
+                "guest_agent_unavailable",
+                "Guest-agent operations require a running VM; resume a paused guest first",
+            ));
+        }
+        drop(qmp);
+        // Every IPC exchange follows this QMP UUID+launch-name ownership check.
+        // The application lock also prevents an engine-controlled VM restart
+        // between verification and connection to its private serial socket.
+        guest::exchange(&self.store.runtime_dir(id)?.join("agent.sock"), op, params)
+    }
+
+    pub fn guest_status(&self, id: &str) -> Result<Value> {
+        self.config(id)?;
+        match self
+            .guest_request(id, "status", json!({}))
+            .and_then(guest::validate_status)
+        {
+            Ok(status) => Ok(json!({"status":status})),
+            Err(error) if error.code == "ownership_mismatch" => Err(error),
+            Err(error) => Ok(
+                json!({"status":{"connected":false,"code":error.code,"reason":error.message,"capabilities":{"clipboard":false,"file_write":false}}}),
+            ),
+        }
+    }
+
+    pub fn guest_clipboard_read(&self, id: &str) -> Result<Value> {
+        let result = self.guest_request(id, "clipboard.read", json!({}))?;
+        let text = result.get("text").and_then(Value::as_str).ok_or_else(|| {
+            Error::new(
+                "guest_agent_protocol",
+                "Guest clipboard response has no text string",
+            )
+        })?;
+        guest::validate_clipboard(text)?;
+        Ok(json!({"text":text}))
+    }
+
+    pub fn guest_clipboard_write(&self, id: &str, text: &str) -> Result<Value> {
+        guest::validate_clipboard(text)?;
+        let result = self
+            .guest_request(id, "clipboard.write", json!({"text":text}))
+            .map_err(|error| {
+                if error.code == "guest_request_too_large" {
+                    Error::new(
+                        "clipboard_too_large",
+                        "Escaped clipboard text exceeds the serialized request limit",
+                    )
+                } else {
+                    error
+                }
+            })?;
+        if result.get("written").and_then(Value::as_bool) != Some(true) {
+            return Err(Error::new(
+                "guest_agent_protocol",
+                "Guest agent did not acknowledge the clipboard write",
+            ));
+        }
+        Ok(json!({"written":true}))
+    }
+
+    pub fn guest_file_push(&self, id: &str, source: &Path, name: &str) -> Result<Value> {
+        self.config(id)?;
+        guest::validate_filename(name)?;
+        if !source.is_absolute() {
+            return Err(Error::new(
+                "invalid_source_path",
+                "File transfer source must be an absolute path",
+            ));
+        }
+        let source = source
+            .canonicalize()
+            .map_err(|error| Error::io("Cannot access file transfer source", error))?;
+        let mut file = OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
+            .open(&source)?;
+        let metadata = file.metadata()?;
+        if !metadata.is_file() {
+            return Err(Error::new(
+                "invalid_source_path",
+                "File transfer source must be a regular file",
+            ));
+        }
+        if metadata.len() > guest::MAX_FILE_BYTES as u64 {
+            return Err(Error::new(
+                "guest_file_too_large",
+                "File transfer supports at most1MiB of decoded file content",
+            ));
+        }
+        let mut content = Vec::new();
+        Read::by_ref(&mut file)
+            .take(guest::MAX_FILE_BYTES as u64 + 1)
+            .read_to_end(&mut content)?;
+        if content.len() > guest::MAX_FILE_BYTES {
+            return Err(Error::new(
+                "guest_file_too_large",
+                "File grew beyond the1MiB transfer limit",
+            ));
+        }
+        let result = self.guest_request(
+            id,
+            "file.write",
+            json!({"name":name,"content_base64":BASE64.encode(&content)}),
+        )?;
+        if result.get("name").and_then(Value::as_str) != Some(name)
+            || result.get("bytes_written").and_then(Value::as_u64) != Some(content.len() as u64)
+        {
+            return Err(Error::new(
+                "guest_agent_protocol",
+                "Guest agent file acknowledgment does not match the requested file",
+            ));
+        }
+        let path = result.get("path").and_then(Value::as_str).ok_or_else(|| {
+            Error::new(
+                "guest_agent_protocol",
+                "Guest file acknowledgment has no informational guest path",
+            )
+        })?;
+        if path.len() > 4096 {
+            return Err(Error::new(
+                "guest_agent_protocol",
+                "Guest file path exceeds the protocol limit",
+            ));
+        }
+        // Guest-reported paths are returned for display only and are never
+        // opened, evaluated or resolved against the host filesystem.
+        Ok(json!({"name":name,"bytes_written":content.len(),"path":path}))
+    }
+
+    pub fn guest_clipboard_write_file(&self, id: &str, path: &Path) -> Result<Value> {
+        self.config(id)?;
+        if !path.is_absolute() {
+            return Err(Error::new(
+                "invalid_source_path",
+                "Clipboard text file path must be absolute",
+            ));
+        }
+        let mut file = OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
+            .open(path)?;
+        let metadata = file.metadata()?;
+        if !metadata.is_file() {
+            return Err(Error::new(
+                "invalid_source_path",
+                "Clipboard text source must be a regular file",
+            ));
+        }
+        if metadata.len() > guest::MAX_CLIPBOARD_BYTES as u64 {
+            return Err(Error::new(
+                "clipboard_too_large",
+                "Clipboard text exceeds256KiB of UTF-8",
+            ));
+        }
+        let mut bytes = Vec::new();
+        Read::by_ref(&mut file)
+            .take(guest::MAX_CLIPBOARD_BYTES as u64 + 1)
+            .read_to_end(&mut bytes)?;
+        if bytes.len() > guest::MAX_CLIPBOARD_BYTES {
+            return Err(Error::new(
+                "clipboard_too_large",
+                "Clipboard text file grew beyond256KiB",
+            ));
+        }
+        let text = String::from_utf8(bytes).map_err(|_| {
+            Error::new(
+                "invalid_clipboard_encoding",
+                "Clipboard text source must be valid UTF-8",
+            )
+        })?;
+        self.guest_clipboard_write(id, &text)
     }
 
     pub fn import_disk(
@@ -459,6 +669,8 @@ impl Engine {
             }
             .into(),
             mac_address: new_mac(&id)?,
+            keyboard_layout: "en-us".into(),
+            audio_output: false,
         };
         let staging = self.store.root.join("VMs").join(format!(".import-{id}"));
         private_dir(&staging)?;
@@ -792,31 +1004,30 @@ impl Engine {
         Ok(json!({"vm":self.view(&config)?}))
     }
 
-    pub fn update(
-        &self,
-        id: &str,
-        name: Option<&str>,
-        cpus: Option<u16>,
-        memory: Option<u64>,
-        iso: Option<&Path>,
-        guest_tools_iso: Option<&Path>,
-    ) -> Result<Value> {
+    pub fn update(&self, id: &str, options: UpdateOptions<'_>) -> Result<Value> {
         let mut config = self.require_stopped(id)?;
-        if let Some(name) = name {
+        if let Some(name) = options.name {
             validate_name(name)?;
             config.name = name.trim().into();
         }
-        if let Some(cpus) = cpus {
+        if let Some(cpus) = options.cpus {
             config.cpus = cpus;
         }
-        if let Some(memory) = memory {
+        if let Some(memory) = options.memory_mib {
             config.memory_mib = memory;
         }
-        if let Some(iso) = iso {
+        if let Some(iso) = options.iso {
             config.iso_path = Some(validate_iso(iso)?);
         }
-        if let Some(iso) = guest_tools_iso {
+        if let Some(iso) = options.guest_tools_iso {
             config.guest_tools_iso_path = Some(validate_iso(iso)?);
+        }
+        if let Some(layout) = options.keyboard_layout {
+            validate_keyboard_layout(layout)?;
+            config.keyboard_layout = layout.into();
+        }
+        if let Some(enabled) = options.audio_output {
+            config.audio_output = enabled;
         }
         validate_resources(config.cpus, config.memory_mib, config.disk_gib)?;
         self.validate_host(config.cpus, config.memory_mib)?;

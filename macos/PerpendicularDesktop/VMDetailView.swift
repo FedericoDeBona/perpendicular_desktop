@@ -36,6 +36,7 @@ struct VMDetailView: View {
                 Menu {
                     Button("Configure…", systemImage: "slider.horizontal.3") { showConfiguration = true }.disabled(!vm.isStopped)
                     Button("Clone…", systemImage: "square.on.square") { NotificationCenter.default.post(name: .cloneVirtualMachine, object: nil) }.disabled(!vm.isStopped)
+                    Button("Guest Tools…", systemImage: "arrow.left.arrow.right") { tab = "guest_tools" }
                     if vm.isoPath != nil {
                         Button("Eject Installation Disc", systemImage: "eject") { Task { await library.action(["eject-iso", vm.id], operation: "Ejecting installation disc…") } }
                     }
@@ -64,7 +65,8 @@ struct VMDetailView: View {
                 Picker("View", selection: $tab) {
                     Text("Display").tag("display")
                     Text("Snapshots").tag("snapshots")
-                }.pickerStyle(.segmented).frame(width: 230).labelsHidden()
+                    Text("Guest Tools").tag("guest_tools")
+                }.pickerStyle(.segmented).frame(width: 330).labelsHidden()
                 Spacer()
                 if tab == "display", vm.isActive {
                     Text("Click the display to use your keyboard.").font(.caption).foregroundStyle(.secondary)
@@ -80,7 +82,8 @@ struct VMDetailView: View {
             }
 
             if tab == "display" || immersive { console }
-            else { snapshots }
+            else if tab == "snapshots" { snapshots }
+            else { GuestToolsView(vm: vm, tools: library.guestTools).environmentObject(library) }
         }
         .sheet(isPresented: $showConfiguration) { ConfigurationView(vm: vm).environmentObject(library) }
         .confirmationDialog("Force stop “\(vm.name)”?", isPresented: $confirmForceStop, titleVisibility: .visible) {

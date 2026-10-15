@@ -10,8 +10,20 @@ mkdir -p "$OUTPUT"
 "$ROOT/macos/Tests/run-console-tests.sh"
 for pair in 'Engine.swift EngineClientCheck.swift' 'WindowPresentation.swift WindowPresentationCheck.swift'; do
   read -r source test <<< "$pair"
+  check_sources=("$ROOT/macos/PerpendicularDesktop/$source")
+  if [[ "$source" == Engine.swift ]]; then
+    check_sources+=("$ROOT/macos/PerpendicularDesktop/GuestTools.swift")
+  fi
   xcrun swiftc -parse-as-library -target arm64-apple-macosx14.0 -swift-version 6 \
-    "$ROOT/macos/PerpendicularDesktop/$source" "$ROOT/macos/Tests/$test" -o "$OUTPUT/${test%.swift}"
+    "${check_sources[@]}" "$ROOT/macos/Tests/$test" -o "$OUTPUT/${test%.swift}"
   "$OUTPUT/${test%.swift}"
 done
+xcrun swiftc -parse-as-library -target arm64-apple-macosx14.0 -swift-version 6 \
+  "$ROOT/macos/PerpendicularDesktop/Engine.swift" \
+  "$ROOT/macos/PerpendicularDesktop/GuestTools.swift" \
+  "$ROOT/macos/Tests/GuestToolsCheck.swift" -o "$OUTPUT/GuestToolsCheck"
+"$OUTPUT/GuestToolsCheck"
+if [[ -n "${PERPENDICULAR_POWERSHELL:-}" ]]; then
+  "$PERPENDICULAR_POWERSHELL" -NoProfile -File "$ROOT/guest-tools/windows/tests/Test-AgentCore.ps1"
+fi
 echo "Rust engine and native console/client/window checks passed."

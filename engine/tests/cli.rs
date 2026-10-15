@@ -2,7 +2,9 @@
 //! tool fixture. These verify lifecycle and data integrity, not Windows boot.
 use serde_json::Value;
 use std::fs;
+use std::io::{BufRead, BufReader, Write};
 use std::os::unix::fs::PermissionsExt;
+use std::os::unix::net::UnixListener;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -231,6 +233,228 @@ fn optional_driver_media_is_persisted_and_can_be_ejected_independently() {
     assert_eq!(
         updated["vm"]["guest_tools_iso_path"],
         canonical_iso.to_str().unwrap()
+    );
+}
+
+#[test]
+fn guest_status_is_truthfully_unavailable_for_stopped_vm_and_transfers_validate_inputs() {
+    let f = Fixture::new();
+    let vm = f.create();
+    let id = vm["id"].as_str().unwrap();
+    assert_eq!(
+        f.invoke(&["guest-status", id])["status"]["connected"],
+        false
+    );
+    let output = f
+        .command()
+        .args(["guest-clipboard-read", id])
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert_eq!(
+        serde_json::from_slice::<Value>(&output.stdout).unwrap()["error"]["code"],
+        "guest_agent_unavailable"
+    );
+    let source = f._temp.path().join("large.bin");
+    fs::write(&source, vec![0u8; 1024 * 1024 + 1]).unwrap();
+    for name in ["../escape.txt", "CON.txt", "good.bin"] {
+        let output = f
+            .command()
+            .args([
+                "guest-file-push",
+                id,
+                "--source",
+                source.to_str().unwrap(),
+                "--name",
+                name,
+            ])
+            .output()
+            .unwrap();
+        assert!(!output.status.success());
+        assert_eq!(
+            serde_json::from_slice::<Value>(&output.stdout).unwrap()["error"]["code"],
+            if name == "good.bin" {
+                "guest_file_too_large"
+            } else {
+                "invalid_guest_filename"
+            }
+        );
+    }
+    let text = f._temp.path().join("invalid-clipboard.txt");
+    fs::write(&text, [0xff, 0xfe]).unwrap();
+    let output = f
+        .command()
+        .args([
+            "guest-clipboard-write",
+            id,
+            "--text-file",
+            text.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert_eq!(
+        serde_json::from_slice::<Value>(&output.stdout).unwrap()["error"]["code"],
+        "invalid_clipboard_encoding"
+    );
+}
+
+#[test]
+fn keyboard_audio_settings_persist_validate_and_default_for_older_metadata() {
+    let f = Fixture::new();
+    let vm = f.create();
+    let id = vm["id"].as_str().unwrap();
+    assert_eq!(vm["keyboard_layout"], "en-us");
+    assert_eq!(vm["audio_output"], false);
+    let updated = f.invoke(&[
+        "update",
+        id,
+        "--keyboard-layout",
+        "it",
+        "--audio-output",
+        "true",
+    ]);
+    assert_eq!(updated["vm"]["keyboard_layout"], "it");
+    assert_eq!(updated["vm"]["audio_output"], true);
+    let output = f
+        .command()
+        .args(["update", id, "--keyboard-layout", "unknown"])
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert_eq!(f.invoke(&["list"])["vms"][0]["keyboard_layout"], "it");
+    let path = Path::new(vm["directory"].as_str().unwrap()).join("config.json");
+    let mut legacy: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+    legacy.as_object_mut().unwrap().remove("keyboard_layout");
+    legacy.as_object_mut().unwrap().remove("audio_output");
+    fs::write(path, serde_json::to_vec(&legacy).unwrap()).unwrap();
+    let listed = f.invoke(&["list"]);
+    assert_eq!(listed["vms"][0]["keyboard_layout"], "en-us");
+    assert_eq!(listed["vms"][0]["audio_output"], false);
+}
+
+#[test]
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+fn guest_operations_use_owned_qmp_and_explicit_bounded_ndjson_exchanges() {
+    use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
+    let f = Fixture::new();
+    let vm = f.create();
+    let id = vm["id"].as_str().unwrap();
+    f.invoke(&["start", id]);
+    let socket = Path::new(vm["qmp_socket"].as_str().unwrap())
+        .parent()
+        .unwrap()
+        .join("agent.sock");
+    let listener = UnixListener::bind(&socket).unwrap();
+    let worker = std::thread::spawn(move || {
+        for expected in [
+            "status",
+            "clipboard.read",
+            "clipboard.write",
+            "clipboard.write",
+            "file.write",
+        ] {
+            let (mut peer, _) = listener.accept().unwrap();
+            let mut line = String::new();
+            BufReader::new(peer.try_clone().unwrap())
+                .read_line(&mut line)
+                .unwrap();
+            assert!(line.len() <= perpendicular_engine::guest::MAX_REQUEST_BYTES);
+            let request: Value = serde_json::from_str(&line).unwrap();
+            assert_eq!(request["op"], expected);
+            let result = match expected {
+                "status" => {
+                    serde_json::json!({"protocol":1,"agent_version":"0.1.0","os_build":"Windows test","architecture":"ARM64","username":"Test","capabilities":{"clipboard":true,"file_write":true},"secure_boot":"unknown","tpm":{"present":"unknown","ready":"unknown"}})
+                }
+                "clipboard.read" => serde_json::json!({"text":"Guest clipboard\n"}),
+                "clipboard.write" => {
+                    assert_eq!(request["params"]["text"], "Host clipboard");
+                    serde_json::json!({"written":true})
+                }
+                _ => {
+                    let content = BASE64
+                        .decode(request["params"]["content_base64"].as_str().unwrap())
+                        .unwrap();
+                    assert_eq!(content.len(), 1024 * 1024);
+                    assert!(line.len() > 1024 * 1024);
+                    serde_json::json!({"name":"transfer.bin","bytes_written":content.len(),"path":"C:\\Users\\Test\\Downloads\\transfer.bin"})
+                }
+            };
+            writeln!(
+                peer,
+                "{}",
+                serde_json::json!({"id":request["id"],"ok":true,"result":result})
+            )
+            .unwrap();
+        }
+    });
+    let status = f.invoke(&["guest-status", id]);
+    assert_eq!(status["status"]["connected"], true);
+    assert_eq!(status["status"]["capabilities"]["max_file_bytes"], 1048576);
+    assert_eq!(
+        f.invoke(&["guest-clipboard-read", id])["text"],
+        "Guest clipboard\n"
+    );
+    assert_eq!(
+        f.invoke(&["guest-clipboard-write", id, "--text", "Host clipboard"])["written"],
+        true
+    );
+    let text_file = f._temp.path().join("clipboard.txt");
+    fs::write(&text_file, b"Host clipboard").unwrap();
+    fs::set_permissions(&text_file, fs::Permissions::from_mode(0o600)).unwrap();
+    assert_eq!(
+        f.invoke(&[
+            "guest-clipboard-write",
+            id,
+            "--text-file",
+            text_file.to_str().unwrap()
+        ])["written"],
+        true
+    );
+    let source = f._temp.path().join("source.bin");
+    fs::write(&source, vec![42u8; 1024 * 1024]).unwrap();
+    let result = f.invoke(&[
+        "guest-file-push",
+        id,
+        "--source",
+        source.to_str().unwrap(),
+        "--name",
+        "transfer.bin",
+    ]);
+    assert_eq!(result["bytes_written"], 1048576);
+    worker.join().unwrap();
+}
+
+#[test]
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+fn guest_ipc_never_connects_when_vm_ownership_check_fails() {
+    let f = Fixture::new();
+    let vm = f.create();
+    let id = vm["id"].as_str().unwrap();
+    f.invoke(&["start", id]);
+    let runtime = Path::new(vm["qmp_socket"].as_str().unwrap())
+        .parent()
+        .unwrap();
+    let listener = UnixListener::bind(runtime.join("agent.sock")).unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let original = fs::read(runtime.join("runtime.json")).unwrap();
+    let mut edited: Value = serde_json::from_slice(&original).unwrap();
+    edited["launch_name"] = serde_json::json!("different-owner");
+    fs::write(
+        runtime.join("runtime.json"),
+        serde_json::to_vec(&edited).unwrap(),
+    )
+    .unwrap();
+    let output = f.command().args(["guest-status", id]).output().unwrap();
+    fs::write(runtime.join("runtime.json"), original).unwrap(); // restore before assertions/fixture cleanup
+    assert!(!output.status.success());
+    assert_eq!(
+        serde_json::from_slice::<Value>(&output.stdout).unwrap()["error"]["code"],
+        "ownership_mismatch"
+    );
+    assert_eq!(
+        listener.accept().unwrap_err().kind(),
+        std::io::ErrorKind::WouldBlock
     );
 }
 

@@ -58,8 +58,9 @@ for original,name in [('QEMU_EFI.fd','edk2-aarch64-secure-code.fd'),('QEMU_VARS.
     if not data or len(data)>64*1024*1024: raise SystemExit('Unexpected ARM firmware image size')
     (output/name).write_bytes(data+b'\xff'*(64*1024*1024-len(data)))
 PY
-PERP_ENROLLED_TEMPLATE="${PERPENDICULAR_ENROLLED_VARS:-$PERP_FIRMWARE_ROOT/.tools/qemu/share/qemu/edk2-arm-secure-vars.fd}"
-if [[ -f "$PERP_ENROLLED_TEMPLATE" ]]; then
+PERP_ENROLLED_TEMPLATE="${PERPENDICULAR_ENROLLED_VARS:-}"
+if [[ -n "$PERP_ENROLLED_TEMPLATE" ]]; then
+  [[ -f "$PERP_ENROLLED_TEMPLATE" ]] || { echo "The explicitly supplied enrolled template does not exist." >&2; exit 1; }
   PERP_FIRMWARE_IMAGE="${PERPENDICULAR_QEMU_IMG:-$PERP_FIRMWARE_ROOT/.tools/qemu/bin/qemu-img}"
   [[ -x "$PERP_FIRMWARE_IMAGE" ]] || { echo "qemu-img is needed to normalize enrolled variables." >&2; exit 1; }
   "$PERP_FIRMWARE_IMAGE" convert -O raw "$PERP_ENROLLED_TEMPLATE" "$PERP_FIRMWARE_OUTPUT/edk2-arm-secure-vars.fd"
@@ -102,7 +103,14 @@ report['x509_certificates']=certificates
 print('Enrolled PK,KEK,db verified; guest SecureBoot remains a runtime check.')
 PY
 else
-  echo "No enrolled variable template supplied. Empty variables are provided, but SecureBoot keys still need enrollment." >&2
+  # Prevent a previous build's enrolled store from appearing to belong to this
+  # new build. Keep it recoverable; provisioning fresh keys is a separate step.
+  for name in edk2-arm-secure-vars.fd enrolled-variable-summary.json; do
+    if [[ -f "$PERP_FIRMWARE_OUTPUT/$name" ]]; then
+      mv "$PERP_FIRMWARE_OUTPUT/$name" "$PERP_FIRMWARE_OUTPUT/$name.previous"
+    fi
+  done
+  echo "Empty variables built. Run python3 scripts/enroll-secure-vars.py to enroll an independent platform key and public Microsoft certificates." >&2
 fi
 "$PERP_FIRMWARE_PYTHON" - "$PERP_FIRMWARE_OUTPUT" "$PERP_QEMU_SHA256" "$PERP_FIRMWARE_TARGET" "${PERP_AARCH64_PREFIX}gcc" "$PERP_ENROLLED_TEMPLATE" <<'PY'
 import hashlib,json,pathlib,subprocess,sys
@@ -112,9 +120,9 @@ report={'source':'https://download.qemu.org/qemu-11.1.2.tar.xz','source_sha256':
         'compiler':subprocess.check_output([sys.argv[4],'--version'],text=True).splitlines()[0],'compiler_compatibility':{'firmware_c_standard':'gnu11','host_apple_clang':'Wno-error=macro-redefined'},'files_sha256':files,'guest_secure_boot_verified':False}
 template=pathlib.Path(sys.argv[5])
 report['code_provenance']={'source_archive':report['source'],'source_archive_sha256':sys.argv[2],'license_aggregation':'edk2-licenses.txt'}
-report['enrolled_variables_provenance']={'source_template_name':template.name,'source_template_sha256':hashlib.sha256(template.read_bytes()).hexdigest() if template.is_file() else None,
-    'description':'Separately supplied enrolled variable template; default is TianoCore/UTM public PK and Microsoft2011/2023 trust certificates provisioned in the local QEMU firmware directory.',
-    'default_upstream_project':'https://github.com/utmapp/UTM','normalization':'qemu-img convert -O raw; authenticated store layout and active PK/KEK/db are validated.','certificate_summary':'enrolled-variable-summary.json'}
+report['enrolled_variables_provenance']=({'source_template_name':template.name,'source_template_sha256':hashlib.sha256(template.read_bytes()).hexdigest(),
+    'description':'Explicitly supplied enrolled variable template.',
+    'normalization':'qemu-img convert -O raw; authenticated store layout and active PK/KEK/db are validated.','certificate_summary':'enrolled-variable-summary.json'} if sys.argv[5] else None)
 (output/'build-manifest.json').write_text(json.dumps(report,indent=2)+'\n')
 PY
 echo "Secure ARM firmware built at $PERP_FIRMWARE_OUTPUT. No existing VM or installed runtime was changed."
