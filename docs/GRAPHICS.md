@@ -1,6 +1,18 @@
 # Windows ARM graphics: evidence and isolated experiment
 
-## Latest host experiment checkpoint — 2026-10-15
+## Latest Windows and host checkpoints — 2026-10-15
+
+The installed native console now presents its RFB frames with Metal; a live
+completed-frame diagnostic confirms the actual GPU path. A separate Windows
+clone booted the pinned fork with hybrid `virtio-ramfb` at PCI slot 7. Windows
+validated and loaded the official ARM64 Red Hat DOD package, reports device
+error 0, and independently measured successful active-mode changes to
+**1920×1080** and **1920×1200**. Secure Boot still reports `True`. An unsupported
+1280×720 mode was refused without changing the display. This is a 2D
+display-only driver. Hardware 3D and actual automatic window fitting remain
+unfinished; Guest Tools still cannot connect as the limited desktop user.
+The native sizing controller and bounded protocol are implemented and tested,
+but require a working guest channel. [Runtime evidence and remaining gates](VERIFICATION.md).
 
 The Xcode/Metal dependency below is now resolved: Xcode 27.0 and Apple's Metal
 toolchain are verified locally, and official Homebrew LLVM 15.0.7 static
@@ -23,8 +35,8 @@ claimed, and these host builds do not establish macOS 14 runtime compatibility.
 
 See the [repeatable fetch/build instructions and actual limits](../scripts/graphics-README.md)
 and [immutable source/dependency lock](../scripts/graphics-sources.json).
-**Guest GPU acceleration, signed-driver load and integration into the native
-VNC console remain unverified.** A separate macOS headless QEMU adapter now
+**Guest 3D acceleration and its integration into the native VNC console remain
+unverified.** A separate macOS headless QEMU adapter now
 passes its real diskless/CPU-less callback harness: **4,616,442 exact pixels**
 through Metal → ANGLE/PBO → bounded DisplaySurface → Unix VNC, including crop,
 resize, missing/delayed producer proof, timeout and exact native-handle teardown.
@@ -44,6 +56,18 @@ reused; a withheld Signal is rejected before reading. This proves the identified
 single-producer primitive, while actual Neptune resource ownership and RPC
 integration remain unfinished. See [the test and source evidence](../experimental/producer-sync/README.md)
 and [the paused HVF/TPM/PCI checks and Windows trial plan](../experimental/producer-sync/COMPATIBILITY.md).
+
+The real Neptune decoder now drives that snapshot path through unchanged
+QEMU/VNC in a closed host fixture: **7,042,042 exact pixels**, verified original
+buffer reuse, missing-token rejection and ownership/ACK guards. A further
+versioned broker exercises actual render workers and asynchronous Neptune rings,
+including control/export reordering, producer death, worker restart, stale ACKs
+and real imports. It still uses a development supervisor and rejects compositor
+resources with ambiguous writers; the full proxy/server and actual QEMU scanout
+association remain the next integration gates. These are functional ownership
+and pixel results, with no Windows 3D or fluidity claim. See
+[decoder integration](../experimental/neptune-snapshot/README.md) and
+[worker broker](../experimental/neptune-broker/README.md).
 
 The [REA inspection of the installed Parallels executable](PARALLELS_GRAPHICS_REA.md)
 records static Metal/IOSurface/display-link imports and explicit analysis limits.
