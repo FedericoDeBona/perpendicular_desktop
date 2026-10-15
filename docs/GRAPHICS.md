@@ -9,10 +9,13 @@ validated and loaded the official ARM64 Red Hat DOD package, reports device
 error 0, and independently measured successful active-mode changes to
 **1920×1080** and **1920×1200**. Secure Boot still reports `True`. An unsupported
 1280×720 mode was refused without changing the display. This is a 2D
-display-only driver. Hardware 3D and actual automatic window fitting remain
-unfinished; Guest Tools still cannot connect as the limited desktop user.
-The native sizing controller and bounded protocol are implemented and tested,
-but require a working guest channel. [Runtime evidence and remaining gates](VERIFICATION.md).
+display-only driver. A full Windows restart returned to the desktop. The
+scoped, explicitly approved per-instance port-access correction now allows
+Guest Tools 0.2.0 to connect through the limited desktop account; live display
+status reports the expected adapter, resize support and 1920×1200. The native
+sizing controller and bounded protocol are implemented and tested. Actual
+window-drag/fullscreen fitting and hardware 3D remain acceptance gates.
+[Runtime evidence and remaining gates](VERIFICATION.md).
 
 The Xcode/Metal dependency below is now resolved: Xcode 27.0 and Apple's Metal
 toolchain are verified locally, and official Homebrew LLVM 15.0.7 static
@@ -62,12 +65,26 @@ QEMU/VNC in a closed host fixture: **7,042,042 exact pixels**, verified original
 buffer reuse, missing-token rejection and ownership/ACK guards. A further
 versioned broker exercises actual render workers and asynchronous Neptune rings,
 including control/export reordering, producer death, worker restart, stale ACKs
-and real imports. It still uses a development supervisor and rejects compositor
-resources with ambiguous writers; the full proxy/server and actual QEMU scanout
-association remain the next integration gates. These are functional ownership
+and real imports. That checkpoint uses a development supervisor and rejects
+compositor resources with ambiguous writers. These are functional ownership
 and pixel results, with no Windows 3D or fluidity claim. See
 [decoder integration](../experimental/neptune-snapshot/README.md) and
 [worker broker](../experimental/neptune-broker/README.md).
+
+The next isolated overlay has now replaced that supervisor with the real QEMU
+virtio queue, Neptune proxy/server/spawned worker and asynchronous ring. Root
+rebuilt and repeated all five real-path checks plus two required failing
+mutants successfully. The baseline selects alternating real scanout resources
+for four frames / **1,920,000 exact VNC pixels** after all **3,840,000 original
+pixels** have independently been verified overwritten. Reset/recreation repeats
+the four frames. Withheld readiness, reused fence values and an old post-ACK
+continuation after reset are also checked. This establishes completed immutable
+snapshots of the selected resource and epoch, without proving one-to-one
+Windows Present association or ARM guest CPU/cache ordering. DWM/imported
+surfaces remain deliberately unsupported, and the release UMD's equivalence to
+the research source is unproved. No Windows 3D driver or app runtime was
+installed by this checkpoint. See the [actual pipeline, reproduction and
+precise limits](../experimental/neptune-live/README.md).
 
 The [REA inspection of the installed Parallels executable](PARALLELS_GRAPHICS_REA.md)
 records static Metal/IOSurface/display-link imports and explicit analysis limits.
@@ -124,6 +141,16 @@ signtool verify /kp /v /c viogpu3d.cat viogpu3d.inf
 ```
 
 Only a successful install, reboot, working display device, and clean relevant Code Integrity events on unchanged security settings establish that the driver loads. If it is rejected, stop and record the error. Do not enable `testsigning`/`nointegritychecks`, disable Secure Boot/HVCI, or import a test certificate to pass this experiment. Microsoft distinguishes signature acceptance from compatibility testing; the observed catalog does not prove WHQL/HLK certification. [Guest build instructions](https://github.com/osy/kvm-guest-drivers-windows/blob/769e75cd645fc48f4aaae716ca8a74795fe5e241/viogpu/viogpu3d/BUILDING.md), [Microsoft verification](https://learn.microsoft.com/en-us/windows-hardware/drivers/devtest/signtool), [signing offerings](https://learn.microsoft.com/en-us/windows-hardware/drivers/dashboard/driver-signing-offerings).
+
+The subsequent [exact released-package review](GRAPHICS_DRIVER_PACKAGE.md)
+records all eleven members, ARM64X/ARM64EC metadata, embedded signature and
+catalog digest consistency, and the still-unknown UMD build provenance. It also
+found material effects beyond loading a display driver: the original INF adds
+an automatic resolution service and globally writes `TdrDebugMode=1` and
+`Scheduler\\EnablePreemption=0`. The former tells Windows to ignore graphics
+timeouts. Those effects require an explicit clone-trial decision before any
+installation; the package has not been installed. Editing the signed INF would
+invalidate the reviewed catalog binding.
 
 ## Host sources, libraries, and licenses
 
