@@ -2,6 +2,14 @@
 
 Run `scripts/check.sh` from the repository root for the normal engine, console and native client checks. These checks do not require a Windows installation.
 
+## Console modifier events
+
+`run-console-tests.sh` compiles the real console with a native `NSEvent` harness and checks its exact RFB key sequence over private local sockets. Eleven modifier regressions cover flags-only Control+C, omitted modifier releases, normal and delayed `flagsChanged`, duplicate events, synthetic-to-physical handoff, all four modifier groups and their left/right sides, Command key equivalents, and focus loss. The peer rejects premature releases, duplicate key messages and wrong ordering. It never connects to a VM or sends system input.
+
+Native device-side flags identify which physical modifier remains held. Aggregate-only events have no such information: a duplicate cannot be distinguished from releasing one side while the other is held. The console conservatively preserves tracked physical sides until side flags or a cleared group flag establish a release. Caps Lock keeps its separate toggle behavior.
+
+For a single console fixture, compile the harness as in `run-console-tests.sh` and pass an optional fixture name as the third argument to `ConsoleMock.py`, such as `modifiers-missing-control` or `modifiers-all-sides`. All eleven new modifier scenarios were verified to fail against the original implementation before the correction and pass with it. This verifies native event handling and wire messages; actual CUA event delivery and Windows shortcut behavior still require live acceptance.
+
 ## Offline disk export
 
 ```sh

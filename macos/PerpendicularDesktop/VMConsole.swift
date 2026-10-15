@@ -1,5 +1,6 @@
 import AppKit
 import Darwin
+import IOKit.hidsystem
 import SwiftUI
 
 /// An embedded framebuffer for the engine's private Unix-domain VNC socket.
@@ -42,6 +43,7 @@ final class VMFramebufferView: NSView {
     private var focusObserver: RFBFocusObserver?
     private var pressedKeys: [UInt16: [UInt32]] = [:]
     private var pressedModifiers: [UInt16: UInt32] = [:]
+    private var synthesizedModifiers: Set<UInt16> = []
     private var pointerButtons: UInt8 = 0
     private var lastPointer = (x: UInt16(0), y: UInt16(0))
 
@@ -114,6 +116,7 @@ final class VMFramebufferView: NSView {
                     self.connection = nil
                     self.pressedKeys.removeAll()
                     self.pressedModifiers.removeAll()
+                    self.synthesizedModifiers.removeAll()
                     self.pointerButtons = 0
                     self.status = "\(message)\nReconnecting…"
                     self.needsDisplay = true
@@ -218,6 +221,7 @@ final class VMFramebufferView: NSView {
         for keysym in pressedModifiers.values { connection?.sendKey(keysym, down: false) }
         pressedKeys.removeAll()
         pressedModifiers.removeAll()
+        synthesizedModifiers.removeAll()
         if pointerButtons != 0 {
             connection?.sendPointer(x: lastPointer.x, y: lastPointer.y, buttons: 0)
             pointerButtons = 0
@@ -226,6 +230,7 @@ final class VMFramebufferView: NSView {
 
     override func keyDown(with event: NSEvent) {
         guard active else { return }
+        synchronizeModifiers(with: event)
         let keysyms = pressedKeys[event.keyCode] ?? Self.keysyms(for: event)
         pressedKeys[event.keyCode] = keysyms
         for keysym in keysyms { connection?.sendKey(keysym, down: true) }
@@ -241,23 +246,61 @@ final class VMFramebufferView: NSView {
     }
 
     override func keyUp(with event: NSEvent) {
+        guard active else { return }
         let keysyms = pressedKeys.removeValue(forKey: event.keyCode) ?? Self.keysyms(for: event)
         for keysym in keysyms { connection?.sendKey(keysym, down: false) }
+        synchronizeModifiers(with: event)
     }
 
     override func flagsChanged(with event: NSEvent) {
-        guard active, let modifier = Self.modifierKeys[event.keyCode] else { return }
-        let isDown: Bool
-        if event.keyCode == 57 { // Caps Lock is a toggle; send a complete press on each toggle.
-            connection?.sendKey(modifier.keysym, down: true)
-            connection?.sendKey(modifier.keysym, down: false)
-            return
-        } else {
-            isDown = event.modifierFlags.contains(modifier.flag) && pressedModifiers[event.keyCode] == nil
+        guard active else { return }
+        synchronizeModifiers(with: event)
+        if event.keyCode == 57 { // Caps Lock is a toggle, not a held modifier.
+            connection?.sendKey(0xffe5, down: true)
+            connection?.sendKey(0xffe5, down: false)
         }
-        if isDown { pressedModifiers[event.keyCode] = modifier.keysym }
-        else { pressedModifiers.removeValue(forKey: event.keyCode) }
-        connection?.sendKey(modifier.keysym, down: isDown)
+    }
+
+    private func synchronizeModifiers(with event: NSEvent) {
+        for group in Self.modifierGroups {
+            let keys: Set<UInt16> = [group.left, group.right]
+            let held = keys.intersection(pressedModifiers.keys)
+            var desired: Set<UInt16> = []
+            let sideMask = Self.modifierKeys[group.left]!.sideMask | Self.modifierKeys[group.right]!.sideMask
+            if event.modifierFlags.contains(group.flag) {
+                if event.modifierFlags.rawValue & sideMask != 0 {
+                    // Native events include device-side bits. These distinguish
+                    // releasing one Control/Shift/etc. while the other stays down.
+                    desired = Set(keys.filter { event.modifierFlags.rawValue & Self.modifierKeys[$0]!.sideMask != 0 })
+                    synthesizedModifiers.subtract(keys)
+                } else if event.type == .flagsChanged, keys.contains(event.keyCode) {
+                    // Aggregate-only events cannot distinguish a duplicate from
+                    // a side release while its sibling is held. Keep real keys
+                    // down until side information or a cleared group flag arrives.
+                    desired = held.subtracting(synthesizedModifiers)
+                    desired.insert(event.keyCode)
+                    synthesizedModifiers.subtract(keys)
+                } else {
+                    desired = held
+                    if desired.isEmpty {
+                        // Some injected events carry modifier flags without a
+                        // preceding flagsChanged. Recover the missing press.
+                        desired.insert(group.left)
+                        synthesizedModifiers.insert(group.left)
+                    }
+                }
+            } else { synthesizedModifiers.subtract(keys) }
+            // Press the replacement side before releasing a synthetic fallback,
+            // so the guest never observes a transient unmodified state.
+            for key in desired.subtracting(held).sorted() {
+                let keysym = Self.modifierKeys[key]!.keysym
+                pressedModifiers[key] = keysym
+                connection?.sendKey(keysym, down: true)
+            }
+            for key in held.subtracting(desired).sorted() {
+                if let keysym = pressedModifiers.removeValue(forKey: key) { connection?.sendKey(keysym, down: false) }
+            }
+        }
     }
 
     /// Standard RFB text clipboard. A guest agent is needed for Windows clipboard integration.
@@ -323,11 +366,16 @@ final class VMFramebufferView: NSView {
         return true
     }
 
-    private static let modifierKeys: [UInt16: (flag: NSEvent.ModifierFlags, keysym: UInt32)] = [
-        56: (.shift, 0xffe1), 60: (.shift, 0xffe2),
-        59: (.control, 0xffe3), 62: (.control, 0xffe4),
-        58: (.option, 0xffe9), 61: (.option, 0xffea),
-        55: (.command, 0xffeb), 54: (.command, 0xffec), 57: (.capsLock, 0xffe5)
+    private static let modifierGroups: [(flag: NSEvent.ModifierFlags, left: UInt16, right: UInt16)] = [
+        (.shift, 56, 60), (.control, 59, 62), (.option, 58, 61), (.command, 55, 54)
+    ]
+
+    // Public device-side masks from IOKit/hidsystem/IOLLEvent.h.
+    private static let modifierKeys: [UInt16: (keysym: UInt32, sideMask: UInt)] = [
+        56: (0xffe1, UInt(NX_DEVICELSHIFTKEYMASK)), 60: (0xffe2, UInt(NX_DEVICERSHIFTKEYMASK)),
+        59: (0xffe3, UInt(NX_DEVICELCTLKEYMASK)), 62: (0xffe4, UInt(NX_DEVICERCTLKEYMASK)),
+        58: (0xffe9, UInt(NX_DEVICELALTKEYMASK)), 61: (0xffea, UInt(NX_DEVICERALTKEYMASK)),
+        55: (0xffeb, UInt(NX_DEVICELCMDKEYMASK)), 54: (0xffec, UInt(NX_DEVICERCMDKEYMASK))
     ]
 
     private static func keysyms(for event: NSEvent) -> [UInt32] {

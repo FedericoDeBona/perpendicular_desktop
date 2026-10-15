@@ -170,6 +170,86 @@ private func runFocusTest(socket: String) {
     print("focus release, Ctrl mapping, pointer coordinates and resize request PASS")
 }
 
+@MainActor
+private func runModifierTest(socket: String, scenario: String) {
+    _ = NSApplication.shared
+    let window = NSWindow(contentRect: CGRect(x: 0, y: 0, width: 300, height: 200),
+                          styleMask: [.titled], backing: .buffered, defer: false)
+    let view = VMFramebufferView(frame: CGRect(x: 0, y: 0, width: 300, height: 200))
+    window.contentView = view
+    view.configure(socketPath: socket, isActive: true)
+    waitForView { view.testFramebufferWidth == 4 }
+    precondition(window.makeFirstResponder(view))
+    func event(_ type: NSEvent.EventType, _ flags: NSEvent.ModifierFlags, _ code: UInt16 = 8, _ text: String = "c") -> NSEvent {
+        NSEvent.keyEvent(with: type, location: .zero, modifierFlags: flags, timestamp: 0,
+            windowNumber: window.windowNumber, context: nil, characters: text,
+            charactersIgnoringModifiers: text, isARepeat: false, keyCode: code)!
+    }
+    func flags(_ code: UInt16, _ flags: NSEvent.ModifierFlags) { view.flagsChanged(with: event(.flagsChanged, flags, code, "")) }
+    func down(_ flags: NSEvent.ModifierFlags, _ code: UInt16 = 8, _ text: String = "c") { view.keyDown(with: event(.keyDown, flags, code, text)) }
+    func up(_ flags: NSEvent.ModifierFlags, _ code: UInt16 = 8, _ text: String = "c") { view.keyUp(with: event(.keyUp, flags, code, text)) }
+    switch scenario {
+    case "missing-control":
+        down(.control); up([])
+    case "missing-release":
+        down(.control); up(.control); down([], 7, "x"); up([], 7, "x")
+    case "normal-duplicate":
+        flags(59, .control); flags(59, .control)
+        down(.control); up(.control)
+        flags(59, []); flags(59, [])
+    case "late-flags":
+        down(.control)
+        flags(59, .control); flags(59, .control)
+        up(.control); flags(59, [])
+    case "left-right":
+        let left = NSEvent.ModifierFlags(rawValue: 0x00000001)
+        let right = NSEvent.ModifierFlags(rawValue: 0x00002000)
+        flags(59, [.control, left]); flags(62, [.control, left, right]); flags(62, [.control, left, right])
+        flags(59, [.control, right]); flags(59, [.control, right])
+        down([.control, right]); up([.control, right]); flags(62, [])
+    case "right-without-flags":
+        down([.control, NSEvent.ModifierFlags(rawValue: 0x00002000)]); up([])
+    case "handoff-right":
+        down(.control); flags(62, .control); up(.control); flags(62, [])
+    case "aggregate-both-duplicate":
+        flags(59, .control); flags(62, .control); flags(59, .control); flags(62, .control)
+        down(.control); up(.control); flags(59, [])
+    case "all-sides":
+        let groups: [(NSEvent.ModifierFlags, UInt16, UInt16, UInt, UInt)] = [
+            (.shift, 56, 60, 0x2, 0x4), (.control, 59, 62, 0x1, 0x2000),
+            (.option, 58, 61, 0x20, 0x40), (.command, 55, 54, 0x8, 0x10)
+        ]
+        for (group, leftKey, rightKey, leftMask, rightMask) in groups {
+            let both: NSEvent.ModifierFlags = [group, NSEvent.ModifierFlags(rawValue: leftMask | rightMask)]
+            let right: NSEvent.ModifierFlags = [group, NSEvent.ModifierFlags(rawValue: rightMask)]
+            flags(leftKey, [group, NSEvent.ModifierFlags(rawValue: leftMask)])
+            flags(rightKey, both); flags(leftKey, both)
+            flags(leftKey, right); flags(leftKey, right)
+            down(right, 7, "x"); up(right, 7, "x")
+            flags(rightKey, []); flags(rightKey, [])
+        }
+    case "focus-fallback":
+        down(.control)
+        precondition(window.makeFirstResponder(nil))
+    case "all-modifiers":
+        for modifier: NSEvent.ModifierFlags in [.control, .shift, .option, .command] {
+            let text = modifier == .shift ? "X" : "x"
+            if modifier == .command {
+                precondition(view.performKeyEquivalent(with: event(.keyDown, modifier, 7, text)))
+            } else { down(modifier, 7, text) }
+            up([], 7, text)
+        }
+    default: preconditionFailure("Unknown modifier scenario")
+    }
+    precondition(view.testHeldInputCount == 0, "Completed modifier sequence left guest input held")
+    // The local peer checks exact RFB event order, rejects duplicates and only
+    // acknowledges with a resize once the complete expected sequence arrived.
+    waitForView { view.testFramebufferWidth == 3 }
+    view.configure(socketPath: socket, isActive: false)
+    RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+    print("modifier \(scenario) exact wire order and release PASS")
+}
+
 precondition(CommandLine.arguments.count >= 2, "Expected console test mode")
 switch CommandLine.arguments[1] {
 case "protocol": runProtocolTest(socket: CommandLine.arguments[2])
@@ -177,5 +257,6 @@ case "bad": runBadMessageTest(socket: CommandLine.arguments[2], expected: Comman
 case "drawing": runDrawingTest()
 case "reconnect": runReconnectTest(socket: CommandLine.arguments[2])
 case "focus": runFocusTest(socket: CommandLine.arguments[2])
+case "modifiers": runModifierTest(socket: CommandLine.arguments[2], scenario: CommandLine.arguments[3])
 default: preconditionFailure("Unknown console test mode")
 }

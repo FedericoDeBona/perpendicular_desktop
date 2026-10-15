@@ -10,6 +10,7 @@ import time
 
 HARNESS = sys.argv[1]
 WORK = Path(sys.argv[2])
+TEST_FILTER = sys.argv[3] if len(sys.argv) > 3 else None
 
 
 class Peer:
@@ -90,6 +91,8 @@ def listener(path):
 
 
 def run_fixture(name, mode, fixture, *arguments):
+    if TEST_FILTER and TEST_FILTER != name:
+        return
     path = WORK / f"{name}.sock"
     server = listener(path)
     errors = []
@@ -105,13 +108,20 @@ def run_fixture(name, mode, fixture, *arguments):
     thread = threading.Thread(target=serve, daemon=True)
     thread.start()
     try:
-        result = subprocess.run(
-            [HARNESS, mode, str(path), *arguments], capture_output=True, text=True, timeout=15
-        )
+        try:
+            result = subprocess.run(
+                [HARNESS, mode, str(path), *arguments], capture_output=True, text=True, timeout=15
+            )
+        except subprocess.TimeoutExpired:
+            # A failed native precondition may spend time producing a crash
+            # backtrace. Preserve the peer's earlier causal wire mismatch.
+            if errors:
+                raise AssertionError(f"{name}: {errors!r}") from None
+            raise
         thread.join(timeout=9)
         assert not thread.is_alive(), f"{name}: mock server did not finish"
-        assert result.returncode == 0, f"{name}: {result.stderr}"
         assert not errors, f"{name}: {errors!r}"
+        assert result.returncode == 0, f"{name}: {result.stderr}"
         print(f"{name}: {result.stdout.strip()}", flush=True)
     finally:
         server.close()
@@ -241,6 +251,54 @@ def focus(peer):
 run_fixture("focus", "focus", focus)
 
 
+def modifier_events(peer, expected):
+    peer.handshake(width=4, height=4)
+    peer.update([rectangle(0, 0, 4, 4, 0, bytes(64))])
+    received = []
+    while len(received) < len(expected):
+        kind = peer.read(1)[0]
+        if kind == 3:
+            assert peer.read(9) == struct.pack(">BHHHH", 1, 0, 0, 4, 4)
+            continue
+        assert kind == 4, f"Unexpected modifier client message {kind}"
+        down, _, _, keysym = struct.unpack(">BBBI", peer.read(7))
+        received.append((keysym, bool(down)))
+        assert received[-1] == expected[len(received) - 1], (
+            f"Wrong modifier wire sequence: expected {expected}, received {received}"
+        )
+    peer.update([rectangle(0, 0, 3, 1, -223)])
+    # Any extra/duplicate key event here fails the framebuffer request check.
+    peer.request(3, 1, incremental=False)
+    peer.eof()
+
+
+LC, RC, C, X = 0xFFE3, 0xFFE4, ord("c"), ord("x")
+control_chord = [(LC, True), (C, True), (C, False), (LC, False)]
+modifier_scenarios = {
+    "missing-control": control_chord,
+    "missing-release": control_chord + [(X, True), (X, False)],
+    "normal-duplicate": control_chord,
+    "late-flags": control_chord,
+    "left-right": [(LC, True), (RC, True), (LC, False), (C, True), (C, False), (RC, False)],
+    "right-without-flags": [(RC, True), (C, True), (C, False), (RC, False)],
+    "handoff-right": [(LC, True), (C, True), (RC, True), (LC, False), (C, False), (RC, False)],
+    "aggregate-both-duplicate": [(LC, True), (RC, True), (C, True), (C, False), (LC, False), (RC, False)],
+    "all-sides": [
+        event
+        for left, right in [(0xFFE1, 0xFFE2), (LC, RC), (0xFFE9, 0xFFEA), (0xFFEB, 0xFFEC)]
+        for event in [(left, True), (right, True), (left, False), (X, True), (X, False), (right, False)]
+    ],
+    "focus-fallback": control_chord,
+    "all-modifiers": [
+        event
+        for modifier, letter in [(LC, X), (0xFFE1, ord("X")), (0xFFE9, X), (0xFFEB, X)]
+        for event in [(modifier, True), (letter, True), (letter, False), (modifier, False)]
+    ],
+}
+for scenario, sequence in modifier_scenarios.items():
+    run_fixture("modifiers-" + scenario, "modifiers", lambda peer, expected=sequence: modifier_events(peer, expected), scenario)
+
+
 def run_reconnect():
     path = WORK / "reconnect.sock"
     initial = listener(path)
@@ -291,6 +349,8 @@ def run_reconnect():
         path.unlink(missing_ok=True)
 
 
-run_reconnect()
-subprocess.run([HARNESS, "drawing"], check=True, timeout=10)
+if TEST_FILTER is None or TEST_FILTER == "reconnect":
+    run_reconnect()
+if TEST_FILTER is None or TEST_FILTER == "drawing":
+    subprocess.run([HARNESS, "drawing"], check=True, timeout=10)
 print("All native console tests passed.", flush=True)
