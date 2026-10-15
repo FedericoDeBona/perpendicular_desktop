@@ -55,7 +55,8 @@ def main():
             "PerpendicularAgent.Display.ps1",
             "Install-PerpendicularAgent.ps1", "Uninstall-PerpendicularAgent.ps1",
             "Install-PerpendicularGuestTools.ps1", "Install-PerpendicularGuestTools.cmd",
-            "Get-PerpendicularGuestToolsDiagnostics.ps1", "Get-PerpendicularGuestToolsDiagnostics.cmd")
+            "Get-PerpendicularGuestToolsDiagnostics.ps1", "Get-PerpendicularGuestToolsDiagnostics.cmd",
+            "Set-PerpendicularGuestChannelAccess.ps1", "PerpendicularChannelAccess.Native.cs")
         for name in required_agent_files:
             if not (agent_source / name).is_file():
                 raise SystemExit("The independent Guest Tools package is incomplete: " + name)

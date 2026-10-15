@@ -29,6 +29,8 @@ The diagnostic does not start/stop/register tasks, install drivers, restart Wind
 
 `Start-ScheduledTask` is asynchronous, so task registration or result `0x00041301` (running) does not establish that the port opened. Native compilation and STA/Windows Forms initialization happen before the agent retry loop; port/FileStream failures happen inside the loop and retry once per second. The raw-byte reader has a size bound, not an idle timeout; waiting for an incomplete line cannot alone explain a port that was never opened. A healthy PCI controller and the named child port are separate observations. [Microsoft task startup](https://learn.microsoft.com/en-us/powershell/module/scheduledtasks/start-scheduledtask), [Microsoft FileStream asynchronous handles](https://learn.microsoft.com/en-us/dotnet/api/system.io.filestream.isasync).
 
+The separately reviewed [per-port access proposal](../docs/GUEST_CHANNEL_ACCESS.md) adds `Set-PerpendicularGuestChannelAccess.ps1` and its C# source to the disc. It defaults to inspection and is never invoked by normal installation. It can propose only one verified desktop SID's read/write access on the uniquely identified Guest Tools PDO, with protected rollback. No Windows execution or ACL change has been performed; actual mapping/descriptor support requires an elevated read-only checkpoint before any user-approved application. There is no elevated agent, SYSTEM service or class-wide permission fallback.
+
 For an agent-only installation after manually installing the signed serial driver, open Windows PowerShell as the desktop user whose clipboard and Downloads folder should be used. Replace `D:` with the actual driver disc letter:
 
 ```powershell
