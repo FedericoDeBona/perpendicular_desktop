@@ -133,3 +133,10 @@ or replace an installed executable. Private HVF features are disabled.
 The WebKit build restricts direct linking to its GLES dylib. The smoke links EGL
 and obtains GL functions via `eglGetProcAddress`, matching the intended dispatch
 route, rather than changing the library's allowed-client metadata.
+
+The subsequent [headless adapter and causal harness](../experimental/metal-headless/README.md)
+are built separately with `graphics-headless.py --causality`. That development
+script does start its own diskless, CPU-less QEMU callback fixture, unlike the
+build stages above. It verifies exact Metal → ANGLE/PBO → DisplaySurface → VNC
+pixels plus resize and teardown. Real Neptune scanouts remain rejected until
+their producer-ready and buffer-reuse contract is implemented and verified.

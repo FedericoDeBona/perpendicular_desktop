@@ -24,10 +24,17 @@ claimed, and these host builds do not establish macOS 14 runtime compatibility.
 See the [repeatable fetch/build instructions and actual limits](../scripts/graphics-README.md)
 and [immutable source/dependency lock](../scripts/graphics-sources.json).
 **Guest GPU acceleration, signed-driver load and integration into the native
-VNC console remain unverified.** The next concrete step is an isolated macOS
-QEMU display backend using the verified PBO transfer to a bounded DisplaySurface,
-with explicit pixel-format conversion, native texture lifetime, crop/orientation and producer synchronization
-checked before any guest-driver experiment.
+VNC console remain unverified.** A separate macOS headless QEMU adapter now
+passes its real diskless/CPU-less callback harness: **4,616,442 exact pixels**
+through Metal → ANGLE/PBO → bounded DisplaySurface → Unix VNC, including crop,
+resize, missing/delayed producer proof, timeout and exact native-handle teardown.
+Two deliberately broken variants fail for their expected thread-handoff and
+color-conversion causes. See the [implementation, repeatable command and limits](../experimental/metal-headless/README.md).
+The existing base experiment binaries and pinned source trees remain unchanged.
+This synthetic producer supplies an explicit ready event and immutable read
+lease; actual Neptune handle-only frames remain rejected. The next step is to
+prove and bridge the real renderer's producer completion and buffer-reuse
+contract before any guest-driver experiment. No fluidity result is claimed.
 
 ## Earlier source inspection and capability checks
 
