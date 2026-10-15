@@ -6,7 +6,7 @@ The requested outcome is a functioning independent reconstruction of the Paralle
 
 - [x] Standalone native macOS application, with a bundled working runtime and documented source build.
 - [x] Create and configure a Windows 11 ARM VM from a user-supplied ISO.
-- [ ] Install and boot Windows to a usable desktop on a private test disk.
+- [x] Install and boot Windows to a usable desktop on a private test disk.
 - [ ] Embedded interactive display with keyboard, pointer, resize, fullscreen and usable scaling.
 - [ ] Accurate start, shutdown, forced stop, pause, resume and crash recovery.
 - [ ] CPU/RAM/disk configuration with coherent validation and persistent state.

@@ -16,7 +16,9 @@ Development host: Apple M4, 24 GiB RAM, macOS 27.2. Checks below were performed 
 
 A separate private VM uses 4 CPUs, 8 GiB RAM, a 64 GiB qcow2 disk and the user-supplied Windows ARM64 ISO. Windows PE reports version 10.0.26100.9457. The guest reached the Italian Windows 11 installation language screen.
 
-The successful combination is QEMU/HVF, the upstream EDK2 ArmVirt build with RAMFB, explicit USB-BOT/SCSI CD-ROMs, NVMe, USB input and swtpm. Windows 11 Pro completed its installation-file stage, rebooted and booted Windows Boot Manager from the private disk into its initial configuration. At the network page, the signed NetKVM Windows 11 ARM64 driver was selected from the sanitized driver disc; Windows displayed **Rete — Connessa** and proceeded to its online update check. The guest has **not yet reached a Windows desktop**.
+The successful combination is QEMU/HVF, the upstream EDK2 ArmVirt build with RAMFB, explicit USB-BOT/SCSI CD-ROMs, NVMe, USB input and swtpm. Windows 11 Pro completed installation and initial configuration, then reached its Italian desktop. At the network page, the signed NetKVM Windows 11 ARM64 driver was selected from the sanitized driver disc; Windows displayed **Rete — Connessa**. The installed desktop opened Windows PowerShell and executed `whoami` successfully. Optional updates were deferred through the official setup link and still require completion.
+
+The native app's Shut Down action stopped that Windows session normally; all three owned runtime processes exited and `qemu-img check` reported no image errors. While stopped, the disk, EFI code/variables and TPM persistent state were cloned into the app's normal private library. SHA-256 comparisons confirmed exact preservation, including UUID and MAC. The original test copy remains retained. The installed app, launched without a development data-directory override, discovered **Windows 11 Pro** and booted it back to the desktop with the installation ISO ejected. The restart adds the integration serial port and output-only audio, and selects QEMU's Italian keyboard map. Device presence is not yet an end-to-end driver/audio result.
 
 Windows PE's own registry reports:
 
@@ -41,11 +43,13 @@ Actual fullscreen testing exposed a race where a retiring SwiftUI accessor could
 
 The new offline enrollment path starts with the source-built empty ArmVirt store, creates a local RSA-3072 platform certificate and enrolls it with pinned `virt-firmware 26.10`. The database includes Microsoft Windows Production PCA 2011 and Windows UEFI CA 2023; KEK includes the local public certificate and Microsoft KEK 2011/2023. The private key stays in the ignored build area with mode 0600 and is never packaged. No installed UTM variable template is needed by this path.
 
-An isolated QEMU/HVF firmware VM, separate from the ongoing Windows installation, reported `SecureBoot=01` and `SetupMode=00`. The supplied Windows ISO's signed ARM64 boot loader was accepted and reached its own “Press any key to boot from CD or DVD” prompt. An unsigned ARM64 Shell.efi built from the same EDK2 sources was refused with `Command Error Status: Access Denied`. This checks firmware enforcement, not Windows desktop provisioning or current revocations. The generated DBX is only virt-firmware's placeholder; provisioning current Microsoft revocation lists and validating updates remains required.
+An isolated QEMU/HVF firmware VM, separate from the ongoing Windows installation, reported `SecureBoot=01` and `SetupMode=00`. The supplied Windows ISO's signed ARM64 boot loader was accepted and reached its own “Press any key to boot from CD or DVD” prompt. An unsigned ARM64 Shell.efi built from the same EDK2 sources was refused with `Command Error Status: Access Denied`. This checks firmware enforcement, not Windows desktop provisioning or current revocations. That initial template used virt-firmware's placeholder DBX.
 
 A separate negative-control store with SecureBootEnable disabled executed that exact unsigned file and started a second shell, while reporting `SecureBoot=00`. That control was confined to the disposable firmware VM; the Windows installation retained Secure Boot throughout. Both firmware test processes were stopped after capture.
 
 ![Independent enrollment rejects unsigned EFI code](images/independent-secure-boot.png)
+
+A subsequent, separately generated factory template contains 26 pinned Microsoft ARM64 image hashes. In disposable firmware VMs, the current Windows loader was accepted; a benign signed EFI canary executed, and the exact same file was rejected after adding only its Authenticode hash to DBX. Host verification of Microsoft's 22-entry signed subset also passed. Firmware rejected the original signed runtime update with `EFI_SECURITY_VIOLATION`, so runtime update/migration remains unverified. The current installed Windows VM and application template have not been changed by these tests. [Exact scope, reproducible tests and remaining limits](SECURE_BOOT_DBX.md).
 
 ## Guest integration checks
 
@@ -66,4 +70,4 @@ Saved keyboard layout and output-audio configuration have engine/native tests. A
 
 ## Remaining required work
 
-Complete installation and reach a usable Windows desktop; verify Windows TPM and networking; audio; live guest tools and integration channel; clipboard, shared folders/transfers and USB integration; native display resizing and graphics acceleration; actual Windows snapshot recovery; current DBX revocation provisioning and release packaging. The authoritative feature checklist remains [FEATURES.md](FEATURES.md).
+Verify Windows TPM health and desktop networking; finish deferred Windows updates; audio; live guest tools and integration channel; clipboard, shared folders/transfers and USB integration; native display resizing and graphics acceleration; actual Windows snapshot recovery; current DBX revocation provisioning and release packaging. The authoritative feature checklist remains [FEATURES.md](FEATURES.md).
