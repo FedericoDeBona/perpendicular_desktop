@@ -104,14 +104,10 @@ final class VMFramebufferView: NSView {
                     self.needsDisplay = true
                 }
             },
-            onCutText: { [weak self] text in
-                Task { @MainActor in
-                    guard let self, self.generation == currentGeneration, self.active else { return }
-                    // RFB clipboard availability depends on the guest/backend integration.
-                    NSPasteboard.general.clearContents()
-                    NSPasteboard.general.setString(text, forType: .string)
-                }
-            },
+            // ServerCutText is unsolicited guest input. Clipboard access belongs
+            // to the explicit Guest Tools actions, so display traffic cannot
+            // replace the Mac user's clipboard.
+            onCutText: { _ in },
             onFailure: { [weak self] message in
                 Task { @MainActor in
                     guard let self, self.generation == currentGeneration, self.active else { return }

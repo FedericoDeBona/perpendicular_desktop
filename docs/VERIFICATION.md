@@ -51,6 +51,8 @@ A separate negative-control store with SecureBootEnable disabled executed that e
 
 The Rust guest transport, native explicit clipboard/file controller and independent Windows PowerShell agent pass the normal checks. The native harness uses a recording clipboard and proves that readiness never accesses clipboard contents, failed reads preserve existing text, private clipboard payloads are cleaned up, capabilities gate operations and partial transfers do not count as success. The PowerShell core passed 51 checks in the verified official PowerShell 7.6.7 runtime on macOS, including a full 1 MiB file and strict framing/encoding/path validation. These are **not yet Windows PowerShell 5.1, device, scheduled-task or live clipboard results**.
 
+The display view now ignores unsolicited RFB ServerCutText messages. Only the explicit Guest Tools actions can replace the Mac clipboard with guest text. The console protocol, native drawing/input and explicit Guest Tools controller checks passed again with the full Xcode toolchain; this does not replace live Windows clipboard validation.
+
 The driver disc also includes an explicit Windows GUI installer. It separates the elevated, fixed signed-driver helper from the original desktop user's limited agent installation. Its 25 portable checks pass; the mounted ISO was rebuilt and replaced through QMP without disturbing the Windows disk. Actual Windows Forms, UAC, Windows signature checks, scheduled-task installation and live communication remain required runtime checks.
 
 Saved keyboard layout and output-audio configuration have engine/native tests. A separate paused HVF smoke exposes the output-only HDA controller; actual Windows sound and Italian punctuation still require guest runtime verification.
