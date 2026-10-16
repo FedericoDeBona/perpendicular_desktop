@@ -143,8 +143,16 @@ final class DisplaySizingController: ObservableObject {
     }
     private var pending: Pending?
 
+    // Windows cold boot can outlast a minute before the interactive Guest Tools
+    // task starts. This is admission for startup transport failures only: at
+    // most 12 observations within one absolute three-minute window, never a
+    // refreshed budget on viewport/tab changes or retries of terminal errors.
+    nonisolated static let defaultBootstrapDelays: [Double] = [2, 5, 10, 20, 20, 20, 20, 20, 20, 20, 20]
+    nonisolated static let defaultBootstrapWindow: Double = 180
+
     init(acknowledgementTimeout: Double = 3, confirmationTimeout: Double = 8,
-         bootstrapDelays: [Double] = [2, 5, 10, 20], bootstrapWindow: Double = 60) {
+         bootstrapDelays: [Double] = DisplaySizingController.defaultBootstrapDelays,
+         bootstrapWindow: Double = DisplaySizingController.defaultBootstrapWindow) {
         self.acknowledgementTimeout = acknowledgementTimeout
         self.confirmationTimeout = confirmationTimeout
         self.bootstrapDelays = bootstrapDelays

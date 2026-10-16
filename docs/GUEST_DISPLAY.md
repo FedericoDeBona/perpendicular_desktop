@@ -30,6 +30,30 @@ The app should choose a fitting mode from the advertised sizes, debounce window 
 
 If a separate RFB size request reports that it was forwarded, that acknowledgement is pending. Neither a forwarded request nor this guest operation may be presented as applied until framebuffer/guest actual dimensions establish the change.
 
+When Windows starts, the app admits at most **12** capability observations over
+one absolute **180-second** startup window. After the first observation, delays
+are 2, 5, 10, then eight intervals of 20 seconds (the last nominal observation
+is at 177 seconds; engine command time can make the absolute deadline end the
+budget earlier). Only `guest_agent_unavailable` and `guest_agent_timeout`
+qualify for this startup admission. A connected but unsupported display,
+protocol/ownership errors and other terminal failures stop immediately. This
+does not broaden mutation retries or their confirmation deadlines.
+
+Viewport changes, switching host tabs and toggling the preference do not refill
+the budget. Hidden/inactive/stopped views cancel scheduled work, and late
+responses must pass the existing VM/backend/connection/generation guards. A new
+VM/backend or a new running transition starts a fresh budget; after exhaustion,
+the explicit Check Display action can still perform a deliberate check.
+Readiness alone never means the display was resized: the app still requires
+both measured guest dimensions and received framebuffer pixels.
+
+The native sizing fixture scales the production startup policy by 50 and
+withholds agent readiness until 2.7 seconds (a 135-second startup). It verifies
+automatic admission after the old 60-second window, one serialized mutation,
+independent guest/framebuffer confirmation and no polling after success.
+Existing fixtures separately retain hard deadline, attempt exhaustion,
+hidden/stopped cancellation, stale response and terminal-error coverage.
+
 ## Windows implementation and verification
 
 The agent selects the attached primary display returned by [EnumDisplayDevicesW](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-enumdisplaydevicesw). [EnumDisplaySettingsExW](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-enumdisplaysettingsexw) supplies current settings and monitor-compatible modes in physical pixels. No raw or rotated-mode override is enabled. Only 32-bpp, non-interlaced, same-orientation modes with the supported DEVMODEW layout and no private trailing data are eligible.

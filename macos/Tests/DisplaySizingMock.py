@@ -40,7 +40,7 @@ try:
         assert (root/release).exists(), 'Harness did not release held fixture command'
     def actual(w,h): return {'width':w,'height':h,'dpi':None,'device_name':'fixed-fixture','adapter':'fixture'}
     if command == 'guest-display-status':
-        assert status_count <= (6 if scenario=='bootstrap-exhausted' else 5 if scenario.startswith('bootstrap-') else 3 if scenario=='recover-reconnect' else 2), 'Unbounded capability requery'
+        assert status_count <= (12 if scenario=='bootstrap-slow-ready' else 6 if scenario=='bootstrap-exhausted' else 5 if scenario.startswith('bootstrap-') else 3 if scenario=='recover-reconnect' else 2), 'Unbounded capability requery'
         if recovery and status_count == 2:
             if scenario in ['recover-stop','recover-disable','recover-hidden','recover-reconnect','recover-target-changed','recover-deadline','recover-frame-first','recover-queued-deadline','recover-queued-hidden','recover-queued-target']:
                 held('status-held','release-status')
@@ -51,6 +51,10 @@ try:
             if scenario in ['bootstrap-deadline','bootstrap-hidden'] and status_count==2:
                 held('bootstrap-held','release-bootstrap')
             disconnected = (scenario=='bootstrap-ready' and status_count<=2) or scenario in ['bootstrap-terminal','bootstrap-cancelled'] or (scenario=='bootstrap-exhausted' and not (root/'agent-ready').exists()) or (scenario in ['bootstrap-deadline','bootstrap-hidden'] and status_count==1)
+            if scenario=='bootstrap-slow-ready':
+                # Admit a 135-second interactive-agent startup at 1/50 scale.
+                # Readiness depends on elapsed time, never an arbitrary call.
+                disconnected = record['time'] - records[0]['time'] < 2.7
             if disconnected: startup_code = 'guest_agent_protocol' if scenario=='bootstrap-terminal' else ('guest_agent_timeout' if status_count%2==0 else 'guest_agent_unavailable')
         fixed = scenario=='fixed-driver' or (scenario=='recover-reconnect' and status_count==3)
         measured = actual(1280,720) if status_count==2 and scenario in ['recover-applied','recover-applied-no-frame','recover-frame-first','recover-stop','recover-disable','recover-hidden','recover-reconnect'] else actual(800,600)
@@ -146,7 +150,7 @@ for scenario in ['success','announcement','retina','rejected','ack-timeout','fra
                  'recover-status-error','recover-status-unavailable','recover-status-no-target','recover-target-changed','recover-deadline','recover-retry-deadline',
                  'recover-stop','recover-disable','recover-hidden','recover-reconnect','recover-protocol-error','recover-ownership-error','recover-message-only',
                  'recover-queued-deadline','recover-queued-hidden','recover-queued-target',
-                 'bootstrap-ready','bootstrap-exhausted','bootstrap-deadline','bootstrap-hidden','bootstrap-terminal','bootstrap-cancelled']:
+                 'bootstrap-ready','bootstrap-slow-ready','bootstrap-exhausted','bootstrap-deadline','bootstrap-hidden','bootstrap-terminal','bootstrap-cancelled']:
     if len(sys.argv)>3 and scenario!=sys.argv[3]:continue
     root=WORK/scenario;root.mkdir(mode=0o700)
     engine=root/'engine';engine.write_text(ENGINE);engine.chmod(0o700)

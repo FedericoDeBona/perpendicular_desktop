@@ -24,9 +24,16 @@ private func runDisplaySizingFixture() throws {
     }
     func pump(_ seconds: Double) { RunLoop.current.run(until: Date().addingTimeInterval(seconds)) }
     _ = NSApplication.shared
+    let lateAgent = scenario == "bootstrap-slow-ready"
+    precondition(DisplaySizingController.defaultBootstrapWindow == 180 &&
+        DisplaySizingController.defaultBootstrapDelays.count + 1 == 12 &&
+        DisplaySizingController.defaultBootstrapDelays.reduce(0, +) < DisplaySizingController.defaultBootstrapWindow,
+        "Startup admission lost its absolute deadline or observation bound")
     let controller = DisplaySizingController(acknowledgementTimeout: 0.45, confirmationTimeout: 1.6,
-        bootstrapDelays: scenario.hasPrefix("bootstrap-") ? [0.08, 0.08, 0.08, 0.08] : [2, 5, 10, 20],
-        bootstrapWindow: scenario == "bootstrap-deadline" ? 0.45 : 60)
+        bootstrapDelays: lateAgent ? DisplaySizingController.defaultBootstrapDelays.map { $0 / 50 } :
+            (scenario.hasPrefix("bootstrap-") ? [0.08, 0.08, 0.08, 0.08] : DisplaySizingController.defaultBootstrapDelays),
+        bootstrapWindow: lateAgent ? DisplaySizingController.defaultBootstrapWindow / 50 :
+            (scenario == "bootstrap-deadline" ? 0.45 : DisplaySizingController.defaultBootstrapWindow))
     let view = VMFramebufferView(frame: NSRect(x: 0, y: 0, width: 640, height: 360))
     let window = NSWindow(contentRect: view.bounds, styleMask: [], backing: .buffered, defer: false)
     window.isReleasedWhenClosed = false
@@ -51,7 +58,7 @@ private func runDisplaySizingFixture() throws {
     let original = GuestDisplayMode(width: 800, height: 600)
     if scenario.hasPrefix("bootstrap-") {
         let status = "guest-display-status"
-        if ["bootstrap-ready", "bootstrap-exhausted"].contains(scenario) {
+        if ["bootstrap-ready", "bootstrap-exhausted", "bootstrap-slow-ready"].contains(scenario) {
             if scenario == "bootstrap-exhausted" {
                 wait("bootstrap status budget exhausted") { controller.phase == .unavailable && commandNames().count == 5 }
                 precondition(commandNames() == Array(repeating: status, count: 5) && controller.request == nil)
@@ -68,11 +75,23 @@ private func runDisplaySizingFixture() throws {
                 controller.checkAgain() // A deliberate user check still works after exhaustion.
             }
             wait("guest ready before normal resize confirmation") { controller.phase == .waiting }
-            let expectedStatuses = scenario == "bootstrap-ready" ? 3 : 6
+            let expectedStatuses = lateAgent ? commands().filter { $0["command"] as? String == status }.count :
+                (scenario == "bootstrap-ready" ? 3 : 6)
+            if lateAgent {
+                let observations = commands().filter { $0["command"] as? String == status }
+                let elapsed = (observations.last!["time"] as! Double) - (observations.first!["time"] as! Double)
+                precondition(expectedStatuses >= 2 && expectedStatuses <= 12 && elapsed >= 2.7,
+                    "Slow-start fixture did not outlast the old startup budget")
+            }
             precondition(commandNames() == Array(repeating: status, count: expectedStatuses) + ["guest-display-resize"], "Bootstrap mutated Windows before readiness or looped")
             precondition(controller.actualFramebuffer == original && controller.phase != .fitted(target))
             mark("allow-frame")
             wait("bootstrap success still requires received pixels") { controller.phase == .fitted(target) }
+            if lateAgent {
+                pump(0.35)
+                precondition(commandNames() == Array(repeating: status, count: expectedStatuses) + ["guest-display-resize"],
+                    "Successful startup kept polling or mutated Windows again")
+            }
         } else if ["bootstrap-deadline", "bootstrap-hidden"].contains(scenario) {
             wait("held bootstrap status") { exists("bootstrap-held") }
             if scenario == "bootstrap-hidden" {
