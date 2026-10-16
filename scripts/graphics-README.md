@@ -140,3 +140,57 @@ script does start its own diskless, CPU-less QEMU callback fixture, unlike the
 build stages above. It verifies exact Metal → ANGLE/PBO → DisplaySurface → VNC
 pixels plus resize and teardown. Real Neptune scanouts remain rejected until
 their producer-ready and buffer-reuse contract is implemented and verified.
+
+
+## Fresh matched Wire1 rebuild on the current host
+
+The archived Wire1 recipes retain exact hashes for their original experiment
+binaries. Those gates still describe that historical installation. When those
+artifacts are absent, use `graphics-wire1-rebuild.py` to create a fresh profile
+from the same complete upstream source pins; it does not rewrite or skip the
+archived recipes' gates. The selected pair is renderer `d3c970599eb0bfbfe417b86d87fc0e0641da9512`
+and DXMT backend `917b721c0f915c6524b416169fdce4427a39524f`, with the original
+DirectX-header pin and exact protocol/native header hashes. No wire constants,
+protocol fragments or backend layouts are substituted.
+
+First build the common ANGLE/epoxy dependencies with the existing private
+builder, selecting optimization 3 explicitly, and run its Metal smoke. Then
+prepare each matched source profile (these two commands do not compile):
+
+```sh
+.tools/build-venv/bin/python scripts/graphics-wire1-rebuild.py --component backend --output .tools/graphics-rebuild-backend-20261016 --source-only
+.tools/build-venv/bin/python scripts/graphics-wire1-rebuild.py --component renderer --output .tools/graphics-rebuild-renderer-20261016 --source-only
+```
+
+Build sequentially, retaining the same component/output/optimization plan:
+
+```sh
+.tools/build-venv/bin/python scripts/graphics-wire1-rebuild.py --component backend --output .tools/graphics-rebuild-backend-20261016 --resume
+.tools/build-venv/bin/python scripts/graphics-wire1-rebuild.py --component renderer --output .tools/graphics-rebuild-renderer-20261016 --resume
+```
+
+Use a new `.tools/graphics-rebuild-*` name for another profile; existing output
+requires `--resume` and the exact recorded plan. Only optimization 2 or 3 is
+accepted; 3 is the default. Meson downloads stay disabled and compilation is
+limited to two jobs. Every install destination must remain inside the profile.
+The source/header pins, clean source inventories, actual dependency hashes,
+compile commands, compiler/SDK, binary identities and signatures are recorded
+under that profile. Resume rejects changed read-only dependencies. A current
+byte baseline of the installed application is checked before and after work;
+it replaces no historical hash assertion and grants no VM/start permission.
+Logs use distinct names for each invocation. The final `build.json` exists
+only after successful compilation, private installation and verification.
+
+Test a rebuilt backend against the matching renderer's shared-layout source:
+
+```sh
+.tools/build-venv/bin/python experimental/neptune-wire1-backend/test.py --rebuild-backend .tools/graphics-rebuild-backend-20261016 --rebuild-renderer .tools/graphics-rebuild-renderer-20261016
+```
+
+The fixture requires a new `native-check` directory in the backend profile and
+records actual loaded-library identity, GPU pixels and incompatible-version
+rejection. It requires only the renderer source preparation above.
+
+These builds do not install a runtime in the application, change drivers or
+start a VM. Renderer pairing and Windows/native-client qualification are still
+required before using them in the ordinary app.

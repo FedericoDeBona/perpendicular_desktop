@@ -20,19 +20,50 @@ build = importlib.util.module_from_spec(spec); spec.loader.exec_module(build)
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--profile', type=Path, default=BASE)
+    selection = parser.add_mutually_exclusive_group()
+    selection.add_argument('--profile', type=Path, default=BASE)
+    selection.add_argument('--rebuild-backend', type=Path, help='Fresh current-host backend profile with build.json')
+    parser.add_argument('--rebuild-renderer', type=Path, help='Matching clean current-host renderer source profile')
     args = parser.parse_args()
-    base = args.profile.absolute()
-    assert base.parent == ROOT / '.tools' and re.fullmatch(r'graphics-wire1-backend(?:-[a-z0-9-]{1,48})?', base.name)
-    build.frozen()
+    rebuilding = args.rebuild_backend is not None
+    assert rebuilding == (args.rebuild_renderer is not None), 'Both rebuild profiles are required together'
+    base = (args.rebuild_backend if rebuilding else args.profile).absolute()
+    if rebuilding:
+        renderer_base = args.rebuild_renderer.absolute()
+        for path in (base, renderer_base):
+            assert path.parent.resolve() == (ROOT / '.tools').resolve() and not path.is_symlink()
+            assert re.fullmatch(r'graphics-rebuild-[a-z0-9-]{1,64}', path.name)
+        base = base.parent.resolve() / base.name
+        renderer_base = renderer_base.parent.resolve() / renderer_base.name
+        manifest = json.loads((base / 'build.json').read_text())
+        renderer_plan = json.loads((renderer_base / 'plan.json').read_text())
+        assert manifest['plan']['output'] == str(base) and renderer_plan['output'] == str(renderer_base)
+        assert manifest['plan']['component'] == 'backend' and manifest['plan']['source']['pin'] == build.PIN
+        assert renderer_plan['component'] == 'renderer' and renderer_plan['source']['pin'] == build.renderer.PIN
+        assert build.sha(base / 'source-files.json') == manifest['source_inventory_sha256']
+        assert build.sha(base / 'dependencies.json') == manifest['dependencies_sha256']
+        protected = json.loads((base / 'protected.json').read_text())
+        assert protected
+        def verify_originals():
+            for name, expected in protected.items():
+                assert build.sha(Path(name)) == expected, 'Protected installed application changed: ' + name
+            for name, expected in json.loads((base / 'dependencies.json').read_text()).items():
+                assert build.sha(Path(name)) == expected, 'Backend dependency changed: ' + name
+        renderer_inventory = json.loads((renderer_base / 'source-files.json').read_text())['repository']
+    else:
+        assert base.parent == ROOT / '.tools' and re.fullmatch(r'graphics-wire1-backend(?:-[a-z0-9-]{1,48})?', base.name)
+        renderer_base = ROOT / '.tools/graphics-wire1'
+        renderer_inventory = json.loads((renderer_base / 'provenance/source-files.json').read_text())
+        verify_originals = build.frozen
+    verify_originals()
     output = base / 'native-check'; output.mkdir(mode=0o700, exist_ok=False)
     source = base / 'src/dxmt'; prefix = base / 'prefix'
-    renderer = ROOT / '.tools/graphics-wire1/src/virglrenderer'
+    renderer = renderer_base / 'src/virglrenderer'
     env = build.renderer.environment()
     build.validate_source(source, env)
     assert build.capture(['git', '-C', renderer, 'rev-parse', 'HEAD'], env) == build.renderer.PIN
+    assert build.capture(['git', '-C', renderer, 'status', '--porcelain'], env) == ''
     shared_path = renderer / 'src/neptune/npt_shared.c'
-    renderer_inventory = json.loads((ROOT / '.tools/graphics-wire1/provenance/source-files.json').read_text())
     assert build.sha(shared_path) == renderer_inventory['src/neptune/npt_shared.c']
     shared = shared_path.read_text()
     definitions = []
@@ -44,6 +75,8 @@ def main():
     assert match
     (output / 'renderer-shared-layout.h').write_text('#include <stdint.h>\n' + '\n'.join(definitions) + '\n' + match[0] + '\n')
     binary = prefix / 'lib/libdxmt-native.dylib'; before = build.sha(binary)
+    if rebuilding:
+        assert before == manifest['binaries'][str(binary)]['sha256'], 'Rebuilt backend identity changed'
     executable = output / 'native-check'
     command = ['xcrun', '--sdk', 'macosx', 'clang++', '-std=c++17', '-O0', '-Wall', '-Wextra', '-Werror',
         '-I' + str(prefix / 'include'), '-I' + str(output), '-isystem', str(source / 'include/native/windows'),
@@ -66,11 +99,14 @@ def main():
     assert any(str(binary) in line for line in loaded)
     assert not any(str(build.OLD / 'prefix/lib/libdxmt-native.dylib') in line for line in loaded)
     assert build.sha(binary) == before
-    build.frozen()
+    verify_originals()
     receipt.update({'build_command': command, 'binary_sha256': before,
         'renderer_shared_source_sha256': build.sha(shared_path), 'backend_header_sha256': build.sha(source / build.HEADER),
         'generated_layout_sha256': build.sha(output / 'renderer-shared-layout.h'), 'loaded_backend_lines': loaded,
         'guest_CPU_executed': False, 'guest_disks': False, 'Neptune_COM_commands_sent': False, 'exit_code': result.returncode})
+    if rebuilding:
+        receipt['current_host_rebuild'] = {'backend_manifest_sha256': build.sha(base / 'build.json'),
+            'renderer_plan_sha256': build.sha(renderer_base / 'plan.json')}
     (output / 'result.json').write_text(json.dumps(receipt, indent=2) + '\n')
     print(json.dumps(receipt, indent=2))
 

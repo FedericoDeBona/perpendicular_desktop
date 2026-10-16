@@ -536,3 +536,27 @@ not execution of that shader or validation of the complete graphics stack.
 The project's full graphics prerequisite check now passes, and all selected
 upstream source, LLVM and private PyYAML pins verified again. This does not
 change the normal installed app or the running VM.
+
+
+### Fresh matched Wire1 backend — 2026-10-16
+
+The current-host recipe rebuilds whole pinned sources in new private profiles,
+retaining the historical recipes' frozen-artifact gates. ANGLE and libepoxy
+were rebuilt with optimization 3. The real Metal/ANGLE smoke passed 16 trials
+and 14,084,084 exact pixel checks, including resize, shared/private textures
+and both surfaceless and pbuffer paths.
+
+The matching DXMT backend at `917b721c0f915c6524b416169fdce4427a39524f`
+completed all 152 build steps and passed arm64/signature verification.
+Its native GPU fixture used the shared-layout source from renderer
+`d3c970599eb0bfbfe417b86d87fc0e0641da9512`: DMTX version 2, 72-byte
+descriptor and FD offset 8. All 2,048 pixels matched; the incompatible version
+was rejected and event signal/clear/poll passed. The loaded-library trace
+identified the new profile's backend. Source/dependency inventories and the
+installed application's recorded file hashes remained unchanged.
+
+Private receipts are `.tools/graphics-experiment/provenance/smoke-results.json`
+and `.tools/graphics-rebuild-backend-20261016/{build.json,native-check/result.json}`.
+The matching renderer source is prepared; its complete build and Neptune COM
+qualification remain pending. These host-only checks execute no Windows CPU
+or guest disks and establish no Windows 3D performance or presentation latency.
