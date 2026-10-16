@@ -161,3 +161,13 @@ calls, Objective-C dispatch types and exception edges remain limitations.
 The guest GPU protocol, producer fences, complete buffer-reuse algorithm,
 currently active Parallels backend, runtime frame cadence and mouse path remain
 unresolved. No runtime frame trace or full graphics reconstruction is claimed.
+
+A bounded input inventory selected a smaller next target:
+`Contents/Frameworks/libPrlGui.3.dylib`, ARM64 slice 5,320,192 bytes, SHA-256
+`bbd2f37d8319e7075c07b23633b0e96533cfacb5217dff8ea8ef04ee3cf77602`.
+It defines native mouse-button/cursor wrappers and imports cursor association,
+warping and mouse-event APIs. The larger `prl_client_app` also imports guest
+mouse-event SDK operations and retains mouse sender/grabber/controller type
+names. These are target-selection findings, not recovered input algorithms.
+The two original carriers and extracted slices are hash-bound in the private
+`input-two-image-inventory.json`; Qt frameworks were not scanned recursively.

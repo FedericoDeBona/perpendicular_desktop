@@ -26,13 +26,32 @@ The exact source gate is UTM QEMU
 existing `build.ninja` SHA-256
 `3d7c980892aab9b8f4a26018fc84fd58c0cfd41b7084762e23bc11c810b2bfe4`.
 Only a **copy** is patched: include `publisher.h` after the Metal include;
-inside `drawFrame:` call
+inside the default branch of `drawFrame:` call
 `perp_native_display_capture(commandBuffer, drawable.texture);` immediately
 after the existing `[blit endEncoding];`, before its original completion
 handler. `perp_native_display_reset()` is the first Metal operation in
 `cocoa_gl_scanout_disable`, before its previous state changes, invalidating
 stale consumer output. Unique function/include/full-boundary anchors and no previous hook are
 required. Pure fixtures reject changed/ambiguous/already-patched anchors.
+
+With the explicit process environment `PERP_NATIVE_DISPLAY_DIRECT=1`, an earlier
+branch instead calls `perp_native_display_capture_region` with the exact read
+texture/origin/size and commits its command buffer, releasing the Cocoa read
+only after actual GPU completion. It returns before `nextDrawable`; no
+drawable capture or presentation is performed in that branch. The publisher
+still makes an immutable GPU snapshot, and the source's producer-fence
+qualification is unchanged. Cocoa context/window removal is a separate step.
+
+The copied read structure has one retry flag for its owned deferred bottom
+half. A direct-mode admission guard in `cocoa_gl_read_dispatch` preserves dirty
+demand while disconnected/full without allocating or dispatching. Transient
+failure/GPU-error cleanup schedules that deferred bottom half on QEMU's main
+loop, with no immediate redispatch. The normal refresh resumes after capacity
+returns. This avoids feeding a full budget into the old completion bottom
+half's immediate retry loop; it does not fall back to a drawable. The worker
+queue never reads or changes QEMU/Cocoa scanout state. Patch fixtures check the
+exact source/crop/commit/completion branch, absence of drawable use there, the
+deferred retry/admission hook, changed anchors and full byte-for-byte reversal.
 
 The copied `cocoa_gl_refresh` also polls
 `perp_native_display_needs_refresh()` immediately after `cocoa_refresh(dcl)`.

@@ -108,42 +108,101 @@ def ninja_words(text):
     return result
 
 
-def patch_cocoa(text):
+# Insertions are exact/reversible: the fixture removes them and compares every
+# byte against upstream. QEMU main-loop state is never touched by the worker.
+DIRECT_BRANCH = """        if (perp_native_display_direct()) {
+            id<MTLCommandBuffer> command = [self.commandQueue commandBuffer];
+            if (!command) {
+                cocoa_gl_read_defer(read, true);
+                return;
+            }
+            PNDCaptureResult result = perp_native_display_capture_region(
+                command, read->texture, read->origin, read->size);
+            if (result != PND_CAPTURE_ENCODED) {
+                /* No drawable fallback. The main-loop refresh owns retry. */
+                cocoa_gl_read_defer(read, result == PND_CAPTURE_BACKPRESSURE ||
+                                          result == PND_CAPTURE_FAILED);
+                return;
+            }
+            [command addCompletedHandler:^(id<MTLCommandBuffer> finished) {
+                if (finished.status == MTLCommandBufferStatusCompleted && !finished.error) {
+                    cocoa_gl_read_done(read);
+                } else {
+                    cocoa_gl_read_defer(read, true);
+                }
+            }];
+            [command commit];
+            return;
+        }
+"""
+DEFER_HELPER = """/* A full snapshot budget must not feed the immediate done-BH redispatch.
+ * Retain dirty demand, release this read on its owning main loop, then wait for
+ * its ordinary refresh. The publisher worker never dispatches QEMU/Cocoa. */
+static void cocoa_gl_read_defer_bh(void *opaque)
+{
+    CocoaGLRead *read = opaque;
+    gl_read_inflight = false;
+    if (read->retry && gl_scanout_src) {
+        qatomic_set(&gl_dirty, true);
+    }
+    [read->texture release];
+    g_free(read);
+}
+
+static void cocoa_gl_read_defer(CocoaGLRead *read, bool retry)
+{
+    read->retry = retry;
+    aio_bh_schedule_oneshot(qemu_get_aio_context(), cocoa_gl_read_defer_bh, read);
+}
+
+"""
+ADMISSION_GUARD = """    if (perp_native_display_direct() && !perp_native_display_can_capture()) {
+        /* Preserve demand without allocating, dispatching or touching a
+         * drawable. A later normal refresh retries after connection/ACK. */
+        qatomic_set(&gl_dirty, true);
+        return;
+    }
+"""
+REFRESH_HOOK = """
+#ifdef USE_METAL
+    if (gl_scanout_src && perp_native_display_needs_refresh()) {
+        qatomic_set(&gl_dirty, true);
+    }
+#endif
+"""
+
+
+def cocoa_edits():
     include = '#include <Metal/Metal.h>'
-    function = '- (void)drawFrame:(CocoaGLRead *)read\n{'
-    require(text.count(include) == 1 and text.count(function) == 1, 'Unexpected Cocoa Metal/function anchor count')
-    start = text.index(function)
-    end = text.index('\n}\n#endif', start) + 2
-    body = text[start:end]
-    anchor = '        [blit endEncoding];\n\n        [commandBuffer addCompletedHandler:'
-    require(body.count(anchor) == 1, 'Expected one blit-end → original-completion-handler anchor inside drawFrame')
-    require(body.count('[blit endEncoding];') == body.count('[commandBuffer addCompletedHandler:') == 1, 'Ambiguous blit/completion-handler sequence')
-    require('perp_native_display_' not in text and '"publisher.h"' not in text, 'Cocoa source already patched')
-    body = body.replace(anchor, '        [blit endEncoding];\n        perp_native_display_capture(commandBuffer, drawable.texture);\n\n        [commandBuffer addCompletedHandler:', 1)
-    patched = text[:start] + body + text[end:]
-    patched = patched.replace(include, include + '\n#include "publisher.h"', 1)
+    draw = '- (void)drawFrame:(CocoaGLRead *)read\n{\n    @autoreleasepool {\n'
     reset = 'static void cocoa_gl_scanout_disable(DisplayChangeListener *dcl)\n{\n'
-    require(patched.count(reset) == 1, 'Expected exactly one scanout-disable function')
-    patched = patched.replace(reset, reset + '#ifdef USE_METAL\n    perp_native_display_reset();\n#endif\n', 1)
     refresh = 'static void cocoa_gl_refresh(DisplayChangeListener *dcl)\n{\n    cocoa_refresh(dcl);\n'
-    require(patched.count(refresh) == 1, 'Expected exactly one Cocoa refresh function')
-    # Only the QEMU main loop accesses scanout/read-inflight state. The serial
-    # publisher queue merely raises a generation-bound atomic demand. Retrying
-    # here preserves the existing no-drawable/inflight path and slot bound.
-    patched = patched.replace(refresh, refresh +
-        '\n#ifdef USE_METAL\n'
-        '    if (gl_scanout_src && perp_native_display_needs_refresh()) {\n'
-        '        qatomic_set(&gl_dirty, true);\n'
-        '    }\n'
-        '#endif\n', 1)
-    compatibility = '    return dcl->ops == &dcl_gl_ops;'
-    require(patched.count(compatibility) == 1, 'Expected one Cocoa listener compatibility gate')
-    return patched.replace(compatibility,
-        '    return dcl->ops == &dcl_gl_ops\n'
-        '#ifdef USE_METAL\n'
-        '        || (perp_native_display_enabled() && !dcl->ops->dpy_gl_update)\n'
-        '#endif\n'
-        '        ;', 1)
+    dispatch = 'static void cocoa_gl_read_dispatch(void)\n{\n'
+    return [
+        (include, include + '\n#include "publisher.h"'),
+        ('    MTLSize size;\n} CocoaGLRead;', '    MTLSize size;\n    bool retry;\n} CocoaGLRead;'),
+        ('static void cocoa_gl_read_done(CocoaGLRead *read);',
+         'static void cocoa_gl_read_done(CocoaGLRead *read);\nstatic void cocoa_gl_read_defer(CocoaGLRead *read, bool retry);'),
+        (draw, draw + DIRECT_BRANCH),
+        ('        [blit endEncoding];\n\n        [commandBuffer addCompletedHandler:',
+         '        [blit endEncoding];\n        perp_native_display_capture(commandBuffer, drawable.texture);\n\n        [commandBuffer addCompletedHandler:'),
+        (dispatch, DEFER_HELPER + dispatch + ADMISSION_GUARD),
+        (reset, reset + '#ifdef USE_METAL\n    perp_native_display_reset();\n#endif\n'),
+        (refresh, refresh + REFRESH_HOOK),
+        ('    return dcl->ops == &dcl_gl_ops;',
+         '    return dcl->ops == &dcl_gl_ops\n#ifdef USE_METAL\n'
+         '        || (perp_native_display_enabled() && !dcl->ops->dpy_gl_update)\n#endif\n        ;'),
+    ]
+
+
+def patch_cocoa(text):
+    require('perp_native_display_' not in text and '"publisher.h"' not in text, 'Cocoa source already patched')
+    require(text.count('[blit endEncoding];\n\n        [commandBuffer addCompletedHandler:') == 1 and
+            text.count('[blit endEncoding];') == 1, 'Ambiguous blit/completion-handler sequence')
+    for before, after in cocoa_edits():
+        require(text.count(before) == 1, 'Unexpected Cocoa anchor count: ' + before[:90])
+        text = text.replace(before, after, 1)
+    return text
 
 
 def source_check():
@@ -264,20 +323,26 @@ def fresh_output(requested):
 def self_test():
     original = (SOURCE / 'ui/cocoa.m').read_text()
     result = patch_cocoa(original)
-    restored = result.replace('#include "publisher.h"\n', '').replace('        perp_native_display_capture(commandBuffer, drawable.texture);\n', '')
-    restored = restored.replace('#ifdef USE_METAL\n    perp_native_display_reset();\n#endif\n', '')
-    restored = restored.replace('\n#ifdef USE_METAL\n'
-        '    if (gl_scanout_src && perp_native_display_needs_refresh()) {\n'
-        '        qatomic_set(&gl_dirty, true);\n'
-        '    }\n'
-        '#endif\n', '')
-    restored = restored.replace('    return dcl->ops == &dcl_gl_ops\n'
-        '#ifdef USE_METAL\n'
-        '        || (perp_native_display_enabled() && !dcl->ops->dpy_gl_update)\n'
-        '#endif\n'
-        '        ;', '    return dcl->ops == &dcl_gl_ops;')
+    restored = result
+    for before, after in reversed(cocoa_edits()):
+        require(restored.count(after) == 1, 'Ambiguous reverse patch')
+        restored = restored.replace(after, before, 1)
+    direct = result.split('        if (perp_native_display_direct()) {', 1)[1].split(
+        '        id<CAMetalDrawable> drawable', 1)[0]
+    require('nextDrawable' not in direct and 'drawable' not in direct.replace('No drawable fallback.', ''),
+            'Direct branch must not acquire or capture a drawable')
+    require('command, read->texture, read->origin, read->size' in direct and
+            '[command commit];' in direct and 'cocoa_gl_read_done(read);' in direct,
+            'Direct branch lost exact region/commit/completion')
+    require('cocoa_gl_read_dispatch' not in DEFER_HELPER and
+            'qatomic_set(&gl_dirty, true)' in DEFER_HELPER,
+            'Deferred retry must preserve dirty without immediate redispatch')
+    require(ADMISSION_GUARD in result and 'perp_native_display_can_capture()' in ADMISSION_GUARD,
+            'Direct full-budget admission must preserve demand')
     require(restored == original, 'Patch changed unrelated source')
     for bad in (result, original.replace('[blit endEncoding];', '[blit endEncoding];\n        [blit endEncoding];'), original.replace('drawFrame:(CocoaGLRead *)read', 'drawFrame:(void *)read'),
+                original.replace('static void cocoa_gl_read_dispatch(void)\n{', 'static void cocoa_gl_read_dispatch_changed(void)\n{'),
+                original.replace('    MTLSize size;\n} CocoaGLRead;', '    MTLSize changed;\n} CocoaGLRead;'),
                 original.replace('static void cocoa_gl_refresh(DisplayChangeListener *dcl)', 'static void cocoa_gl_refresh_changed(DisplayChangeListener *dcl)'),
                 original + '\nstatic void cocoa_gl_refresh(DisplayChangeListener *dcl)\n{\n    cocoa_refresh(dcl);\n'):
         try:

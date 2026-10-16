@@ -174,7 +174,7 @@ static PNDPublisher *get_publisher(void) {
     return publisher;
 }
 
-static PNDCapture *allocate_capture(id<MTLTexture> source, uint64_t generation) {
+static PNDCapture *allocate_capture(id<MTLTexture> source, MTLSize size, uint64_t generation) {
     unsigned count = atomic_load(&occupied);
     do { if (count >= NDT_SLOTS) return nil; }
     while (!atomic_compare_exchange_weak(&occupied, &count, count + 1));
@@ -185,8 +185,8 @@ static PNDCapture *allocate_capture(id<MTLTexture> source, uint64_t generation) 
     size_t alignment = [source.device minimumLinearTextureAlignmentForPixelFormat:MTLPixelFormatBGRA8Unorm];
     size_t page = (size_t)sysconf(_SC_PAGESIZE);
     if (!alignment || (alignment & (alignment - 1)) || !page || (page & (page - 1))) return nil;
-    size_t pitch = (source.width * 4 + alignment - 1) & ~(alignment - 1);
-    size_t logical = pitch * source.height, extent = (logical + page - 1) & ~(page - 1);
+    size_t pitch = (size.width * 4 + alignment - 1) & ~(alignment - 1);
+    size_t logical = pitch * size.height, extent = (logical + page - 1) & ~(page - 1);
     if (extent > NDT_MAX_EXTENT || pitch > UINT32_MAX) return nil;
     int memory = -1;
     for (unsigned attempt = 0; attempt < 4; attempt++) {
@@ -209,7 +209,7 @@ static PNDCapture *allocate_capture(id<MTLTexture> source, uint64_t generation) 
         }];
     if (!capture.backing) { munmap(mapping, extent); atomic_fetch_add(&unmappings, 1); return nil; }
     MTLTextureDescriptor *descriptor = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatBGRA8Unorm
-        width:source.width height:source.height mipmapped:NO];
+        width:size.width height:size.height mipmapped:NO];
     descriptor.storageMode = MTLStorageModeShared;
     descriptor.usage = MTLTextureUsageShaderRead;
     capture.texture = [capture.backing newTextureWithDescriptor:descriptor offset:0 bytesPerRow:pitch];
@@ -222,7 +222,7 @@ static PNDCapture *allocate_capture(id<MTLTexture> source, uint64_t generation) 
         if (flags < 0 || fcntl(ready[i], F_SETFL, flags | O_NONBLOCK) < 0 ||
             fcntl(ready[i], F_SETFD, FD_CLOEXEC) < 0) return nil;
     }
-    capture.metadata = (ndt_metadata){.width=(uint32_t)source.width, .height=(uint32_t)source.height,
+    capture.metadata = (ndt_metadata){.width=(uint32_t)size.width, .height=(uint32_t)size.height,
         .pitch=(uint32_t)pitch, .format=NDT_BGRA8, .offset=0, .size=logical};
     return capture;
 }
@@ -235,22 +235,45 @@ static bool refresh_pending(void) {
 bool perp_native_display_needs_refresh(void) {
     return refresh_pending() && atomic_load(&occupied) < NDT_SLOTS;
 }
-void perp_native_display_capture(id<MTLCommandBuffer> command, id<MTLTexture> output) {
+bool perp_native_display_direct(void) {
+    static bool direct;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        const char *value = getenv("PERP_NATIVE_DISPLAY_DIRECT");
+        direct = value && !strcmp(value, "1");
+    });
+    return direct;
+}
+bool perp_native_display_can_capture(void) {
+    return get_publisher() && atomic_load(&active_generation) && atomic_load(&occupied) < NDT_SLOTS;
+}
+PNDCaptureResult perp_native_display_capture_region(id<MTLCommandBuffer> command,
+    id<MTLTexture> output, MTLOrigin origin, MTLSize size) {
     PNDPublisher *owner = get_publisher();
-    if (!owner) return;
+    if (!owner) return PND_CAPTURE_UNAVAILABLE;
     atomic_fetch_add(&attempted, 1);
     uint64_t generation = atomic_load(&active_generation);
-    if (!generation || !command || !output || output.pixelFormat != MTLPixelFormatBGRA8Unorm ||
+    if (!generation) { atomic_fetch_add(&dropped, 1); return PND_CAPTURE_UNAVAILABLE; }
+    /* Subtraction after the size bound avoids origin+size integer overflow. */
+    if (!command || command.status != MTLCommandBufferStatusNotEnqueued || !output ||
+        output.pixelFormat != MTLPixelFormatBGRA8Unorm ||
         output.textureType != MTLTextureType2D || output.sampleCount != 1 ||
-        output.device != command.commandQueue.device || !output.width || !output.height ||
-        output.width > NDT_MAX_DIMENSION || output.height > NDT_MAX_DIMENSION ||
-        output.width * output.height > NDT_MAX_PIXELS) { atomic_fetch_add(&dropped, 1); return; }
-    PNDCapture *capture = allocate_capture(output, generation);
-    if (!capture) { atomic_fetch_add(&dropped, 1); return; }
+        output.device != command.commandQueue.device || origin.z || size.depth != 1 ||
+        !size.width || !size.height || size.width > NDT_MAX_DIMENSION || size.height > NDT_MAX_DIMENSION ||
+        size.width * size.height > NDT_MAX_PIXELS || size.width > output.width || size.height > output.height ||
+        origin.x > output.width - size.width || origin.y > output.height - size.height) {
+        atomic_fetch_add(&dropped, 1); return PND_CAPTURE_INVALID;
+    }
+    if (atomic_load(&occupied) >= NDT_SLOTS) { atomic_fetch_add(&dropped, 1); return PND_CAPTURE_BACKPRESSURE; }
+    PNDCapture *capture = allocate_capture(output, size, generation);
+    if (!capture) {
+        atomic_fetch_add(&dropped, 1);
+        return atomic_load(&occupied) >= NDT_SLOTS ? PND_CAPTURE_BACKPRESSURE : PND_CAPTURE_FAILED;
+    }
     id<MTLBlitCommandEncoder> encoder = [command blitCommandEncoder];
-    if (!encoder) { atomic_fetch_add(&dropped, 1); return; }
-    [encoder copyFromTexture:output sourceSlice:0 sourceLevel:0 sourceOrigin:MTLOriginMake(0, 0, 0)
-        sourceSize:MTLSizeMake(output.width, output.height, 1) toTexture:capture.texture
+    if (!encoder) { atomic_fetch_add(&dropped, 1); return PND_CAPTURE_FAILED; }
+    [encoder copyFromTexture:output sourceSlice:0 sourceLevel:0 sourceOrigin:origin
+        sourceSize:size toTexture:capture.texture
         destinationSlice:0 destinationLevel:0 destinationOrigin:MTLOriginMake(0, 0, 0)];
     [encoder endEncoding];
     [command addCompletedHandler:^(id<MTLCommandBuffer> finished) {
@@ -264,6 +287,11 @@ void perp_native_display_capture(id<MTLCommandBuffer> command, id<MTLTexture> ou
         atomic_fetch_add(&completed, 1);
         [owner submit:capture];
     }];
+    return PND_CAPTURE_ENCODED;
+}
+void perp_native_display_capture(id<MTLCommandBuffer> command, id<MTLTexture> output) {
+    (void)perp_native_display_capture_region(command, output, MTLOriginMake(0, 0, 0),
+        MTLSizeMake(output.width, output.height, 1));
 }
 void perp_native_display_reset(void) { [publisher reset]; }
 void perp_native_display_shutdown(void) { [publisher shutdown]; }

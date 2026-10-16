@@ -1,4 +1,4 @@
-# Completed-console GPU snapshots
+# Completed GPU snapshots
 
 This bridge is a step toward presenting the working Windows3D path in the
 application's own Metal view. It does not alter the signed guest driver,
@@ -6,7 +6,7 @@ renderer protocol or matched Wire1/DMTX backend. The ordinary installed
 application remains separate from the private native-client trial; actual
 Windows evidence is recorded in the checkpoint linked below.
 
-The pinned Cocoa console already copies the selected guest texture into its
+By default, the pinned Cocoa console copies the selected guest texture into its
 drawable. The separate build adds one more GPU blit from that drawable into a
 new shared-memory Metal texture, in **the same command buffer**. Only a
 successful completion handler signals the owned readiness pipe and offers the
@@ -43,8 +43,49 @@ refresh work without losing the request; stale GPU completions after a reset
 cannot satisfy a replacement connection. No cached drawable is retained and no
 guest input/redraw is required. This source correction still needs a fresh
 private QEMU build and the host tab-switch qualification on actual Windows.
-The initial format is uncropped top-left BGRA8, one plane/mip/layer/sample,
+The transported format is top-left BGRA8 at destination offset zero, one plane/mip/layer/sample,
 maximum4096 dimensions, eight megapixels and64MiB padded extent.
+
+## Direct source snapshot opt-in
+
+`PERP_NATIVE_DISPLAY_DIRECT=1` selects a separate branch in the copied
+`drawFrame:` **before `nextDrawable`**. It takes the exact existing
+`CocoaGLRead.texture`, `origin` and `size` and encodes one GPU blit into a new
+immutable NDT snapshot. It does not acquire, present or capture a
+`CAMetalDrawable`. The default branch and its full-texture capture API remain
+compatible; unset, `0` and `true` do not enable direct mode. This is a process
+launch option, not an application preference.
+
+The new `perp_native_display_capture_region` API validates the texture/device,
+BGRA8 format, 2D/single-sample layout, command-buffer state and crop bounds
+without overflowing `origin + size`. Snapshot dimensions/pitch describe only
+that selected region; NDT still receives an offset-zero texture. Readiness is
+signalled by the real command-buffer **completed** handler. The existing Cocoa
+read remains retained through GPU completion and is released on QEMU's main
+loop.
+
+Direct mode never falls back to a drawable when there is no consumer or the
+two-snapshot budget is full. The main-loop dispatcher preserves `gl_dirty`
+without allocating or dispatching another Cocoa read until admission becomes
+possible. A transient allocation/encoding/GPU failure returns its read through
+a separate bottom half: it preserves demand for the ordinary refresh instead
+of the original completion bottom half's immediate redispatch. No worker
+thread accesses QEMU scanout state, and no extra timer is added. Invalid input
+or a disconnected generation is not explicitly rearmed by that failure path;
+new connection refresh demand and later guest updates remain independent.
+
+This removes the producer's drawable dependency and one GPU copy. It still
+performs one GPU snapshot copy, keeps the Cocoa/GL context and window, and does
+not add a guest Present fence or prove the source writer has finished. It is
+not a zero-copy or window-removal claim. Host fixtures, source checks and a
+fresh private full QEMU build passed on 2026-10-16. The signed candidate hash is
+`c631e4ffa1ab77888edbcbcd188bd0c147c8d76143926700ea3661f45eeb0383`;
+its private receipt is `.tools/cocoa-native-display-build/direct-source1/build.json`.
+All 3,310 protected build inputs remained unchanged. This candidate is not
+packaged, installed or tested in Windows, and contains the builder's original
+trace3 GPU profile rather than the later STP/HVF diagnostic combination.
+The live Windows trial and controlled presentation/latency comparison remain
+separate gates.
 
 The producer requires `PERP_NATIVE_DISPLAY_DIR` naming an already private0700
 runtime and `PERP_NATIVE_DISPLAY_SESSION` naming its32-hex launch identity.
@@ -105,6 +146,18 @@ source hashes alongside the original three-frame GPU test. This verifies the
 publisher boundary; Cocoa's hook is checked against its pinned source by
 `build.py --check --self-test`, and the real Windows tab switch remains a
 separate post-build test.
+
+The region fixture adds three actual Metal snapshots from an11×8 source,
+including crops at(3,2) and(6,5) and the final bottom-right pixel(10,7). It checks
+56 exact pixels including a held-snapshot immutability recheck after the source
+is overwritten. A shared-event gate proves no publication/completion before
+the blit can finish. Twelve invalid command/format/region cases allocate no
+snapshot and do not consume initial-refresh demand; a full budget returns
+backpressure and an ACK restores admission. All three mappings/allocations
+are released. A private negative build changing only the source origin to zero
+must fail at `exact nonzero crop pixel mismatch`. Separate process fixtures
+verify the explicit environment opt-in. These checks do not start QEMU,
+Windows, a Cocoa window or an application.
 
 See [separate build and source pins](BUILD.md), the
 [transport contract](../native-display-transport/ndt.h), and the

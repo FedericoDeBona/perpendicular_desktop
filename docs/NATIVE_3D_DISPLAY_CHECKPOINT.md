@@ -6,6 +6,10 @@ Mouse, keyboard and automatic resolution selection work on this path. The
 ordinary installed application still uses its validated 2D runtime. This is an
 integration checkpoint, not production packaging or performance parity.
 
+An additional direct-source candidate was compiled on 2026-10-16; it is not
+the path used for the Windows observations below. See its qualification scope
+under [Direct source candidate](#direct-source-candidate).
+
 ## Actual Windows run
 
 The existing Windows 11 — 3D Trial was reused, without another VM copy.
@@ -93,6 +97,37 @@ This still depends on the separate Cocoa window/drawable and does not establish
 correspondence with every Windows Present: the current native scanout ABI has
 no per-resource producer fence. Removing that window dependency, reducing the
 extra GPU copy and measuring actual presentation remain required work.
+
+## Direct source candidate
+
+The explicit `PERP_NATIVE_DISPLAY_DIRECT=1` branch in the copied QEMU backend
+now encodes the selected renderer texture/crop directly into an immutable NDT
+snapshot. It returns before acquiring or presenting a Cocoa drawable. This
+removes the intermediate drawable copy/presentation from this branch while
+retaining one GPU snapshot copy, source-read ownership through completion and
+the existing native client's retirement/ACK contract. Cocoa context/window
+construction and the upstream producer-fence limitation remain.
+
+The final source passed the actual two-process Metal fixture: nonzero crops,
+bottom-right edge, immutable held frame, GPU completion gate, twelve invalid
+inputs, two-slot backpressure and ACK recovery, with all resources released.
+Changing just the source crop origin to zero fails the pixel check. Legacy
+full-frame and static-reconnect regressions also passed. These are host tests,
+not guest/display performance measurements.
+
+A fresh full private QEMU build and strict code-signature verification passed.
+Candidate SHA-256:
+`c631e4ffa1ab77888edbcbcd188bd0c147c8d76143926700ea3661f45eeb0383`.
+Build receipt `.tools/cocoa-native-display-build/direct-source1/build.json`,
+SHA-256 `fd967a4e76c58fd9ab7a54dda1ccb7929a99296cc189cdad86ed6df9a27a5dcd`,
+records all 3,310 protected inputs unchanged, no installation/packaging and no
+VM start. This uses the builder's original trace3 GPU profile; the later STP/HVF
+diagnostic combination has not yet been relinked with this source change.
+
+Next acceptance work: combine that known diagnostic profile, reuse the existing
+VM for an actual direct-mode launch, verify static reconnect and resize, then
+compare visible presentation and input latency under the same workload. No
+fluidity improvement is claimed from the successful build or host fixture.
 
 ## Qualification and defects found
 

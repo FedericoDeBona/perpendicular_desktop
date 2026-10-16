@@ -64,11 +64,50 @@ def main():
         negative_result = subprocess.run([str(negative)], text=True, capture_output=True, timeout=30, env=env)
     (OUTPUT / 'refresh-negative.log').write_text(negative_result.stdout + negative_result.stderr)
     assert negative_result.returncode != 0 and 'initial refresh was not requested' in negative_result.stderr
-    paths = [SOURCE / name for name in ('publisher.h', 'publisher.m', 'test-publisher.m', 'test-publisher-refresh.m', 'test-publisher.py')]
+    region = OUTPUT / 'publisher-region-check'
+    def compile_region(publisher, destination):
+        subprocess.run(['xcrun', 'clang', '-fobjc-arc', '-std=gnu11', '-Wall', '-Wextra', '-Werror',
+                        '-I' + str(TRANSPORT), '-I' + str(SOURCE), str(publisher),
+                        str(SOURCE / 'test-publisher-region.m'), str(obj), '-framework', 'Foundation',
+                        '-framework', 'Metal', '-o', str(destination)], check=True)
+    compile_region(SOURCE / 'publisher.m', region)
+    region_result = subprocess.run([str(region)], text=True, capture_output=True, timeout=30)
+    (OUTPUT / 'region.log').write_text(region_result.stdout + region_result.stderr)
+    if region_result.returncode:
+        raise RuntimeError((OUTPUT / 'region.log').read_text())
+    region_rows = [json.loads(line) for line in region_result.stdout.splitlines()]
+    assert region_rows[0]['region_consumer'] == region_rows[1]['region_producer'] == 'pass'
+    assert region_rows[0]['exact_crop_pixels'] == 56 and region_rows[1]['gpu_gate'] and region_rows[1]['immutable']
+    assert region_rows[1]['stats']['occupied'] == 0
+    # Causal crop negative: copying from (0,0) must fail the exact pixel check.
+    origin = 'sourceLevel:0 sourceOrigin:origin\n'
+    assert source.count(origin) == 1
+    bad_crop = OUTPUT / 'publisher-zero-origin.m'
+    bad_crop.write_text(source.replace(origin, 'sourceLevel:0 sourceOrigin:MTLOriginMake(0, 0, 0)\n', 1))
+    region_negative = OUTPUT / 'publisher-region-negative'
+    compile_region(bad_crop, region_negative)
+    with tempfile.TemporaryDirectory(prefix='pnreg-', dir='/tmp') as runtime:
+        env = dict(os.environ, PERP_REGION_TEST_RUNTIME=runtime + '/r-XXXXXX')
+        bad_region = subprocess.run([str(region_negative)], text=True, capture_output=True, timeout=30, env=env)
+    (OUTPUT / 'region-negative.log').write_text(bad_region.stdout + bad_region.stderr)
+    assert bad_region.returncode != 0 and 'exact nonzero crop pixel mismatch' in bad_region.stderr
+    opt_in = []
+    for value in (None, '0', 'true', '1'):
+        env = dict(os.environ)
+        env.pop('PERP_NATIVE_DISPLAY_DIRECT', None)
+        if value is not None:
+            env['PERP_NATIVE_DISPLAY_DIRECT'] = value
+        flag = subprocess.run([str(region), '--direct-flag'], env=env, text=True, capture_output=True, check=True, timeout=5)
+        assert json.loads(flag.stdout)['direct'] == (value == '1')
+        opt_in.append({'value': value, 'direct': value == '1'})
+    paths = [SOURCE / name for name in ('publisher.h', 'publisher.m', 'test-publisher.m', 'test-publisher-refresh.m', 'test-publisher-region.m', 'test-publisher.py')]
     paths += [TRANSPORT / name for name in ('ndt.h', 'ndt.c')]
     receipt = {'result': 'pass', 'actual_gpu': True, 'processes': 2, 'guest_or_disks': False,
                'observations': rows,
                'reconnect_observations': refresh_rows,
+               'region_observations': region_rows, 'direct_opt_in': opt_in,
+               'crop_causal_negative': {'zero_origin': True, 'exit_code': bad_region.returncode,
+                                        'failed_at': 'exact nonzero crop pixel mismatch'},
                'causal_negative': {'accept_signal_removed': True, 'exit_code': negative_result.returncode,
                                    'failed_at': 'initial refresh was not requested'},
                'inputs': {str(p.relative_to(ROOT)): hashlib.sha256(p.read_bytes()).hexdigest() for p in paths}}
