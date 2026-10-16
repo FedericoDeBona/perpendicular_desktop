@@ -81,6 +81,12 @@ struct EngineClientCheck {
         let nativeVM = try decoder.decode(VirtualMachine.self, from: JSONSerialization.data(withJSONObject: vmJSON))
         precondition(nativeVM.nativeDisplay == endpoint)
         vmJSON.removeValue(forKey: "native_display")
+        vmJSON["state"] = "unavailable"
+        let unavailableVM = try decoder.decode(VirtualMachine.self, from: JSONSerialization.data(withJSONObject: vmJSON))
+        precondition(unavailableVM.isControlUnavailable && !unavailableVM.isStopped && !unavailableVM.isActive,
+                     "Loss of control must not permit stopped-VM operations or expose an unverified console")
+        precondition(unavailableVM.stateLabel == "Control unavailable")
+        vmJSON["state"] = vm.state
         for invalid: Any in ["unknown-display", 1, NSNull()] {
             vmJSON["display_adapter"] = invalid
             do {
@@ -134,7 +140,7 @@ struct EngineClientCheck {
         func lastUpdate() throws -> [String] {
             try String(contentsOf: root.appendingPathComponent("last-update"), encoding: .utf8).split(separator: "\n").map(String.init)
         }
-        for state in ["running", "paused", "starting", "stopping", "crashed", "unknown"] {
+        for state in ["running", "paused", "starting", "stopping", "crashed", "unavailable", "unknown"] {
             setenv("PERPENDICULAR_FIXTURE_STATE", state, 1)
             await model.refresh()
             precondition(!model.canConfigure(vmID: vm.id))

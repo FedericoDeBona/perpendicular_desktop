@@ -73,7 +73,8 @@ struct VirtualMachine: Codable, Identifiable, Hashable, Sendable {
 
     var isActive: Bool { ["running", "paused", "starting", "stopping"].contains(state) }
     var isStopped: Bool { ["stopped", "crashed"].contains(state) }
-    var stateLabel: String { state.capitalized }
+    var isControlUnavailable: Bool { state == "unavailable" }
+    var stateLabel: String { isControlUnavailable ? "Control unavailable" : state.capitalized }
     var memoryLabel: String { String(format: "%g GB", Double(memoryMib) / 1024) }
     var stateColor: Color {
         switch state {
@@ -81,6 +82,7 @@ struct VirtualMachine: Codable, Identifiable, Hashable, Sendable {
         case "paused": .orange
         case "starting", "stopping": .blue
         case "crashed": .red
+        case "unavailable": .orange
         default: .secondary
         }
     }

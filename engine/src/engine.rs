@@ -218,7 +218,7 @@ impl Engine {
                             last_error=Some("QEMU exited without a supervisor exit record; the previous launch was interrupted".into());
                         }
                     } else {
-                        state = "crashed".into();
+                        state = "unavailable".into();
                         last_error = Some(format!(
                             "VM may still be running, but control is unavailable. {}",
                             error.message
@@ -1691,6 +1691,17 @@ mod native_display_tests {
     }
 
     #[test]
+    fn live_process_without_qmp_is_not_reported_as_terminated() {
+        let fixture = Fixture::new();
+        let (_process, runtime) = fixture.process();
+        atomic_json(&fixture.directory.join("runtime.json"), &runtime).unwrap();
+        let vm = fixture.engine.view(&fixture.config).unwrap();
+        assert_eq!(vm.state, "unavailable");
+        assert!(vm.last_error.unwrap().contains("may still be running"));
+        assert!(vm.native_display.is_none());
+    }
+
+    #[test]
     fn native_display_is_absent_when_qmp_identity_or_status_is_unverified() {
         for (uuid, name, status) in [
             (
@@ -1707,7 +1718,7 @@ mod native_display_tests {
             atomic_json(&fixture.directory.join("runtime.json"), &runtime).unwrap();
             let qmp = qmp_fixture(&fixture.directory, uuid, &name, status);
             let vm = fixture.engine.view(&fixture.config).unwrap();
-            assert_eq!(vm.state, "crashed");
+            assert_eq!(vm.state, "unavailable");
             assert!(vm.native_display.is_none());
             assert!(serde_json::to_value(vm)
                 .unwrap()

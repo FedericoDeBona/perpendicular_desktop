@@ -91,7 +91,7 @@ struct VMDetailView: View {
 
             if let error = vm.lastError, !error.isEmpty {
                 VStack(alignment: .leading, spacing: 8) {
-                    Label(vm.state == "crashed" ? "Windows stopped unexpectedly." : "The virtual machine reported a problem.",
+                    Label(vm.isControlUnavailable ? "Windows control is temporarily unavailable." : (vm.state == "crashed" ? "Windows stopped unexpectedly." : "The virtual machine reported a problem."),
                           systemImage: "exclamationmark.triangle.fill")
                         .font(.callout).foregroundStyle(.orange)
                     DisclosureGroup("Technical Details") {
@@ -172,6 +172,8 @@ struct VMDetailView: View {
             Button { Task { await library.action(["resume", vm.id], operation: "Resuming \(vm.name)…") } } label: { Label("Resume", systemImage: "play.fill") }.buttonStyle(.borderedProminent).disabled(!library.canControl)
         case "starting", "stopping":
             ProgressView().controlSize(.small)
+        case "unavailable":
+            Text("Control unavailable").foregroundStyle(.secondary)
         default:
             Button { Task { await library.action(["start", vm.id], operation: "Starting \(vm.name)…") } } label: { Label("Start", systemImage: "play.fill").padding(.horizontal, 7) }.buttonStyle(.borderedProminent).controlSize(.large).disabled(!library.canControl)
         }
@@ -199,14 +201,16 @@ struct VMDetailView: View {
             } else {
                 VStack(spacing: 13) {
                     Image(systemName: "desktopcomputer").font(.system(size: 54, weight: .ultraLight)).foregroundStyle(.white.opacity(0.45))
-                    Text(library.connectionError != nil ? "Virtual machine status is unavailable." : (vm.state == "crashed" ? "The virtual machine stopped unexpectedly." : "The virtual machine is powered off."))
+                    Text(library.connectionError != nil || vm.isControlUnavailable ? "Virtual machine status is unavailable." : (vm.state == "crashed" ? "The virtual machine stopped unexpectedly." : "The virtual machine is powered off."))
                         .font(.system(size: 17, weight: .medium)).foregroundStyle(.white.opacity(0.82))
-                    Text(library.connectionError != nil ? "Reconnect to the engine before starting this virtual machine." : (vm.state == "crashed" ? "Review the error above, then try starting again." : (vm.isoPath != nil ? "Start to install Windows or continue using your virtual machine." : "Start your virtual machine to continue where you left off.")))
+                    Text(vm.isControlUnavailable ? "Windows may still be running. Wait for control to reconnect before starting or changing this virtual machine." : (library.connectionError != nil ? "Reconnect to the engine before starting this virtual machine." : (vm.state == "crashed" ? "Review the error above, then try starting again." : (vm.isoPath != nil ? "Start to install Windows or continue using your virtual machine." : "Start your virtual machine to continue where you left off."))))
                         .font(.callout).foregroundStyle(.white.opacity(0.45))
+                    if !vm.isControlUnavailable {
                     Button { Task { await library.action(["start", vm.id], operation: "Starting \(vm.name)…") } } label: {
                         Label("Start Windows", systemImage: "play.fill").foregroundStyle(.white).padding(.horizontal, 22).padding(.vertical, 11)
                             .background(Color.blue, in: Capsule()).opacity(library.isBusy ? 0.5 : 1)
                     }.buttonStyle(.plain).padding(.top, 9).disabled(!library.canControl)
+                    }
                 }.padding(30)
             }
         }.overlay(RoundedRectangle(cornerRadius: radius).stroke(.primary.opacity(0.08), lineWidth: 1))

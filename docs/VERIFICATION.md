@@ -269,3 +269,45 @@ sources. The compressed absolute-bootstrap-deadline fixture now allows two
 seconds for its two real Python subprocesses to reach the held-response gate;
 it still requires expiry and rejects the late result. Production startup and
 resize timeouts were not increased by these fixture changes.
+
+### Control availability and migration follow-up — 2026-10-16
+
+The pinned graphics source fetch and independent verification completed,
+including the LLVM 15 static/header bottle, required QEMU wraps and private
+PyYAML package. All eight fetch/provenance fixture tests pass. These outputs
+remain private under `.tools/graphics-experiment`; they are not a built or
+installed 3D runtime.
+
+A second WinRE inspection found neither MEMORY.DMP nor Minidump. It confirmed
+that `prl_strg` (Parallels paravirt disk filter) and `prl_tg` (Parallels Tool
+Device) are boot-start drivers. The disk class LowerFilters contains exactly
+`prl_strg` and `EhStorClass`. The complete SYSTEM hive was saved successfully
+as `C:\PerpendicularCrashBackup.hiv`. No Parallels service/filter or CrashControl
+value has been changed. A guarded repair script was prepared on a read-only
+diagnostic ISO but has **not been executed**. The attempt to insert that ISO
+from the Desktop workspace left QEMU blocked in `open()`: a native process
+sample and macOS TCC logs identify a pending DesktopFolder access prompt for
+the installed app. The owned QEMU process remains alive; no duplicate launch
+or forced termination was attempted. User dismissal was requested so the ISO
+can instead be staged under the app's data directory.
+
+That observation exposed a separate status bug: the engine classified an
+unreachable QMP endpoint as a crash even when process termination was unproven.
+It now returns `unavailable` in that branch. The client labels it Control
+unavailable, offers no Start action, and retains stopped-only configuration and
+clone guards. No native display endpoint is exposed without successful QMP
+identity/status verification. Eight native-display/lifecycle Rust tests,
+all-target Clippy, and the standalone engine client check pass. The complete
+Swift UI sources compile with the existing Command Line Tools SDK. This change
+is not yet installed into the running app. A default full Rust run and the
+DiskExport UI fixture cannot pass while their absolute `/usr/bin/python3`
+launcher is blocked by Xcode's pending license; their failures do not establish
+a lifecycle regression. No full-suite success is claimed for this checkpoint.
+
+REA accepted the installed ARM64 `prl_tg.sys` target (SHA-256
+`92139c536400a65ccd710c55b926769bee1c29ae86f3546f1fd396aa52a0f520`),
+but Ghidra startup failed because REA's macOS process-ownership helper invokes
+`xcrun swiftc`, now gated by the same pending Xcode agreement. The exact launch
+error is retained privately. No driver decompilation or attribution of the
+Windows crash to that driver is claimed. This artifact has not been matched
+to the driver's bytes inside the imported guest.
