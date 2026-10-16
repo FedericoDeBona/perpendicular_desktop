@@ -154,8 +154,7 @@ Decoded original Objective-C stubs give concrete meaning to part of this path:
 then binds vertex/fragment buffers, textures and samplers. Small inline data
 uses the respective `set*Bytes:length:atIndex:` selectors; a larger branch
 creates a buffer with `newBufferWithBytes:length:options:`. It then calls
-`0x1001de72c`, whose three dispatch targets remain to be analyzed. Calling
-this a particular indexed/instanced draw form would exceed the current evidence.
+`0x1001de72c`, whose three dispatch targets are analyzed below.
 The reset helper releases retained objects in the pending arrays and resets
 end pointers; this is CPU-side batch cleanup, not proof of GPU retirement.
 
@@ -197,6 +196,37 @@ control flow. Raw pseudocode also misrepresents parts of the floating-point
 calling convention; original register/selector observations support the
 bounded API claims here. No proprietary implementation is incorporated into
 the independent app, and no Parallels VM was executed for these checks.
+
+## Draw dispatch below the pending-state drain
+
+Three further function-start intervals resolve the previously unknown dispatch
+targets. Original Objective-C selector stubs, reached by byte-verified direct
+branches, identify these operations:
+
+| Interval | Observed Metal selectors |
+| --- | --- |
+| `0x1001de7ec` (152 bytes) | `setTessellationFactorBuffer:offset:instanceStride:` followed by direct or indirect `drawPatches` |
+| `0x1001de884` (196 bytes) | Direct indexed draw with instance count/base vertex/base instance, or indexed indirect draw |
+| `0x1001de948` (120 bytes) | Direct primitive draw with instance count/base instance, or primitive indirect draw |
+
+Each routine selects its indirect branch when the record's pointer at `+8`
+is nonzero. For the indexed direct branch, register loads and arithmetic show
+an index-buffer byte offset derived from the base offset and a table-selected
+element width. The table's full type mapping has not been reconstructed.
+The original `objc_retain`/`objc_release` stubs bracket the encoder use; the
+decompiler truncates at the external release tail, while the original branch
+bytes preserve its destination. This narrows the earlier state drain to real
+render-command encoding. It does not identify drawable presentation, a guest
+frame boundary, producer completion or a reusable-texture handoff.
+
+REA evidence: `ev_04e853135f35ae30867c964a710af38c6cb7b50fb15c1a3bb931b6aa702b4fb1`,
+`ev_c2d9fab774afc6bae1e81b0879dbf14763d6cdc77ee54c4b89570933ed3038d6`
+and `ev_a8c60bba2851458f8b08da932cab243323e12e0a1f3d4128e118f88e04805531`.
+All three subject digests match their original executable slices. Independent
+ARM64 immediate decoding verified all 16 direct branches in the decoded
+intervals. Private receipts are `draw-dispatch-slices.json` and
+`draw-dispatch-verification.json` alongside the earlier graphics research.
+No Parallels VM was executed and no proprietary code is added to the app.
 
 ## Independent implementation implications
 

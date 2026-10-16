@@ -560,3 +560,41 @@ and `.tools/graphics-rebuild-backend-20261016/{build.json,native-check/result.js
 The matching renderer source is prepared; its complete build and Neptune COM
 qualification remain pending. These host-only checks execute no Windows CPU
 or guest disks and establish no Windows 3D performance or presentation latency.
+
+
+### Fresh renderer/QEMU and actual Wire1 COM dispatch — 2026-10-16
+
+The complete matching renderer now builds at optimization 3: all 88 steps,
+thin arm64 and strict signatures verified. The new whole-source QEMU recipe
+then completed 1,963 build steps using that renderer. It includes the current
+ACK-retired backing publisher and direct-source Cocoa hooks as independently
+compiled libraries; actual compiler commands confirm ARC/blocks for publisher,
+MRC for original Cocoa and C17 for transport. Candidate SHA-256:
+`570923fd08c84e04b488ca1b9d504abcab0b150433b2449d024380c6bc354971`.
+Strict signing and the sole Hypervisor entitlement passed. Current installed
+application and selected matched dependencies remained byte-identical.
+
+The first protocol attempt timed out during initial Cocoa startup using the
+old 4-second socket timeout. A separate retained attempt with bounded
+30-second startup passed: capsets 1/2/7, Wire1 and flags `0xb6`, paused CPU,
+no attached disks and orderly quit. The first COM attempt exposed a fixture
+assumption from the newer protocol: Wire1 QueryInterface returns only HRESULT
+and registers the requested ID, rather than returning a canonical ID. The
+fixture now checks that exact declaration and uses the requested ID; no
+renderer/protocol/backend code or constants were altered.
+
+The corrected fixture passed actual virtqueue → renderer worker → Wire1
+decoder → DXMT GPU execution. It created two 64×32 shared textures, completed
+GPU fence value 1, verified each texture's red/green pixels, then verified both
+overwritten magenta: 8,192 exact pixel checks. Actual owned descendant paths
+identify the matching renderer server; dyld traces identify the fresh matching
+renderer/backend. The guest CPU remained paused and QEMU exited 0. Receipts
+are `.tools/graphics-rebuild-qemu-native-20261016/{build.json,compile-mode-checks.json}`,
+`capset-startup2/result.json` and `com-wire1-reply2/result.json`; initial failed
+attempts remain in `capset-probe` and `com-probe` respectively.
+
+This is real decoder/backend pairing evidence, with no native bootstrap/test
+entry point in the renderer. It sends no scanout and does not exercise the
+compiled publisher, establish producer ordering across contexts, execute
+Windows or measure presentation/latency. This QEMU profile still lacks the
+prior STP/HVF and HID changes and is not installed.

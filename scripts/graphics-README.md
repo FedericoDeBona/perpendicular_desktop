@@ -194,3 +194,44 @@ rejection. It requires only the renderer source preparation above.
 These builds do not install a runtime in the application, change drivers or
 start a VM. Renderer pairing and Windows/native-client qualification are still
 required before using them in the ordinary app.
+
+## Fresh QEMU with the native publisher
+
+Once both matched profiles have complete `build.json` receipts, build the
+whole pinned QEMU in another private profile:
+
+```sh
+.tools/build-venv/bin/python scripts/graphics-qemu-rebuild.py --output .tools/graphics-rebuild-qemu-native-20261016 --renderer .tools/graphics-rebuild-renderer-20261016 --backend .tools/graphics-rebuild-backend-20261016 --source-only
+.tools/build-venv/bin/python scripts/graphics-qemu-rebuild.py --output .tools/graphics-rebuild-qemu-native-20261016 --renderer .tools/graphics-rebuild-renderer-20261016 --backend .tools/graphics-rebuild-backend-20261016 --resume
+```
+
+Source preparation copies the verified whole QEMU and its populated pinned
+wraps, applies the existing reversible Cocoa direct-source hooks, and adds the
+publisher/transport through separate Meson libraries. Publisher Objective-C
+uses ARC/blocks; original Cocoa remains MRC and transport uses C17. Compilation
+uses optimization 3 and at most two jobs. Only private Slirp is installed into
+this profile. The QEMU candidate is a data-fork copy signed with only the
+public Hypervisor entitlement; the candidate must link the selected renderer.
+Source and local implementation inventories, matched dependencies and the
+installed app's file baseline are preserved. No QEMU installation or VM launch
+occurs. This profile includes no historical GPU diagnostic overlay, STP/HVF
+extension or HID backpressure patch; it is not ready to replace the installed
+Windows runtime.
+
+Run the owned, paused, diskless protocol fixture separately:
+
+```sh
+.tools/build-venv/bin/python scripts/graphics-qemu-probe.py --profile .tools/graphics-rebuild-qemu-native-20261016
+.tools/build-venv/bin/python scripts/graphics-qemu-probe.py --profile .tools/graphics-rebuild-qemu-native-20261016 --com
+```
+
+The COM variant uses a 4 KiB HVF IPA granule and the matching protocol's
+HRESULT-only QueryInterface response. It sends actual virtqueue/ring commands
+through the unmodified renderer decoder, creates two shared textures, checks a
+real GPU fence and verifies red/green then magenta pixels through their mapped
+storage. It records the matching server's actual descendant executable path
+and loaded renderer/backend identities. It does not submit a scanout, exercise
+the native publisher or execute Windows. Use `--label` with a fresh name to
+retain another attempt; existing receipts are never overwritten. Full source,
+dependency hashes and logs remain in the private profile; console output is a
+compact result.
