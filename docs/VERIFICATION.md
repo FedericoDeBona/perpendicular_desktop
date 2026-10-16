@@ -311,3 +311,16 @@ but Ghidra startup failed because REA's macOS process-ownership helper invokes
 error is retained privately. No driver decompilation or attribution of the
 Windows crash to that driver is claimed. This artifact has not been matched
 to the driver's bytes inside the imported guest.
+
+A separate release candidate is now built at
+`.build/candidates/control-unavailable/Perpendicular Desktop.app`, from local
+commit `1af7b35`, using the existing Command Line Tools compiler and SDK.
+The engine release and Swift app with native-display transport compiled
+successfully. The candidate passes deep, strict code-signature verification;
+its engine responds to `--version`. All 185 copied resource files other than
+the rebuilt engine match the installed app by SHA-256. This is a candidate
+build check, not a Windows boot or 3D test. It has not replaced or launched
+alongside the installed app: the existing guest process is still alive with
+its control endpoint unavailable, pending dismissal of the Desktop access
+request. The new Xcode agreement remains pending; no acceptance is implied
+by using the previously available Command Line Tools.
