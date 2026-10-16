@@ -1,0 +1,125 @@
+# First Windows ARM64 Direct3D checkpoint
+
+2026-10-16: the signed Windows ARM64 driver now creates a hardware Direct3D11
+Device on VirtIO and presents the independent color-pattern scene through the
+experimental Cocoa display. This is the first positive Windows checkpoint;
+it is not application compatibility, Parallels performance parity or a
+production-ready graphics package.
+
+## Matched configuration
+
+The existing trial VM/disk was reused throughout; no further VM copies were
+created. Secure Boot and kernel signature enforcement were retained. The
+ordinary installed app still uses its previously validated 2D runtime.
+
+- Whole renderer/server: `utmapp/virglrenderer` commit
+  `d3c970599eb0bfbfe417b86d87fc0e0641da9512`, internal wire version 1.
+- Whole native backend: `utmapp/dxmt` commit
+  `917b721c0f915c6524b416169fdce4427a39524f`, matching DMTX v2 texture ABI.
+- Existing signed QEMU10 diagnostic candidate `0bc3e2c35b41af1fd4313729d37e490af357def0141a91eb02807f203c265339`.
+- Public HVF option `-accel hvf,ipa-granule-size=4096`.
+- Scoped loader order: Wire1 renderer library, matching backend library,
+  original supporting libraries, ANGLE. All three `NPT_*_LIBRARY_PATH` settings
+  name the matching backend; `RENDER_SERVER_EXEC_PATH` names the Wire1 server.
+- PCI8 `virtio-gpu-gl-pci`, Neptune/BLOB enabled, 256 MiB host-visible memory;
+  a separate firmware RAMFB console supplies a diagnostic fallback.
+
+Actual dyld output from the Windows run verifies the intended renderer and
+backend, including renderer workers. Environment variables or the renderer's
+printed requested filename alone were not accepted as loading evidence.
+Source/build/test recipes are in [renderer](../experimental/neptune-wire1/README.md),
+[backend](../experimental/neptune-wire1-backend/README.md) and
+[loader/IPA checks](../experimental/neptune-wire1-backend/LOADER_IPA.md).
+
+## Problems identified before the positive run
+
+The released signed UMD rejects wire2 before context initialization; see
+[the binary analysis](NEPTUNE_DRIVER_WIRE_COMPATIBILITY.md). The old renderer
+also needs the older shared-texture ABI. Merely changing a version constant
+would not repair either boundary.
+
+A diagnostic boot showed Code43/ProblemStatus0, oem5.inf and driver version
+100.6.101.58000. Windows reported its kernel boot time from the earlier 11:26
+session despite later VM launches, consistent with Fast Startup retaining the
+failed state. A native `shutdown /s /t 0` completed before the next cold boot;
+no global hibernation policy was changed.
+
+That next boot created Neptune context7, then QEMU asserted at
+`target/arm/hvf/hvf.c:2295` (`isv`) after rejecting 4 KiB-aligned blob mappings
+under its default 16 KiB mapping guard. It also exposed an incorrect loader
+order: the original DXMT loaded despite the requested new absolute filename.
+That failed run is not attributed to the matching backend.
+
+Separate paused-CPU fixtures verified both the corrected actual loader paths
+and the public 4 KiB IPA mode. The latter accepted three distinct blob backings
+that the default mode rejected. The subsequent Windows run has shown neither
+those alignment warnings nor that assertion in the observed interval.
+A read-only qcow2 structural check after the crash found no errors; that does
+not establish a clean Windows filesystem.
+
+## Windows Device result
+
+The corrected independent [probe](../experimental/windows-3d-probe/README.md)
+completed at `2026-10-16T10:38:43.7447425Z`:
+
+| Check | Actual result |
+| --- | --- |
+| Device mode | success=true |
+| Native ARM64 | true; native machine AA64 |
+| D3D11CreateDevice HARDWARE | S_OK, feature level11_1 |
+| Adapter | Red Hat VirtIO GPU3D controller |
+| PCI vendor/device | 1AF4:1050 |
+| Software adapter/fallback | false/false |
+| Intended adapter verified | true |
+| Own-process UMD inventory | complete |
+
+The loaded ARM64 UMD's on-disk SHA-256 is
+`8fbb509b3b5e2a06b67392fe6b711832227e1ab802e096bf7d723ace6c66b437`,
+matching the reviewed release. The shim hash is
+`bb181fe8c67c18b597ca9a34078195a6d506e282e72c18ed9da49c151c19257f`.
+The report's `host_acceleration_verified` remains false by design: this probe
+alone does not inspect host execution. Host loading/texture/visible-output
+observations are separate evidence.
+
+Private captured Device report:
+`.tools/windows-3d-device-positive-ipa4k.json`, SHA-256
+`5418cd5086cc4c00a322f4d77b1a6765d98bb746055f1a32cec1a6a71779b79e`.
+C# source SHA-256: `28cb9b46f8e698506b2f850f563276de4e61164f59df3e5c215cf7507a7d1ecd`;
+launcher SHA-256: `cf6af725a1aaa11ef00b82ed59ed1abb1d385d37a67f272e77666dc766a64a1e`.
+
+## Scene and visible output
+
+Two windowed 800×600, BGRA8, flip-discard scene reports were read in the native
+Windows console. Each recorded 600 Present attempts, 600 S_OK results, zero
+occluded presents and S_OK GetDeviceRemovedReason. Elapsed scene-loop times
+were 10,883 ms and 10,300 ms. The second run was specifically repeated to close
+the visual-evidence gap: the real Cocoa console showed the probe's colored
+rectangles/barcode, with its window title reporting accepted Present533.
+The second guest report is `Downloads/scene-ipa4k2.json`. Its raw contents were
+captured privately at `.tools/windows-3d-scene-positive-ipa4k2.json`, SHA-256
+`d0ea04ebabf0f3cec977ba3cdea7d56d01c45a35a9b243c583057a06df58415e`.
+It confirms success=true, native ARM64, the intended VirtIO adapter, complete
+UMD inventory and the same probe/launcher source hashes as the Device result.
+
+These are small Clear/ClearView color-pattern presentation checks, not a
+shader/geometry benchmark or a count of every physically displayed frame.
+They do not measure input latency, frame pacing, browser acceleration, video,
+games, long-run stability or comparison with Parallels. Renderer/backend builds
+still use optimization0. The probe also printed a renderer-ready wire1 message;
+this is a guest diagnostic, not a separately captured raw capset byte stream.
+
+## Remaining work
+
+1. Qualify a real geometry/shader workload plus browser/application rendering.
+2. Restore reliable Guest Tools access in the experimental QEMU profile;
+   reconnect, automatic resolution and clipboard are not yet qualified here.
+3. Package the coherent graphics profile into the app with simple driver setup
+   and recovery, then validate cold boot, shutdown and repeated use.
+4. Use optimized builds and measure frame pacing, input latency, copies,
+   CPU/GPU/memory use and regression against the 2D baseline before tuning.
+
+Private runtime receipts include `windows-3d-wire1-full-cold1.json` (failed
+pre-4K/incorrect-backend run), `windows-3d-wire1-ipa4k-qmp1.json` and
+`windows-3d-wire1-ipa4k-boot1.json`. The successful VM run is PID52762/launch
+suffix `98af7b0c0e1d44f186b5ec93d4578b04`; historical PIDs do not select a live
+process for future control.
