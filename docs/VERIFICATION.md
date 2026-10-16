@@ -347,3 +347,26 @@ The diagnostic ISO is also staged read-only under the app's Application Support
 `Diagnostics` directory, outside Desktop, with a SHA-256 match to the prepared
 921,600-byte image. It is not attached: the earlier pending QMP operation must
 resolve first. No additional guest repair has been executed.
+
+
+### Imported Windows desktop recovered — 2026-10-16
+
+This checkpoint supersedes the pending control/ISO and candidate-install
+status above. The owned process recovered QMP access without a duplicate
+launch. The storage-filter experiment alone still produced bugcheck 0x139.
+Bounded held-kernel captures analyzed with REA/Ghidra located the exception
+address in `prl_fs.sys` (Parallels Shared Folders), without establishing the
+origin of corruption. Complete observations, evidence IDs, inference limits
+and backup details are in [Windows migration diagnostics](WINDOWS_MIGRATION_DIAGNOSTICS.md).
+
+After preserving that evidence and stopping the already bugchecked process,
+the locally verified control-availability candidate replaced the installed
+app. The previous app bundle was retained; deep strict signature verification
+passed. The normal app launched the existing imported VM with its 2D runtime.
+A guarded WinRE repair backed up the SYSTEM hive and service key, then changed
+only `prl_fs.Start` from 1 to 4 in this step. Windows subsequently reached its
+desktop; a pointer click opened Start and typed text appeared correctly in
+Windows Search. This is one successful desktop boot with basic input, not
+a 3D, latency or long-term stability result. The original VM is preserved.
+The pending Xcode agreement was not accepted. Work and commits remain local
+at the user's request; no GitHub authentication or push was attempted.
