@@ -1,8 +1,9 @@
 # First Windows ARM64 Direct3D checkpoint
 
 2026-10-16: the signed Windows ARM64 driver now creates a hardware Direct3D11
-Device on VirtIO and presents the independent color-pattern scene through the
-experimental Cocoa display. This is the first positive Windows checkpoint;
+Device on VirtIO and presents both the independent color-pattern scene and a
+compiled-shader RGB triangle through the experimental Cocoa display.
+Edge also selects that adapter for its ANGLE D3D11 path. This is a positive Windows checkpoint;
 it is not application compatibility, Parallels performance parity or a
 production-ready graphics package.
 
@@ -110,7 +111,8 @@ this is a guest diagnostic, not a separately captured raw capset byte stream.
 
 ## Remaining work
 
-1. Qualify a real geometry/shader workload plus browser/application rendering.
+1. Measure browser/application workloads, frame pacing and interaction beyond
+   the bounded triangle check; WebGPU and accelerated rasterization remain gaps.
 2. Restore reliable Guest Tools access in the experimental QEMU profile;
    reconnect, automatic resolution and clipboard are not yet qualified here.
 3. Package the coherent graphics profile into the app with simple driver setup
@@ -123,3 +125,42 @@ pre-4K/incorrect-backend run), `windows-3d-wire1-ipa4k-qmp1.json` and
 `windows-3d-wire1-ipa4k-boot1.json`. The successful VM run is PID52762/launch
 suffix `98af7b0c0e1d44f186b5ec93d4578b04`; historical PIDs do not select a live
 process for future control.
+
+## Geometry result and browser adapter qualification
+
+A separate Geometry run compiled original HLSL using Windows System32
+`d3dcompiler_47.dll`, created both `vs_4_0` and `ps_4_0` shaders, and submitted
+`Draw(3,0)` before each Present. Native ARM64 PowerShell5.1, adapter1AF4:1050
+and the same reviewed UMD hashes were recorded. Both shader compilations and
+creations returned S_OK; 600 Draw calls returned, 1,800 vertices were submitted,
+600/600 Presents returned S_OK, none were occluded, and
+GetDeviceRemovedReason returned S_OK. The loop elapsed10,394ms. The real console
+showed the interpolated RGB triangle at accepted Present203, beyond the
+ClearView background. The report records success=true and geometry_completed=true.
+This establishes a small shader/geometry workload and visible output, not
+physical frame count, sustained FPS, input latency or broad application compatibility.
+
+Private raw report `.tools/windows-3d-geometry-ipa4k1.json`, SHA-256
+`94203df574ba3f896a9af51c733a84dfe51acf4122ea02808100c444e1208251`.
+Its source SHA-256 is
+`e67451db1f010e16617b60a7df4123722801ad833ba218648d4f3ce01312a2a2`;
+launcher SHA-256
+`70249dd0c677011fcd5fed98d1183e43feff9feca34e4f1665dab12cd91041fb`.
+These are newer sources than the historical Device/Scene reports above.
+
+Edge155.0.4283.45 exported its internal GPU report at
+2026-10-16T11:03:48.544Z. It names active GPU0 as VirtIO1AF4:1050 and
+`ANGLE_D3D11`, with renderer
+`ANGLE (VirtIO, Red Hat VirtIO GPU 3D controller (0x00001050) Direct3D11 vs_5_0 ps_5_0, D3D11-0.0.0.0)`.
+Compositing, canvas and WebGL are reported hardware accelerated. The browser
+GPU sandbox is enabled. This is adapter/configuration evidence, not yet a
+rendered WebGL benchmark or verified video decode/encode.
+
+The summary's WebGPU label is insufficient: Dawn specifically blocklists the
+VirtIO D3D11 backend as not fully implemented, and lists software CPU backends
+separately. WebGPU acceleration has not been established. Accelerated rasterization
+is unavailable; the report attributes a GPU rasterization restriction to its
+vendor/backend allowlist. No browser security setting, blocklist override or
+experimental flag was changed to obtain this report.
+Private raw report `.tools/windows-edge-gpu-ipa4k1.txt`, SHA-256
+`ee87f3529c034313ec642bdad650468f504c8aa206f66ad67ff004ca3528c73c`.

@@ -59,6 +59,22 @@ namespace Perpendicular3D
         public UmdModuleReport[] umd_modules = new UmdModuleReport[0];
         public bool scene_attempted;
         public bool scene_completed;
+        public bool geometry_attempted;
+        public bool geometry_completed;
+        public string rendering_technique;
+        public string system_d3dcompiler_path;
+        public string[] shader_profiles = new string[0];
+        public string shader_source_sha256;
+        public int shader_compile_attempts;
+        public int shader_compile_s_ok;
+        public int shader_create_attempts;
+        public int shader_create_s_ok;
+        public string last_shader_compile_hresult;
+        public string last_shader_create_hresult;
+        public string shader_compile_error;
+        public int draw_attempts;
+        public int draw_calls_returned;
+        public int vertices_submitted;
         public bool exclusive_requested;
         public bool exclusive_observed;
         public bool exclusive_end_observed;
@@ -98,6 +114,17 @@ namespace Perpendicular3D
         internal const int GetFullscreenStateSlot = 11; // IDXGISwapChain1
         internal const int ResizeBuffersSlot = 13; // IDXGISwapChain1
         internal const int ClearViewSlot = 132; // ID3D11DeviceContext1
+        internal const int CreateVertexShaderSlot = 12; // ID3D11Device
+        internal const int CreatePixelShaderSlot = 15; // ID3D11Device
+        internal const int VSSetShaderSlot = 11; // ID3D11DeviceContext
+        internal const int PSSetShaderSlot = 9; // ID3D11DeviceContext
+        internal const int IASetInputLayoutSlot = 17; // ID3D11DeviceContext
+        internal const int IASetPrimitiveTopologySlot = 24; // ID3D11DeviceContext
+        internal const int OMSetRenderTargetsSlot = 33; // ID3D11DeviceContext
+        internal const int RSSetViewportsSlot = 44; // ID3D11DeviceContext
+        internal const int DrawSlot = 13; // ID3D11DeviceContext
+        internal const int GetBufferPointerSlot = 3; // ID3DBlob (ID3D10Blob alias)
+        internal const int GetBufferSizeSlot = 4; // ID3DBlob
         private const uint HardwareDriver = 1;
         private const uint SdkVersion = 7;
         private const uint BgraSupport = 0x20;
@@ -111,6 +138,20 @@ namespace Perpendicular3D
         private static readonly Guid Context1Id = new Guid("bb2c6faa-b5fb-4082-8e6b-388b8cfa90e1");
         private static readonly Guid Texture2DId = new Guid("6f15aaf2-d208-4e89-9ab4-489535d34f9c");
         private static readonly object RunLock = new object();
+        // Original HLSL. Three generated vertices, clockwise in screen space;
+        // the fresh immediate context's default rasterizer keeps this face.
+        // Profiles 4_0 cover every feature level requested above. No includes,
+        // external files, input layout, vertex buffers or fallback compiler.
+        private const string GeometryShaderSource = @"
+struct VertexOutput { float4 position : SV_Position; float3 color : COLOR0; };
+VertexOutput VSMain(uint id : SV_VertexID) {
+    const float2 positions[3] = { float2(0.0, 0.75), float2(0.75, -0.65), float2(-0.75, -0.65) };
+    const float3 colors[3] = { float3(1, 0, 0), float3(0, 1, 0), float3(0, 0, 1) };
+    VertexOutput result; result.position = float4(positions[id], 0.5, 1.0);
+    result.color = colors[id]; return result;
+}
+float4 PSMain(VertexOutput input) : SV_Target { return float4(input.color, 1.0); }
+";
 
         [StructLayout(LayoutKind.Sequential)] internal struct Luid { public uint Low; public int High; }
         [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
@@ -135,6 +176,10 @@ namespace Perpendicular3D
             public int Left, Top, Right, Bottom;
             public Rect(int l, int t, int r, int b) { Left = l; Top = t; Right = r; Bottom = b; }
         }
+        [StructLayout(LayoutKind.Sequential)] internal struct Viewport
+        {
+            public float TopLeftX, TopLeftY, Width, Height, MinDepth, MaxDepth;
+        }
 
         [UnmanagedFunctionPointer(CallingConvention.StdCall)] private delegate int Query(IntPtr self, ref Guid id, out IntPtr result);
         [UnmanagedFunctionPointer(CallingConvention.StdCall)] private delegate uint ReleaseNative(IntPtr self);
@@ -150,6 +195,16 @@ namespace Perpendicular3D
         [UnmanagedFunctionPointer(CallingConvention.StdCall)] private delegate int PresentNative(IntPtr self, uint interval, uint flags);
         [UnmanagedFunctionPointer(CallingConvention.StdCall)] private delegate int RemovedNative(IntPtr self);
         [UnmanagedFunctionPointer(CallingConvention.StdCall)] private delegate void ClearViewNative(IntPtr self, IntPtr view, [In, MarshalAs(UnmanagedType.LPArray, SizeConst = 4)] float[] color, ref Rect rectangle, uint count);
+        [UnmanagedFunctionPointer(CallingConvention.StdCall)] private delegate IntPtr BlobPointerNative(IntPtr self);
+        [UnmanagedFunctionPointer(CallingConvention.StdCall)] private delegate UIntPtr BlobSizeNative(IntPtr self);
+        [UnmanagedFunctionPointer(CallingConvention.StdCall)] private delegate int CreateShaderNative(IntPtr self, IntPtr bytecode, UIntPtr length, IntPtr linkage, out IntPtr shader);
+        [UnmanagedFunctionPointer(CallingConvention.StdCall)] private delegate void SetShaderNative(IntPtr self, IntPtr shader, IntPtr classes, uint count);
+        [UnmanagedFunctionPointer(CallingConvention.StdCall)] private delegate void SetInputLayoutNative(IntPtr self, IntPtr layout);
+        [UnmanagedFunctionPointer(CallingConvention.StdCall)] private delegate void SetTopologyNative(IntPtr self, uint topology);
+        [UnmanagedFunctionPointer(CallingConvention.StdCall)] private delegate void SetTargetsNative(IntPtr self, uint count, [In, MarshalAs(UnmanagedType.LPArray, SizeParamIndex = 1)] IntPtr[] targets, IntPtr depth);
+        [UnmanagedFunctionPointer(CallingConvention.StdCall)] private delegate void SetViewportsNative(IntPtr self, uint count, ref Viewport viewport);
+        [UnmanagedFunctionPointer(CallingConvention.StdCall)] private delegate void DrawNative(IntPtr self, uint count, uint first);
+        private delegate int CompileNative(byte[] source, UIntPtr length, string name, IntPtr defines, IntPtr include, string entry, string target, uint flags, uint effectFlags, out IntPtr code, out IntPtr errors);
 
         private static T Method<T>(IntPtr instance, int slot) where T : class
         {
@@ -190,7 +245,8 @@ namespace Perpendicular3D
         {
             if (String.Equals(mode, "Device", StringComparison.OrdinalIgnoreCase)) return "Device";
             if (String.Equals(mode, "Scene", StringComparison.OrdinalIgnoreCase)) return "Scene";
-            throw new ProbeFailure("arguments", "Use Device or Scene (case insensitive).", null);
+            if (String.Equals(mode, "Geometry", StringComparison.OrdinalIgnoreCase)) return "Geometry";
+            throw new ProbeFailure("arguments", "Use Device, Scene or Geometry (case insensitive).", null);
         }
         private static bool IsNativeArm64(ushort process, ushort native, int pointerBytes) { return process == 0 && native == 0xaa64 && pointerBytes == 8; }
         private static bool IsSoftware(uint flags) { return (flags & SoftwareAdapterFlag) != 0; }
@@ -271,9 +327,9 @@ namespace Perpendicular3D
             report.dxgi_software_flag = IsSoftware(desc.Flags);
             // Actual Windows baseline returned this software renderer with Flags=0.
             report.software_adapter = report.dxgi_software_flag || (desc.VendorId == 0x1414 && desc.DeviceId == 0x008c);
-            if (report.software_adapter) throw new ProbeFailure("adapter", "Software adapter (DXGI flag or Microsoft Basic Render ID); Device/Scene refused.", null);
+            if (report.software_adapter) throw new ProbeFailure("adapter", "Software adapter (DXGI flag or Microsoft Basic Render ID); probe refused.", null);
             if (desc.VendorId != 0x1af4 || desc.DeviceId != 0x1050)
-                throw new ProbeFailure("adapter_target", "Expected VirtIO GPU vendor 0x1AF4/device 0x1050; Device/Scene refused.", null);
+                throw new ProbeFailure("adapter_target", "Expected VirtIO GPU vendor 0x1AF4/device 0x1050; probe refused.", null);
             report.expected_adapter_verified = true;
             // Compatibility field: only API creation plus target identity, never host-GPU proof.
             report.hardware_adapter_verified = report.device_creation_succeeded;
@@ -307,8 +363,8 @@ namespace Perpendicular3D
             try
             {
                 mode = NormalizeMode(mode); report.mode = mode;
-                if ((exclusive && mode != "Scene") || frames < 1 || frames > 600 || seconds < 1 || seconds > 30)
-                    throw new ProbeFailure("arguments", "Use Device/Scene; exclusive only with Scene; 1..600 frames, 1..30 seconds.", null);
+                if ((exclusive && mode == "Device") || frames < 1 || frames > 600 || seconds < 1 || seconds > 30)
+                    throw new ProbeFailure("arguments", "Use Device/Scene/Geometry; exclusive only with Scene/Geometry; 1..600 frames, 1..30 seconds.", null);
                 if (Environment.OSVersion.Platform != PlatformID.Win32NT)
                     throw new ProbeFailure("platform", "This diagnostic requires Windows; no native graphics function was called.", null);
                 ushort processMachine, nativeMachine;
@@ -333,8 +389,8 @@ namespace Perpendicular3D
                 AdapterDesc1 desc;
                 Check(Method<GetDescNative>(adapter1, GetDesc1Slot)(adapter1, out desc), "GetDesc1");
                 ValidateAdapter(report, desc);
-                if (mode == "Scene") RenderScene(report, device, context, adapter, exclusive, frames, seconds);
-                report.success = mode == "Device" || report.scene_completed;
+                if (mode != "Device") RenderScene(report, device, context, adapter, exclusive, frames, seconds, mode == "Geometry");
+                report.success = mode == "Device" || (mode == "Geometry" ? report.geometry_completed : report.scene_completed);
             }
             catch (ProbeFailure error) { report.error_stage = error.Stage; report.error_message = error.Message; report.error_hresult = error.Result.HasValue ? Hex(error.Result.Value) : null; }
             catch (Exception error) { report.error_stage = "managed_or_native_binding"; report.error_message = error.GetType().FullName + ": " + error.Message; }
@@ -342,12 +398,15 @@ namespace Perpendicular3D
             return report;
         }
 
-        private static void RenderScene(ProbeReport report, IntPtr device, IntPtr context, IntPtr adapter, bool exclusive, int frames, int seconds)
+        private static void RenderScene(ProbeReport report, IntPtr device, IntPtr context, IntPtr adapter, bool exclusive, int frames, int seconds, bool geometry)
         {
             report.scene_attempted = true;
+            report.geometry_attempted = geometry;
+            report.rendering_technique = geometry ? "vertex_id_gradient_triangle" : "clear_view_counter";
             if (report.session_id == 0 || !Environment.UserInteractive) throw new ProbeFailure("session", "Scene requires the interactive desktop, not Session 0.", null);
             IntPtr factory = IntPtr.Zero, swap = IntPtr.Zero, buffer = IntPtr.Zero, view = IntPtr.Zero, context1 = IntPtr.Zero;
             bool enteredFullscreen = false;
+            IntPtr vertexShader = IntPtr.Zero, pixelShader = IntPtr.Zero;
             using (NativeWindow window = new NativeWindow(report.width, report.height))
             {
                 try
@@ -374,15 +433,27 @@ namespace Perpendicular3D
                     Check(Method<GetBufferNative>(swap, GetBufferSlot)(swap, 0, ref textureId, out buffer), "GetBuffer(0)");
                     Check(Method<CreateRtvNative>(device, CreateRenderTargetViewSlot)(device, buffer, IntPtr.Zero, out view), "CreateRenderTargetView");
                     Release(ref buffer);
+                    if (geometry)
+                    {
+                        report.shader_profiles = new string[] { "vs_4_0", "ps_4_0" };
+                        using (SHA256 hash = SHA256.Create()) { report.shader_source_sha256 = BitConverter.ToString(hash.ComputeHash(Encoding.ASCII.GetBytes(GeometryShaderSource))).Replace("-", "").ToLowerInvariant(); }
+                        vertexShader = CompileGeometryShader(report, device, true, Native.D3DCompile);
+                        pixelShader = CompileGeometryShader(report, device, false, Native.D3DCompile);
+                        StringBuilder compilerPath = new StringBuilder(32768);
+                        IntPtr compiler = Native.GetModuleHandleW("d3dcompiler_47.dll");
+                        if (compiler != IntPtr.Zero && Native.GetModuleFileNameW(compiler, compilerPath, (uint)compilerPath.Capacity) > 0)
+                            report.system_d3dcompiler_path = compilerPath.ToString();
+                    }
                     Stopwatch timer = Stopwatch.StartNew();
                     while (report.present_attempts < frames && timer.Elapsed.TotalSeconds < seconds)
                     {
                         window.Pump();
                         if (window.Closed) { report.user_closed = true; break; }
                         DrawPattern(context1, view, report.present_s_ok + 1, report.width, report.height);
+                        if (geometry) DrawGeometry(report, context, view, vertexShader, pixelShader);
                         int hr = Method<PresentNative>(swap, PresentSlot)(swap, 1, 0);
                         if (!ObservePresent(report, hr)) { Thread.Sleep(50); continue; }
-                        window.Title("Perpendicular D3D11 HARDWARE - accepted Present " + report.present_s_ok + " - " + (exclusive ? "exclusive" : "windowed"));
+                        window.Title("Perpendicular D3D11 HARDWARE " + report.mode + " - accepted Present " + report.present_s_ok + " - " + (exclusive ? "exclusive" : "windowed"));
                     }
                     timer.Stop(); report.scene_elapsed_ms = timer.ElapsedMilliseconds;
                     int removed = Method<RemovedNative>(device, GetDeviceRemovedReasonSlot)(device);
@@ -393,10 +464,18 @@ namespace Perpendicular3D
                         if (!report.exclusive_end_observed) throw new ProbeFailure("exclusive", "DXGI left exclusive mode during the probe.", null);
                     }
                     report.scene_completed = report.present_s_ok > 0 && !report.user_closed;
+                    report.geometry_completed = geometry && report.scene_completed && report.draw_calls_returned > 0 && report.shader_create_s_ok == 2;
                     if (!report.scene_completed) throw new ProbeFailure("scene", report.user_closed ? "User closed the probe before completion." : "No Present returned S_OK.", null);
                 }
                 finally
                 {
+                    if (geometry && (vertexShader != IntPtr.Zero || pixelShader != IntPtr.Zero))
+                    {
+                        Method<SetShaderNative>(context, VSSetShaderSlot)(context, IntPtr.Zero, IntPtr.Zero, 0);
+                        Method<SetShaderNative>(context, PSSetShaderSlot)(context, IntPtr.Zero, IntPtr.Zero, 0);
+                        Method<SetTargetsNative>(context, OMSetRenderTargetsSlot)(context, 0, null, IntPtr.Zero);
+                    }
+                    Release(ref pixelShader); Release(ref vertexShader);
                     if (enteredFullscreen && swap != IntPtr.Zero)
                     {
                         int restored = Method<FullscreenNative>(swap, SetFullscreenStateSlot)(swap, 0, IntPtr.Zero);
@@ -404,6 +483,7 @@ namespace Perpendicular3D
                         if (restored != 0)
                         {
                             report.scene_completed = false;
+                            report.geometry_completed = false;
                             report.error_stage = "fullscreen_restore"; report.error_hresult = Hex(restored);
                             report.error_message = "Fullscreen restoration did not return S_OK.";
                         }
@@ -411,6 +491,68 @@ namespace Perpendicular3D
                     Release(ref view); Release(ref buffer); Release(ref swap); Release(ref factory); Release(ref context1);
                 }
             }
+        }
+
+        private static string CompilerMessage(IntPtr blob)
+        {
+            if (blob == IntPtr.Zero) return null;
+            ulong size = Method<BlobSizeNative>(blob, GetBufferSizeSlot)(blob).ToUInt64();
+            IntPtr data = Method<BlobPointerNative>(blob, GetBufferPointerSlot)(blob);
+            if (data == IntPtr.Zero || size == 0) return null;
+            byte[] bytes = new byte[(int)Math.Min(size, 4096UL)];
+            Marshal.Copy(data, bytes, 0, bytes.Length);
+            return Encoding.UTF8.GetString(bytes).TrimEnd('\0');
+        }
+
+        private static IntPtr CompileGeometryShader(ProbeReport report, IntPtr device, bool vertex, CompileNative compile)
+        {
+            IntPtr code = IntPtr.Zero, errors = IntPtr.Zero, shader = IntPtr.Zero;
+            string label = vertex ? "VS" : "PS";
+            bool transferred = false;
+            try
+            {
+                byte[] source = Encoding.ASCII.GetBytes(GeometryShaderSource);
+                report.shader_compile_attempts++;
+                int hr = compile(source, new UIntPtr((uint)source.Length), "Perpendicular-original-triangle", IntPtr.Zero, IntPtr.Zero,
+                                 vertex ? "VSMain" : "PSMain", vertex ? "vs_4_0" : "ps_4_0", 0x800, 0, out code, out errors);
+                report.last_shader_compile_hresult = Hex(hr);
+                report.shader_compile_error = CompilerMessage(errors);
+                if (hr != 0) throw new ProbeFailure("D3DCompile(" + label + ")", report.shader_compile_error ?? "Shader compilation did not return S_OK.", hr);
+                if (code == IntPtr.Zero) throw new ProbeFailure("D3DCompile(" + label + ")", "Compiler returned a null bytecode blob.", null);
+                report.shader_compile_s_ok++;
+                UIntPtr size = Method<BlobSizeNative>(code, GetBufferSizeSlot)(code);
+                IntPtr data = Method<BlobPointerNative>(code, GetBufferPointerSlot)(code);
+                if (size.ToUInt64() == 0 || size.ToUInt64() > 1024 * 1024 || data == IntPtr.Zero)
+                    throw new ProbeFailure("shader_bytecode", "Bytecode must have a non-null pointer and 1..1048576 bytes.", null);
+                report.shader_create_attempts++;
+                hr = Method<CreateShaderNative>(device, vertex ? CreateVertexShaderSlot : CreatePixelShaderSlot)(device, data, size, IntPtr.Zero, out shader);
+                report.last_shader_create_hresult = Hex(hr);
+                if (hr != 0) throw new ProbeFailure("Create" + (vertex ? "Vertex" : "Pixel") + "Shader", "Shader creation did not return S_OK.", hr);
+                if (shader == IntPtr.Zero) throw new ProbeFailure("shader_create", "Successful shader creation returned a null pointer.", null);
+                report.shader_create_s_ok++;
+                transferred = true;
+                return shader;
+            }
+            finally { if (!transferred) Release(ref shader); Release(ref errors); Release(ref code); }
+        }
+
+        private static void DrawGeometry(ProbeReport report, IntPtr context, IntPtr view, IntPtr vertexShader, IntPtr pixelShader)
+        {
+            if (vertexShader == IntPtr.Zero || pixelShader == IntPtr.Zero || view == IntPtr.Zero)
+                throw new ProbeFailure("geometry_bind", "A complete shader pipeline and render target are required before Draw.", null);
+            Viewport viewport = new Viewport();
+            viewport.Width = report.width; viewport.Height = report.height; viewport.MaxDepth = 1;
+            Method<SetTargetsNative>(context, OMSetRenderTargetsSlot)(context, 1, new IntPtr[] { view }, IntPtr.Zero);
+            Method<SetViewportsNative>(context, RSSetViewportsSlot)(context, 1, ref viewport);
+            Method<SetInputLayoutNative>(context, IASetInputLayoutSlot)(context, IntPtr.Zero);
+            Method<SetTopologyNative>(context, IASetPrimitiveTopologySlot)(context, 4); // TRIANGLELIST
+            Method<SetShaderNative>(context, VSSetShaderSlot)(context, vertexShader, IntPtr.Zero, 0);
+            Method<SetShaderNative>(context, PSSetShaderSlot)(context, pixelShader, IntPtr.Zero, 0);
+            report.draw_attempts++;
+            // Draw returns void: a returned call is not a GPU completion fence.
+            Method<DrawNative>(context, DrawSlot)(context, 3, 0);
+            report.draw_calls_returned++;
+            report.vertices_submitted += 3;
         }
 
         private static void DrawPattern(IntPtr context1, IntPtr view, int frame, int width, int height)
@@ -500,6 +642,9 @@ namespace Perpendicular3D
             [StructLayout(LayoutKind.Sequential)] internal struct Message { public IntPtr Window; public uint Id; public UIntPtr WParam; public IntPtr LParam; public uint Time; public Point Position; public uint Private; }
             [DllImport("d3d11.dll"), DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
             internal static extern int D3D11CreateDevice(IntPtr adapter, uint driver, IntPtr software, uint flags, [In] uint[] levels, uint count, uint sdk, out IntPtr device, out uint level, out IntPtr context);
+            [DllImport("d3dcompiler_47.dll", ExactSpelling = true, CallingConvention = CallingConvention.StdCall), DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
+            internal static extern int D3DCompile([In] byte[] source, UIntPtr length, [MarshalAs(UnmanagedType.LPStr)] string name, IntPtr defines, IntPtr include,
+                [MarshalAs(UnmanagedType.LPStr)] string entry, [MarshalAs(UnmanagedType.LPStr)] string target, uint flags, uint effectFlags, out IntPtr code, out IntPtr errors);
             [DllImport("kernel32.dll", SetLastError = true), DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
             [return: MarshalAs(UnmanagedType.Bool)] internal static extern bool IsWow64Process2(IntPtr process, out ushort processMachine, out ushort nativeMachine);
             [DllImport("kernel32.dll"), DefaultDllImportSearchPaths(DllImportSearchPath.System32)] internal static extern IntPtr GetCurrentProcess();
@@ -523,21 +668,21 @@ namespace Perpendicular3D
         public static string[] SelfTest()
         {
             List<string> passed = new List<string>();
-            if (IntPtr.Size != 8 || Marshal.SizeOf(typeof(AdapterDesc1)) != 312 || Marshal.OffsetOf(typeof(AdapterDesc1), "Flags").ToInt32() != 304 || Marshal.SizeOf(typeof(SwapDesc1)) != 48 || Marshal.SizeOf(typeof(Rect)) != 16 || Marshal.SizeOf(typeof(Native.WindowClass)) != 80 || Marshal.SizeOf(typeof(Native.Message)) != 48)
+            if (IntPtr.Size != 8 || Marshal.SizeOf(typeof(AdapterDesc1)) != 312 || Marshal.OffsetOf(typeof(AdapterDesc1), "Flags").ToInt32() != 304 || Marshal.SizeOf(typeof(SwapDesc1)) != 48 || Marshal.SizeOf(typeof(Rect)) != 16 || Marshal.SizeOf(typeof(Viewport)) != 24 || Marshal.SizeOf(typeof(Native.WindowClass)) != 80 || Marshal.SizeOf(typeof(Native.Message)) != 48)
                 throw new Exception("Win64 structure layout mismatch");
             passed.Add("Win64 struct sizes/adapter flag offset");
             if (FeatureLevel(0xb100) != "11_1" || FeatureLevel(0xa000) != "10_0" || Hex(unchecked((int)0x887A0005)) != "0x887A0005") throw new Exception("Result formatting mismatch");
             passed.Add("Feature-level and negative HRESULT reporting");
             if (HardwareDriver != 1 || SdkVersion != 7 || !IsNativeArm64(0, 0xaa64, 8) || IsNativeArm64(0x8664, 0xaa64, 8) || IsNativeArm64(0, 0x8664, 8) || IsNativeArm64(0, 0xaa64, 4) || !IsSoftware(2) || IsSoftware(0)) throw new Exception("Hardware/native-architecture admission failed");
             passed.Add("HARDWARE constant, ARM64-only admission and software-adapter rejection");
-            string[] modes = { "Device", "device", "DEVICE", "DeViCe", "Scene", "scene", "SCENE", "sCeNe" };
+            string[] modes = { "Device", "device", "DEVICE", "DeViCe", "Scene", "scene", "SCENE", "sCeNe", "Geometry", "geometry", "GEOMETRY", "gEoMeTrY" };
             foreach (string mode in modes)
             {
-                string expected = mode.StartsWith("d", StringComparison.OrdinalIgnoreCase) ? "Device" : "Scene";
+                string expected = mode.StartsWith("d", StringComparison.OrdinalIgnoreCase) ? "Device" : mode.StartsWith("s", StringComparison.OrdinalIgnoreCase) ? "Scene" : "Geometry";
                 if (NormalizeMode(mode) != expected) throw new Exception("Mode casing was not canonicalized");
                 if (Environment.OSVersion.Platform != PlatformID.Win32NT)
                 {
-                    ProbeReport denied = Run(mode, expected == "Scene", 1, 1);
+                    ProbeReport denied = Run(mode, expected != "Device", 1, 1);
                     if (denied.mode != expected || denied.error_stage != "platform" || denied.success || denied.native_arm64 || denied.scene_attempted || denied.device_creation_succeeded)
                         throw new Exception("Accepted mode casing failed arguments or reached native calls");
                 }
@@ -547,7 +692,7 @@ namespace Perpendicular3D
                 ProbeReport denied = Run(mode, false, 1, 1);
                 if (denied.error_stage != "arguments" || denied.device_creation_succeeded || denied.scene_attempted) throw new Exception("Invalid mode was admitted");
             }
-            passed.Add("Eight Device/Scene casings canonicalized; invalid modes rejected before native calls");
+            passed.Add("Twelve Device/Scene/Geometry casings canonicalized; invalid modes rejected before native calls");
             foreach (uint[] identity in new uint[][] { new uint[] { 0x1414, 0x008c, 0 }, new uint[] { 0x1234, 0x1050, 0 }, new uint[] { 0x1af4, 0x1050, 2 }, new uint[] { 0x1af4, 0x1050, 0 } })
             {
                 AdapterDesc1 desc = new AdapterDesc1();
@@ -623,6 +768,7 @@ namespace Perpendicular3D
             }
             finally { Marshal.FreeHGlobal(instance); Marshal.FreeHGlobal(table); GC.KeepAlive(draw); GC.KeepAlive(release); }
             passed.Add("Owned mock vtable/delegate dispatch, bounded pixel-counter commands and one-release ownership");
+            TestGeometry(passed);
             if (Environment.OSVersion.Platform != PlatformID.Win32NT)
             {
                 ProbeReport denied = Run("Device", false, 1, 1);
@@ -630,6 +776,124 @@ namespace Perpendicular3D
                 passed.Add("Non-Windows execution fails closed before DLL calls");
             }
             return passed.ToArray();
+        }
+
+        // Test-owned vtables only; no OS COM object or native DLL is loaded.
+        private sealed class MockCom : IDisposable
+        {
+            internal readonly IntPtr Handle;
+            private readonly IntPtr table;
+            private readonly List<Delegate> roots = new List<Delegate>();
+            internal MockCom(int slots)
+            {
+                table = Marshal.AllocHGlobal(slots * IntPtr.Size); Handle = Marshal.AllocHGlobal(IntPtr.Size);
+                for (int i = 0; i < slots; i++) Marshal.WriteIntPtr(table, i * IntPtr.Size, IntPtr.Zero);
+                Marshal.WriteIntPtr(Handle, table);
+            }
+            internal void Set(int slot, Delegate callback) { roots.Add(callback); Marshal.WriteIntPtr(table, slot * IntPtr.Size, Marshal.GetFunctionPointerForDelegate(callback)); }
+            public void Dispose() { Marshal.FreeHGlobal(Handle); Marshal.FreeHGlobal(table); GC.KeepAlive(roots); }
+        }
+
+        private static void TestGeometry(List<string> passed)
+        {
+            System.Reflection.MethodInfo compilerMethod = typeof(Native).GetMethod("D3DCompile", System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic);
+            DllImportAttribute binding = (DllImportAttribute)Attribute.GetCustomAttribute(compilerMethod, typeof(DllImportAttribute));
+            DefaultDllImportSearchPathsAttribute search = (DefaultDllImportSearchPathsAttribute)Attribute.GetCustomAttribute(compilerMethod, typeof(DefaultDllImportSearchPathsAttribute));
+            Type[] parameterTypes = { typeof(byte[]), typeof(UIntPtr), typeof(string), typeof(IntPtr), typeof(IntPtr), typeof(string), typeof(string), typeof(uint), typeof(uint), typeof(IntPtr).MakeByRefType(), typeof(IntPtr).MakeByRefType() };
+            System.Reflection.ParameterInfo[] parameters = compilerMethod.GetParameters();
+            if (binding.Value != "d3dcompiler_47.dll" || !binding.ExactSpelling || binding.CallingConvention != CallingConvention.StdCall || search.Paths != DllImportSearchPath.System32 || compilerMethod.ReturnType != typeof(int) || parameters.Length != parameterTypes.Length)
+                throw new Exception("Native compiler DLL/search/calling convention signature changed");
+            for (int i = 0; i < parameters.Length; i++) if (parameters[i].ParameterType != parameterTypes[i]) throw new Exception("D3DCompile pointer/SIZE_T/output signature mismatch");
+            foreach (int i in new int[] { 2, 5, 6 })
+            {
+                MarshalAsAttribute marshaling = (MarshalAsAttribute)Attribute.GetCustomAttribute(parameters[i], typeof(MarshalAsAttribute));
+                if (marshaling == null || marshaling.Value != UnmanagedType.LPStr) throw new Exception("HLSL name/entry/profile must be ANSI pointers");
+            }
+            passed.Add("D3DCompile Win64 SIZE_T/pointer/out signature, explicit ANSI strings and System32-only compiler binding");
+            foreach (int[] bounds in new int[][] { new int[] { 0, 1 }, new int[] { 601, 1 }, new int[] { 1, 0 }, new int[] { 1, 31 } })
+            {
+                ProbeReport denied = Run("Geometry", true, bounds[0], bounds[1]);
+                if (denied.error_stage != "arguments" || denied.shader_compile_attempts != 0 || denied.draw_attempts != 0 || denied.geometry_attempted)
+                    throw new Exception("Geometry bounds reached native compilation or graphics");
+            }
+            if (Run("Device", true, 1, 1).error_stage != "arguments") throw new Exception("Device admitted fullscreen");
+            passed.Add("Geometry frame/time bounds and Device-only fullscreen rejection before native calls");
+            IntPtr bytes = Marshal.AllocHGlobal(4096);
+            try
+            {
+                Marshal.WriteInt32(bytes, unchecked((int)0x43425844));
+                using (MockCom device = new MockCom(16))
+                using (MockCom blob = new MockCom(5))
+                using (MockCom shader = new MockCom(3))
+                {
+                    int blobReleases = 0, shaderReleases = 0, compileCalls = 0, createCalls = 0;
+                    int compileResult = 0, createResult = 0; bool nullCode = false, nullShader = false;
+                    ulong blobBytes = 4;
+                    blob.Set(ReleaseSlot, new ReleaseNative(delegate(IntPtr self) { blobReleases++; return 0; }));
+                    blob.Set(GetBufferPointerSlot, new BlobPointerNative(delegate(IntPtr self) { return bytes; }));
+                    blob.Set(GetBufferSizeSlot, new BlobSizeNative(delegate(IntPtr self) { return new UIntPtr(blobBytes); }));
+                    byte[] diagnostic = new byte[4096]; for (int i = 0; i < diagnostic.Length; i++) diagnostic[i] = 88;
+                    Marshal.Copy(diagnostic, 0, bytes, diagnostic.Length); blobBytes = 8192;
+                    if (CompilerMessage(blob.Handle).Length != 4096) throw new Exception("Compiler diagnostic escaped its byte cap");
+                    blobBytes = 4; Marshal.WriteInt32(bytes, unchecked((int)0x43425844));
+                    shader.Set(ReleaseSlot, new ReleaseNative(delegate(IntPtr self) { shaderReleases++; return 0; }));
+                    CompileNative compile = delegate(byte[] input, UIntPtr length, string name, IntPtr defines, IntPtr include, string entry, string target, uint flags, uint effectFlags, out IntPtr code, out IntPtr errors)
+                    {
+                        compileCalls++;
+                        if (length.ToUInt64() != (ulong)input.Length || Encoding.ASCII.GetString(input) != GeometryShaderSource || defines != IntPtr.Zero || include != IntPtr.Zero || flags != 0x800 || effectFlags != 0 ||
+                            !((entry == "VSMain" && target == "vs_4_0") || (entry == "PSMain" && target == "ps_4_0")))
+                            throw new Exception("Shader source/profile/strictness or no-include contract changed");
+                        code = nullCode || compileResult != 0 ? IntPtr.Zero : blob.Handle; errors = IntPtr.Zero; return compileResult;
+                    };
+                    CreateShaderNative create = delegate(IntPtr self, IntPtr data, UIntPtr length, IntPtr linkage, out IntPtr result)
+                    {
+                        createCalls++;
+                        if (self != device.Handle || data != bytes || length.ToUInt64() != 4 || linkage != IntPtr.Zero) throw new Exception("Shader creation bytecode or class linkage mismatch");
+                        result = nullShader || createResult != 0 ? IntPtr.Zero : shader.Handle; return createResult;
+                    };
+                    device.Set(CreateVertexShaderSlot, create); device.Set(CreatePixelShaderSlot, create);
+                    ProbeReport good = new ProbeReport();
+                    IntPtr vs = CompileGeometryShader(good, device.Handle, true, compile), ps = CompileGeometryShader(good, device.Handle, false, compile);
+                    Release(ref vs); Release(ref ps);
+                    if (good.shader_compile_attempts != 2 || good.shader_compile_s_ok != 2 || good.shader_create_attempts != 2 || good.shader_create_s_ok != 2 || compileCalls != 2 || createCalls != 2 || blobReleases != 2 || shaderReleases != 2)
+                        throw new Exception("Real shader path counters/blob ownership diverged");
+                    foreach (string failure in new string[] { "compile", "null_code", "oversize", "create", "null_shader" })
+                    {
+                        compileResult = failure == "compile" ? unchecked((int)0x80004005) : 0;
+                        createResult = failure == "create" ? unchecked((int)0x80070057) : 0;
+                        nullCode = failure == "null_code"; nullShader = failure == "null_shader";
+                        blobBytes = failure == "oversize" ? 1048577UL : 4UL;
+                        ProbeReport bad = new ProbeReport(); bool rejected = false; int before = blobReleases;
+                        try { IntPtr unexpected = CompileGeometryShader(bad, device.Handle, true, compile); Release(ref unexpected); }
+                        catch (ProbeFailure) { rejected = true; }
+                        int expectedCreate = failure == "create" || failure == "null_shader" ? 1 : 0;
+                        int expectedRelease = failure == "compile" || failure == "null_code" ? 0 : 1;
+                        if (!rejected || bad.shader_compile_attempts != 1 || bad.shader_create_attempts != expectedCreate || bad.shader_create_s_ok != 0 || bad.draw_attempts != 0 || blobReleases != before + expectedRelease)
+                            throw new Exception("Shader failure was admitted or leaked bytecode: " + failure);
+                    }
+                    passed.Add("Production shader path: fixed HLSL/profiles, no includes, strict compilation, VS/PS creation, bytecode ownership and compile/null/oversize/create failures");
+                }
+                using (MockCom context = new MockCom(45))
+                {
+                    List<string> calls = new List<string>();
+                    context.Set(OMSetRenderTargetsSlot, new SetTargetsNative(delegate(IntPtr self, uint count, IntPtr[] targets, IntPtr depth) { if (count != 1 || targets.Length != 1 || targets[0] != new IntPtr(0x33) || depth != IntPtr.Zero) throw new Exception("RTV binding mismatch"); calls.Add("target"); }));
+                    context.Set(RSSetViewportsSlot, new SetViewportsNative(delegate(IntPtr self, uint count, ref Viewport v) { if (count != 1 || v.Width != 800 || v.Height != 600 || v.TopLeftX != 0 || v.TopLeftY != 0 || v.MinDepth != 0 || v.MaxDepth != 1) throw new Exception("Viewport mismatch"); calls.Add("viewport"); }));
+                    context.Set(IASetInputLayoutSlot, new SetInputLayoutNative(delegate(IntPtr self, IntPtr layout) { if (layout != IntPtr.Zero) throw new Exception("SV_VertexID requires no input layout"); calls.Add("layout"); }));
+                    context.Set(IASetPrimitiveTopologySlot, new SetTopologyNative(delegate(IntPtr self, uint topology) { if (topology != 4) throw new Exception("Triangle list required"); calls.Add("topology"); }));
+                    context.Set(VSSetShaderSlot, new SetShaderNative(delegate(IntPtr self, IntPtr shader, IntPtr classes, uint count) { if (shader != new IntPtr(0x11) || classes != IntPtr.Zero || count != 0) throw new Exception("VS binding mismatch"); calls.Add("vs"); }));
+                    context.Set(PSSetShaderSlot, new SetShaderNative(delegate(IntPtr self, IntPtr shader, IntPtr classes, uint count) { if (shader != new IntPtr(0x22) || classes != IntPtr.Zero || count != 0) throw new Exception("PS binding mismatch"); calls.Add("ps"); }));
+                    context.Set(DrawSlot, new DrawNative(delegate(IntPtr self, uint count, uint first) { if (count != 3 || first != 0) throw new Exception("Expected Draw(3,0)"); calls.Add("draw"); }));
+                    ProbeReport report = new ProbeReport();
+                    DrawGeometry(report, context.Handle, new IntPtr(0x33), new IntPtr(0x11), new IntPtr(0x22));
+                    if (String.Join(",", calls.ToArray()) != "target,viewport,layout,topology,vs,ps,draw" || report.draw_attempts != 1 || report.draw_calls_returned != 1 || report.vertices_submitted != 3 || report.geometry_completed || report.host_acceleration_verified)
+                        throw new Exception("Geometry submission order/counters falsely report GPU completion");
+                    bool rejected = false;
+                    try { DrawGeometry(report, context.Handle, new IntPtr(0x33), IntPtr.Zero, new IntPtr(0x22)); } catch (ProbeFailure) { rejected = true; }
+                    if (!rejected || report.draw_attempts != 1 || calls.Count != 7) throw new Exception("Incomplete pipeline reached Draw");
+                    passed.Add("Owned context vtable: exact RTV/viewport/null layout/triangle topology/VS/PS/Draw order, three vertices, incomplete pipeline denial, no GPU-completion claim");
+                }
+            }
+            finally { Marshal.FreeHGlobal(bytes); }
         }
     }
 }

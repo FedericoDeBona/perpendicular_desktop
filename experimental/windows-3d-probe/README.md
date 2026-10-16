@@ -1,16 +1,21 @@
 # Independent Windows ARM64 D3D11 probe
 
-Original MIT diagnostic, prepared on 2026-10-16. The corrected probe has now
-run in native ARM64 Windows PowerShell 5.1 and **correctly rejected Microsoft
-Basic Render**. A positive VirtIO device result, visible scene and host
-acceleration remain unverified. No driver, VM, app, runtime, certificate,
+Original MIT diagnostic, prepared on 2026-10-16. Historical native ARM64
+Windows PowerShell 5.1 results below include correct rejection of Microsoft
+Basic Render. The **Geometry** mode has now compiled and run on native ARM64 Windows
+PowerShell 5.1 with a visible RGB triangle and 600 successful Presents. Results from earlier Device/Scene source revisions
+must retain their own report hashes. Host acceleration remains a separate gate.
+The separately retained [positive Device/Scene checkpoint](../../docs/NEPTUNE_WINDOWS_3D_CHECKPOINT.md)
+now records native ARM64 VirtIO creation and visible clear/present output;
+those earlier hashes do not establish a Geometry result.
+No driver, VM, app, runtime, certificate,
 security policy or display setting was changed by preparing this probe. The separate operator-led
 driver trial is recorded below without a success claim. See the separate
 [driver-package gate](../../docs/GRAPHICS_DRIVER_PACKAGE.md) and
 [host scanout limits](../neptune-live/README.md); this program does not authorize
 installing that driver or qualify its source provenance.
 
-## Device and scene are separate results
+## Device, scene and geometry are separate results
 
 `Device` calls **D3D11CreateDevice exactly once**, with NULL adapter,
 `D3D_DRIVER_TYPE_HARDWARE=1`, NULL software module, BGRA support, SDK version 7,
@@ -21,7 +26,7 @@ levels is reported; it is not proof about unsupported lower levels.
 
 The actual returned device is queried for IDXGIDevice, its adapter and
 IDXGIAdapter1::GetDesc1. The report includes description, vendor/device/subsystem/
-revision, LUID, flags and actual selected feature level. Device and Scene now
+revision, LUID, flags and actual selected feature level. All three modes
 require the expected VirtIO GPU identity **vendor 0x1AF4/device 0x1050** as well
 as a clear DXGI software flag. Microsoft Basic Render **0x1414/0x008C** is
 explicitly rejected even when DXGI returns flags zero, as observed in the real
@@ -72,7 +77,7 @@ target, not just a native title or CPU-painted overlay.
 [ClearView contract](https://learn.microsoft.com/en-us/windows/win32/api/d3d11_1/nf-d3d11_1-id3d11devicecontext1-clearview),
 [swap-chain creation](https://learn.microsoft.com/en-us/windows/win32/api/dxgi1_2/nf-dxgi1_2-idxgifactory2-createswapchainforhwnd).
 
-This is a clear/present scene, **not a triangle, shader, geometry or performance
+Scene is a clear/present mode, **not a triangle, shader, geometry or performance
 benchmark**. Occlusion is counted separately, other non-S_OK statuses fail, and
 device removal is reported. S_OK is an API observation; externally visible
 console pixels still require observation. Frame count and duration are bounds
@@ -99,6 +104,64 @@ does not guess that a fence observed elsewhere belongs to its Present. The
 Windows driver's own allocations, rings, fences and present sequence remain
 unverified. One-to-one association with the QEMU scanout is still the separate
 gate described in the host overlay README.
+
+## Geometry: compiled shaders and submitted Draw calls
+
+`-Mode Geometry` uses the same single HARDWARE device, native ARM64 admission,
+mandatory non-software VirtIO `1AF4:1050` adapter check, UMD inventory and
+swap-chain lifecycle. It adds a real RGB gradient triangle over the existing
+clear/counter pattern. There is no WARP retry, alternate adapter, shader
+replacement or clear-only fallback if shader compilation or creation fails.
+Device and Scene do not load the shader compiler or call this geometry path.
+
+The original inline HLSL is compiled twice by Windows System32
+`d3dcompiler_47.dll`: `VSMain/vs_4_0` and `PSMain/ps_4_0`, with strictness
+enabled, NULL macro/include handlers and no external source files. The vertex
+shader generates three positions and colours from `SV_VertexID`; the pixel
+shader interpolates colour. Shader model 4.0 covers the requested 10_0..11_1
+feature levels. Creation uses returned bytecode and NULL class linkage;
+blobs and shader interfaces are released on success and failure. Bytecode is
+limited to 1 MiB and compiler messages to 4 KiB.
+[Compiler contract](https://learn.microsoft.com/en-us/windows/win32/api/d3dcompiler/nf-d3dcompiler-d3dcompile),
+[vertex shader creation](https://learn.microsoft.com/en-us/windows/win32/api/d3d11/nf-d3d11-id3d11device-createvertexshader).
+
+Every Geometry frame explicitly binds its render target, viewport, NULL input
+layout, TRIANGLELIST topology, vertex and pixel shaders, then invokes
+`Draw(3, 0)` before Present. No vertex/index/constant buffer, depth buffer,
+texture sample or geometry-shader stage is required. The clockwise triangle
+uses the fresh immediate context's default rasterizer. The bottom counter
+remains outside the triangle. The default 180 frames/10 seconds and limits of
+1..600 frames/1..30 seconds also apply to Geometry; bounds are checked between
+calls, not as a hard watchdog for a stalled compiler or driver.
+[Draw and SV_VertexID](https://learn.microsoft.com/en-us/windows/win32/api/d3d11/nf-d3d11-id3d11devicecontext-draw),
+[viewport contract](https://learn.microsoft.com/en-us/windows/win32/api/d3d11/nf-d3d11-id3d11devicecontext-rssetviewports).
+
+The report adds `geometry_attempted/completed`, `rendering_technique`, compiler
+module path, profiles and inline-HLSL SHA-256, compile/create attempt and S_OK
+counters, last shader HRESULTs, bounded compiler errors, `draw_attempts`,
+`draw_calls_returned`, and `vertices_submitted`. Draw returns **void**:
+`draw_calls_returned=1` means the API call returned after submission, not that a
+GPU finished three vertices. Geometry completion additionally requires both
+created shaders, a returned Draw, a successful Present, no user closure,
+successful device-removal check and any requested fullscreen restoration.
+Neither that result nor the counters measure pixels, host Metal execution,
+shader correctness, FPS or sustained stability; `host_acceleration_verified`
+remains false. The actual Windows Geometry run is recorded below; its visible triangle
+is a separate observation from the API counters.
+
+## Actual Windows Geometry checkpoint
+
+The native Windows run completed at `2026-10-16T11:05:54.7052778Z` using C#
+SHA-256 `e67451db1f010e16617b60a7df4123722801ad833ba218648d4f3ce01312a2a2`
+and launcher `70249dd0c677011fcd5fed98d1183e43feff9feca34e4f1665dab12cd91041fb`.
+System32 compiler, both shader compilations/creations, 600 Draw calls and
+600 Presents completed; the real console showed the RGB gradient triangle.
+There was no device removal or occlusion. Raw report SHA-256
+`94203df574ba3f896a9af51c733a84dfe51acf4122ea02808100c444e1208251`.
+See the [full checkpoint](../../docs/NEPTUNE_WINDOWS_3D_CHECKPOINT.md) for
+configuration, UMD hashes and the distinction between API/visual evidence and
+unmeasured sustained performance. Earlier Device/Scene reports retain their
+older source hashes.
 
 ## Actual Windows baseline and corrections
 
@@ -175,6 +238,21 @@ Any later device or scene result must name the report's source/launcher hashes.
 A visible scene still needs independent observation and its host renderer/
 scanout trace before claiming the intended accelerated path.
 
+## Positive Device/Scene checkpoint from the previous source
+
+The separate checkpoint now records a successful native ARM64 VirtIO Device
+report and two successful Scene runs; the repeated scene was also observed in
+the Cocoa console. Those used C# source
+`28cb9b46f8e698506b2f850f563276de4e61164f59df3e5c215cf7507a7d1ecd`
+and launcher `cf6af725a1aaa11ef00b82ed59ed1abb1d385d37a67f272e77666dc766a64a1e`.
+The retained Device report SHA-256 is
+`5418cd5086cc4c00a322f4d77b1a6765d98bb746055f1a32cec1a6a71779b79e`;
+the repeated Scene report SHA-256 is
+`d0ea04ebabf0f3cec977ba3cdea7d56d01c45a35a9b243c583057a06df58415e`.
+See [the full scope and matched runtime](../../docs/NEPTUNE_WINDOWS_3D_CHECKPOINT.md).
+They qualify the preceding Device/clear-scene revision only. They did not
+compile these new shaders or execute Geometry and are not a geometry/FPS result.
+
 ## Build and future execution
 
 The existing Mac inventory found Apple clang and the pinned DXMT native/WIDL
@@ -193,14 +271,16 @@ P/Invoke imports use System32-only DLL search.
 
 Copy `D3D11Probe.cs` and `Invoke-D3D11Probe.ps1` together into a trusted trial
 folder. The following commands require an authorized interactive clone trial;
-the corrected Device probe has produced the negative baseline above, while
-Scene and a positive VirtIO device result remain unverified:
+the earlier source produced the negative baseline and later positive
+Device/Scene checkpoint above. Geometry still requires its own Windows trial:
 
 ```powershell
 powershell.exe -NoProfile -STA -File .\Invoke-D3D11Probe.ps1 -Mode Device -ReportPath .\device.json
 powershell.exe -NoProfile -STA -File .\Invoke-D3D11Probe.ps1 -Mode Scene -Frames 180 -Seconds 10 -ReportPath .\scene-windowed.json
 # Explicitly changes this probe's swap-chain fullscreen state:
 powershell.exe -NoProfile -STA -File .\Invoke-D3D11Probe.ps1 -Mode Scene -Exclusive -Frames 180 -Seconds 10 -ReportPath .\scene-exclusive.json
+# Real shaders and Draw; use a fresh report name and interactive native ARM64 process:
+powershell.exe -NoProfile -STA -File .\Invoke-D3D11Probe.ps1 -Mode Geometry -Frames 60 -Seconds 10 -ReportPath .\geometry-windowed.json
 ```
 
 Use the actual native executable path if PATH selects an emulated PowerShell;
@@ -232,7 +312,7 @@ python3 experimental/windows-3d-probe/check-abi.py
 
 Observed PASS: C# language-version-5 compilation; Win64-sized struct layout and
 adapter flag offset; native-architecture and software-adapter guards; eight
-Device/Scene case variations and invalid-mode rejection; the real Basic Render
+Device/Scene/Geometry case variations and invalid-mode rejection; the real Basic Render
 S_OK/11_1/flags-zero counterexample; expected VirtIO identity admission and
 unexpected-adapter rejection; exact feature/HRESULT formatting; bounds;
 Neptune module-name filter, known full SHA-256 and aggregate/per-file byte
@@ -240,10 +320,14 @@ limits, with unavailable files reported unknown;
 Present S_OK versus occlusion/device loss/
 other status classification; owned mock vtable/delegate dispatch of 21
 bounded clear commands including counter bits; idempotent one-release COM
-ownership; non-Windows fail-closed path; PowerShell launcher parse and two real
+ownership; compiler binding/SIZE_T/ANSI signatures; bounded original shader
+source/profile/no-include dispatch; mocked VS/PS creation and compile, null,
+oversized-bytecode and creation failures; RTV/viewport/topology/shader bindings
+followed by exactly Draw(3,0), with incomplete pipelines denied and no false
+completion; non-Windows fail-closed path; PowerShell launcher parse and three real
 fresh-process lowercase/mixed-case launches that write canonical-mode reports
 at the platform guard without Windows DLL calls. The ABI
-checker independently matches **15 vtable slots and five interface GUIDs**
+checker independently matches **26 vtable slots and five interface GUIDs**
 against the existing pinned WIDL headers and prints their SHA-256 receipts.
 That local DXMT tree is commit `2a7dd3e7d22541611433441b82894ec5bca75ca2`;
 its fetch provenance belongs to the separate graphics experiment. No header or
@@ -252,10 +336,10 @@ third-party implementation is copied into this folder.
 These host checks do not execute Windows PowerShell 5.1, the Windows CLR
 marshaler, user32, DXGI, the Windows driver or any GPU API. They do not establish
 that the window, fullscreen transition, Present or visible counter works on
-the intended Windows build. The separate actual Windows Device report above
-verifies the negative Basic Render gate. Required next evidence is a positive
-native ARM64 VirtIO Device report, then a separately observed Scene with its
-report and host renderer/scanout trace. Do not infer signature acceptance, installed UMD
+the intended Windows build. The separate Windows reports above verify the
+negative Basic Render gate and the previous source's positive Device/Scene
+checkpoint. Geometry requires its own native Windows report, visible triangle
+and host renderer/scanout evidence. Do not infer signature acceptance, installed UMD
 revision, driver provenance, acceleration, stability or FPS from a name or
 from the host self-tests.
 

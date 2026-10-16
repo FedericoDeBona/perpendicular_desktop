@@ -25,13 +25,13 @@ if ([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT) {
     [void][IO.Directory]::CreateDirectory($folder)
     try {
         $hostPath = (Get-Process -Id $PID).Path
-        foreach ($mode in @('device', 'sCeNe')) {
+        foreach ($mode in @('device', 'sCeNe', 'gEoMeTrY')) {
             $path = Join-Path $folder ($mode + '.json')
             $output = & $hostPath -NoProfile -File (Join-Path $PSScriptRoot 'Invoke-D3D11Probe.ps1') -Mode $mode -Frames 1 -Seconds 1 -ReportPath $path
             if ($LASTEXITCODE -ne 1) { throw ('Expected platform denial for launcher mode ' + $mode + ': ' + ($output | Out-String)) }
             $report = [IO.File]::ReadAllText($path) | ConvertFrom-Json
-            $expected = if ($mode -ieq 'device') { 'Device' } else { 'Scene' }
-            if ($report.probe.mode -cne $expected -or $report.probe.error_stage -ne 'platform' -or $report.probe.device_creation_succeeded -or $report.probe.scene_attempted) {
+            $expected = if ($mode -ieq 'device') { 'Device' } elseif ($mode -ieq 'scene') { 'Scene' } else { 'Geometry' }
+            if ($report.probe.mode -cne $expected -or $report.probe.error_stage -ne 'platform' -or $report.probe.device_creation_succeeded -or $report.probe.scene_attempted -or $report.probe.shader_compile_attempts -ne 0 -or $report.probe.draw_attempts -ne 0) {
                 throw ('Launcher did not canonicalize mode before the platform guard: ' + $mode)
             }
         }

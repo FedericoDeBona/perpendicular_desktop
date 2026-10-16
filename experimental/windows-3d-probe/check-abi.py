@@ -15,8 +15,10 @@ source = (HERE / 'D3D11Probe.cs').read_text()
 constants = {name: int(value) for name, value in re.findall(r'internal const int (\w+)Slot = (\d+);', source)}
 checks = {
     'd3d11.h': {
-        'ID3D11Device': ['QueryInterface', 'Release', 'CreateRenderTargetView', 'GetDeviceRemovedReason'],
+        'ID3D11Device': ['QueryInterface', 'Release', 'CreateRenderTargetView', 'GetDeviceRemovedReason', 'CreateVertexShader', 'CreatePixelShader'],
+        'ID3D11DeviceContext': ['VSSetShader', 'PSSetShader', 'IASetInputLayout', 'IASetPrimitiveTopology', 'OMSetRenderTargets', 'RSSetViewports', 'Draw'],
     },
+    'd3dcommon.h': {'ID3D10Blob': ['GetBufferPointer', 'GetBufferSize']},
     'd3d11_1.h': {'ID3D11DeviceContext1': ['ClearView']},
     'dxgi.h': {'IDXGIDevice': ['GetAdapter'], 'IDXGIAdapter1': ['GetDesc1'],
                'IDXGISwapChain': ['Present', 'GetBuffer', 'SetFullscreenState', 'GetFullscreenState', 'ResizeBuffers']},

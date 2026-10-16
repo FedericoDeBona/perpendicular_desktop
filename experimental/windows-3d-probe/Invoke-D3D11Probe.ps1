@@ -2,7 +2,7 @@
 # Explicit, independent diagnostic; never installs a driver or changes policy.
 [CmdletBinding()]
 param(
-    [ValidateSet('Device', 'Scene')][string]$Mode = 'Device',
+    [ValidateSet('Device', 'Scene', 'Geometry')][string]$Mode = 'Device',
     [switch]$Exclusive,
     [ValidateRange(1, 600)][int]$Frames = 180,
     [ValidateRange(1, 30)][int]$Seconds = 10,
@@ -11,8 +11,8 @@ param(
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
 # ValidateSet accepts all casings; pass the canonical labels to the C# API too.
-$Mode = if ($Mode -ieq 'Device') { 'Device' } else { 'Scene' }
-if ($Exclusive -and $Mode -ne 'Scene') { throw '-Exclusive requires -Mode Scene.' }
+$Mode = if ($Mode -ieq 'Device') { 'Device' } elseif ($Mode -ieq 'Scene') { 'Scene' } else { 'Geometry' }
+if ($Exclusive -and $Mode -eq 'Device') { throw '-Exclusive requires -Mode Scene or Geometry.' }
 if ([string]::IsNullOrWhiteSpace($ReportPath)) {
     $ReportPath = Join-Path ([IO.Path]::GetTempPath()) ('Perpendicular-D3D11-' + [Guid]::NewGuid().ToString('N') + '.json')
 }
