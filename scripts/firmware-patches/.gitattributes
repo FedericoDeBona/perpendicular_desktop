@@ -1,2 +1,2 @@
 # Preserve the hash-pinned upstream mail patch, including its CRLF context.
-*.patch -text
+*.patch -text whitespace=-blank-at-eol

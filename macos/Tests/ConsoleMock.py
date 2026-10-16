@@ -399,7 +399,7 @@ def check_input_diagnostics(stderr):
     allowed = {"generation", "duration_ms", "application_down", "application_up", "application_flags",
                "responder_down", "responder_up", "responder_flags", "responder_repeat", "unmatched_up",
                "accepted_down", "accepted_up", "written_down", "written_up", "queue_overflow",
-               "queue_peak_messages", "queue_peak_bytes", "queue_max_wait_us",
+               "queue_peak_messages", "queue_peak_bytes", "queue_max_wait_us", "pointer_coalesced",
                "application_min_gap_us", "application_max_gap_us", "wire_min_gap_us", "wire_max_gap_us"}
     for report in reports:
         assert set(report).issubset(allowed), "Input diagnostics exposed non-metric fields"
@@ -477,6 +477,33 @@ def input_overflow(peer):
 
 for scenario in ("messages", "bytes"):
     run_fixture("input-overflow-" + scenario, "input-overflow", input_overflow, scenario)
+
+
+def pointer_coalescing(peer):
+    peer.handshake()
+    def acknowledge():
+        peer.send(bytes([3, 0, 0, 0]) + struct.pack(">I", 2) + b"ok")
+    def pointer(x, y, buttons):
+        return struct.pack(">BBHH", 5, buttons, x, y)
+    acknowledge()
+    expected = b"".join([
+        pointer(9999, 10, 0), pointer(100, 20, 1), pointer(9999, 30, 1),
+        struct.pack(">BBHI", 4, 1, 0, 65), struct.pack(">BBHI", 4, 0, 0, 65),
+        pointer(499, 40, 1), pointer(500, 50, 0), pointer(699, 60, 0),
+        struct.pack(">B3xI", 6, 7) + b"barrier", pointer(799, 70, 0),
+        pointer(800, 80, 8), pointer(800, 80, 8), pointer(800, 80, 0),
+        pointer(899, 90, 0), pointer(900, 100, 2), pointer(999, 110, 2),
+        pointer(1000, 120, 0),
+    ])
+    assert len(expected) == 115
+    assert peer.read(len(expected)) == expected, "Coalescing reordered or lost a motion/barrier/edge"
+    acknowledge()
+    assert peer.read(6) == pointer(1001, 121, 0), "Drained motion run swallowed subsequent input"
+    acknowledge()
+    peer.eof()
+
+
+run_fixture("pointer-coalescing", "pointer-coalescing", pointer_coalescing)
 
 
 def run_reconnect():

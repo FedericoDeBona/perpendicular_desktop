@@ -920,6 +920,15 @@ private final class RFBConnection: @unchecked Sendable {
     // on overflow instead of dropping an individual key/button release.
     private var queuedInputMessages = 0
     private var queuedInputBytes = 0
+    // Only an unsent run of absolute motion can change in place. A button
+    // transition, wheel pulse or any other message ends the run. The writer
+    // takes its immutable bytes under stateLock before touching the socket.
+    private final class PendingMotion: @unchecked Sendable {
+        var bytes: Data
+        init(_ bytes: Data) { self.bytes = bytes }
+    }
+    private var pendingMotion: PendingMotion?
+    private var lastPointerButtons: UInt8 = 0
     private var inputFailure: String?
     private static let maximumQueuedInputMessages = 1_024
     private static let maximumQueuedInputBytes = 2 * 1024 * 1024
@@ -1196,7 +1205,7 @@ private final class RFBConnection: @unchecked Sendable {
         var event = Data([5, buttons])
         event.appendUInt16(x)
         event.appendUInt16(y)
-        enqueue(event)
+        enqueue(event, pointerButtons: buttons)
     }
 
     func sendCutText(_ text: String) {
@@ -1209,9 +1218,16 @@ private final class RFBConnection: @unchecked Sendable {
     }
 
     @discardableResult
-    private func enqueue(_ bytes: Data, paceKey: Bool = false) -> Bool {
+    private func enqueue(_ bytes: Data, paceKey: Bool = false, pointerButtons: UInt8? = nil) -> Bool {
         stateLock.lock()
         guard ready && !cancelled else { stateLock.unlock(); return false }
+        let isMotion = pointerButtons.map { $0 == lastPointerButtons && $0 & ~UInt8(7) == 0 } ?? false
+        if isMotion, let pendingMotion {
+            pendingMotion.bytes = bytes
+            inputDiagnostics?.record("pointer_coalesced")
+            stateLock.unlock()
+            return true
+        }
         guard queuedInputMessages < Self.maximumQueuedInputMessages,
               bytes.count <= Self.maximumQueuedInputBytes - queuedInputBytes else {
             inputFailure = "Too much input arrived at once. Try a shorter input."
@@ -1223,6 +1239,9 @@ private final class RFBConnection: @unchecked Sendable {
         }
         queuedInputMessages += 1
         queuedInputBytes += bytes.count
+        let motion = isMotion ? PendingMotion(bytes) : nil
+        pendingMotion = motion
+        if let pointerButtons { lastPointerButtons = pointerButtons }
         let queuedAt = inputDiagnostics == nil ? 0 : DispatchTime.now().uptimeNanoseconds
         if paceKey { inputDiagnostics?.accepted(down: bytes[1] != 0, messages: queuedInputMessages, bytes: queuedInputBytes) }
         // Reserve and submit while holding the same lock, so concurrent callers
@@ -1236,6 +1255,8 @@ private final class RFBConnection: @unchecked Sendable {
             }
             stateLock.lock()
             let stillReady = ready && !cancelled && descriptor >= 0
+            let payload = motion?.bytes ?? bytes
+            if let motion, pendingMotion === motion { pendingMotion = nil }
             stateLock.unlock()
             guard stillReady else { return }
             if paceKey, lastKeyWrite != 0 {
@@ -1247,7 +1268,7 @@ private final class RFBConnection: @unchecked Sendable {
                 }
             }
             do {
-                try send(bytes)
+                try send(payload)
                 if paceKey { inputDiagnostics?.written(down: bytes[1] != 0, queuedAt: queuedAt) }
             }
             catch {

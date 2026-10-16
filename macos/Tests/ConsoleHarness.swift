@@ -434,6 +434,52 @@ private func runRapidKeyboardTest(socket: String) {
     print("rapid 440-transition burst: ordered writer pacing and final release PASS")
 }
 
+private func runPointerCoalescingTest(socket: String) {
+    let state = ConsoleTestState()
+    let client = RFBConnection(socketPath: socket, onFrame: { _ in },
+        onReady: { _ in state.ready.signal() }, onCutText: { state.cut($0) },
+        onFailure: { state.failed($0) })
+    client.start()
+    precondition(state.ready.wait(timeout: .now() + 5) == .success)
+    precondition(state.clipboardReceived.wait(timeout: .now() + 2) == .success)
+    let started = DispatchSemaphore(value: 0), release = DispatchSemaphore(value: 0)
+    client.holdTestWriter(started: started, release: release)
+    precondition(started.wait(timeout: .now() + 2) == .success)
+    for x in 0..<10_000 { client.sendPointer(x: UInt16(x), y: 10, buttons: 0) }
+    client.sendPointer(x: 100, y: 20, buttons: 1)
+    for x in 0..<10_000 { client.sendPointer(x: UInt16(x), y: 30, buttons: 1) }
+    client.sendKey(65, down: true); client.sendKey(65, down: false)
+    for x in 400..<500 { client.sendPointer(x: UInt16(x), y: 40, buttons: 1) }
+    client.sendPointer(x: 500, y: 50, buttons: 0)
+    for x in 600..<700 { client.sendPointer(x: UInt16(x), y: 60, buttons: 0) }
+    client.sendCutText("barrier")
+    for x in 700..<800 { client.sendPointer(x: UInt16(x), y: 70, buttons: 0) }
+    // Equal wheel masks still represent two pulses, never replaceable motion.
+    client.sendPointer(x: 800, y: 80, buttons: 8)
+    client.sendPointer(x: 800, y: 80, buttons: 8)
+    client.sendPointer(x: 800, y: 80, buttons: 0)
+    for x in 801..<900 { client.sendPointer(x: UInt16(x), y: 90, buttons: 0) }
+    client.sendPointer(x: 900, y: 100, buttons: 2)
+    for x in 901..<1_000 { client.sendPointer(x: UInt16(x), y: 110, buttons: 2) }
+    client.sendPointer(x: 1_000, y: 120, buttons: 0)
+    let held = client.testInputReservations
+    precondition(held.messages == 17 && held.bytes == 115,
+                 "Absolute motion accumulated, crossed a barrier or lost a button/wheel edge")
+    release.signal()
+    precondition(state.clipboardReceived.wait(timeout: .now() + 5) == .success,
+                 "Peer did not confirm the exact ordered pointer/key/clipboard bytes")
+    let drained = DispatchSemaphore(value: 0)
+    client.signalTestWriterDrained(drained)
+    precondition(drained.wait(timeout: .now() + 2) == .success)
+    let empty = client.testInputReservations
+    precondition(empty.messages == 0 && empty.bytes == 0 && state.snapshot().error == nil)
+    // A new run after the previous writer drained must also be sent.
+    client.sendPointer(x: 1_001, y: 121, buttons: 0)
+    precondition(state.clipboardReceived.wait(timeout: .now() + 2) == .success)
+    client.stop()
+    print("absolute pointer burst: latest unsent motion, exact click/drag/wheel/key barriers and drained-writer reuse PASS")
+}
+
 private func runInputOverflowTest(socket: String, scenario: String) {
     let state = ConsoleTestState()
     let failed = DispatchSemaphore(value: 0)
@@ -496,6 +542,7 @@ case "modifiers": runModifierTest(socket: CommandLine.arguments[2], scenario: Co
 case "application-release": runApplicationReleaseTest(socket: CommandLine.arguments[2], scenario: CommandLine.arguments[3])
 case "recorded-keyboard": try runRecordedKeyboardTest(socket: CommandLine.arguments[2], fixture: CommandLine.arguments[3], layout: CommandLine.arguments[4])
 case "rapid-keyboard": runRapidKeyboardTest(socket: CommandLine.arguments[2])
+case "pointer-coalescing": runPointerCoalescingTest(socket: CommandLine.arguments[2])
 case "input-overflow": runInputOverflowTest(socket: CommandLine.arguments[2], scenario: CommandLine.arguments[3])
 default: preconditionFailure("Unknown console test mode")
 }
