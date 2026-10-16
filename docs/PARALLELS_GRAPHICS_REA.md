@@ -1,5 +1,9 @@
 # Parallels graphics: REA observations
 
+For the currently installed 27.0.3 build, see the separate
+[Parallels 27 study](PARALLELS_27_GRAPHICS_REA.md). The addresses and hashes in
+this document belong to the earlier 26.3 artifact.
+
 Static inspection on 2026-10-15, followed by targeted decompilation on
 2026-10-16, with REA 6.5.0. Target: Parallels Desktop
 26.3.0 (57392), `Contents/MacOS/Parallels VM.app/Contents/MacOS/prl_vm_app`.
