@@ -65,10 +65,75 @@ signal/wait pair in this branch concerns **GPU counter collection**. It must
 not be reported as the guest framebuffer ownership protocol.
 
 The more general signal/wait wrappers establish explicit command-buffer event
-operations outside that counter-specific pair. Their call sites, allocation
-ownership and connection to Windows scanout remain untraced. There is no
-evidence here for a particular pool size, a cross-process shared-event handle,
-or the synchronization of the texture imported from IOSurface.
+operations outside that counter-specific pair. The follow-up below traces
+their direct callers and one event constructor. Connection to Windows scanout
+remains unresolved. There is no evidence here for a particular pool size,
+a cross-process shared-event handle, or the synchronization of the texture
+imported from IOSurface.
+
+## Direct callers, event origin and retirement follow-up
+
+A fresh scan of every aligned instruction in `__text` included both direct
+`BL` calls and `B` tail branches. It found three signal/wait caller intervals:
+`0x1001f82a0` (460 bytes), `0x1001f8474` (72 bytes), and `0x1001f84bc`
+(76 bytes). The last adjusts the incoming receiver by `-0x88`; it is not
+evidence for a third independent synchronization object. No direct B/BL into
+the previously selected IOSurface importer or drawable submission entry was
+found in that scan. Indirect dispatch is outside this negative result.
+
+Original assembly in all three callers loads the event at receiver offset
+`0x90`, increments the 64-bit value at `0x98`, passes both to the signal
+wrapper, then reloads them for a tail branch to the wait wrapper. The longer
+routine takes this path when its input tag equals 3; the two short entries
+first invoke a virtual method with argument 4. Those numeric tags have no
+recovered domain names. The virtual transition's effects and actual queue
+identity remain unknown: adjacent signal/wait calls do not by themselves
+prove a cross-queue handoff or framebuffer reuse barrier.
+
+For the constructor's primary virtual table, slot `+0xa8` contains
+`0x1001f7348`; original assembly there forwards the receiver's `0xd8` object
+to `0x1001e1e04`. This gives a concrete next target for the transition rather
+than assigning semantics from its numeric argument. Other derived tables
+and runtime dispatch have not been exhausted.
+
+The constructor-like interval at `0x1001f6fc8` (632 bytes) calls the decoded
+`newEvent` selector, stores its result at `0x90`, and initializes `0x98` to
+zero. Its stores of two virtual-table addresses are corroborated by original
+64-bit pointer entries to the caller methods and an adjusting thunk. This
+supports associating the constructor and callers. This event is created with
+**`newEvent`, not `newSharedEvent`**; the counter branch above is separate.
+No exported event handle or interprocess ownership contract was established.
+
+The submission interval at `0x100244fdc` (600 bytes) registers distinct
+scheduled and completed blocks, commits the current command buffer, clears
+its field and releases its reference. The scheduled block at `0x10024527c`
+(16 bytes) only copies a captured 32-bit value to receiver offset `0x14`.
+The completed block at `0x10024528c` (628 bytes) checks sequence continuity
+and command-buffer status, records diagnostic state under a mutex, updates a
+separate completed value at `0x18`, releases eligible retained objects from a
+tagged collection under another mutex, and notifies a condition variable.
+It can also invoke a captured callback. The collection's element types,
+insertion sites and connection to imported surfaces have not been identified;
+these releases must not yet be labeled framebuffer retirement.
+
+| Selected interval | REA evidence |
+| --- | --- |
+| `0x1001f82a0` | `ev_61525015e753046db790bca77925e12ca2239307839baa992ef19d234b034497` |
+| `0x1001f8474` | `ev_e250d4c4c3737f9e5453906462dc4ed5016553d0fe661b03bc66e9d0d63d5ba4` |
+| `0x1001f84bc` | `ev_1263e14ff6642ba49020f1abec5a90518dd7d858fe1236aa007dd2ee8fcec3a0` |
+| `0x1001f6fc8` | `ev_4b6fa6e8a181c462ba0750a808f6bbac3b7ed1a0fbfdfb4fcb389561cceb6a4c` |
+| `0x100244fdc` | `ev_23999f7aa80419ac6f76adca2849f5d52f124bd40cef6bb8205ba059dd28518e` |
+| `0x10024527c` | `ev_ca423aab6595d30367e6abc7df2d26ea148dd859b8b32733128868cb3d84f9f8` |
+| `0x10024528c` | `ev_2941643e4cee2e0ca17ffc6e71f220ef15c344e745c8e9ea1ff76f5d3eaa90bc` |
+
+All seven slices were compared byte-for-byte with the source executable at
+their mapped addresses and their digests verified. The original executable
+still matches the identity above. Full receipts and the direct-branch scan
+are retained privately. The caller decompilations truncate external tails,
+and the submission interval has an incomplete exceptional tail; original
+assembly supplies the tail-branch and selector argument observations.
+Constructor and callback normal returns were recovered. This remains static
+evidence with no new VM execution, graphics benchmark or runtime attribution.
 
 ## Independent implementation implications
 
@@ -78,8 +143,9 @@ producer-copy completion requirement or consumer GPU retirement with a
 scheduled callback. Our transport's immutable snapshot and ACK lifetime rules
 remain necessary until actual producer ownership is proven for our renderer.
 
-Next investigation: trace the general wrappers' callers and event origins,
-then connect them to the actual texture writer/reader and release sites. A
-runtime trace is needed to establish which branch runs in the user's VM.
+Next investigation: identify the virtual transition's command-buffer effects
+and the completed block's collection insertion sites, then connect the actual
+texture writer/reader to those release sites. A runtime trace is needed to
+establish which branch runs in the user's VM.
 There is no Windows performance, latency, buffer-reuse or installed 3D result
 from this static analysis.
