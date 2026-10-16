@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Native compatible backend smoke: exact renderer POD, real GPU pixels, no VM."""
+import argparse
 import hashlib
 import importlib.util
 import json
@@ -18,9 +19,14 @@ build = importlib.util.module_from_spec(spec); spec.loader.exec_module(build)
 
 
 def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--profile', type=Path, default=BASE)
+    args = parser.parse_args()
+    base = args.profile.absolute()
+    assert base.parent == ROOT / '.tools' and re.fullmatch(r'graphics-wire1-backend(?:-[a-z0-9-]{1,48})?', base.name)
     build.frozen()
-    output = BASE / 'native-check'; output.mkdir(mode=0o700, exist_ok=False)
-    source = BASE / 'src/dxmt'; prefix = BASE / 'prefix'
+    output = base / 'native-check'; output.mkdir(mode=0o700, exist_ok=False)
+    source = base / 'src/dxmt'; prefix = base / 'prefix'
     renderer = ROOT / '.tools/graphics-wire1/src/virglrenderer'
     env = build.renderer.environment()
     build.validate_source(source, env)

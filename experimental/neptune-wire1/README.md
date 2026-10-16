@@ -116,3 +116,21 @@ function 0. This is a new guest-side initialization gate, not evidence that
 the corrected wire version completed device creation or that the texture ABI
 caused this early failure. Driver restart and a fully matched backend remain
 to be tested.
+
+## Optimized comparison profile
+
+An explicit `--optimization 2` builds a fresh profile with the same whole pin;
+`--optimization 0` remains the default for the historical checkpoint. For example:
+
+```sh
+.tools/build-venv/bin/python experimental/neptune-wire1/build.py --profile .tools/graphics-wire1-o2 --optimization 2
+.tools/build-venv/bin/python experimental/neptune-wire1/probe.py --profile .tools/graphics-wire1-o2
+```
+
+The actual O2 build completed with strict output signatures. Its complete
+tracked source inventory is identical to the original profile. Meson option
+comparison found only optimization0→2 and the separate prefix changed. The
+paused CPU/diskless fixture observed wire1/flags0xb6 through the new library
+and exited0. This is a protocol/loading gate, not a rendered Windows workload,
+performance improvement or full graphics qualification. Current private
+comparison receipt: `.tools/graphics-o2-comparison.json`.

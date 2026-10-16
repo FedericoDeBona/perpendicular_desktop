@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 """Owned paused HVF GET_CAPSET handshake. No Neptune COM commands or guest disk."""
+import argparse
 import hashlib
 import importlib.util
 import json
 import os
 from pathlib import Path
+import re
 import signal
 import struct
 import subprocess
@@ -25,12 +27,17 @@ def sha(path):
 
 
 def main():
-    output = BASE / 'probe'
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--profile', type=Path, default=BASE)
+    args = parser.parse_args()
+    base = args.profile.absolute()
+    assert base.parent == ROOT / '.tools' and re.fullmatch(r'graphics-wire1(?:-[a-z0-9-]{1,48})?', base.name)
+    output = base / 'probe'
     output.mkdir(mode=0o700, exist_ok=False)
-    libraries = ':'.join(map(str, (BASE / 'prefix/lib', OLD / 'prefix/lib', OLD / 'prefix/ANGLE.xcarchive/Products/usr/local/lib')))
+    libraries = ':'.join(map(str, (base / 'prefix/lib', OLD / 'prefix/lib', OLD / 'prefix/ANGLE.xcarchive/Products/usr/local/lib')))
     selected = {'DYLD_LIBRARY_PATH': libraries, 'DYLD_FALLBACK_LIBRARY_PATH': libraries,
         'DYLD_PRINT_LIBRARIES': '1', 'ANGLE_DEFAULT_PLATFORM': 'metal', 'NPT_BACKEND': 'dxmt',
-        'RENDER_SERVER_EXEC_PATH': str(BASE / 'prefix/libexec/virgl_render_server')}
+        'RENDER_SERVER_EXEC_PATH': str(base / 'prefix/libexec/virgl_render_server')}
     for key in ('NPT_D3D11_LIBRARY_PATH', 'NPT_DXGI_LIBRARY_PATH', 'NPT_D3D12_LIBRARY_PATH'):
         selected[key] = str(OLD / 'prefix/lib/libdxmt-native.dylib')
     env = {key: value for key, value in os.environ.items() if not key.startswith(('DYLD_', 'NPT_', 'ANGLE_', 'PERP_', 'VIRGL_', 'QEMU_'))}
@@ -38,8 +45,8 @@ def main():
     env.update(selected)
     before = {str(p.relative_to(ROOT)): sha(p) for p in (OLD / 'prefix/bin/qemu-system-aarch64',
         OLD / 'prefix/lib/libvirglrenderer.1.dylib', OLD / 'prefix/libexec/virgl_render_server',
-        OLD / 'prefix/lib/libdxmt-native.dylib', BASE / 'prefix/lib/libvirglrenderer.1.dylib',
-        BASE / 'prefix/libexec/virgl_render_server')}
+        OLD / 'prefix/lib/libdxmt-native.dylib', base / 'prefix/lib/libvirglrenderer.1.dylib',
+        base / 'prefix/libexec/virgl_render_server')}
     report = {'environment': selected, 'protected_sha256': before, 'guest_disks': False,
         'guest_CPU_executed': False, 'COM_commands_sent': False, 'rendering_verified': False}
     peers = [];process = None;q = None
@@ -83,12 +90,12 @@ def main():
                 common.stop_group(process)
             for peer in peers:peer.close()
     lines = (output / 'qemu.log').read_text(errors='replace').splitlines()
-    expected = str(BASE / 'prefix/lib/libvirglrenderer.1.dylib')
+    expected = str(base / 'prefix/lib/libvirglrenderer.1.dylib')
     report['loaded_library_lines'] = [line for line in lines if 'dyld[' in line and any(s in line for s in ('libvirglrenderer', 'virgl_render_server', 'libdxmt-native', 'libEGL.dylib', 'libGLESv2.dylib'))]
     assert any(expected in line for line in report['loaded_library_lines']), 'Actual Wire1 dylib was not observed'
     old = str(OLD / 'prefix/lib/libvirglrenderer.1.dylib')
     assert not any(old in line for line in report['loaded_library_lines']), 'Wire2 library unexpectedly loaded'
-    report['matching_server_observed'] = any(str(BASE / 'prefix/libexec/virgl_render_server') in line for line in report['loaded_library_lines'])
+    report['matching_server_observed'] = any(str(base / 'prefix/libexec/virgl_render_server') in line for line in report['loaded_library_lines'])
     for name, value in before.items():assert sha(ROOT / name) == value, name
     report['result'] = 'pass'
     (output / 'result.json').write_text(json.dumps(report, indent=2) + '\n')

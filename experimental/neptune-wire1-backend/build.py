@@ -67,6 +67,7 @@ def main():
     parser.add_argument('--profile', type=Path, default=ROOT / '.tools/graphics-wire1-backend')
     parser.add_argument('--continue-source', action='store_true', help='Build an already fetched, clean exact source; requires absent build/prefix')
     parser.add_argument('--record-existing', action='store_true')
+    parser.add_argument('--optimization', choices=('0', '2'), default='0', help='Explicit separate profile optimization; original checkpoint defaults to 0')
     args = parser.parse_args()
     assert not (args.continue_source and args.record_existing)
     base = args.profile.absolute()
@@ -99,7 +100,7 @@ def main():
         links = json.dumps([str(zstd), str(unwind)])
         meson = ROOT / '.tools/build-venv/bin/meson'
         run('configure', [meson, 'setup', build, source, '--prefix=' + str(prefix), '--libdir=lib',
-            '--buildtype=release', '--wrap-mode=nodownload', '-Doptimization=0',
+            '--buildtype=release', '--wrap-mode=nodownload', '-Doptimization=' + args.optimization,
             '-Dnative_llvm_path=' + str(llvm), '-Denable_d3d12=false', '-Denable_nvapi=false', '-Denable_nvngx=false',
             '-Dcpp_link_args=' + links, '-Dc_link_args=' + links])
         run('compile', [meson, 'compile', '-C', build, '-j', '2'])
@@ -118,13 +119,15 @@ def main():
     commands = build / 'compile_commands.json'
     assert str(OLD / 'src/dxmt') not in commands.read_text(), 'Original/new ABI source leaked into build'
     options = json.loads(capture([ROOT / '.tools/build-venv/bin/meson', 'introspect', '--buildoptions', build], env))
+    settings = {entry['name']: entry['value'] for entry in options}
+    assert settings['optimization'] == args.optimization, 'Built optimization does not match requested profile'
     report = {'schema': 1, 'source_url': 'https://github.com/utmapp/dxmt.git', 'source_pin': PIN,
         'source_tree': capture(['git', '-C', source, 'rev-parse', 'HEAD^{tree}'], env), 'source_clean': True,
         'source_patches': [], 'source_inventory_sha256': sha(provenance / 'source-files.json'),
         'source_files': {key: len(value) for key, value in files.items()}, 'directx_headers_pin': HEADERS_PIN,
         'disabled_unfetched_nvapi_pin': 'd08488fcc82eef313b0464db37d2955709691e94',
         'native_header_sha256': HEADER_SHA, 'shared_texture_ABI': {'magic': 'DMTX', 'version': 2, 'size_bytes': 72, 'fd_offset': 8},
-        'compile_commands_sha256': sha(commands), 'build_options': {entry['name']: entry['value'] for entry in options},
+        'compile_commands_sha256': sha(commands), 'build_options': settings,
         'tools': {'python': sys.version, 'meson': capture([ROOT / '.tools/build-venv/bin/meson', '--version'], env),
             'ninja': capture([ROOT / '.tools/build-venv/bin/ninja', '--version'], env), 'clang': capture(['xcrun', 'clang++', '--version'], env),
             'metal': capture(['xcrun', 'metal', '--version'], env), 'sdk': capture(['xcrun', '--sdk', 'macosx', '--show-sdk-path'], env)},

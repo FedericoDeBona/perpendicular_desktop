@@ -125,3 +125,23 @@ The reused LLVM bottle's Apache-2.0-with-LLVM-exception notice and third-party
 notices remain under `.tools/graphics-experiment/provenance/licenses/llvm15`.
 The newly written recipe and fixture follow this repository's Apache-2.0
 license; these terms do not replace upstream licenses.
+
+## Optimized comparison profile
+
+The builder now accepts explicit `--optimization 2` for a fresh profile;
+optimization0 remains the historical default. The same actual native GPU
+fixture can select that profile:
+
+```sh
+.tools/build-venv/bin/python experimental/neptune-wire1-backend/build.py --profile .tools/graphics-wire1-backend-o2 --optimization 2
+.tools/build-venv/bin/python experimental/neptune-wire1-backend/test.py --profile .tools/graphics-wire1-backend-o2
+```
+
+The actual O2 build completed, passed strict signature verification and the
+native test verified2048GPU pixels plus rejection of a wrong shared-texture
+version. The complete tracked source inventory matches the original backend,
+including the same DirectX header submodule. Meson option comparison found
+only optimization0→2 and the new prefix changed; no ABI or feature option was
+changed. This does not yet establish Windows compatibility or an improvement
+in pacing/latency. Both original checkpoint binaries remain unchanged. Private
+comparison: `.tools/graphics-o2-comparison.json`.

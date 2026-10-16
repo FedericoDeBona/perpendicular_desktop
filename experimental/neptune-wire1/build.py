@@ -49,7 +49,7 @@ def verify_frozen():
         assert sha(ROOT / name) == expected, 'Original artifact changed: ' + name
 
 
-def record(base, env):
+def record(base, env, optimization='0'):
     source = base / 'src/virglrenderer'; build = base / 'build/renderer'; prefix = base / 'prefix'
     assert capture(['git', '-C', source, 'rev-parse', 'HEAD'], env) == PIN
     assert capture(['git', '-C', source, 'diff', '--name-only', 'HEAD'], env) == ''
@@ -77,6 +77,7 @@ def record(base, env):
     assert str(OLD / 'src/virglrenderer') not in compile_commands.read_text(), 'Wire2 renderer source/include leaked into profile'
     options = json.loads(capture([ROOT / '.tools/build-venv/bin/meson', 'introspect', '--buildoptions', build], env))
     settings = {entry['name']: entry['value'] for entry in options}
+    assert settings['optimization'] == optimization, 'Built optimization does not match requested profile'
     assert settings['prefix'] == str(prefix) and settings['neptune'] is True and settings['venus'] is False
     assert settings['render-server-mode'] == settings['render-server-worker'] == 'process'
     tools = {'python': sys.version, 'meson': capture([ROOT / '.tools/build-venv/bin/meson', '--version'], env),
@@ -106,6 +107,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--profile', type=Path, default=ROOT / '.tools/graphics-wire1')
     parser.add_argument('--record-existing', action='store_true', help='Only validate/record already-built private profile; do not rebuild')
+    parser.add_argument('--optimization', choices=('0', '2'), default='0', help='Explicit separate profile optimization; original checkpoint defaults to 0')
     args = parser.parse_args(); base = args.profile.absolute()
     assert base.parent == ROOT / '.tools' and re.fullmatch(r'graphics-wire1(?:-[a-z0-9-]{1,48})?', base.name)
     env = environment();verify_frozen()
@@ -125,7 +127,7 @@ def main():
         build = base / 'build/renderer'; prefix = base / 'prefix'
         meson = ROOT / '.tools/build-venv/bin/meson'
         run('configure', [meson, 'setup', build, source, '--prefix=' + str(prefix), '--libdir=lib',
-            '--buildtype=release', '--wrap-mode=nodownload', '-Doptimization=0',
+            '--buildtype=release', '--wrap-mode=nodownload', '-Doptimization=' + args.optimization,
             '-Dc_args=-I' + str(OLD / 'src/WebKit/Source/ThirdParty/ANGLE/include'), '-Dplatforms=egl',
             '-Dneptune=true', '-Dvenus=false', '-Dvtest=false', '-Drender-server-mode=process',
             '-Drender-server-worker=process', '-Dcheck-gl-errors=false', '-Dtracing=none'])
@@ -133,7 +135,7 @@ def main():
         installed = json.loads(capture([meson, 'introspect', '--installed', build], env))
         assert all(Path(path).is_relative_to(prefix) for path in installed.values())
         run('install-private', [meson, 'install', '-C', build, '--no-rebuild'])
-    report = record(base, env)
+    report = record(base, env, args.optimization)
     print(json.dumps({'source_pin': PIN, 'wire_version': 1, 'binaries': report['binaries'],
         'source_files': report['source_files'], 'originals_unchanged': True, 'started_VM': False}, indent=2))
 
