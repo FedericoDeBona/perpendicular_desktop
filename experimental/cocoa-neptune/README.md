@@ -2,9 +2,10 @@
 
 This checkpoint tests the existing private QEMU **10.0.12** graphics candidate,
 not the normal QEMU11 runtime or the separate `neptune-live` overlay. It builds
-no dependencies and changes no firmware, Windows disk, TPM state, app bundle or
-stable runtime. The fixture owns its paused diskless QEMU, temporary TPM and
-renderer children; it closes only those processes.
+no dependencies. Its diskless fixture changes no Windows disk, firmware, TPM
+state or installed app/runtime. Later sections separately describe the private
+Cocoa app container and operator-led Windows trials. The fixture owns its paused
+diskless QEMU, temporary TPM and renderer children; it closes only those processes.
 
 The pinned candidate is
 `.tools/graphics-experiment/prefix/bin/qemu-system-aarch64`, SHA-256:
@@ -215,10 +216,14 @@ is returned in the manifest and the original runtime ledger is unchanged.
 .tools/build-venv/bin/python experimental/cocoa-neptune/test-app-trial.py
 ```
 
-All nineteen generation3 private-file/socket regressions pass, including the
+All thirty generation3 private-file/socket regressions pass, including the
 fixed resource pair with unchanged disk nodes, failure rejected by default,
 failure rejected with a live/missing PID, explicit clone failure gate with no
-ledger mutation, and changed app metadata/keymaps. Only the coordinating task
+ledger mutation, and changed app metadata/keymaps. Fresh `UUID[-attempt]` directories permit
+rebinding after a legitimate stopped-VM TPM atomic replacement without copying
+the VM. Added cases cover replacement/rebind, the 48-character suffix boundary,
+invalid suffixes and parent paths, and pre-existing output/symlink refusal.
+Only the coordinating task
 starts or operates Windows.
 
 The coordinating task subsequently reported **generation3 start exit0**, a
@@ -229,6 +234,46 @@ This is an observed Windows boot/display result reported by the coordinator.
 The hybrid device can show an existing2D desktop; this observation does not
 establish a loaded3D driver, accelerated D3D scene or sustained performance.
 Driver installation and actual Windows rendering validation are separate gates.
+
+## Explicit PCI8 instance variant
+
+The preparation helper accepts `--gpu-slot 7` or `--gpu-slot 8`; the default
+remains7. Selecting8 tests a fresh Windows PCI instance for the **same existing
+clone**, following the observed driver-install timeout. It does not establish
+that QUERY_REMOVE is the cause or that a fresh instance will fix it. No additional
+VM copy, driver edit or security change is involved.
+
+For the coordinating task, while both source and clone are stopped and the
+saved display adapter is still the required hybrid2D profile:
+
+```sh
+.tools/build-venv/bin/python experimental/cocoa-neptune/prepare-app-trial.py \
+  12755108-83c6-4790-b477-58ca87b1a00e \
+  --data-dir '/Users/federico/Library/Application Support/Perpendicular Desktop' \
+  --gpu-slot 8 \
+  --output '/Users/federico/Desktop/perpendicular_desktop/.tools/cocoa-neptune-app-trials-gen3/12755108-83c6-4790-b477-58ca87b1a00e-pci8-1'
+```
+
+Use a new permitted attempt name if that directory already exists. This command
+only prepares a fresh private wrapper/manifest; the coordinator starts the VM
+explicitly afterward. Existing wrappers become stale when their pinned helper
+changes; do not edit an old manifest to change its slot.
+
+The selected integer is recorded as `gpu_slot`, with a matching `pci7`/`pci8`
+purpose. The generated wrapper binds the complete manifest hash. The launch
+guard still accepts only the engine's exact owned
+`virtio-ramfb,id=display0,addr=0x7` argument. Compared with the existing PCI7 GL
+variant, selecting8 changes **one argument only**: the transformed `display0`
+device's address from `0x7` to `0x8`. All other device arguments retain their
+order/values; disks, firmware, TPM, media, network, USB, audio and QMP guards/pins
+are unchanged. Actual PCI enumeration and Windows behaviour remain trial results
+for the coordinator to verify.
+
+Six additional private-fixture tests cover the exact one-argument delta,
+manifest-bound slot8 through the real lock/socket launch guard, invalid slot
+types/ranges, slot/purpose mismatch, coherent manifest tampering rejected before
+execution, and nonowned/prealtered/additional GPU arguments. These tests never
+start QEMU or contact a guest.
 
 ## Source attribution and REA evidence
 

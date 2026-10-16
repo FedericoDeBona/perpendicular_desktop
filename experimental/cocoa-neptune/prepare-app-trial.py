@@ -335,7 +335,19 @@ def parse_arguments(arguments):
     return pairs
 
 
-def transform(arguments, config, vm, runtime, launch_name):
+def checked_gpu_slot(value):
+    require(type(value) is int and value in (7, 8), 'GPU slot must be the explicit integer 7 or 8')
+    return value
+
+
+def manifest_gpu_slot(manifest):
+    slot = checked_gpu_slot(manifest['gpu_slot'])
+    require(manifest['purpose'] == 'private-exact-clone-cocoa-neptune-app-pci' + str(slot), 'Manifest GPU slot/purpose mismatch')
+    return slot
+
+
+def transform(arguments, config, vm, runtime, launch_name, *, gpu_slot=7):
+    gpu_slot = checked_gpu_slot(gpu_slot)
     require(config['id'] == CLONE_ID, 'Only the exact independent 3D clone is allowlisted')
     canonical_id(config['id'])
     require(re.fullmatch('perpendicular-' + re.escape(config['id']) + '-[0-9a-f]{32}', launch_name) is not None, 'Launch identity is not engine-owned')
@@ -358,7 +370,7 @@ def transform(arguments, config, vm, runtime, launch_name):
         elif chunk == ['-device', 'tpm-tis-device,tpmdev=tpm0,ppi=off']:
             result += ['-device', 'tpm-tis-device,tpmdev=tpm0']
         elif chunk == ['-device', 'virtio-ramfb,id=display0,addr=0x7']:
-            result += ['-device', 'virtio-ramfb-gl,id=display0,addr=0x7,disable-legacy=on,neptune=on,blob=on,hostmem=256M']
+            result += ['-device', 'virtio-ramfb-gl,id=display0,addr=0x' + str(gpu_slot) + ',disable-legacy=on,neptune=on,blob=on,hostmem=256M']
         else:
             result += chunk
         index += count
@@ -404,7 +416,8 @@ def graphics_environment(inherited, output):
     return environment
 
 
-def prepare_manifest(data, clone_id, output):
+def prepare_manifest(data, clone_id, output, *, gpu_slot=7):
+    gpu_slot = checked_gpu_slot(gpu_slot)
     canonical_id(clone_id)
     require(clone_id == CLONE_ID, 'Only the exact independent 3D clone is allowlisted')
     data = ordinary_path(str(data))
@@ -414,7 +427,8 @@ def prepare_manifest(data, clone_id, output):
     runtime_parent = runtime_root(owner)
     output = ordinary_path(str(output))
     trial_parent = REPO / '.tools/cocoa-neptune-app-trials-gen3'
-    require(output.parent == trial_parent and output.name == CLONE_ID and not os.path.lexists(output), 'Output must be the fresh .tools/cocoa-neptune-app-trials-gen3/allowlisted-UUID directory')
+    attempt_name = re.fullmatch(re.escape(CLONE_ID) + r'(?:-[a-z0-9-]{1,48})?', output.name)
+    require(output.parent == trial_parent and attempt_name is not None and not os.path.lexists(output), 'Output must be a fresh allowlisted-UUID[-attempt] directory under .tools/cocoa-neptune-app-trials-gen3')
     helper = Path(__file__).absolute()
     checked(helper)
     verify_artifacts()
@@ -436,7 +450,8 @@ def prepare_manifest(data, clone_id, output):
         swtpm = str(Path('/opt/homebrew/bin/swtpm').resolve(strict=True))
         checked(Path(swtpm))
         require(os.access(swtpm, os.X_OK), 'Existing swtpm is unavailable')
-        manifest = {'format_version': 1, 'purpose': 'private-exact-clone-cocoa-neptune-app-pci7',
+        manifest = {'format_version': 1, 'purpose': 'private-exact-clone-cocoa-neptune-app-pci' + str(gpu_slot),
+            'gpu_slot': gpu_slot,
             'generation': 3, 'prior_reaped_exit': prior_exit,
             'previous_helper_sha256': 'fcfc19fbbad466382d9624cc41b4f8c626c408347f16333516798f6c59dbc8b4',
             'resource_dir': str(PREFIX / 'share/qemu'),
@@ -452,7 +467,7 @@ def prepare_manifest(data, clone_id, output):
             'firmware_code_sha256': firmware_hash, 'state_bindings': bindings, 'disk_headers': disks, 'iso_bindings': iso_bindings,
             'mutations': ['fixed -L to existing pinned graphics prefix/share/qemu (app relocation)', 'replace only display none with cocoa,gl=es', 'remove only the expected Unix VNC pair (incompatible with GL)',
                 'omit unsupported ppi=off on fork tpm-tis-device',
-                'replace only PCI7 virtio-ramfb with virtio-ramfb-gl,disable-legacy=on,neptune=on,blob=on,hostmem=256M'],
+                'replace only engine PCI7 display0 virtio-ramfb with PCI' + str(gpu_slot) + ' virtio-ramfb-gl,disable-legacy=on,neptune=on,blob=on,hostmem=256M'],
             'console': 'separate Cocoa window only; integrated app VNC console unavailable',
             'guest_security_verified': False, 'guest_display_driver_verified': False,
             'warnings': ['TPM cryptographic state was copied; it is not a newly provisioned TPM identity.',
@@ -481,6 +496,7 @@ def prepare_manifest(data, clone_id, output):
 
 
 def validate_launch(manifest, arguments):
+    gpu_slot = manifest_gpu_slot(manifest)
     require(manifest['format_version'] == 1 and manifest['uid'] == os.geteuid() and manifest['source_id'] == SOURCE_ID, 'Trial manifest ownership/schema mismatch')
     clone_id = canonical_id(manifest['clone_id'])
     require(clone_id == CLONE_ID, 'Only the exact independent 3D clone is allowlisted')
@@ -539,7 +555,7 @@ def validate_launch(manifest, arguments):
     tpm_socket = (expected_runtime / 'swtpm.sock').lstat()
     require(stat.S_ISSOCK(tpm_socket.st_mode) and tpm_socket.st_uid == os.geteuid(), 'Owned cloned TPM endpoint required')
     with stopped(runtime_root(owner) / SOURCE_ID, SOURCE_ID):
-        return transform(arguments, config, vm, expected_runtime, job['launch_name'])
+        return transform(arguments, config, vm, expected_runtime, job['launch_name'], gpu_slot=gpu_slot)
 
 
 def wrapper_main(manifest_path, arguments):
@@ -550,7 +566,8 @@ def wrapper_main(manifest_path, arguments):
         manifest = read_json(manifest_path)
         require(manifest['wrapper'] == str(manifest_path.parent / 'qemu-trial-wrapper'), 'Manifest/wrapper directory mismatch')
         require(manifest['fork'] == str(FORK) and manifest['fork_sha256'] == FORK_SHA256 and digest(FORK) == FORK_SHA256, 'Pinned fork changed')
-        require(manifest['clone_id'] == CLONE_ID and manifest['source_id'] == SOURCE_ID and manifest['purpose'] == 'private-exact-clone-cocoa-neptune-app-pci7', 'Manifest target/purpose changed')
+        require(manifest['clone_id'] == CLONE_ID and manifest['source_id'] == SOURCE_ID, 'Manifest target changed')
+        manifest_gpu_slot(manifest)
         verify_artifacts()
         if arguments in (['--version'], ['-device', 'help']):
             actual = arguments  # Exact real binary output; neither probe starts a VM.
@@ -569,11 +586,12 @@ def main(argv=None):
     parser.add_argument('clone_id', choices=(CLONE_ID,), help='The single explicitly authorized independent 3D clone')
     parser.add_argument('--data-dir', required=True, type=Path)
     parser.add_argument('--output', type=Path, help='Fresh repo/.tools/cocoa-neptune-app-trials-gen3/allowlisted-UUID only')
+    parser.add_argument('--gpu-slot', type=int, choices=(7, 8), default=7, help='Explicit experimental GPU PCI slot; default 7, optional fresh instance at 8')
     arguments = parser.parse_args(argv)
     try:
         output = arguments.output or REPO / '.tools/cocoa-neptune-app-trials-gen3' / arguments.clone_id
-        manifest = prepare_manifest(arguments.data_dir, arguments.clone_id, output)
-        print(json.dumps({'prepared': True, 'clone_id': manifest['clone_id'], 'manifest': str(output / 'manifest.json'), 'wrapper': manifest['wrapper'], 'started': False}, indent=2))
+        manifest = prepare_manifest(arguments.data_dir, arguments.clone_id, output, gpu_slot=arguments.gpu_slot)
+        print(json.dumps({'prepared': True, 'clone_id': manifest['clone_id'], 'gpu_slot': manifest['gpu_slot'], 'manifest': str(output / 'manifest.json'), 'wrapper': manifest['wrapper'], 'started': False}, indent=2))
     except (Refused, OSError, ValueError, KeyError, TypeError) as error:
         parser.exit(2, 'Preparation refused: ' + str(error) + '\n')
 

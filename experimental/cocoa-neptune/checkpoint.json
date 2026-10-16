@@ -9,9 +9,10 @@
   "windows_3d_verified_by_this_checkpoint": false,
   "private_file_socket_tests_passed": 17,
   "file_sha256": {
+    "experimental/cocoa-neptune/README.md": "270e8464688aab55b811c2e364d5bd8f4a8f6add9ad30e1e82ad35f21eb59586",
     "experimental/cocoa-neptune/probe.py": "09b5ea256b9b32e239a803ac391cc1d1f9aafbf6916845ce4759c236063532c1",
     "experimental/cocoa-neptune/prepare-trial.py": "27b1a3b2bbfba69b36bf9533ef8452b519dc167f4820c588d189fc3f34167534",
-    "experimental/cocoa-neptune/prepare-app-trial.py": "e8f78a2af9fcafbcdc21aeac27acdf583bafed104d0d1b52fb75689324d7ba1b",
+    "experimental/cocoa-neptune/prepare-app-trial.py": "3c9acc64a439341ddb450d2d9669288c569907b49d47b33ce85d540d2bccd2d1",
     "experimental/cocoa-neptune/package-cocoa-app.py": "99255b2b1667b95065cededad8219850814e8865c5adbcc8ba21f43747d1ffe8",
     "experimental/cocoa-neptune/test-trial.py": "9e24d5a3149acf861e8b96328aea8c4ae5164ec0a5975bf2ca5bc74ff7fa7341",
     "experimental/neptune-live/test-live.py": "735972991cde1a08fb5950ed9c78b059c83569bf5c5a5489004edf5418efef59",
@@ -27,7 +28,7 @@
     ".tools/cocoa-neptune-app/package.json": "821418b8c07424ec0ce344d777f8d13c336feeb22104ad7a202c4fc37ed3be46",
     ".tools/cocoa-neptune-app-trials/12755108-83c6-4790-b477-58ca87b1a00e/manifest.json": "a0e68cf411f0ae1363fa5a120ac311a8deb7e52754c8e78075656ade409d23c0",
     ".tools/cocoa-neptune-app-trials/12755108-83c6-4790-b477-58ca87b1a00e/qemu-trial-wrapper": "d29ba82697b05da7636f897b4fe4d53e9c947a66e9831bd84ca2964ca5c9cbbf",
-    "experimental/cocoa-neptune/test-app-trial.py": "0be90dbea2ce1e91f62f04f8cb32f53db971fd9d3396e98df850018033c532d6",
+    "experimental/cocoa-neptune/test-app-trial.py": "18f6d0cf79faf58ee4d45447c52ba7a639f0fbdf6847b1196cfea0ac059639f0",
     ".tools/cocoa-neptune-app-trials/12755108-83c6-4790-b477-58ca87b1a00e/preflight-failure.json": "57cd5d9900b47748bdc1cf1e43e8df6f5fc68121bdd2581468722d1c5ad3fbb2",
     ".tools/cocoa-neptune-app-trials-gen3/12755108-83c6-4790-b477-58ca87b1a00e/manifest.json": "dae6be3ab0acd6ffdd818f9fe39a3a3a4caee686f302925d616ab90e71cc1d14",
     ".tools/cocoa-neptune-app-trials-gen3/12755108-83c6-4790-b477-58ca87b1a00e/qemu-trial-wrapper": "1e94a7133fec0ce470cba088ca99e280f4e48eea23f08f566784ee9c2a0fde6f",
@@ -161,7 +162,7 @@
       "neptune_capset": null
     }
   ],
-  "app_generation3_private_file_socket_tests_passed": 19,
+  "app_generation3_private_file_socket_tests_passed": 30,
   "current_app_generation": 3,
   "original_app_generation2_helper_sha256": "fcfc19fbbad466382d9624cc41b4f8c626c408347f16333516798f6c59dbc8b4",
   "coordinator_observation": {
@@ -171,5 +172,65 @@
     "qmp_receipt": ".tools/windows-3d-cocoa-live-qmp.json",
     "hardware_3d_verified": false,
     "source": "coordinating agent live observation; this fixture did not operate the guest"
+  },
+  "prior_helper_checkpoint": {
+    "sha256": "e8f78a2af9fcafbcdc21aeac27acdf583bafed104d0d1b52fb75689324d7ba1b",
+    "git_commit": "3b0ed4b",
+    "reason": "later fresh attempt names permit rebinding after legitimate swtpm atomic state replacement; no VM copied"
+  },
+  "windows_driver_trial_2026_10_16": {
+    "package_staged": "oem5.inf",
+    "device_activation": "unverified; primary display became unavailable during PnP transition",
+    "windows_agent_alive": "confirmed before first forced stop; not confirmed after RAMFB recovery yet",
+    "regular_shutdown": "did not finish within observed interval; forced QMP stop used",
+    "qcow2_check": "0 errors; not a Windows clean-shutdown or NTFS consistency proof",
+    "hardware_D3D11_proven": false,
+    "next_gate": "post-restart bound driver, device status, hardware target and actual scene",
+    "private_observations": ".tools/windows-3d-install-attempt.json",
+    "post_restart": "Cocoa output inactive and guest-agent timeout; same VM recovered to desktop using standard RAMFB",
+    "setupapi_observation": {
+      "configuration": "oem5.inf / VioGpu3D_Inst / VioGpu3D service",
+      "time_local": "10:49:12.814\u2013816",
+      "failure": "Detected driver hang while installing device; installation timeout error 0x000001E0",
+      "cause": "not isolated",
+      "failure_stage": "query-removal of GPU and default-monitor subtree after successful package configuration; vgpusrv started first",
+      "error_symbol": "ERROR_PNP_QUERY_REMOVE_DEVICE_TIMEOUT"
+    },
+    "recovery_device_properties": {
+      "driver_inf": "oem5.inf",
+      "service": "VioGpu3D",
+      "problem_code": null,
+      "problem_status": null,
+      "device_absent_in_ramfb_profile": true
+    },
+    "code_integrity_query": {
+      "max_events": 80,
+      "message_regex": "viogpu|neptune",
+      "matches": 0,
+      "scope": "bounded negative query; does not prove complete kernel signature acceptance"
+    },
+    "setupapi_text_capture": {
+      "path": ".tools/windows-3d-setupapi-recovered.log",
+      "bytes": 1324653,
+      "sha256": "04527f3cfd3365fbfaf872a0b7170c9d8ff5639f6dcd797db84f8f90a8cfb46d",
+      "transport": "single-use tokenized loopback HTTP POST of Get-Content -Raw text; not byte-for-byte disk-file identity",
+      "limitations": "contains opaque/binary/zero tail; only bounded text section interpreted"
+    },
+    "corrected_probe_ramfb_negative": {
+      "report": ".tools/windows-3d-corrected-negative.json",
+      "sha256": "615d3cfd9967e477c7a81e0be89b5e8ab2c93f96538fb6b58837065fea5cffa4",
+      "timestamp_utc": "2026-10-16T09:21:04.7635473Z",
+      "windows_powershell": "5.1.26100.9711",
+      "native_arm64": true,
+      "mode": "Device (requested lowercase device)",
+      "device_creation": "S_OK / feature level 11_1",
+      "actual_adapter": "Microsoft Basic Render 1414:008C / DXGI flags 0",
+      "probe_result": "rejected at adapter stage",
+      "software_adapter": true,
+      "hardware_adapter_verified": false,
+      "umd_inventory": "complete / empty",
+      "scene_attempted": false,
+      "presents": 0
+    }
   }
 }

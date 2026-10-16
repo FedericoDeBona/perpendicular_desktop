@@ -8,6 +8,7 @@ import sys
 import unittest
 from unittest import mock
 import plistlib
+import subprocess
 
 sys.dont_write_bytecode = True
 HERE = Path(__file__).resolve().parent
@@ -85,6 +86,121 @@ class AppTrialCheck(base.TrialCheck):
             with self.assertRaises(trial.Refused):
                 trial.verify_artifacts()
             base.write(path, before)
+
+    def test_fresh_attempt_rebinds_atomic_tpm_replacement_without_vm_copy(self):
+        first = self.prepare()
+        source_before = trial.identity(self.source / 'tpm/tpm2-00.permall')
+        state = self.vm / 'tpm/tpm2-00.permall'
+        replacement = self.vm / 'tpm/replacement.tmp'
+        base.write(replacement, b'legitimate stopped fixture TPM replacement')
+        os.replace(replacement, state)
+        attempt = self.output.with_name(trial.CLONE_ID + '-restart-2')
+        second = trial.prepare_manifest(self.data, trial.CLONE_ID, attempt)
+        self.assertNotEqual(first['state_bindings']['tpm/tpm2-00.permall']['clone']['inode'],
+            second['state_bindings']['tpm/tpm2-00.permall']['clone']['inode'])
+        self.assertEqual(second['state_bindings']['tpm/tpm2-00.permall']['clone'], trial.identity(state))
+        self.assertEqual(second['clone_id'], trial.CLONE_ID)
+        self.assertEqual(second['vm_dir'], first['vm_dir'])
+        self.assertEqual(second['wrapper'], str(attempt / 'qemu-trial-wrapper'))
+        self.assertEqual(source_before, trial.identity(self.source / 'tpm/tpm2-00.permall'))
+        self.assertEqual({path.name for path in (self.data / 'VMs').iterdir()}, {trial.SOURCE_ID, trial.CLONE_ID})
+        self.assertTrue((self.output / 'manifest.json').is_file())
+
+    def test_attempt_suffix_accepts_exact_48_character_boundary(self):
+        attempt = self.output.with_name(trial.CLONE_ID + '-' + 'a' * 48)
+        manifest = trial.prepare_manifest(self.data, trial.CLONE_ID, attempt)
+        self.assertEqual(manifest['wrapper'], str(attempt / 'qemu-trial-wrapper'))
+        self.assertEqual(trial.read_json(attempt / 'manifest.json')['clone_id'], trial.CLONE_ID)
+
+    def test_invalid_or_oversized_attempt_suffix_refused(self):
+        suffixes = ('-', '-UPPER', '-try_2', '-try.2', '-.', '-..', '-caf\u00e9',
+            '-try\nagain', '-try\x00again', '-' + 'a' * 49)
+        for suffix in suffixes:
+            with self.subTest(suffix=repr(suffix)), self.assertRaises(trial.Refused):
+                trial.prepare_manifest(self.data, trial.CLONE_ID, self.output.with_name(trial.CLONE_ID + suffix))
+        self.assertFalse(self.output.parent.exists())
+
+    def test_attempt_output_wrong_parent_nested_or_traversal_refused(self):
+        name = trial.CLONE_ID + '-retry'
+        invalid = (self.output.parent.parent / name, self.output.parent / 'nested' / name,
+            self.output.parent / '..' / self.output.parent.name / name,
+            self.output.parent / (trial.SOURCE_ID + '-retry'))
+        for attempt in invalid:
+            with self.subTest(path=str(attempt)), self.assertRaises(trial.Refused):
+                trial.prepare_manifest(self.data, trial.CLONE_ID, attempt)
+        self.assertFalse(self.output.parent.exists())
+
+    def test_attempt_output_cannot_reuse_directory_file_or_dangling_symlink(self):
+        self.output.parent.mkdir(mode=0o700)
+        attempt = self.output.with_name(trial.CLONE_ID + '-retry')
+        attempt.mkdir(mode=0o700)
+        with self.assertRaises(trial.Refused):
+            trial.prepare_manifest(self.data, trial.CLONE_ID, attempt)
+        attempt.rmdir()
+        base.write(attempt, b'existing private file')
+        with self.assertRaises(trial.Refused):
+            trial.prepare_manifest(self.data, trial.CLONE_ID, attempt)
+        self.assertEqual(attempt.read_bytes(), b'existing private file')
+        attempt.unlink()
+        attempt.symlink_to(self.base / 'absent')
+        with self.assertRaises(trial.Refused):
+            trial.prepare_manifest(self.data, trial.CLONE_ID, attempt)
+        self.assertTrue(attempt.is_symlink())
+
+    def test_explicit_slot8_changes_exactly_one_gpu_argument(self):
+        default = trial.transform(self.arguments, self.config, self.vm, self.runtime, self.launch_name)
+        slot8 = trial.transform(self.arguments, self.config, self.vm, self.runtime, self.launch_name, gpu_slot=8)
+        self.assertEqual(len(default), len(slot8))
+        changes = [(left, right) for left, right in zip(default, slot8) if left != right]
+        self.assertEqual(changes, [('virtio-ramfb-gl,id=display0,addr=0x7,disable-legacy=on,neptune=on,blob=on,hostmem=256M',
+            'virtio-ramfb-gl,id=display0,addr=0x8,disable-legacy=on,neptune=on,blob=on,hostmem=256M')])
+        self.assertEqual(slot8[slot8.index('-uuid') + 1], trial.CLONE_ID)
+
+    def test_slot8_manifest_binds_choice_through_real_launch_guard(self):
+        manifest = trial.prepare_manifest(self.data, trial.CLONE_ID, self.output, gpu_slot=8)
+        self.assertEqual(manifest['gpu_slot'], 8)
+        self.assertEqual(manifest['purpose'], 'private-exact-clone-cocoa-neptune-app-pci8')
+        self.assertEqual(trial.read_json(self.output / 'manifest.json')['gpu_slot'], 8)
+        with self.supervisor(manifest):
+            actual = trial.validate_launch(manifest, self.arguments)
+        self.assertIn('virtio-ramfb-gl,id=display0,addr=0x8,disable-legacy=on,neptune=on,blob=on,hostmem=256M', actual)
+        self.assertFalse(any(value.startswith('virtio-ramfb-gl,id=display0,addr=0x7,') for value in actual))
+
+    def test_invalid_gpu_slot_type_or_range_refused_without_output(self):
+        for slot in (True, False, '8', 8.0, None, 0, 6, 9, 255):
+            with self.subTest(slot=repr(slot)):
+                with self.assertRaises(trial.Refused):
+                    trial.prepare_manifest(self.data, trial.CLONE_ID, self.output, gpu_slot=slot)
+                with self.assertRaises(trial.Refused):
+                    trial.transform(self.arguments, self.config, self.vm, self.runtime, self.launch_name, gpu_slot=slot)
+        self.assertFalse(self.output.parent.exists())
+
+    def test_gpu_slot_or_purpose_manifest_tamper_refused(self):
+        manifest = self.prepare()
+        self.assertEqual(manifest['gpu_slot'], 7)
+        with self.supervisor(manifest):
+            for slot in (8, True, '7', 9, None):
+                changed = dict(manifest, gpu_slot=slot)
+                with self.subTest(slot=repr(slot)), self.assertRaises(trial.Refused):
+                    trial.validate_launch(changed, self.arguments)
+            changed = dict(manifest, purpose='private-exact-clone-cocoa-neptune-app-pci8')
+            with self.assertRaises(trial.Refused):
+                trial.validate_launch(changed, self.arguments)
+
+    def test_generated_wrapper_rejects_coherent_slot_tamper_before_exec(self):
+        manifest = self.prepare()
+        changed = dict(manifest, gpu_slot=8, purpose='private-exact-clone-cocoa-neptune-app-pci8')
+        self.json(self.output / 'manifest.json', changed)
+        result = subprocess.run([str(self.output / 'qemu-trial-wrapper'), '--version'], capture_output=True, text=True, timeout=5)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('Trial manifest changed', result.stderr)
+
+    def test_slot8_still_rejects_nonowned_or_readdressed_engine_gpu(self):
+        for arguments in ([value.replace('display0,addr=0x7', 'display0,addr=0x8') for value in self.arguments],
+                [value.replace('display0,addr=0x7', 'other,addr=0x7') for value in self.arguments],
+                self.arguments + ['-device', 'virtio-ramfb,id=other,addr=0x8']):
+            with self.assertRaises(trial.Refused):
+                trial.transform(arguments, self.config, self.vm, self.runtime, self.launch_name, gpu_slot=8)
 
 
 if __name__ == '__main__':

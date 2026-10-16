@@ -1,9 +1,10 @@
 # Independent Windows ARM64 D3D11 probe
 
-Original MIT diagnostic, prepared on 2026-10-16. Windows baseline observations
-below exposed two source bugs; the corrections pass host checks and **await a
-Windows rerun**. No driver, VM, app, runtime, certificate, security policy or
-display setting was changed by preparing this probe. The separate operator-led
+Original MIT diagnostic, prepared on 2026-10-16. The corrected probe has now
+run in native ARM64 Windows PowerShell 5.1 and **correctly rejected Microsoft
+Basic Render**. A positive VirtIO device result, visible scene and host
+acceleration remain unverified. No driver, VM, app, runtime, certificate,
+security policy or display setting was changed by preparing this probe. The separate operator-led
 driver trial is recorded below without a success claim. See the separate
 [driver-package gate](../../docs/GRAPHICS_DRIVER_PACKAGE.md) and
 [host scanout limits](../neptune-live/README.md); this program does not authorize
@@ -122,8 +123,9 @@ concrete counterexample to treating the creation request and DXGI flag as
 sufficient hardware evidence; it is **not a successful 3D/acceleration result**.
 The new mandatory VirtIO identity gate and Basic Render rejection cover this
 exact tuple. Host tests call the same production classification routine with
-the observed report values. Current case/adapter fixes have not been run in
-Windows; existing trial media retains the earlier source.
+the observed report values; the corrected Windows rerun below now verifies
+that rejection on the actual baseline too. Earlier trial media retains the
+earlier source.
 
 The operator subsequently delivered the corrected source/launcher to the
 clone's Downloads through the guest-file channel and received its file-write
@@ -137,13 +139,27 @@ their embedded source hashes must not be attributed to this correction.
 
 In a separate experimental-driver attempt, the operator observed pnputil add
 the original package as `oem5.inf`, followed by a disabled/stalled GPU PnP
-device and a black display after reboot. There is no corrected Windows probe
-report from that attempt. Package addition does not establish a working
+device and a black display after reboot. That attempt yielded no corrected
+Windows probe report at the time. Package addition does not establish a working
 device, loaded UMD or successful D3D11 call. The observations do not isolate
-the cause of the stall/black display. The corrected probe's Windows execution,
-Neptune module inventory and visible scene all remain unverified.
+the cause of the stall/black display.
 
-For a future recovered, authorized trial, these are the report expectations:
+**Corrected Windows negative baseline, 2026-10-16 09:21:04 UTC:** the report
+records the corrected source/launcher hashes above, Windows PowerShell
+**5.1.26100.9711**, OS **10.0.26300.0**, and native ARM64
+(`process_machine=0x0000`, `native_machine=0xAA64`). Lowercase `-Mode device`
+produced canonical `mode=Device`. D3D11CreateDevice(HARDWARE) returned S_OK,
+feature level 11_1, but the actual adapter was again **Microsoft Basic Render
+Driver, 1414:008C, flags zero**. The corrected report returned
+`success=false`, `error_stage=adapter`, `dxgi_software_flag=false`, and
+`software_adapter=true`; `expected_adapter_verified`,
+`hardware_adapter_verified` and `host_acceleration_verified` were all false.
+Own-process UMD inventory completed with an empty list. Scene was not attempted
+and both Present counters were zero. This verifies compilation/execution,
+case normalization and Basic Render rejection on Windows; it does not verify
+a Neptune UMD, a working VirtIO 3D device, a scene or host acceleration.
+
+For future authorized trials, these remain the report expectations:
 
 | Observation | Expected interpretation |
 | --- | --- |
@@ -177,7 +193,8 @@ P/Invoke imports use System32-only DLL search.
 
 Copy `D3D11Probe.cs` and `Invoke-D3D11Probe.ps1` together into a trusted trial
 folder. The following commands require an authorized interactive clone trial;
-the corrected source has not been executed in a VM:
+the corrected Device probe has produced the negative baseline above, while
+Scene and a positive VirtIO device result remain unverified:
 
 ```powershell
 powershell.exe -NoProfile -STA -File .\Invoke-D3D11Probe.ps1 -Mode Device -ReportPath .\device.json
@@ -235,9 +252,10 @@ third-party implementation is copied into this folder.
 These host checks do not execute Windows PowerShell 5.1, the Windows CLR
 marshaler, user32, DXGI, the Windows driver or any GPU API. They do not establish
 that the window, fullscreen transition, Present or visible counter works on
-the intended Windows build. Required next evidence is an actual native ARM64
-Device report, then a separately observed Scene with its report and host
-renderer/scanout trace. Do not infer signature acceptance, installed UMD
+the intended Windows build. The separate actual Windows Device report above
+verifies the negative Basic Render gate. Required next evidence is a positive
+native ARM64 VirtIO Device report, then a separately observed Scene with its
+report and host renderer/scanout trace. Do not infer signature acceptance, installed UMD
 revision, driver provenance, acceleration, stability or FPS from a name or
 from the host self-tests.
 

@@ -33,6 +33,49 @@ retains failed observations as unknown and never installs a package. Installing
 the unchanged package under Windows enforcement, identifying the loaded driver
 and proving actual hardware D3D11 rendering remain the next gates.
 
+## First installation attempt — 2026-10-16
+
+In the existing 3D Trial, Windows accepted the unchanged package into its
+DriverStore as **oem5.inf**. No completed device-install result was observed.
+The primary display became unavailable during the PnP transition; Guest Tools
+still answered and acknowledged two diagnostic source transfers. Two owned
+QMP samples 83 seconds apart showed the GPU disabled, no DRIVER_OK, empty
+in-flight queues and unmapped BARs. These establish a disabled PCI device,
+not a proven renderer hang or a proven signed-driver start failure. The host
+had allocated the same BARs successfully before installation.
+
+Regular shutdown did not finish in the observed interval, so the owned VM was
+force-stopped. Qcow2 check returned zero errors; this does not establish a clean
+Windows shutdown or NTFS consistency. A restart with the same Cocoa/Metal path
+remained without active display output. The same VM was then restarted with
+standard RAMFB and returned to the Windows desktop. No further VM copy, EFI/TPM
+replacement, Secure Boot change or signature-policy exception was made.
+
+After RAMFB recovery, SetupAPI records configuration of `oem5.inf` with
+`VioGpu3D_Inst` and creation of the `VioGpu3D` service at 10:46:51.947 local.
+At 10:49:12.814 it explicitly reports **"Detected driver hang while installing
+device"** for the exact VirtIO GPU instance; at 10:49:12.816 the installation
+timeout exceeds its limit with **0x000001E0**. Microsoft identifies this code as a timeout during the query-remove step of
+the device restart, narrowing the failure to that handoff; it does not establish
+that the new driver entered StartDevice or attribute the hang to a specific
+routine or host renderer. [Microsoft installation troubleshooting](https://learn.microsoft.com/en-us/windows-hardware/drivers/install/troubleshooting-device-and-driver-installations). Windows retains the 3D controller
+name; its current `CM_PROB_PHANTOM` is expected with the GPU temporarily absent
+from the RAMFB recovery profile and is not the original failure code.
+
+The corrected D3D11 probe compiled and completed a Device run in Windows
+after RAMFB recovery. It correctly rejects Microsoft Basic Render (1414:008C,
+flags zero) despite S_OK/feature level 11_1, and reports no Neptune UMD modules
+at its snapshot. This validates the negative baseline, not 3D acceleration.
+The old probe
+incorrectly accepted Microsoft Basic Render (1414:008C with flags zero); that
+result is explicitly rejected as acceleration evidence. Recovered device properties identify `oem5.inf` and service `VioGpu3D`;
+problem-code/status properties returned no data. A bounded query of the latest
+80 CodeIntegrity events found no message matching `viogpu|neptune`, which is
+not a complete signature-policy acceptance proof. Kernel-PnP event 400 at
+10:46:52 records the same package/version as configured; a completed 3D driver
+start remains unverified. Real Windows 3D, visible scene pixels and sustained performance remain
+unverified.
+
 ## Exact release identity
 
 The supplied file `/tmp/perpendicular-viogpu3d-release.zip` is 2,117,369 bytes.
