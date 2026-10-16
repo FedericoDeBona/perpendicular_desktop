@@ -1,8 +1,8 @@
 # Native display FD lease transport (experimental)
 
 Original macOS C17 transport for a producer process and a Swift/native consumer.
-It transfers immutable, unique, per-frame shared-memory allocations over a
-private Unix stream socket. It does not contain a renderer, GPU synchronization
+It transfers immutable frame leases backed by shared memory over a private
+Unix stream socket. It does not contain a renderer, GPU synchronization
 implementation, VM control, network listener, pool allocator or private SDK ABI.
 The C code has no heap allocations or external dependencies. License: [MIT](LICENSE).
 
@@ -32,7 +32,7 @@ connecting, not failure. The caller supplies connection/readiness deadlines.
 
 The producer calls `ndt_queue_frame` with memory/readiness FDs. It retains its
 originals; the transport duplicates both with CLOEXEC and closes those internal
-duplicates after the first successful send. Keep the unique backing immutable
+duplicates after the first successful send. Keep the leased backing immutable
 and its readiness writer alive until the exact ACK. Two outstanding identities
 and one queued transmit record are allowed. Two slots let a presenter retain
 its current frame until a replacement arrives. Backpressure returns AGAIN;
@@ -60,8 +60,11 @@ not silently discard a pending retirement.
 Drain those before reinitializing connection storage. Already taken frames
 survive transport closure and still require caller GPU drain and frame_close.
 Disconnect/cancellation never grants permission to reuse mutable backing.
-Keeping every initial backing allocation unique and immutable makes losing
-the ACK safe: a receiver's own FD/mapping keeps that allocation alive.
+A producer may pool backing only after its exact ACK; unacknowledged storage
+must remain immutable even after disconnect. A receiver's own FD/mapping keeps
+that allocation alive when the producer drops its handles. The Cocoa publisher
+also keeps its idle cache within one connection generation and gives every
+reuse a fresh readiness pipe; pooling itself is outside this C transport.
 No Darwin sealing primitive enforces immutability; it is a producer contract,
 and admission-time fstat does not prevent a malicious producer truncation.
 

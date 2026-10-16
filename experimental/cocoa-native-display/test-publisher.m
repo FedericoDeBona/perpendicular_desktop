@@ -18,6 +18,7 @@ extern char **environ;
 
 static const uint64_t session_hi = 0xf123456789abcdefULL;
 static const uint64_t session_lo = 0x123456789abcdef1ULL;
+static const char *pixel_mismatch = "GPU snapshot pixel mismatch";
 static void check(BOOL value, const char *message) {
     if (!value) {
         char *raw = perp_native_display_stats();
@@ -57,7 +58,7 @@ static uint64_t verify(ndt_frame *frame, unsigned width, unsigned height,
     for (unsigned y = 0; y < height; y++) for (unsigned x = 0; x < width; x++) {
         const uint8_t *pixel = mapped + y * frame->metadata.pitch + x * 4;
         check(pixel[0] == blue && pixel[1] == green && pixel[2] == red && pixel[3] == 255,
-              "GPU snapshot pixel mismatch");
+              pixel_mismatch);
     }
     check(munmap(mapped, frame->memory_extent) == 0, "consumer munmap");
     return (uint64_t)width * height;
@@ -102,6 +103,13 @@ static int consumer(const char *path, pid_t server, int read_control, int write_
         usleep(1000);
     }
     acknowledge(&connection, &a); notify(write_control, 'a');
+    control(read_control, 'G');
+    for (unsigned i=0; i<100; i++) {
+        pump(&connection); ndt_frame unexpected;
+        check(ndt_take_frame(&connection, &unexpected) == NDT_AGAIN, "reused backing bypassed new GPU gate");
+        usleep(1000);
+    }
+    notify(write_control, 'g');
     ndt_frame c = receive(&connection);
     pixels += verify(&c, 800, 600, 255, 0, 0);
     acknowledge(&connection, &b);
@@ -109,8 +117,39 @@ static int consumer(const char *path, pid_t server, int read_control, int write_
     for (unsigned i=0; i<20; i++) { pump(&connection); usleep(1000); }
     acknowledge(&connection, &c); notify(write_control, 'E');
     control(read_control, 'e');
+    for (unsigned i=0; i<32; i++) {
+        ndt_frame next = receive(&connection);
+        pixels += verify(&next, 800, 600, (i & 1) ? 0 : 255, 0, (i & 1) ? 255 : 0);
+        acknowledge(&connection, &next); notify(write_control, 'F');
+    }
+    for (unsigned i=0; i<3; i++) {
+        ndt_frame next = receive(&connection);
+        pixels += verify(&next, i < 2 ? 809 : 800, i < 2 ? 611 : 600, 0, 255, 0);
+        acknowledge(&connection, &next); notify(write_control, 'F');
+    }
+    /* Keep this exported allocation after disconnect, without ACK. A new
+     * connection's blue snapshot must never rewrite the old red snapshot. */
+    ndt_frame held = receive(&connection);
+    pixels += verify(&held, 800, 600, 0, 0, 255);
+    notify(write_control, 'H'); control(read_control, 'R');
+    double end = now() + 5;
+    do { result = ndt_pump(&connection); usleep(1000); }
+    while ((result == NDT_OK || result == NDT_AGAIN) && now() < end);
+    check(result == NDT_CLOSED, "pool reset did not disconnect");
+    ndt_close(&connection);
+    result = ndt_client_start(&connection, path, geteuid(), server, session_hi, session_lo, 1);
+    check(result == NDT_OK || result == NDT_AGAIN, "pool reconnect");
+    for (unsigned i=0; i<30; i++) { pump(&connection); usleep(1000); }
+    notify(write_control, 'C');
+    ndt_frame fresh = receive(&connection);
+    check(fresh.metadata.id.frame > held.metadata.id.frame, "pool reused frame identity");
+    pixels += verify(&fresh, 800, 600, 255, 0, 0);
+    pixel_mismatch = "unacknowledged old snapshot changed after reconnect";
+    pixels += verify(&held, 800, 600, 0, 0, 255);
+    ndt_frame_close(&held);
+    acknowledge(&connection, &fresh); notify(write_control, 'Z'); control(read_control, 'z');
     ndt_close(&connection); close(read_control); close(write_control);
-    printf("{\"consumer\":\"pass\",\"frames\":3,\"exact_pixels_including_immutability_recheck\":%llu}\n",
+    printf("{\"consumer\":\"pass\",\"frames\":40,\"exact_pixels_including_immutability_recheck\":%llu}\n",
            (unsigned long long)pixels);
     return 0;
 }
@@ -150,12 +189,17 @@ int main(int argc, char **argv) {
         if (argc == 6 && !strcmp(argv[1], "--consumer"))
             return consumer(argv[2], (pid_t)atoi(argv[3]), atoi(argv[4]), atoi(argv[5]));
         check(argc == 1, "unexpected arguments");
-        char directory[] = "/tmp/perp-native-publisher-XXXXXX"; check(mkdtemp(directory) != NULL, "private runtime");
+        char directory[104];
+        const char *runtime = getenv("PERP_PUBLISHER_TEST_RUNTIME");
+        check(strlcpy(directory, runtime ? runtime : "/tmp/perp-native-publisher-XXXXXX", sizeof(directory)) < sizeof(directory),
+            "publisher test path too long");
+        check(mkdtemp(directory) != NULL, "private runtime");
         setenv("PERP_NATIVE_DISPLAY_DIR", directory, 1);
         setenv("PERP_NATIVE_DISPLAY_SESSION", "f123456789abcdef123456789abcdef1", 1);
         id<MTLDevice> device = MTLCreateSystemDefaultDevice(); check(device != nil, "Metal device");
         id<MTLCommandQueue> queue = [device newCommandQueue];
         id<MTLTexture> first = texture(device, 800, 600), second = texture(device, 803, 607);
+        id<MTLTexture> resized = texture(device, 809, 611);
         draw(queue, first, MTLClearColorMake(0,0,0,1), YES, nil); /* creates listener, no client yet */
         int to_child[2], from_child[2]; check(pipe(to_child) == 0 && pipe(from_child) == 0, "control pipes");
         char path[104], pid_text[32], read_text[32], write_text[32];
@@ -179,12 +223,40 @@ int main(int argc, char **argv) {
         wait_for("occupied", 2);
         draw(queue, first, MTLClearColorMake(0,0,1,1), YES, nil);
         notify(to_child[1], 'D'); control(from_child[0], 'a'); wait_for("acknowledged", 1); wait_for("occupied", 1);
-        draw(queue, first, MTLClearColorMake(0,0,1,1), YES, nil);
+        id<MTLSharedEvent> reuse_gate = [device newSharedEvent]; check(reuse_gate != nil, "reuse GPU gate");
+        draw(queue, first, MTLClearColorMake(0,0,1,1), YES, reuse_gate);
+        notify(to_child[1], 'G'); control(from_child[0], 'g');
+        check([stats()[@"published"] unsignedIntValue] == 2, "reused snapshot published before GPU gate");
+        reuse_gate.signaledValue = 1;
         control(from_child[0], 'E'); wait_for("acknowledged", 3); wait_for("occupied", 0);
-        notify(to_child[1], 'e'); int status; check(waitpid(child, &status, 0) == child && WIFEXITED(status) && WEXITSTATUS(status) == 0, "consumer exit");
+        notify(to_child[1], 'e');
+        for (unsigned i=0; i<32; i++) {
+            draw(queue, first, MTLClearColorMake((i & 1) ? 1 : 0, 0, (i & 1) ? 0 : 1, 1), YES, nil);
+            control(from_child[0], 'F'); wait_for("acknowledged", 4+i); wait_for("occupied", 0);
+        }
+        check([stats()[@"backing_allocations"] unsignedIntValue] == 2 &&
+            [stats()[@"backing_reuses"] unsignedIntValue] == 33, "steady frames did not reuse backing");
+        for (unsigned i=0; i<3; i++) {
+            draw(queue, i < 2 ? resized : first, MTLClearColorMake(0,1,0,1), YES, nil);
+            control(from_child[0], 'F'); wait_for("acknowledged", 36+i); wait_for("occupied", 0);
+        }
+        check([stats()[@"backing_allocations"] unsignedIntValue] == 3 &&
+            [stats()[@"backing_reuses"] unsignedIntValue] == 35, "resize cache did not replace idle mismatch");
+        draw(queue, first, MTLClearColorMake(1,0,0,1), YES, nil); control(from_child[0], 'H');
+        perp_native_display_reset(); wait_for("occupied", 0);
+        notify(to_child[1], 'R'); control(from_child[0], 'C');
+        double end = now() + 5;
+        while (!perp_native_display_can_capture() && now() < end) usleep(1000);
+        check(perp_native_display_can_capture(), "new pool generation admission");
+        draw(queue, first, MTLClearColorMake(0,0,1,1), YES, nil);
+        control(from_child[0], 'Z'); wait_for("acknowledged", 39); wait_for("occupied", 0);
+        notify(to_child[1], 'z'); int status; check(waitpid(child, &status, 0) == child && WIFEXITED(status) && WEXITSTATUS(status) == 0, "consumer exit");
         perp_native_display_shutdown();
         NSDictionary *result = stats(); check([result[@"allocations"] isEqual:result[@"releases"]] &&
-            [result[@"mappings"] isEqual:result[@"unmappings"]] && [result[@"published"] unsignedIntValue] == 3,
+            [result[@"mappings"] isEqual:result[@"unmappings"]] && [result[@"published"] unsignedIntValue] == 40 &&
+            [result[@"backing_allocations"] unsignedIntValue] == 4 &&
+            [result[@"backing_allocations"] isEqual:result[@"backing_releases"]] &&
+            [result[@"backing_reuses"] unsignedIntValue] == 36 && [result[@"cached_backings"] unsignedIntValue] == 0,
             "snapshot cleanup/count mismatch");
         close(to_child[1]); close(from_child[0]); check(rmdir(directory) == 0, "private runtime cleanup");
         printf("{\"producer\":\"pass\",\"gpu_gate\":true,\"immutable\":true,\"bounded_slots\":2,\"stats\":%s}\n",

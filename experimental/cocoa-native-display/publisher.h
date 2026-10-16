@@ -9,7 +9,7 @@ bool perp_native_display_enabled(void);
 /* Polled by Cocoa's existing main-loop refresh, never by the publisher queue.
  * A new consumer needs one snapshot even when the guest is idle. The request
  * persists through no-drawable/full-budget/GPU failures until publication, and
- * is false while both immutable snapshot slots are reserved. */
+ * is false while both immutable snapshot leases are reserved. */
 bool perp_native_display_needs_refresh(void);
 /* Explicit process opt-in, independent of whether a consumer is connected.
  * Direct mode never silently falls back to a Cocoa drawable. */
@@ -26,7 +26,11 @@ typedef enum {
 /* Encode an immutable BGRA8 snapshot of this exact 2D source region onto the
  * caller's command buffer. The caller commits and keeps source/read ownership
  * until GPU completion. No drawable, CPU readback, scaling or guest fence is
- * inferred here. An encoded snapshot is published only after GPU completion. */
+ * inferred here. An encoded snapshot is published only after GPU completion.
+ * Shared-memory/Metal backing may be reused only after its exact consumer ACK,
+ * for the same device, dimensions and connection generation. Each new frame
+ * receives a fresh readiness pipe. Two idle backings may be cached in addition
+ * to the two active leases; reset/shutdown discard the cache. */
 PNDCaptureResult perp_native_display_capture_region(id<MTLCommandBuffer> command,
     id<MTLTexture> source, MTLOrigin origin, MTLSize size);
 /* Compatible full-texture wrapper. Called after the existing console copy has

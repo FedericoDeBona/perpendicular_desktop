@@ -16,8 +16,8 @@ struct NativeDisplayFailure: Error, Equatable, Sendable {
 }
 
 /// One endpoint/connection lifetime. Construct a new instance to reconnect.
-/// Producer frames must be unique immutable allocations; disconnect never
-/// authorizes producer reuse of a backing still held by a GPU lease.
+/// Producer backing stays immutable until the exact frame ACK; disconnect
+/// never authorizes reuse of backing still held by a GPU lease.
 @MainActor
 final class NativeDisplayConnection {
     private let endpoint: NativeDisplayEndpoint

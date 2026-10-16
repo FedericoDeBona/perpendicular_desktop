@@ -486,3 +486,35 @@ component evidence: it does not exercise the Windows 3D producer, establish
 its writer fence, measure presentation latency or change the installed 2D app.
 The accompanying [REA transition analysis](PARALLELS_27_GRAPHICS_REA.md#virtual-transition-pending-render-state-drain)
 adds static render-state and conditional-commit evidence, not runtime attribution.
+
+
+### ACK-retired Metal backing cache — 2026-10-16
+
+The independent publisher now caches at most two idle shared-memory/Metal
+backings, in addition to its two active snapshot leases. Exact ACK, device,
+dimensions and connection generation govern reuse; readiness pipes and frame
+identities remain per-frame. Cache misses evict an idle mismatch so changed
+geometry can enter the cache. Disconnect discards all unacknowledged storage
+and the idle cache. There is still one GPU snapshot copy and no production
+CPU pixel readback.
+
+The expanded two-process Metal fixture passed 40 frames and 20,196,019 exact
+pixel checks: retained-image immutability, two active leases, a GPU wait before
+publication into reused storage, 32 repeated frames, a new geometry and return,
+and an old unacknowledged mapping surviving a new connection's different image.
+The first 35 frames used two backing allocations and 33 reuses; the same
+fixture with only caching disabled allocated 35 and failed the reuse check.
+The whole run used four backings, 36 reuses, 40 per-frame capture objects and
+39 ACKs (one unacknowledged frame discarded on reset). All backings/captures
+and mappings were released, with zero active or cached entries at shutdown.
+Separate private mutants fail when idle-size eviction is removed or when an
+unacknowledged backing is recycled after disconnect. Existing crop and
+initial-refresh causal negatives also pass.
+
+The actual native receiver and external-presenter suites passed, including a
+real held GPU event, replacement, reset/stop and stale connection ACK isolation.
+Pure Cocoa patch-anchor/escaping/protected-input fixtures passed against the
+pinned pristine source; no full archived QEMU build-input gate or new QEMU
+build is claimed. Results remain under `.build/checks/native-publisher/` and
+`publisher-pool-{receiver,presenter}.log`. This is allocation/lifetime evidence,
+not Windows presentation FPS, latency, 3D integration or an installed-app result.

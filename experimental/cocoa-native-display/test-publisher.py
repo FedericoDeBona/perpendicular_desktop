@@ -31,9 +31,11 @@ def main():
     rows = [json.loads(line) for line in result.stdout.splitlines()]
     consumer, producer = rows
     assert consumer['consumer'] == producer['producer'] == 'pass'
-    assert consumer['exact_pixels_including_immutability_recheck'] == 1927421
+    assert consumer['frames'] == 40 and consumer['exact_pixels_including_immutability_recheck'] == 20196019
     assert producer['gpu_gate'] and producer['immutable'] and producer['bounded_slots'] == 2
     assert producer['stats']['occupied'] == 0
+    assert producer['stats']['backing_allocations'] == producer['stats']['backing_releases'] == 4
+    assert producer['stats']['backing_reuses'] == 36 and producer['stats']['cached_backings'] == 0
     refresh = OUTPUT / 'publisher-refresh-check'
     def compile_refresh(publisher, destination):
         subprocess.run(['xcrun', 'clang', '-fobjc-arc', '-std=gnu11', '-Wall', '-Wextra', '-Werror',
@@ -53,6 +55,42 @@ def main():
     # Remove exactly the production accept signal in a PRIVATE source copy.
     # The same real connection/GPU fixture must fail its first-refresh assertion.
     source = (SOURCE / 'publisher.m').read_text()
+    def pool_negative(name, changed, expected):
+        variant = OUTPUT / (name + '.m')
+        executable = OUTPUT / name
+        variant.write_text(changed)
+        subprocess.run(['xcrun', 'clang', '-fobjc-arc', '-std=gnu11', '-Wall', '-Wextra', '-Werror',
+                        '-I' + str(TRANSPORT), '-I' + str(SOURCE), str(variant),
+                        str(SOURCE / 'test-publisher.m'), str(obj), '-framework', 'Foundation',
+                        '-framework', 'Metal', '-o', str(executable)], check=True)
+        with tempfile.TemporaryDirectory(prefix='pnpool-', dir='/tmp') as runtime:
+            env = dict(os.environ, PERP_PUBLISHER_TEST_RUNTIME=runtime + '/r-XXXXXX')
+            failure = subprocess.run([str(executable)], text=True, capture_output=True, timeout=30, env=env)
+        (OUTPUT / (name + '.log')).write_text(failure.stdout + failure.stderr)
+        assert failure.returncode != 0 and expected in failure.stderr
+        return {'exit_code': failure.returncode, 'failed_at': expected}
+    ack_cache = '                cache_backing(capture.storage, capture.generation);'
+    assert source.count(ack_cache) == 1
+    no_pool = pool_negative('publisher-no-pool', source.replace(ack_cache,
+        '                cache_backing(nil, capture.generation);', 1), 'steady frames did not reuse backing')
+    eviction = '''        retired = pool.firstObject;
+        [pool removeObjectAtIndex:0];
+        atomic_fetch_sub(&cached_backings, 1);'''
+    assert source.count(eviction) == 1
+    no_eviction = pool_negative('publisher-no-pool-eviction', source.replace(eviction,
+        '        /* negative control: retain mismatched idle storage */', 1),
+        'resize cache did not replace idle mismatch')
+    # Deliberately unsafe PRIVATE mutant: give unacknowledged storage to the
+    # next connection. The independent old consumer must detect its overwrite.
+    clear = '    clear_pool();'
+    assert source.count(clear) == 1
+    unsafe = source.replace(clear, clear + '''
+    for (PNDCapture *capture in _captures) {
+        capture.storage.generation = self->_generation + 1;
+        cache_backing(capture.storage, 0);
+    }''', 1)
+    unsafe_pool = pool_negative('publisher-unsafe-reconnect-pool', unsafe,
+        'unacknowledged old snapshot changed after reconnect')
     signal = '        atomic_store(&refresh_generation, _generation);'
     assert source.count(signal) == 1
     negative_source = OUTPUT / 'publisher-no-accept-refresh.m'
@@ -104,6 +142,8 @@ def main():
     paths += [TRANSPORT / name for name in ('ndt.h', 'ndt.c')]
     receipt = {'result': 'pass', 'actual_gpu': True, 'processes': 2, 'guest_or_disks': False,
                'observations': rows,
+               'pool_causal_negatives': {'no_reuse': no_pool, 'no_resize_eviction': no_eviction,
+                                        'reuse_without_ack_after_disconnect': unsafe_pool},
                'reconnect_observations': refresh_rows,
                'region_observations': region_rows, 'direct_opt_in': opt_in,
                'crop_causal_negative': {'zero_origin': True, 'exit_code': bad_region.returncode,

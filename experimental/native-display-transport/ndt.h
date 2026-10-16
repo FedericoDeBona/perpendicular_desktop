@@ -102,8 +102,9 @@ int ndt_next_event(ndt_connection *connection, ndt_event *event);
 void ndt_frame_close(ndt_frame *frame);
 /* Idempotent. Closes internal descriptors, preserves pending ACK/CANCEL events.
  * Caller-owned frames still require GPU drain and frame_close. No backing reuse
- * is authorized by disconnect/cancellation: initial frames must be immutable,
- * unique allocations. Drain events before reinitializing the connection. */
+ * is authorized by disconnect/cancellation. An unacknowledged backing must stay
+ * immutable even after connection loss; only its exact ACK permits reuse.
+ * Drain events before reinitializing the connection. */
 void ndt_close(ndt_connection *connection);
 
 #ifdef __cplusplus

@@ -22,15 +22,24 @@ inventing an association with the latest observed guest fence.
 
 Two snapshots total may be reserved across GPU completion, queued transmission
 and consumer ownership. With a full budget, capture is skipped while the
-ordinary console continues. Each frame uses a unique immediately-unlinked
-shared-memory allocation; no mutable backing pool is reused. The consumer
-retains its current frame for redraw until replacement and acknowledges it
-only after every consumer GPU read has ended. Disconnect is not treated as
-permission to overwrite outstanding memory. Existing consumer mappings retain
-their independent backing even after the publisher releases its own handles.
+ordinary console continues. The consumer retains its current frame for redraw
+until replacement and acknowledges it only after every consumer GPU read has
+ended. Only that exact ACK makes its immediately-unlinked shared-memory/Metal
+backing eligible for reuse. The publisher caches at most two idle backings in
+addition to two active leases (at most 256 MiB at the 64-MiB extent limit,
+excluding source/consumer/driver storage). Reuse requires the same Metal device,
+dimensions and connection generation. An idle geometry/device mismatch is
+evicted on a cache miss so a resize cannot strand a full cache of old sizes.
+Every frame still gets a new identity and fresh readiness pipe; a previously
+signalled token cannot authorize a new copy. Disconnect drops unacknowledged
+storage and clears the idle cache, without overwriting old consumer mappings.
+Shutdown also clears the cache. Failure and stale-generation paths never cache
+a frame that lacks an exact ACK.
 
 All transport state belongs to a serial worker queue. The console thread only
-reserves a bounded slot, allocates the shared texture and encodes its blit.
+reserves a bounded slot, checks out or allocates shared texture backing and
+encodes its blit. A short lock protects cache ownership; no transport or GPU
+wait occurs under that lock.
 The worker handles nonblocking accepts, partial sends and exact-identity ACKs.
 Disable/reset closes the connection and changes its generation; a completion
 from the previous generation cannot publish into a replacement connection.
@@ -139,14 +148,33 @@ the first snapshot while the original private texture is overwritten magenta,
 and verifies that the snapshot remains red. It accepts a differently sized
 second frame while still holding the first, checks that a third allocation is
 skipped at the two-slot budget, then acknowledges one frame and accepts a new
-one. It checks1,927,421 pixels including the immutability recheck. This consumer
-reads CPU pixels solely to validate the fixture; the publisher does no readback.
+one. A second real GPU gate withholds the copy into that reused backing: the
+consumer cannot receive it early. Thirty-two further alternating images reuse
+the same buffers. A new 809×611 geometry replaces an idle mismatch, is reused,
+and then returns to 800×600. Finally the consumer holds an unacknowledged red
+snapshot across reset/reconnect while receiving blue through a new connection;
+the old red pixels must remain unchanged.
 
-The first actual run passed all these boundaries on the M4, with three
-allocations/maps and three releases/unmaps, three exact ACKs, and no occupied
-slot at completion. The repeatable runner records exact input hashes and raw
-output under `.build/checks/native-publisher/`. A source description or successful
-compile alone is not a Windows or application integration result.
+The current M4 run checks 40 delivered frames and 20,196,019 exact pixels,
+including immutability rechecks. Its first 35 frames use two backing allocations
+and 33 reuses. The complete resize/reconnect run uses four backing allocations,
+36 reuses and 39 exact ACKs; the one unacknowledged old frame is discarded on
+reset. All 40 capture objects, four mappings and four backings are released at
+teardown, with no idle cache or occupied lease remaining. Capture objects and
+readiness pipes still exist per frame: this eliminates repeated backing/Metal
+texture allocation, not every allocation or the GPU snapshot copy. This
+consumer reads CPU pixels solely to validate the fixture; the publisher does
+no readback. These allocation counts are not a Windows FPS/latency result.
+
+Three private causal mutants must fail: disabling ACK-based caching at
+`steady frames did not reuse backing`, retaining all mismatched cached sizes
+at `resize cache did not replace idle mismatch`, and recycling an
+unacknowledged buffer into the next connection at
+`unacknowledged old snapshot changed after reconnect`. The repeatable runner
+records input hashes, outputs and negative results under
+`.build/checks/native-publisher/`. No mutant is packaged or installed.
+The production pool still requires a fresh QEMU build and a live Windows trial;
+the installed ordinary app continues to use its separately verified 2D runtime.
 
 The same runner now includes a static-image reconnect regression. Its second
 owned process connects three times. A texture rendered red **before any
@@ -165,7 +193,7 @@ at `initial refresh was not requested`. It never packages or uses that binary
 outside the fixture. `refresh_pending` in the bounded statistics distinguishes
 a pending request from lack of free snapshot capacity; it contains no pixels,
 guest input, session identity or endpoint. The runner records this result and
-source hashes alongside the original three-frame GPU test. This verifies the
+source hashes alongside the pooled-backing GPU test. This verifies the
 publisher boundary; Cocoa's hook is checked against its pinned source by
 `build.py --check --self-test`, and the real Windows tab switch remains a
 separate post-build test.

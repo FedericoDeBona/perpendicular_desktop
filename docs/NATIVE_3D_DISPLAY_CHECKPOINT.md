@@ -12,6 +12,32 @@ The newer run and its unresolved presentation loss are recorded under
 [Hidden direct-source run](#hidden-direct-source-run). Earlier observations
 below retain their original runtime scope.
 
+## Source-level backing reuse follow-up
+
+A later source change adds a bounded cache to the independent Metal publisher.
+Only an exact consumer ACK makes a backing reusable; device, dimensions and
+connection generation must match. New frames retain distinct readiness pipes
+and identities, and disconnect discards unacknowledged storage. Geometry
+misses evict idle mismatches rather than forcing repeated allocation forever.
+There remain at most two active snapshot leases plus two cached idle backings.
+The GPU snapshot copy itself is unchanged.
+
+On the current host, the expanded real-Metal/two-process fixture passed 40
+frames and 20,196,019 exact pixels, including a reused-buffer GPU gate, resize
+and an old unacknowledged mapping retained across reconnect. Its first 35
+frames used two backing allocations; a private no-cache control allocated 35.
+The complete run used four backing allocations and 36 reuses, and drained all
+captures/backings/mappings at shutdown. Private controls that retain only old
+sizes or recycle an unacknowledged snapshot fail the resize and old-image
+checks respectively. The native receiver and external-presenter suites also
+passed their GPU-before-ACK, replacement, reset and disconnect checks.
+
+These are component and allocation results. This source has not yet been
+compiled into a fresh QEMU/native Windows candidate or installed; the earlier
+live Windows results below still belong to their frozen artifacts. Writer
+synchronization, measured Windows presentation/latency and installed 3D
+integration remain outstanding. [Publisher contract and tests](../experimental/cocoa-native-display/README.md).
+
 ## Hidden direct-source run
 
 The first combined direct-source/STP candidate launched after correcting a
