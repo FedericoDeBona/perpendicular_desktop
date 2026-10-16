@@ -1,0 +1,39 @@
+{
+  "schema": 1,
+  "source_pin": "d3c970599eb0bfbfe417b86d87fc0e0641da9512",
+  "wire_version": 1,
+  "files_sha256": {
+    "experimental/neptune-wire1/build.py": "841d5fe320f6b5bdad2e3eea56f7c15be1e1492ebdb4673c5d11619674075488",
+    "experimental/neptune-wire1/probe.py": "81d97dee66f035dfc1078f43224dfeb9599652d6e246fb38c8c6f2d222a779ee",
+    "experimental/neptune-wire1/README.md": "185e77034d52b673ac1620462f1154e82e7b7a963ece6f429eecc6a87fe88b24",
+    "experimental/neptune-wire1/COPYING": "3b32caf16e2402c2aff2b716858713f3e1feded85c25e71bf829816ee5009402",
+    ".tools/graphics-wire1/provenance/build.json": "79f503c898153de7d2c59c7c355ad72f6faf039d1c5138a9bf2cd77796250c04",
+    ".tools/graphics-wire1/provenance/source-files.json": "1a751a0975895e30d291b5d182b60da652fde656c189d73f0997946bfdb7e855",
+    ".tools/graphics-wire1/logs/configure.log": "d974d75b01ffc01141c0ded8f9dfdc32be565324109b556eef2e2ee296253eed",
+    ".tools/graphics-wire1/logs/compile.log": "2e56c14ce646088084b3684d030640be6867d5c3e9a70a9ee7b7e4c92458cd49",
+    ".tools/graphics-wire1/logs/install-private.log": "3e9464dfc7665024c562b925041090fdca76ed79d42865c6f33f67ee235bf19a",
+    ".tools/graphics-wire1/probe/result.json": "a50bb618b35d5ba99901481216ccaa2ef9c471cbf41c4d465ecf5ea2bc2ed87e",
+    ".tools/graphics-wire1/probe/qemu.log": "d627a3bc8b0ec5137447b0408dd51d0088b11bb09429d67a4a9d598e47bada36"
+  },
+  "binary_sha256": {
+    ".tools/graphics-wire1/prefix/lib/libvirglrenderer.1.dylib": "d554a7b740bcd639c9b1aafca63992bbfcc2400f081058143a7fe0a04e17d83c",
+    ".tools/graphics-wire1/prefix/libexec/virgl_render_server": "abb91b15d010fbb5a9637e92043d20b339e5e6a7078115a9f6dfeccec91a927c"
+  },
+  "build_exit": 0,
+  "handshake_exit": 0,
+  "guest_CPU_executed": false,
+  "COM_commands_sent": false,
+  "rendering_verified": false,
+  "backend_shared_texture_ABI_qualified": false,
+  "backend_mismatch": "Renderer DMTX v2 versus original backend DXNt v1; compatible whole backend is a separate gate",
+  "original_artifacts_unchanged": true,
+  "coordinator_windows_boot": {
+    "same_vm": true,
+    "new_vm_copy": false,
+    "new_library_and_server_observed": true,
+    "guest_tools_connected": true,
+    "gpu_initialized": false,
+    "driver_code43_dual_display_observed": true,
+    "3D_verified": false
+  }
+}
