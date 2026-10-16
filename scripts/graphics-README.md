@@ -218,6 +218,12 @@ occurs. This profile includes no historical GPU diagnostic overlay, STP/HVF
 extension or HID backpressure patch; it is not ready to replace the installed
 Windows runtime.
 
+Resume requires the exact recorded recipe and input hashes. After editing a
+recipe, choose a fresh profile; existing successful receipts still bind their
+original Git revision. Meson's generated `subprojects/.wraplock` is excluded
+from the source inventory so its creation does not invalidate an unchanged
+recipe's prepared-source check.
+
 Run the owned, paused, diskless protocol fixture separately:
 
 ```sh

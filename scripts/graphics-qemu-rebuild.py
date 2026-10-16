@@ -33,8 +33,11 @@ sha, require, save = shared.sha, shared.require, shared.save
 
 
 def inventory(directory):
+    # Meson creates this synchronization file on its first configure. It is
+    # build bookkeeping, not a source input, and must not break a later resume.
     return {str(p.relative_to(directory)): os.readlink(p) if p.is_symlink() else sha(p)
-            for p in sorted(directory.rglob('*')) if p.is_file() or p.is_symlink()}
+            for p in sorted(directory.rglob('*'))
+            if (p.is_file() or p.is_symlink()) and p != directory / 'subprojects/.wraplock'}
 
 
 def main():
