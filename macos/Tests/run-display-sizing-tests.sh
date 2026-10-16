@@ -8,6 +8,8 @@ cat "$repo_dir/macos/PerpendicularDesktop/VMKeyboardText.swift" \
     "$repo_dir/macos/PerpendicularDesktop/NativeDisplayEndpoint.swift" \
     "$repo_dir/macos/PerpendicularDesktop/RFBDesktopResize.swift" \
     "$repo_dir/macos/PerpendicularDesktop/VMDisplayPresenter.swift" \
+    "$repo_dir/macos/PerpendicularDesktop/RFBCursor.swift" \
+    "$repo_dir/macos/PerpendicularDesktop/RFBCursorPresentation.swift" \
     "$repo_dir/macos/PerpendicularDesktop/VMConsole.swift" \
     "$repo_dir/macos/PerpendicularDesktop/Engine.swift" \
     "$repo_dir/macos/PerpendicularDesktop/GuestTools.swift" \

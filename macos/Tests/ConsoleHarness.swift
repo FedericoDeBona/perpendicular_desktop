@@ -45,6 +45,7 @@ private extension RFBConnection {
 @MainActor
 private extension VMFramebufferView {
     var testFramebufferWidth: Int { Int(framebufferSize.width) }
+    var testHasLocalCursor: Bool { localCursor != nil }
     var testHeldInputCount: Int { pressedKeys.count + pressedModifiers.count + Int(pointerButtons) }
     var testUsesMetal: Bool { metalDisplay != nil }
     var testHasFallbackFrame: Bool { framebuffer != nil }
@@ -94,6 +95,100 @@ private func runProtocolTest(socket: String) {
     precondition(result.clipboard == "guest", "ServerCutText mismatch")
     client.stop()
     print("raw framebuffer, resize, keyboard, pointer and clipboard PASS")
+}
+
+private final class CursorTestState: @unchecked Sendable {
+    private let lock = NSLock()
+    private var shapes: [RFBCursor] = []
+    let received = DispatchSemaphore(value: 0)
+    func offer(_ cursor: RFBCursor) {
+        lock.lock(); shapes.append(cursor); lock.unlock(); received.signal()
+    }
+    func snapshot() -> [RFBCursor] { lock.lock(); defer { lock.unlock() }; return shapes }
+}
+
+private func runCursorProtocolTest(socket: String) {
+    let state = ConsoleTestState(), cursors = CursorTestState()
+    let client = RFBConnection(socketPath: socket, onFrame: { state.frame($0) },
+        onReady: { _ in state.ready.signal() }, onCutText: { state.cut($0) },
+        onCursor: { cursors.offer($0) }, onFailure: { state.failed($0) })
+    client.start()
+    precondition(cursors.received.wait(timeout: .now() + 5) == .success)
+    // Peer withholds all pixels until we confirm the dedicated cursor callback.
+    precondition(state.snapshot().frames.isEmpty, "Cursor shape submitted a framebuffer")
+    let shape = cursors.snapshot()[0]
+    precondition(shape.width == 3 && shape.height == 2 && shape.hotspotX == 2 && shape.hotspotY == 1)
+    precondition(shape.pixelsBGRA == Data([1,2,3,255, 0,0,0,0, 9,10,11,255,
+        0,0,0,0, 17,18,19,255, 0,0,0,0]), "Fragmented cursor mask/color mismatch")
+    client.sendCutText("shape received")
+    precondition(state.changed.wait(timeout: .now() + 5) == .success)
+    precondition(cursors.received.wait(timeout: .now() + 5) == .success)
+    precondition(state.clipboardReceived.wait(timeout: .now() + 5) == .success)
+    let frames = state.snapshot().frames
+    precondition(frames.count == 1 && frames[0].width == 2 && frames[0].height == 2,
+        "Cursor hotspot/shape modified framebuffer geometry")
+    precondition(cursors.snapshot().count == 2 && cursors.snapshot()[1].isHidden)
+    precondition(state.snapshot().error == nil)
+    client.stop()
+    print("dedicated cursor updates, oversized-to-frame shape, hotspot, alpha, hide and raw stream alignment PASS")
+}
+
+@MainActor
+private final class CursorFixtureWindow: NSWindow {
+    var fixtureKey = false
+    override var isKeyWindow: Bool { fixtureKey }
+}
+
+@MainActor
+private extension VMFramebufferView {
+static func runCursorViewTest() {
+    _ = NSApplication.shared
+    let raw = Data([0, 0, 255, 0, 0, 255, 0, 0, 0xc0])
+    let shape = try! RFBCursor.decode(width: 2, height: 1, hotspotX: 1, hotspotY: 0, payload: raw)
+    let window = CursorFixtureWindow(contentRect: CGRect(x: 0, y: 0, width: 240, height: 200),
+        styleMask: [.titled], backing: .buffered, defer: false)
+    let view = VMFramebufferView(frame: window.contentView!.bounds)
+    window.contentView!.addSubview(view)
+    view.active = true; view.connectionID = UUID(); view.framebufferSize = CGSize(width: 2, height: 2)
+    view.status = ""; view.localCursor = shape
+    // Constructing a native shape must not depend on a GPU or guest.
+    let p = RFBCursorPresentation.make(shape, framebufferSize: view.framebufferSize, viewBounds: view.bounds)!
+    precondition(p.rect == CGRect(x: 20, y: 0, width: 200, height: 200))
+    precondition(p.cursor.image.size == CGSize(width: 200, height: 100) && p.cursor.hotSpot == CGPoint(x: 100, y: 0))
+    let image = p.cursor.image.cgImage(forProposedRect: nil, context: nil, hints: nil)!
+    precondition(image.width == 2 && image.height == 1, "Cursor backing pixels were resampled to view points")
+    precondition(view.localCursorPresentation == nil, "Inactive window installed a guest cursor")
+    window.fixtureKey = true
+    precondition(view.localCursorPresentation != nil, "Key console has no local cursor")
+    view.status = "Reconnecting…"
+    precondition(view.localCursorPresentation == nil, "Disconnected display kept a guest cursor")
+    view.status = ""; view.connectionID = nil
+    precondition(view.localCursorPresentation == nil, "Disconnected RFB kept a guest cursor")
+    view.connectionID = UUID(); view.localCursor = try! RFBCursor.decode(width: 0, height: 0, hotspotX: 0, hotspotY: 0, payload: Data())
+    let hiddenPresentation = view.localCursorPresentation!
+    let hiddenImage = hiddenPresentation.cursor.image.cgImage(forProposedRect: nil, context: nil, hints: nil)!
+    precondition(hiddenImage.width == 1 && hiddenImage.height == 1)
+    precondition((hiddenImage.dataProvider!.data! as Data).allSatisfy { $0 == 0 }, "Hidden cursor backing is opaque")
+    window.fixtureKey = false
+    precondition(view.localCursorPresentation == nil, "Focus loss retained a guest cursor rect")
+    window.fixtureKey = true
+    view.disconnect()
+    precondition(view.localCursor == nil && view.localCursorPresentation == nil)
+    window.contentView = nil
+    // A stalled main loop holds one newest shape and one delivery task.
+    var delivered: [RFBCursor] = []
+    let relay = RFBValueRelay<RFBCursor> { delivered.append($0) }
+    for _ in 0..<500 { relay.offer(shape) }
+    let hidden = try! RFBCursor.decode(width: 0, height: 0, hotspotX: 0, hotspotY: 0, payload: Data())
+    relay.offer(hidden)
+    waitForView { !delivered.isEmpty }
+    precondition(delivered == [hidden], "Cursor relay retained stale queued shapes")
+    relay.offer(shape)
+    waitForView { delivered.count == 2 }
+    precondition(delivered.last == shape)
+    print("AppKit point scaling/hotspot, scoped hide, focus/status/disconnect guards and latest-shape relay PASS")
+}
+
 }
 
 private func runBadMessageTest(socket: String, expected: String) {
@@ -179,7 +274,9 @@ private func runReconnectTest(socket: String) {
     view.configure(socketPath: socket, isActive: true)
     // The mock removes the first listener, waits through a failed retry, and
     // creates a new Unix listener at the same path with a different framebuffer.
+    waitForView { view.testHasLocalCursor }
     waitForView { view.testFramebufferWidth == 3 }
+    precondition(!view.testHasLocalCursor, "Replacement connection retained an old cursor shape")
     view.configure(socketPath: socket, isActive: false)
     RunLoop.current.run(until: Date().addingTimeInterval(0.15))
     print("Unix listener stop/start reconnect and inactive shutdown PASS")
@@ -413,7 +510,10 @@ private func runRecordedKeyboardTest(socket: String, fixture: String, layout: St
     view.configure(socketPath: socket, isActive: false)
     window.contentView = nil; window.close()
     if ProcessInfo.processInfo.environment["PERPENDICULAR_INPUT_DIAGNOSTICS"] == "1" {
-        RunLoop.current.run(until: Date().addingTimeInterval(0.35))
+        // An unordered window may leave no run-loop sources. run(until:)
+        // may return early; keep the process alive through the idle flush.
+        let deadline = Date().addingTimeInterval(1)
+        while Date() < deadline { RunLoop.current.run(until: deadline) }
     }
     print("recorded CUA keyboard \(layout): exact Windows key locations/modifiers and matching releases PASS")
 }
@@ -533,6 +633,8 @@ private func runInputOverflowTest(socket: String, scenario: String) {
 precondition(CommandLine.arguments.count >= 2, "Expected console test mode")
 switch CommandLine.arguments[1] {
 case "protocol": runProtocolTest(socket: CommandLine.arguments[2])
+case "cursor-protocol": runCursorProtocolTest(socket: CommandLine.arguments[2])
+case "cursor-view": VMFramebufferView.runCursorViewTest()
 case "bad": runBadMessageTest(socket: CommandLine.arguments[2], expected: CommandLine.arguments[3])
 case "drawing": runDrawingTest()
 case "presenter-fallback": runPresenterFallbackTest()

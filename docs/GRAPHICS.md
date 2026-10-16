@@ -116,8 +116,9 @@ installed by this checkpoint. See the [actual pipeline, reproduction and
 precise limits](../experimental/neptune-live/README.md).
 
 The [REA inspection of the installed Parallels executable](PARALLELS_GRAPHICS_REA.md)
-records static Metal/IOSurface/display-link imports and explicit analysis limits.
-It supplies no recovered guest GPU protocol or runtime performance claim.
+records targeted Metal/IOSurface/display-link and mouse control-flow observations,
+with per-version identities and explicit raw-decompilation limits. It supplies
+no recovered guest GPU protocol or runtime performance claim.
 
 ## Earlier source inspection and capability checks
 

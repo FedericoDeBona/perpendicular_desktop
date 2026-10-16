@@ -110,7 +110,7 @@ class Peer:
         self.send(b'\x01\x01'); assert self.read(1)==b'\x01'; self.send(bytes(4)); assert self.read(1)==b'\x01'
         self.send(struct.pack('>HH',800,600)+bytes(16)+struct.pack('>I',4)+b'test')
         assert self.read(20)==bytes([0,0,0,0,32,24,0,1,0,255,0,255,0,255,16,8,0,0,0,0])
-        assert self.read(20)==struct.pack('>BBHiiii',2,0,4,0,-223,-224,-308)
+        assert self.read(24)==struct.pack('>BBHiiiii',2,0,5,-239,0,-223,-224,-308)
         assert self.read(10)==struct.pack('>BBHHHH',3,0,0,0,800,600)
     def update(self, rectangles): self.send(struct.pack('>BBH',0,0,len(rectangles))+b''.join(rectangles))
     def message(self):

@@ -7,6 +7,7 @@ mkdir -p "$OUTPUT"
 "$CARGO" fmt --manifest-path "$ROOT/engine/Cargo.toml" --check
 "$CARGO" clippy --manifest-path "$ROOT/engine/Cargo.toml" --locked --all-targets -- -D warnings
 "$CARGO" test --manifest-path "$ROOT/engine/Cargo.toml" --locked
+"$ROOT/macos/Tests/run-rfb-cursor-tests.sh"
 "$ROOT/macos/Tests/run-console-tests.sh"
 "$ROOT/macos/Tests/run-display-sizing-tests.sh"
 for pair in 'Engine.swift EngineClientCheck.swift' 'WindowPresentation.swift WindowPresentationCheck.swift' 'RFBDesktopResize.swift RFBDesktopResizeCheck.swift'; do

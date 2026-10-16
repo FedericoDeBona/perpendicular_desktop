@@ -45,7 +45,8 @@ for run in range(5):
                 read(1)
                 connection.sendall(struct.pack(">HH", width, height) + bytes(16) + struct.pack(">I", 4) + b"test")
                 read(20)
-                read(16)
+                header = read(4)
+                read(struct.unpack(">H", header[2:4])[0] * 4)
                 for _ in range(frame_count):
                     read(10)
                     connection.sendall(frame_header)

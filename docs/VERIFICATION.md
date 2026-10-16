@@ -199,3 +199,48 @@ The complete normal check with the optional real Metal and PowerShell suites pas
 ## Remaining required work
 
 Verify Windows TPM health and desktop networking; finish deferred Windows updates; audio; clipboard, shared folders/transfers and USB integration; fresh-start Guest Tools bootstrap, broader resize/input endurance and Windows graphics acceleration; actual Windows snapshot recovery; current DBX revocation provisioning and release packaging. The bounded adaptive-2D/fullscreen and fast-keyboard checks above are complete, without establishing all driver/mode/layout combinations or sustained fluidity. The authoritative feature checklist remains [FEATURES.md](FEATURES.md).
+
+## Local cursor integration — 2026-10-16
+
+The checkout now negotiates the standard RFB Cursor pseudo-encoding and
+presents its image/hotspot with AppKit cursor rectangles, independently of
+framebuffer arrival. This closes the earlier decoder-only implementation gap.
+The socket fixtures verify separate cursor-only delivery, shape/header bounds,
+mask/alpha bytes, hide, hotspot-vs-framebuffer semantics and following raw frames.
+The AppKit fixture checks real cursor image geometry, a bounded latest-value
+relay, focus/status guards and cleanup without system pointer injection.
+[Contract and acceptance limits](../macos/Tests/RFBCursor.md).
+
+The `.tools` experiment builds, installed app and old ignored research
+receipts referenced by earlier checkpoints were not present when this work
+resumed. The historical performance and runtime checkpoints above do not
+qualify this new client on this machine. The user subsequently identified the
+existing Parallels Windows VM as the available source and authorized its use.
+Windows completed a normal shutdown; an independent APFS clone of its single
+base HDS was created with the source stopped and fully hash-compared against
+the original (18,536,726,528 bytes). Its receipt and descriptor remain private
+under `.tools/vm-migration/`. The original VM remains registered and stopped.
+No force-stop, guest driver/security change, or Perpendicular boot has occurred.
+The owned QEMU runtime and secure firmware are being rebuilt from pinned source.
+Required next gates include conversion/import, real cursor shape/hide and native
+scanout composition, and measuring input-to-image latency before/after. A passed
+socket/AppKit check is not a Windows smoothness or 3D integration result.
+
+The complete default `scripts/check.sh` passes on this checkout after the cursor
+integration: Rust formatting/lints/unit/CLI checks; decoder oracle plus its
+required failing bit-order mutant; the complete socket/AppKit console suite;
+all display-sizing fixtures; native client/window/guest-tools/export checks;
+and Python source/provenance tests. Three Rust checks requiring real external
+runtime/tools are explicitly ignored by default. Optional PowerShell/Metal
+lanes were not enabled in that command. The native-display build configuration
+also type-checks with the actual C transport header. The raw-frame mock benchmark
+still completes all five 60-frame 1920×1080 runs after cursor negotiation changed;
+these are host socket-throughput checks, not Windows FPS/latency measurements.
+
+Two existing test timing races were repaired: the export converter now publishes
+its mock readiness PID by atomic rename, and the input diagnostics fixture stays
+alive through its idle flush even when an unordered window has no run-loop
+sources. The compressed absolute-bootstrap-deadline fixture now allows two
+seconds for its two real Python subprocesses to reach the held-response gate;
+it still requires expiry and rejects the late result. Production startup and
+resize timeouts were not increased by these fixture changes.

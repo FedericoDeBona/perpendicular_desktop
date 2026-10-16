@@ -49,7 +49,7 @@ class Peer:
         assert self.read(20) == bytes(
             [0, 0, 0, 0, 32, 24, 0, 1, 0, 255, 0, 255, 0, 255, 16, 8, 0, 0, 0, 0]
         ), "Wrong client RGB888 pixel format"
-        assert self.read(20) == struct.pack(">BBHiiii", 2, 0, 4, 0, -223, -224, -308
+        assert self.read(24) == struct.pack(">BBHiiiii", 2, 0, 5, -239, 0, -223, -224, -308
         ), "Wrong advertised encodings"
         if expect_initial_request:
             self.request(width, height, incremental=False)
@@ -518,7 +518,8 @@ def run_reconnect():
             with connection:
                 peer = Peer(connection)
                 peer.handshake(width=2, height=1)
-                peer.update([rectangle(0, 0, 2, 1, 0, bytes(8))])
+                peer.update([rectangle(0, 0, 2, 1, 0, bytes(8)),
+                             rectangle(0, 0, 1, 1, -239, bytes([0, 0, 255, 0, 0x80]))])
                 peer.request(2, 1)
                 time.sleep(0.15)
             initial.close()
@@ -563,3 +564,32 @@ if TEST_FILTER is None or TEST_FILTER == "drawing":
 if TEST_FILTER is None or TEST_FILTER == "presenter-fallback":
     subprocess.run([HARNESS, "presenter-fallback"], check=True, timeout=10)
 print("All native console tests passed.", flush=True)
+
+
+def cursor_protocol(peer):
+    peer.handshake()
+    pixels = bytes(range(1, 25))
+    peer.update([rectangle(2, 1, 3, 2, -239, pixels + bytes([0xa0, 0x40]))])
+    peer.request(2, 2)
+    assert peer.read(8) == struct.pack(">BBBBI", 6, 0, 0, 0, len(b"shape received"))
+    assert peer.read(len(b"shape received")) == b"shape received"
+    peer.update([rectangle(0, 0, 2, 2, 0, bytes(16)), rectangle(0, 0, 0, 0, -239)])
+    peer.request(2, 2)
+    peer.send(bytes([3, 0, 0, 0]) + struct.pack(">I", 4) + b"done")
+    peer.eof()
+
+
+run_fixture("cursor-protocol", "cursor-protocol", cursor_protocol)
+for name, x, y, w, h in [("oversize", 0, 0, 513, 1), ("hotspot", 2, 0, 2, 2),
+                        ("zero-axis", 0, 0, 0, 1), ("hidden-hotspot", 1, 0, 0, 0)]:
+    def bad_cursor(peer, x=x, y=y, w=w, h=h):
+        peer.handshake()
+        # Deliberately NO payload. Header alone must trigger rejection before a read/allocation.
+        peer.update([rectangle(x, y, w, h, -239)])
+        peer.eof()
+    run_fixture("cursor-invalid-" + name, "bad", bad_cursor, "Invalid display cursor")
+
+if not TEST_FILTER or TEST_FILTER == "cursor-view":
+    result = subprocess.run([HARNESS, "cursor-view"], capture_output=True, text=True, timeout=15)
+    assert result.returncode == 0, result.stderr
+    print("cursor-view: " + result.stdout.strip(), flush=True)

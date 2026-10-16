@@ -29,11 +29,14 @@ private func runDisplaySizingFixture() throws {
         DisplaySizingController.defaultBootstrapDelays.count + 1 == 12 &&
         DisplaySizingController.defaultBootstrapDelays.reduce(0, +) < DisplaySizingController.defaultBootstrapWindow,
         "Startup admission lost its absolute deadline or observation bound")
+    // Leave enough wall time for two real Python engine subprocesses to start.
+    // Expiry is still tested while the second result is explicitly held,
+    // rather than accidentally expiring before the fixture reaches that gate.
     let controller = DisplaySizingController(acknowledgementTimeout: 0.45, confirmationTimeout: 1.6,
         bootstrapDelays: lateAgent ? DisplaySizingController.defaultBootstrapDelays.map { $0 / 50 } :
             (scenario.hasPrefix("bootstrap-") ? [0.08, 0.08, 0.08, 0.08] : DisplaySizingController.defaultBootstrapDelays),
         bootstrapWindow: lateAgent ? DisplaySizingController.defaultBootstrapWindow / 50 :
-            (scenario == "bootstrap-deadline" ? 0.45 : DisplaySizingController.defaultBootstrapWindow))
+            (scenario == "bootstrap-deadline" ? 2.0 : DisplaySizingController.defaultBootstrapWindow))
     let view = VMFramebufferView(frame: NSRect(x: 0, y: 0, width: 640, height: 360))
     let window = NSWindow(contentRect: view.bounds, styleMask: [], backing: .buffered, defer: false)
     window.isReleasedWhenClosed = false

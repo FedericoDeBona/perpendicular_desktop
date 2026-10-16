@@ -93,10 +93,15 @@ final class VMFramebufferView: NSView {
     private var nativeHasPixels = false
     private var nativeGeneration = 0
 #endif
-    private var framebufferSize = CGSize.zero
-    private var status = "Console is stopped"
+    private var localCursor: RFBCursor?
+    private var framebufferSize = CGSize.zero {
+        didSet { if oldValue != framebufferSize { invalidateLocalCursor() } }
+    }
+    private var status = "Console is stopped" {
+        didSet { if oldValue.isEmpty != status.isEmpty { invalidateLocalCursor() } }
+    }
     private var tracking: NSTrackingArea?
-    private var focusObserver: RFBFocusObserver?
+    private var focusObservers: [RFBFocusObserver] = []
     private var keyReleaseMonitor: RFBKeyReleaseMonitor?
     private let inputDiagnosticsEnabled = ProcessInfo.processInfo.environment["PERPENDICULAR_INPUT_DIAGNOSTICS"] == "1"
     private var inputDiagnostics: RFBInputDiagnostics?
@@ -163,6 +168,8 @@ final class VMFramebufferView: NSView {
         connection?.stop()
         connection = nil
         inputDiagnostics = nil
+        localCursor = nil
+        invalidateLocalCursor()
         metalDisplay?.reset()
         connectionID = nil
         latestLayout = nil
@@ -180,9 +187,15 @@ final class VMFramebufferView: NSView {
         connectionID = currentConnectionID
         // Coalesce frames if the server outpaces the main thread. Keep only the newest
         // pending image instead of retaining an unbounded queue of framebuffer copies.
-        let frameRelay = RFBFrameRelay { [weak self] frame in
+        let frameRelay = RFBValueRelay<RFBFrame> { [weak self] frame in
             guard let self, self.generation == currentGeneration, self.active else { return }
             self.present(frame)
+        }
+        let cursorRelay = RFBValueRelay<RFBCursor> { [weak self] cursor in
+            guard let self, self.generation == currentGeneration, self.active,
+                  self.connectionID == currentConnectionID else { return }
+            self.localCursor = cursor
+            self.invalidateLocalCursor()
         }
         let client = RFBConnection(
             socketPath: configuredPath,
@@ -206,6 +219,7 @@ final class VMFramebufferView: NSView {
             // to the explicit Guest Tools actions, so display traffic cannot
             // replace the Mac user's clipboard.
             onCutText: { _ in },
+            onCursor: { cursorRelay.offer($0) },
             onLayout: { [weak self] layout in
                 Task { @MainActor in
                     guard let self, self.generation == currentGeneration, self.active else { return }
@@ -217,6 +231,8 @@ final class VMFramebufferView: NSView {
             onFailure: { [weak self] message in
                 Task { @MainActor in
                     guard let self, self.generation == currentGeneration, self.active else { return }
+                    self.localCursor = nil
+                    self.invalidateLocalCursor()
                     self.connection = nil
                     self.connectionID = nil
                     self.latestLayout = nil
@@ -341,8 +357,8 @@ final class VMFramebufferView: NSView {
         Task { @MainActor [weak self] in self?.onDisplayEvent?(.requestQueued(request.id, accepted: accepted)) }
     }
 
-    override func layout() { super.layout(); reportViewport() }
-    override func viewDidChangeBackingProperties() { super.viewDidChangeBackingProperties(); reportViewport() }
+    override func layout() { super.layout(); reportViewport(); invalidateLocalCursor() }
+    override func viewDidChangeBackingProperties() { super.viewDidChangeBackingProperties(); reportViewport(); invalidateLocalCursor() }
     private func reportViewport() {
         guard bounds.width > 0, bounds.height > 0 else { return }
         onDisplayEvent?(.viewport(points: bounds.size, backingScale: window?.backingScaleFactor ?? 1))
@@ -429,6 +445,27 @@ final class VMFramebufferView: NSView {
         }
     }
 
+    private func invalidateLocalCursor() {
+        window?.invalidateCursorRects(for: self)
+    }
+
+    // AppKit owns pointer motion. Only shape/hotspot updates cross RFB, so
+    // moving the local cursor never waits for a framebuffer or guest round trip.
+    // Cursor rectangles scope hidden shapes to this active view; never change
+    // process/global cursor visibility or warp the user's pointer.
+    private var localCursorPresentation: RFBCursorPresentation? {
+        guard active, connectionID != nil, window?.isKeyWindow == true,
+              status.isEmpty, let localCursor else { return nil }
+        return RFBCursorPresentation.make(localCursor, framebufferSize: framebufferSize, viewBounds: bounds)
+    }
+
+    override func resetCursorRects() {
+        super.resetCursorRects()
+        if let presentation = localCursorPresentation {
+            addCursorRect(presentation.rect, cursor: presentation.cursor)
+        }
+    }
+
     override func updateTrackingAreas() {
         super.updateTrackingAreas()
         if let tracking { removeTrackingArea(tracking) }
@@ -443,19 +480,25 @@ final class VMFramebufferView: NSView {
         updateKeyReleaseMonitor()
         reportViewport()
         updatePresenterVisibility()
+        invalidateLocalCursor()
         if let latestFrame, window != nil {
             metalDisplay?.present(VMDisplayFrame(width: latestFrame.width, height: latestFrame.height, pixels: latestFrame.pixels,
                 hasReceivedPixels: latestFrame.hasReceivedPixels))
         }
-        focusObserver = nil
+        focusObservers.removeAll()
         if let window {
             window.acceptsMouseMovedEvents = true
             let observer = NotificationCenter.default.addObserver(
                 forName: NSWindow.didResignKeyNotification, object: window, queue: .main
             ) { [weak self] _ in
-                Task { @MainActor in self?.releaseInput() }
+                Task { @MainActor in self?.releaseInput(); self?.invalidateLocalCursor() }
             }
-            focusObserver = RFBFocusObserver(observer)
+            let becameKey = NotificationCenter.default.addObserver(
+                forName: NSWindow.didBecomeKeyNotification, object: window, queue: .main
+            ) { [weak self] _ in
+                Task { @MainActor in self?.invalidateLocalCursor() }
+            }
+            focusObservers = [RFBFocusObserver(observer), RFBFocusObserver(becameKey)]
         } else {
             releaseInput()
         }
@@ -764,15 +807,15 @@ private final class RFBKeyReleaseMonitor: @unchecked Sendable {
     deinit { NSEvent.removeMonitor(token) }
 }
 
-private final class RFBFrameRelay: @unchecked Sendable {
+private final class RFBValueRelay<Value: Sendable>: @unchecked Sendable {
     private let lock = NSLock()
-    private var pending: RFBFrame?
+    private var pending: Value?
     private var scheduled = false
-    private let deliver: @MainActor @Sendable (RFBFrame) -> Void
+    private let deliver: @MainActor @Sendable (Value) -> Void
 
-    init(deliver: @escaping @MainActor @Sendable (RFBFrame) -> Void) { self.deliver = deliver }
+    init(deliver: @escaping @MainActor @Sendable (Value) -> Void) { self.deliver = deliver }
 
-    func offer(_ frame: RFBFrame) {
+    func offer(_ frame: Value) {
         lock.lock()
         pending = frame
         let shouldSchedule = !scheduled
@@ -785,7 +828,7 @@ private final class RFBFrameRelay: @unchecked Sendable {
         }
     }
 
-    private func take() -> RFBFrame? {
+    private func take() -> Value? {
         lock.lock()
         defer { lock.unlock() }
         let frame = pending
@@ -907,6 +950,7 @@ private final class RFBConnection: @unchecked Sendable {
     private let onFrame: @Sendable (RFBFrame) -> Void
     private let onReady: @Sendable (String) -> Void
     private let onCutText: @Sendable (String) -> Void
+    private let onCursor: @Sendable (RFBCursor) -> Void
     private let onLayout: @Sendable (RFBDesktopLayout) -> Void
     private let onFailure: @Sendable (String) -> Void
     private let inputDiagnostics: RFBInputDiagnostics?
@@ -949,6 +993,7 @@ private final class RFBConnection: @unchecked Sendable {
          onFrame: @escaping @Sendable (RFBFrame) -> Void,
          onReady: @escaping @Sendable (String) -> Void,
          onCutText: @escaping @Sendable (String) -> Void,
+         onCursor: @escaping @Sendable (RFBCursor) -> Void = { _ in },
          onLayout: @escaping @Sendable (RFBDesktopLayout) -> Void = { _ in },
          inputDiagnostics: RFBInputDiagnostics? = nil,
          onFailure: @escaping @Sendable (String) -> Void) {
@@ -956,6 +1001,7 @@ private final class RFBConnection: @unchecked Sendable {
         self.onFrame = onFrame
         self.onReady = onReady
         self.onCutText = onCutText
+        self.onCursor = onCursor
         self.onLayout = onLayout
         self.onFailure = onFailure
         self.inputDiagnostics = inputDiagnostics
@@ -1072,7 +1118,8 @@ private final class RFBConnection: @unchecked Sendable {
         let name = String(decoding: try read(count: nameLength), as: UTF8.self)
         // SetPixelFormat: 32 bits, depth 24, little endian, RGB888, shifts 16/8/0.
         try send(Data([0, 0, 0, 0, 32, 24, 0, 1, 0, 255, 0, 255, 0, 255, 16, 8, 0, 0, 0, 0]))
-        var encodings = Data([2, 0, 0, 4])
+        var encodings = Data([2, 0, 0, 5])
+        encodings.appendUInt32(UInt32(bitPattern: RFBCursor.encoding))
         encodings.appendUInt32(0) // Raw
         encodings.appendUInt32(UInt32(bitPattern: Int32(-223))) // DesktopSize
         encodings.appendUInt32(UInt32(bitPattern: Int32(-224))) // LastRect
@@ -1100,7 +1147,16 @@ private final class RFBConnection: @unchecked Sendable {
                     let w = Int(rect.uint16(at: 4)), h = Int(rect.uint16(at: 6))
                     let encoding = Int32(bitPattern: rect.uint32(at: 8))
                     if encoding == -224 { break }
-                    if encoding == RFBDesktopResize.encoding {
+                    if encoding == RFBCursor.encoding {
+                        // x/y are the hotspot, not framebuffer coordinates.
+                        // Validate before allocating or blocking on payload bytes.
+                        do {
+                            let length = try RFBCursor.payloadLength(width: w, height: h, hotspotX: x, hotspotY: y)
+                            let cursor = try RFBCursor.decode(width: w, height: h, hotspotX: x, hotspotY: y,
+                                                              payload: read(count: length))
+                            onCursor(cursor)
+                        } catch is RFBCursorError { throw RFBError.protocolError("Invalid display cursor") }
+                    } else if encoding == RFBDesktopResize.encoding {
                         let layout: RFBDesktopLayout
                         do {
                             let layoutHeader = try read(count: 4)

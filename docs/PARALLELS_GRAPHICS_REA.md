@@ -217,3 +217,39 @@ carrier/slice/raw interval manifests remain private under
 `research/private/parallels-graphics/targeted/mouse/`. The private receipt is
 SHA-256 `fa7414efaa9098401a89e780dd7bd9e4fb7c75bc439fb3a9891864a463f946d5`.
 No proprietary pseudocode or original instruction listing is published here.
+
+## Revalidation against the current installation — 2026-10-16
+
+The checkout now runs on an installation reporting Parallels Desktop **27.0.3
+(58680)**. The earlier 26.3.0 addresses/hashes above must not be applied to this
+version. The old ignored research directory and experiment runtime builds are
+absent in this checkout; the checked-in reports remain historical evidence.
+
+A new targeted REA/Ghidra query selected the exported
+`WidgetUtils::setCursorPos(QPointF const&)` in the current
+`Contents/Frameworks/libPrlGui.3.dylib`. Its ARM64 slice is SHA-256
+`4084c9c94f97147bda96409a0a47e3f833048ab729b2e9ed324bd78d42455621`.
+The 64-byte interval at preferred address `0x375c4` (slice file offset 226756)
+is SHA-256 `c8f8e18e755d0874759841404b047d56c59567804d2fe7f67a53a5ba6f96e176`.
+REA evidence is
+`ev_eba3451fa1d8cd4e03e661d72da6a029b9b204c3146fdf5584e07d8ffe4b87dd`.
+Analysis completed in seconds without whole-program indexing, attaching to the
+running application, or persistent provider configuration changes.
+
+Independent LLVM disassembly and `otool -Iv` bind the two direct calls to
+`CGEventCreateMouseEvent` and `CGEventPost`, and the final tail branch to
+`CFRelease`. The code loads the two floating-point coordinates from the supplied
+point, creates a mouse-move event (type 5) and posts it at tap zero. REA's raw
+pseudocode truncates at the external tail branch and lacks floating-point API
+types; it is not complete recovered control flow. This confirms a host event
+positioning wrapper in this version, not guest delivery, cursor shape handling,
+latency, or the active VM graphics backend. No proprietary instructions or
+pseudocode are checked into Git. Original bytes, complete Evidence, manifests
+and independent listings stay in ignored `research/private/parallels-current/`.
+
+The independent client implementation now negotiates standard RFB cursor
+shapes and delivers them separately from framebuffer pixels. AppKit moves the
+local cursor; received shapes/hotspots are scaled in view points and registered
+only within the fitted console rectangle. This choice uses the public RFB
+contract, not this proprietary event-posting wrapper. Windows timing and native
+scanout cursor composition still require live verification.
