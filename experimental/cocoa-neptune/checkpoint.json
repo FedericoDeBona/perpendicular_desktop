@@ -1,0 +1,175 @@
+{
+  "schema": 1,
+  "purpose": "Owned diskless Cocoa/Neptune configuration and separate exact-clone wrapper preparations",
+  "candidate_sha256": "8d4d5ec3f94f7f8117568a2fbf426499e71636c2b0af3f5854adf19a33e94981",
+  "signed_app_sha256": "3707f441f6d593add3dd0a60a7033cc7672b68dab840292cea131172c5fffbc9",
+  "fixture_guest_cpu_executed": false,
+  "fixture_disks": false,
+  "cocoa_drawable_pixels_verified": false,
+  "windows_3d_verified_by_this_checkpoint": false,
+  "private_file_socket_tests_passed": 17,
+  "file_sha256": {
+    "experimental/cocoa-neptune/probe.py": "09b5ea256b9b32e239a803ac391cc1d1f9aafbf6916845ce4759c236063532c1",
+    "experimental/cocoa-neptune/prepare-trial.py": "27b1a3b2bbfba69b36bf9533ef8452b519dc167f4820c588d189fc3f34167534",
+    "experimental/cocoa-neptune/prepare-app-trial.py": "e8f78a2af9fcafbcdc21aeac27acdf583bafed104d0d1b52fb75689324d7ba1b",
+    "experimental/cocoa-neptune/package-cocoa-app.py": "99255b2b1667b95065cededad8219850814e8865c5adbcc8ba21f43747d1ffe8",
+    "experimental/cocoa-neptune/test-trial.py": "9e24d5a3149acf861e8b96328aea8c4ae5164ec0a5975bf2ca5bc74ff7fa7341",
+    "experimental/neptune-live/test-live.py": "735972991cde1a08fb5950ed9c78b059c83569bf5c5a5489004edf5418efef59",
+    ".tools/graphics-experiment/src/qemu/ui/cocoa.m": "1924b6069e19a2e1b58fa2ccf586fe2188b0910f7e0d70abba202f1535841cf9",
+    ".tools/graphics-experiment/src/qemu/ui/console.c": "5f7405a341f830dbe58be6fbd9d9202c9a5fcca1edb1b472d4a777a743a55bda",
+    ".tools/graphics-experiment/src/qemu/hw/display/virtio-gpu-virgl.c": "a57ff9a0275943f99c2566b00f7aa5877715948b427d9f648bcbf7191798e200",
+    ".tools/graphics-experiment/src/qemu/hw/tpm/tpm_tis_sysbus.c": "b8b5649733328f1fc77cdcc8e0cd7a0a902ca8b7806b1666a111a21ef8464236",
+    ".tools/graphics-experiment/src/virglrenderer/src/neptune/npt_renderer.c": "a33e6d8eff12b184361d5d75aa8ff1674a7c69f2859170a116f1d93b4aca9867",
+    ".tools/graphics-experiment/src/virglrenderer/src/neptune_hw.h": "30b6740cc3f1669e13437e8192c1f2af6416fbee9a87167862bcfd1e65809375",
+    ".tools/graphics-experiment/src/virglrenderer/server/render_worker.c": "630c8c2d0c0f2d701c68bd2862b7b7bcb2cf29e9eaaeb5bee216d7eca28beaa9",
+    ".tools/graphics-experiment/build/cocoa-neptune/rea-analysis.json": "90a13cc3cc01c112f71c4891e523ed73268597900cadc812de07a7d85a8031b4",
+    ".tools/graphics-experiment/build/cocoa-neptune/wrapper-probes.json": "90a185f06fa2be6f8bdd58d791ad199ea35fb951d6209c684d90e22ff265e67e",
+    ".tools/cocoa-neptune-app/package.json": "821418b8c07424ec0ce344d777f8d13c336feeb22104ad7a202c4fc37ed3be46",
+    ".tools/cocoa-neptune-app-trials/12755108-83c6-4790-b477-58ca87b1a00e/manifest.json": "a0e68cf411f0ae1363fa5a120ac311a8deb7e52754c8e78075656ade409d23c0",
+    ".tools/cocoa-neptune-app-trials/12755108-83c6-4790-b477-58ca87b1a00e/qemu-trial-wrapper": "d29ba82697b05da7636f897b4fe4d53e9c947a66e9831bd84ca2964ca5c9cbbf",
+    "experimental/cocoa-neptune/test-app-trial.py": "0be90dbea2ce1e91f62f04f8cb32f53db971fd9d3396e98df850018033c532d6",
+    ".tools/cocoa-neptune-app-trials/12755108-83c6-4790-b477-58ca87b1a00e/preflight-failure.json": "57cd5d9900b47748bdc1cf1e43e8df6f5fc68121bdd2581468722d1c5ad3fbb2",
+    ".tools/cocoa-neptune-app-trials-gen3/12755108-83c6-4790-b477-58ca87b1a00e/manifest.json": "dae6be3ab0acd6ffdd818f9fe39a3a3a4caee686f302925d616ab90e71cc1d14",
+    ".tools/cocoa-neptune-app-trials-gen3/12755108-83c6-4790-b477-58ca87b1a00e/qemu-trial-wrapper": "1e94a7133fec0ce470cba088ca99e280f4e48eea23f08f566784ee9c2a0fde6f",
+    ".tools/windows-3d-cocoa-live-qmp.json": "bb1e055573c0d21adf2f72339d2571c577c46edc9873a4a5f2e85c182c4ae9db"
+  },
+  "cases": [
+    {
+      "label": "hvf-cgl-tpm-render",
+      "receipt": ".tools/graphics-experiment/build/cocoa-neptune/hvf-cgl-tpm-render/result.json",
+      "sha256": "d43db4701834233c1f37adf5dcf584c0c7e83f7847cb40d8eb49fa5b2ddbff89",
+      "result": "pass",
+      "qemu_exit": 0,
+      "matched_pixels": 8192,
+      "qmp_ready": true,
+      "neptune_capset": null
+    },
+    {
+      "label": "hvf-es-256m-render",
+      "receipt": ".tools/graphics-experiment/build/cocoa-neptune/hvf-es-256m-render/result.json",
+      "sha256": "ce67704c1bb0a962514e70ef8919b471663c0b4f797c939b1f4cb4c03a3f0efc",
+      "result": "pass",
+      "qemu_exit": 0,
+      "matched_pixels": 8192,
+      "qmp_ready": true,
+      "neptune_capset": null
+    },
+    {
+      "label": "hvf-es-clean-env-final",
+      "receipt": ".tools/graphics-experiment/build/cocoa-neptune/hvf-es-clean-env-final/result.json",
+      "sha256": "38f13980858d176409be4c00cf2469d0c5e25437b234ccb94603fd5f543abe26",
+      "result": "pass",
+      "qemu_exit": 0,
+      "matched_pixels": 8192,
+      "qmp_ready": true,
+      "neptune_capset": {
+        "wire_format_version": 2,
+        "caps_flags": 182
+      }
+    },
+    {
+      "label": "hvf-es-fallback-render",
+      "receipt": ".tools/graphics-experiment/build/cocoa-neptune/hvf-es-fallback-render/result.json",
+      "sha256": "7eaf78bfbf347dbc1e722c7c3994f92a171de7d988bf7393c3e07513b9283c6f",
+      "result": "pass",
+      "qemu_exit": 0,
+      "matched_pixels": 8192,
+      "qmp_ready": true,
+      "neptune_capset": null
+    },
+    {
+      "label": "hvf-es-final-backend",
+      "receipt": ".tools/graphics-experiment/build/cocoa-neptune/hvf-es-final-backend/result.json",
+      "sha256": "4428dba8a6d584b24896a70454a749adb1c322fedc67ccc3173cef465a3cbf89",
+      "result": "pass",
+      "qemu_exit": 0,
+      "matched_pixels": 8192,
+      "qmp_ready": true,
+      "neptune_capset": {
+        "wire_format_version": 2,
+        "caps_flags": 182
+      }
+    },
+    {
+      "label": "hvf-es-frozen-render",
+      "receipt": ".tools/graphics-experiment/build/cocoa-neptune/hvf-es-frozen-render/result.json",
+      "sha256": "01308a21b1723d2ca0fe8b89aca65909c5d8bb30ab4acc1b4027b5f60ed90cd4",
+      "result": "pass",
+      "qemu_exit": 0,
+      "matched_pixels": 8192,
+      "qmp_ready": true,
+      "neptune_capset": null
+    },
+    {
+      "label": "hvf-es-highmem-tpm-startup",
+      "receipt": ".tools/graphics-experiment/build/cocoa-neptune/hvf-es-highmem-tpm-startup/result.json",
+      "sha256": "a2e1cafcc2004ebc9702141c84685c9700463826ec191e45551d60e1593763c3",
+      "result": "pass",
+      "qemu_exit": 0,
+      "matched_pixels": 0,
+      "qmp_ready": true,
+      "neptune_capset": null
+    },
+    {
+      "label": "hvf-es-tpm-ppi-negative",
+      "receipt": ".tools/graphics-experiment/build/cocoa-neptune/hvf-es-tpm-ppi-negative/result.json",
+      "sha256": "461e4c7f79970bb8777fd67365b75becb5886fc4b89563d19a38d139251fefac",
+      "result": "failed",
+      "qemu_exit": 1,
+      "matched_pixels": 0,
+      "qmp_ready": false,
+      "neptune_capset": null
+    },
+    {
+      "label": "hvf-es-tpm-render",
+      "receipt": ".tools/graphics-experiment/build/cocoa-neptune/hvf-es-tpm-render/result.json",
+      "sha256": "a3dd80e94a9d79676e8ce254e5a8d571d9b83bef1c5348168c18104eb435f65a",
+      "result": "pass",
+      "qemu_exit": 0,
+      "matched_pixels": 8192,
+      "qmp_ready": true,
+      "neptune_capset": null
+    },
+    {
+      "label": "hvf-es-tpm-startup",
+      "receipt": ".tools/graphics-experiment/build/cocoa-neptune/hvf-es-tpm-startup/result.json",
+      "sha256": "f5cac05f39fde198759936474fe3064a1662d2484195c01055a876587309ee90",
+      "result": "pass",
+      "qemu_exit": 0,
+      "matched_pixels": 0,
+      "qmp_ready": true,
+      "neptune_capset": null
+    },
+    {
+      "label": "hvf-es-tpm-vnc-render",
+      "receipt": ".tools/graphics-experiment/build/cocoa-neptune/hvf-es-tpm-vnc-render/result.json",
+      "sha256": "73234a524a362f066f07c122bbccbf7a97312f4d3d430b3100dba8d488c7b19e",
+      "result": "failed",
+      "qemu_exit": 1,
+      "matched_pixels": 0,
+      "qmp_ready": false,
+      "neptune_capset": null
+    },
+    {
+      "label": "hvf-gl-disabled-negative",
+      "receipt": ".tools/graphics-experiment/build/cocoa-neptune/hvf-gl-disabled-negative/result.json",
+      "sha256": "0708b7fefb3a416084373be0d0bacbecbf39a769abe9d2c50cb43da035118d4e",
+      "result": "failed",
+      "qemu_exit": 1,
+      "matched_pixels": 0,
+      "qmp_ready": false,
+      "neptune_capset": null
+    }
+  ],
+  "app_generation3_private_file_socket_tests_passed": 19,
+  "current_app_generation": 3,
+  "original_app_generation2_helper_sha256": "fcfc19fbbad466382d9624cc41b4f8c626c408347f16333516798f6c59dbc8b4",
+  "coordinator_observation": {
+    "generation3_start_exit": 0,
+    "native_app_identity": "org.perpendicular.cocoa3dtrial",
+    "windows_desktop_visible": true,
+    "qmp_receipt": ".tools/windows-3d-cocoa-live-qmp.json",
+    "hardware_3d_verified": false,
+    "source": "coordinating agent live observation; this fixture did not operate the guest"
+  }
+}
