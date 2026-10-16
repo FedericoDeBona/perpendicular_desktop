@@ -231,6 +231,27 @@
       "umd_inventory": "complete / empty",
       "scene_attempted": false,
       "presents": 0
+    },
+    "pci8_cold_boot": {
+      "same_vm": true,
+      "new_vm_copy": false,
+      "prior_ramfb_windows_shutdown": "native shutdown command completed; engine observed stopped",
+      "launch_name": "perpendicular-12755108-83c6-4790-b477-58ca87b1a00e-fe54ab16463545d192ac05049d9f33ad",
+      "gpu_pci_slot": 8,
+      "read_only_qmp_receipt": ".tools/windows-3d-pci8-boot-qmp.json",
+      "receipt_sha256": "e5aa1c4f8e394344b363ee5c2854e42708d8751b8f6ee98ddaaa08af9ba76c2c",
+      "observed_interval_seconds": 91.255,
+      "driver_ok": true,
+      "started": true,
+      "disabled": false,
+      "broken": false,
+      "virgl_blob_context_init_negotiated": true,
+      "bars_mapped": true,
+      "control_queue_used_delta": 657,
+      "renderer_worker_seen": false,
+      "native_display": "Display output is not active",
+      "hardware_D3D11_verified": false,
+      "shutdown": "regular engine ACPI request completed; PID gone and engine reported stopped; no forced stop on this attempt"
     }
   }
 }

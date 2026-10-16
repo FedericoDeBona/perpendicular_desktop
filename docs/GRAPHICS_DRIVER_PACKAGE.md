@@ -76,6 +76,18 @@ not a complete signature-policy acceptance proof. Kernel-PnP event 400 at
 start remains unverified. Real Windows 3D, visible scene pixels and sustained performance remain
 unverified.
 
+## Fresh GPU instance test — 2026-10-16
+
+After normal Windows shutdown from RAMFB recovery, the same disk/VM was booted
+with only the experimental GPU moved from PCI7 to PCI8. Other PCI slots, media,
+EFI/TPM files, graphics libraries and security settings were unchanged. Two
+read-only QMP samples 91.255 seconds apart showed DRIVER_OK/started, no disabled
+or broken state, mapped BARs and negotiated VIRGL/BLOB/CONTEXT_INIT; the control
+queue advanced by 657. This clears the earlier initialization failure boundary
+for the new device instance. No renderer worker was seen in those snapshots,
+Cocoa still showed inactive output, and hardware D3D11 remains unverified. This
+test does not identify the cause of the original query-remove failure.
+
 ## Exact release identity
 
 The supplied file `/tmp/perpendicular-viogpu3d-release.zip` is 2,117,369 bytes.
