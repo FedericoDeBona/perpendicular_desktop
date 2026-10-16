@@ -135,6 +135,69 @@ assembly supplies the tail-branch and selector argument observations.
 Constructor and callback normal returns were recovered. This remains static
 evidence with no new VM execution, graphics benchmark or runtime attribution.
 
+## Virtual transition: pending render-state drain
+
+The primary-table transition above is now followed through nine further REA
+intervals from the same verified executable. The forwarding receiver's
+`0xd8` field reaches `0x1001e1e04` (628-byte function-start interval).
+An empty begin/end pair at `+0x1d0/+0x1d8` returns immediately. Otherwise the
+routine obtains an object through `0x1001aff2c`, passes it to a resource-usage
+helper, iterates 248-byte pending records through `0x1001de288`, performs
+additional resource bookkeeping, and resets the pending collections through
+`0x1001da2ec`. Its final normal path releases the retained object through the
+original `objc_release` stub. This supports a pending render-state drain;
+it does not identify a Windows Present or an IPC handoff.
+
+Decoded original Objective-C stubs give concrete meaning to part of this path:
+`0x1001de140` iterates resource/usage pairs and sends `useResource:usage:`.
+`0x1001de288` applies viewport/scissor, depth/cull/blend and pipeline state,
+then binds vertex/fragment buffers, textures and samplers. Small inline data
+uses the respective `set*Bytes:length:atIndex:` selectors; a larger branch
+creates a buffer with `newBufferWithBytes:length:options:`. It then calls
+`0x1001de72c`, whose three dispatch targets remain to be analyzed. Calling
+this a particular indexed/instanced draw form would exceed the current evidence.
+The reset helper releases retained objects in the pending arrays and resets
+end pointers; this is CPU-side batch cleanup, not proof of GPU retirement.
+
+The object-creation wrapper first calls `0x1002455c4`. That helper compares a
+32-bit field at `+0x1c` against a configured value. Its original string is
+`video.mtl.max_command_buffer_size`; the configuration call receives
+`0x500000`. The threshold branch ends in a direct tail branch to the previously
+identified submit/commit routine `0x100244fdc`. Thus this drain can include a
+conditional command-buffer submission before later encoding. Neither the
+active configuration value nor the runtime counter was sampled.
+
+The larger helper `0x1001affd8` configures render-pass color/depth/stencil
+attachments, texture/slice/level, load/store/resolve settings and visibility
+buffer. It also calls the earlier encoder-ending helper on one branch and
+encodes `memoryBarrierWithScope:afterStages:beforeStages:` on selected paths.
+The observed sequence therefore includes render-pass preparation and resource
+binding before the original signal/wait pair. It still does not prove the
+identity of the two command queues, texture reuse policy or the completed
+callback's collection insertion sites.
+
+| Interval | REA evidence |
+| --- | --- |
+| `0x1001e1e04` | `ev_f5c28cf895d9b3a604d33b13c7cbd8436c4bab4e46ca3f177049025dd9f68226` |
+| `0x1001aff2c` | `ev_69662529947c668e37e8a1a7929591c5b9c33d0ab09ef105bf1ecfc046231eda` |
+| `0x1001de140` | `ev_7cf656659d2557190fdaab805eed36846f747f7e2d35a9208671ea7008d07347` |
+| `0x1001de288` | `ev_461a075489ef79811ac2ca578c7a10648caab1cef54efd1bf2fecc96cedf298f` |
+| `0x1001de1ac` | `ev_28d3de920f5931c1a31bd0e71c54ef4019b83f89d06bb23146740d021b16aedb` |
+| `0x1001da2ec` | `ev_9911c7b7774817a6e20e520b276b7bdabcf5f516d0525b02e448adedc8232085` |
+| `0x1001affd8` | `ev_2dd8cc459b171216a795e5d506812f061e7648c582f9ed935c766d34c9e28f97` |
+| `0x1002455c4` | `ev_f24d640a7f2e8f42c2d5044035ac8ad6d2efaa09f5c441bf2c0e970b1f97ba1c` |
+| `0x1001de72c` | `ev_e358c5ac7dadb02b3c040fa731c9c2eec69227a72af3b0492c680b1f7fd020e3` |
+
+All nine slices match original bytes and REA subject digests. An independent
+ARM64 immediate-branch decoder checked 244 decoded direct branches against
+those bytes. Full receipts, selector associations and pseudocode remain in the
+private graphics research directory. Several raw decompilations truncate
+external tails, and the large render-pass helper has incomplete exceptional
+control flow. Raw pseudocode also misrepresents parts of the floating-point
+calling convention; original register/selector observations support the
+bounded API claims here. No proprietary implementation is incorporated into
+the independent app, and no Parallels VM was executed for these checks.
+
 ## Independent implementation implications
 
 This evidence separates encoder boundaries, GPU event ordering, completion
@@ -143,8 +206,8 @@ producer-copy completion requirement or consumer GPU retirement with a
 scheduled callback. Our transport's immutable snapshot and ACK lifetime rules
 remain necessary until actual producer ownership is proven for our renderer.
 
-Next investigation: identify the virtual transition's command-buffer effects
-and the completed block's collection insertion sites, then connect the actual
+Next investigation: follow the three render-operation dispatch targets and
+the completed block's collection insertion sites, then connect the actual
 texture writer/reader to those release sites. A runtime trace is needed to
 establish which branch runs in the user's VM.
 There is no Windows performance, latency, buffer-reuse or installed 3D result

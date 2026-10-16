@@ -470,3 +470,19 @@ reported the DOD adapter, `can_resize=true` and 1920×1200. No new device ACL
 change was needed. The display name changed from DISPLAY2 to DISPLAY1 across
 boot; no stable display ordinal is assumed. Driver PnP error code and version
 were not independently queried in this checkpoint.
+
+
+### Current-host native Metal publisher check — 2026-10-16
+
+The unchanged two-process publisher fixture compiled and passed with the
+existing Command Line Tools/SDK selection. Actual Metal work verified
+1,927,421 pixels including rechecking immutable snapshots, bounded occupancy,
+GPU-completion-before-publication and ACK retirement. The reconnect fixture
+passed three connections with no additional guest updates, rejecting stale
+GPU completions; nonzero-crop checks and both causal negative controls passed.
+All retained captures and mappings were released at teardown. The private
+receipt is `.build/checks/native-publisher/result.json`. This is host-only
+component evidence: it does not exercise the Windows 3D producer, establish
+its writer fence, measure presentation latency or change the installed 2D app.
+The accompanying [REA transition analysis](PARALLELS_27_GRAPHICS_REA.md#virtual-transition-pending-render-state-drain)
+adds static render-state and conditional-commit evidence, not runtime attribution.
