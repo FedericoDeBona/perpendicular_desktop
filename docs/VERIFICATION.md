@@ -518,3 +518,21 @@ pinned pristine source; no full archived QEMU build-input gate or new QEMU
 build is claimed. Results remain under `.build/checks/native-publisher/` and
 `publisher-pool-{receiver,presenter}.log`. This is allocation/lifetime evidence,
 not Windows presentation FPS, latency, 3D integration or an installed-app result.
+
+
+### Metal compiler component restored — 2026-10-16
+
+The read-only full-Xcode first-launch check now exits 0 (Xcode 27.1,
+27A9275), superseding the earlier pending-license blocker in this ledger.
+No license-acceptance or first-launch setup command was run in this checkpoint.
+The component inventory initially reported Metal Toolchain 27A266a as
+`uninstalled`; the official `xcodebuild -downloadComponent MetalToolchain`
+completed. Inventory then reported `installed` and the resolved Metal compiler
+reported 32023.921. A new 188-byte local compute-shader fixture compiled into
+AIR and linked with the actual `metallib` tool, producing a 3,599-byte library.
+The private source/output hashes and component metadata are retained in
+`.build/checks/metal-toolchain-20261016/receipt.json`. This is compiler readiness,
+not execution of that shader or validation of the complete graphics stack.
+The project's full graphics prerequisite check now passes, and all selected
+upstream source, LLVM and private PyYAML pins verified again. This does not
+change the normal installed app or the running VM.
