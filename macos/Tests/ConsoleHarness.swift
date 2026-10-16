@@ -427,7 +427,25 @@ private func runApplicationReleaseTest(socket: String, scenario: String) {
             timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: windowNumber ?? window.windowNumber,
             context: nil, characters: text, charactersIgnoringModifiers: text, isARepeat: false, keyCode: code)!
     }
-    if scenario == "duplicate-release" {
+    if scenario.hasPrefix("escape-") {
+        let flags: NSEvent.ModifierFlags = scenario == "escape-control" ? .control : []
+        let other = NSWindow(contentRect: .init(x: 0, y: 0, width: 100, height: 100),
+            styleMask: [], backing: .buffered, defer: false)
+        other.isReleasedWhenClosed = false
+        app.sendEvent(event(.keyDown, code: 53, text: "\u{1b}", windowNumber: other.windowNumber))
+        precondition(view.testHeldInputCount == 0,
+                     "Another window's Escape reached the console")
+        other.close()
+        app.sendEvent(event(.keyDown, code: 53, text: "\u{1b}", flags: flags))
+        precondition(view.testHeldInputCount == (flags.isEmpty ? 1 : 2))
+        app.sendEvent(event(.keyUp, code: 53, text: "\u{1b}"))
+        precondition(view.testHeldInputCount == 0, "Escape left a guest key or modifier held")
+        precondition(window.makeFirstResponder(nil))
+        app.sendEvent(event(.keyDown, code: 53, text: "\u{1b}"))
+        precondition(view.testHeldInputCount == 0,
+                     "The console captured Escape without keyboard focus")
+        precondition(window.makeFirstResponder(view))
+    } else if scenario == "duplicate-release" {
         let down = event(.keyDown, code: 15, text: "r")
         let up = event(.keyUp, code: 15, text: "r")
         view.keyDown(with: down)

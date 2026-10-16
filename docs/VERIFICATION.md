@@ -370,3 +370,46 @@ Windows Search. This is one successful desktop boot with basic input, not
 a 3D, latency or long-term stability result. The original VM is preserved.
 The pending Xcode agreement was not accepted. Work and commits remain local
 at the user's request; no GitHub authentication or push was attempted.
+
+
+### Escape routing and imported-guest setup — 2026-10-16
+
+Two live Control-Escape attempts in the focused Windows console exited native
+macOS full screen before the fix. The console's local event monitor now routes
+Escape key-down to the guest before AppKit consumes it, with the same active
+view, owning-window and first-responder guards as input release. Key-up still
+uses the existing deduplicated release path. Other windows and controls retain
+their own Escape handling.
+
+The complete native console suite passed with the existing Command Line Tools
+compiler/SDK, including plain and Control-Escape wire-order/release fixtures,
+other-window and lost-focus checks, text/modifier bursts, pointer barriers,
+reconnect, cursor and drawing checks. Removing only the production Escape
+change in a private harness caused the new plain-Escape fixture to fail before
+guest delivery. Unknown test filters now fail instead of printing success
+without executing a fixture; that negative case was also verified. This is a
+console-suite result, not a new complete project/Metal performance check.
+
+The full Swift UI and native transport compiled for macOS 14, and the candidate
+passed deep strict signature verification. All 186 resource files match the
+previous installed app. After a normal VM shutdown, the app was replaced and
+the previous bundle retained. The same VM then reached its desktop from the
+updated normal installed app. With console focus, Control-Escape visibly
+opened Windows Start while native full screen remained active; plain Escape
+closed Start and also retained full screen. Subsequent Control-Escape attempts
+did not consistently reopen Start, although full screen remained active and
+clicking the taskbar Start button worked. The repeat-input discrepancy remains
+unresolved; this checkpoint does not establish keyboard endurance. With the
+VM keyboard layout set to Italian, the literal punctuation sample
+`a:b\c-_/[]@` was typed and echoed correctly in Windows PowerShell.
+No latency or 3D improvement is inferred.
+
+The driver provisioner now supports read-only native macOS image extraction,
+verified source downloads and atomic cache publication. Real extraction, all
+134 packaged-file hashes and cleanup after simulated failures were checked.
+In the imported Windows installation, both signed VirtIO packages were
+accepted and the exact limited-user agent task started. Its diagnostic
+confirmed a healthy serial controller but fixed-port open failed with error 5.
+Administrator Inspect produced the exact per-instance permission proposal;
+Apply remains pending user confirmation. DNS/TCP connectivity to Microsoft's
+port 443 succeeded. [Detailed scope and remaining limits](WINDOWS_MIGRATION_DIAGNOSTICS.md).

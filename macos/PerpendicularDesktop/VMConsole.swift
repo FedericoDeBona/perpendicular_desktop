@@ -572,7 +572,7 @@ final class VMFramebufferView: NSView {
     private func updateKeyReleaseMonitor() {
         keyReleaseMonitor = nil
         guard active, let window else { return }
-        let mask: NSEvent.EventTypeMask = inputDiagnosticsEnabled ? [.keyDown, .keyUp, .flagsChanged] : .keyUp
+        let mask: NSEvent.EventTypeMask = inputDiagnosticsEnabled ? [.keyDown, .keyUp, .flagsChanged] : [.keyDown, .keyUp]
         let token = NSEvent.addLocalMonitorForEvents(matching: mask) { [weak self, weak window] event in
             guard let self, let window, self.active, event.window === window,
                   window.firstResponder === self else { return event }
@@ -583,6 +583,13 @@ final class VMFramebufferView: NSView {
                 case .flagsChanged: diagnostics.record("application_flags")
                 default: break
                 }
+            }
+            // AppKit can consume Escape (including Control-Escape) to leave
+            // native full screen before ordinary responder routing. While
+            // this console owns keyboard focus, deliver it to Windows first.
+            if event.type == .keyDown, event.keyCode == 53 {
+                self.keyDown(with: event)
+                return nil
             }
             guard event.type == .keyUp, self.pressedKeys[event.keyCode] != nil else { return event }
             // AppKit routes key equivalents separately from ordinary keys. See

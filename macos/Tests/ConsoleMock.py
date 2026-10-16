@@ -13,6 +13,7 @@ import time
 HARNESS = sys.argv[1]
 WORK = Path(sys.argv[2])
 TEST_FILTER = sys.argv[3] if len(sys.argv) > 3 else None
+selected_fixtures = 0
 
 
 class Peer:
@@ -93,8 +94,10 @@ def listener(path):
 
 
 def run_fixture(name, mode, fixture, *arguments, input_diagnostics=False):
+    global selected_fixtures
     if TEST_FILTER and TEST_FILTER != name:
         return
+    selected_fixtures += 1
     path = WORK / f"{name}.sock"
     server = listener(path)
     errors = []
@@ -125,7 +128,7 @@ def run_fixture(name, mode, fixture, *arguments, input_diagnostics=False):
             raise
         thread.join(timeout=9)
         assert not thread.is_alive(), f"{name}: mock server did not finish"
-        assert not errors, f"{name}: {errors!r}"
+        assert not errors, f"{name}: {errors!r}\n{result.stderr}"
         assert result.returncode == 0, f"{name}: {result.stderr}"
         if input_diagnostics:
             check_input_diagnostics(result.stderr)
@@ -357,7 +360,9 @@ for character in "powershell.exe -NoProfile":
     if character.isupper(): burst.append((0xFFE1, False))
 burst += [(0xFFE1, True), (0xFFE3, True), (0xFF0D, True), (0xFF0D, False), (0xFFE1, False), (0xFFE3, False)]
 for scenario, sequence in {"command-release": command_r, "window-scope": command_r,
-                           "duplicate-release": [(ord("r"), True), (ord("r"), False)], "text-burst": burst}.items():
+                           "duplicate-release": [(ord("r"), True), (ord("r"), False)], "text-burst": burst,
+                           "escape-plain": [(0xFF1B, True), (0xFF1B, False)],
+                           "escape-control": [(0xFFE3, True), (0xFF1B, True), (0xFF1B, False), (0xFFE3, False)]}.items():
     run_fixture("application-"+scenario, "application-release",
                 lambda peer, expected=sequence, flood=scenario=="text-burst": application_release_events(peer, expected, flood), scenario)
 
@@ -563,7 +568,6 @@ if TEST_FILTER is None or TEST_FILTER == "drawing":
     subprocess.run([HARNESS, "drawing"], check=True, timeout=10)
 if TEST_FILTER is None or TEST_FILTER == "presenter-fallback":
     subprocess.run([HARNESS, "presenter-fallback"], check=True, timeout=10)
-print("All native console tests passed.", flush=True)
 
 
 def cursor_protocol(peer):
@@ -593,3 +597,9 @@ if not TEST_FILTER or TEST_FILTER == "cursor-view":
     result = subprocess.run([HARNESS, "cursor-view"], capture_output=True, text=True, timeout=15)
     assert result.returncode == 0, result.stderr
     print("cursor-view: " + result.stdout.strip(), flush=True)
+
+if TEST_FILTER and selected_fixtures == 0 and TEST_FILTER not in {
+    "reconnect", "drawing", "presenter-fallback", "cursor-view"
+}:
+    raise SystemExit("Unknown native console test filter: " + TEST_FILTER)
+print("Selected native console tests passed." if TEST_FILTER else "All native console tests passed.", flush=True)
