@@ -1,5 +1,247 @@
 import AppKit
 import MetalKit
+import Darwin
+
+struct VMNativeDisplayTiming: Sendable {
+    let received: Double
+    let ready: Double
+    let delivered: Double?
+}
+
+/// Opt-in metadata only. One private, bounded report per process; no frame,
+/// endpoint, VM identity, key, pointer position or clipboard content is stored.
+/// All file writes run on the serial writer, never a Metal/main-actor callback.
+final class VMDisplayTelemetry: @unchecked Sendable {
+    static let shared: VMDisplayTelemetry? = {
+        guard let directory = ProcessInfo.processInfo.environment["PERPENDICULAR_DISPLAY_TELEMETRY_DIR"] else { return nil }
+        return try? VMDisplayTelemetry(directory: directory)
+    }()
+    static let recordLimit = 128
+    static let metricLimit = 256
+    static let byteLimit = 131_072
+    struct Event: Encodable, Sendable {
+        let kind: String
+        let submission: UInt64
+        let stream: UInt64
+        let generation: UInt64
+        let atMs: Double
+        let stale: Bool
+        let values: [String: Double]
+    }
+    struct Metric: Encodable, Sendable {
+        let totalSamples: UInt64
+        let recentSamples: Int
+        let medianMs: Double
+        let p95Ms: Double
+        let minimumMs: Double
+        let maximumMs: Double
+    }
+    struct Report: Encodable, Sendable {
+        let schema = 1
+        let scope = "Host native-display pipeline only; drawable presentation is not input-to-photon latency or guest FPS."
+        let clock = "Host monotonic clock; event times relative to recorder start; durations in milliseconds."
+        let sampleWindow = "Each metric uses its latest 256 valid samples; events use the latest 128 records."
+        let counters: [String: UInt64]
+        let metrics: [String: Metric]
+        let events: [Event]
+    }
+    private struct Stream { var generation: UInt64; var previousPresented: Double? }
+    private let lock = NSLock()
+    private let writer = DispatchQueue(label: "org.perpendicular.display-telemetry", qos: .utility)
+    private let descriptor: Int32
+    private let started = CACurrentMediaTime()
+    let outputPath: String
+    private var counters: [String: UInt64] = [:]
+    private var metrics: [String: [Double]] = [:]
+    private var metricCounts: [String: UInt64] = [:]
+    private var events: [Event] = []
+    private var streams: [UInt64: Stream] = [:]
+    private var nextStream: UInt64 = 0
+    private var nextSubmission: UInt64 = 0
+    private var flushScheduled = false
+
+    init(directory: String) throws {
+        guard directory.hasPrefix("/"), !directory.utf8.contains(0) else { throw CocoaError(.fileWriteInvalidFileName) }
+        var normalized = directory
+        while normalized.count > 1, normalized.last == "/" { normalized.removeLast() }
+        let parent = open(normalized, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
+        guard parent >= 0 else { throw CocoaError(.fileWriteNoPermission) }
+        defer { close(parent) }
+        var info = stat()
+        guard fstat(parent, &info) == 0, info.st_uid == geteuid(), info.st_mode & 0o777 == 0o700 else {
+            throw CocoaError(.fileWriteNoPermission)
+        }
+        let name = "native-presentation-\(getpid())-\(UUID().uuidString).json"
+        let fd = openat(parent, name, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0o600)
+        guard fd >= 0 else { throw CocoaError(.fileWriteNoPermission) }
+        descriptor = fd
+        outputPath = URL(fileURLWithPath: directory).appendingPathComponent(name).path
+    }
+    deinit { close(descriptor) }
+
+    func count(_ key: String) { update { self.increment(key) } }
+    func beginStream() -> UInt64 {
+        lock.lock(); defer { lock.unlock() }
+        nextStream &+= 1
+        if streams.count == 8, let oldest = streams.keys.min() { streams.removeValue(forKey: oldest); increment("stream_history_evicted") }
+        streams[nextStream] = .init(generation: 0)
+        increment("streams_started")
+        return nextStream
+    }
+    func reset(stream: UInt64, generation: UInt64) {
+        update {
+            guard self.streams[stream] != nil else { return }
+            self.streams[stream] = .init(generation: generation)
+            self.increment("resets")
+        }
+    }
+    func endStream(_ stream: UInt64) {
+        update { if self.streams.removeValue(forKey: stream) != nil { self.increment("streams_stopped") } }
+    }
+    func delivered(_ timing: VMNativeDisplayTiming) {
+        update {
+            self.increment("frames_delivered")
+            self.metric("receive_to_ready", timing.ready - timing.received)
+            if let delivered = timing.delivered { self.metric("ready_to_main_delivery", delivered - timing.ready) }
+        }
+    }
+    func submission(stream: UInt64, generation: UInt64, timing: VMNativeDisplayTiming?, firstDraw: Bool,
+                    width: Int = 0, height: Int = 0, drawableWidth: Int = 0, drawableHeight: Int = 0) -> Submission {
+        lock.lock(); nextSubmission &+= 1; let number = nextSubmission; lock.unlock()
+        return Submission(owner: self, number: number, stream: stream, generation: generation,
+                          timing: timing, firstDraw: firstDraw,
+                          geometry: ["source_width": Double(width), "source_height": Double(height),
+                                     "drawable_width": Double(drawableWidth), "drawable_height": Double(drawableHeight)])
+    }
+    private func increment(_ key: String) {
+        guard counters[key] != nil || counters.count < 32 else { return }
+        counters[key, default: 0] &+= 1
+    }
+    private func metric(_ key: String, _ seconds: Double) {
+        let milliseconds = seconds * 1000
+        guard milliseconds.isFinite, milliseconds >= 0 else { increment("invalid_timestamps"); return }
+        guard metrics[key] != nil || metrics.count < 16 else { return }
+        if metrics[key, default: []].count == Self.metricLimit { metrics[key]?.removeFirst() }
+        metrics[key, default: []].append(milliseconds)
+        metricCounts[key, default: 0] &+= 1
+    }
+    private func update(_ change: () -> Void) {
+        lock.lock(); change()
+        let schedule = !flushScheduled
+        flushScheduled = true
+        lock.unlock()
+        if schedule { writer.asyncAfter(deadline: .now() + 1) { [self] in writeReport() } }
+    }
+    private func record(_ sample: Submission, kind: String, time: Double, values: [String: Double],
+                        metrics change: (Bool) -> Void) {
+        update {
+            let stale = self.streams[sample.stream]?.generation != sample.generation
+            self.increment(kind)
+            if stale { self.increment("stale_callbacks") }
+            change(stale)
+            let relative = (time - self.started) * 1000
+            guard relative.isFinite, values.values.allSatisfy(\.isFinite) else { self.increment("invalid_timestamps"); return }
+            if self.events.count == Self.recordLimit { self.events.removeFirst() }
+            self.events.append(.init(kind: kind, submission: sample.number, stream: sample.stream,
+                generation: sample.generation, atMs: relative, stale: stale, values: values))
+        }
+    }
+    func snapshot() -> Report {
+        lock.lock(); defer { lock.unlock() }
+        let summaries = Dictionary(uniqueKeysWithValues: metrics.map { key, samples in
+            let values = samples.sorted()
+            // Nearest-rank quantiles describe this bounded recent sample window.
+            return (key, Metric(totalSamples: metricCounts[key] ?? 0, recentSamples: values.count,
+                medianMs: values[max(0, Int(ceil(Double(values.count) * 0.5)) - 1)],
+                p95Ms: values[max(0, Int(ceil(Double(values.count) * 0.95)) - 1)],
+                minimumMs: values[0], maximumMs: values[values.count - 1]))
+        })
+        return .init(counters: counters, metrics: summaries, events: events)
+    }
+    /// Tests/capture tools may explicitly checkpoint; production callbacks only
+    /// schedule one coalesced asynchronous write, at most once per second.
+    func checkpoint() { writer.sync { writeReport() } }
+    private func writeReport() {
+        lock.lock(); flushScheduled = false; lock.unlock()
+        guard let data = try? JSONEncoder().encode(snapshot()), data.count <= Self.byteLimit else { return }
+        let success = data.withUnsafeBytes { bytes -> Bool in
+            var offset = 0
+            for _ in 0..<8 where offset < bytes.count {
+                let written = pwrite(descriptor, bytes.baseAddress!.advanced(by: offset), bytes.count - offset, off_t(offset))
+                if written < 0 && errno == EINTR { continue }
+                guard written > 0 else { return false }
+                offset += written
+            }
+            return offset == bytes.count && ftruncate(descriptor, off_t(bytes.count)) == 0
+        }
+        if !success { lock.lock(); increment("report_write_failures"); lock.unlock() }
+    }
+
+    /// Contains only timestamps/ordinals: delayed drawable callbacks cannot
+    /// retain a lease/texture or interfere with GPU-drained retirement/ACK.
+    final class Submission: @unchecked Sendable {
+        private let owner: VMDisplayTelemetry
+        fileprivate let number: UInt64
+        fileprivate let stream: UInt64
+        fileprivate let generation: UInt64
+        private let timing: VMNativeDisplayTiming?
+        private let firstDraw: Bool
+        private let geometry: [String: Double]
+        private let lock = NSLock()
+        private var committed: Double?
+        private var gpuRecorded = false
+        private var presentedRecorded = false
+        private var mainRecorded = false
+        fileprivate init(owner: VMDisplayTelemetry, number: UInt64, stream: UInt64, generation: UInt64,
+                         timing: VMNativeDisplayTiming?, firstDraw: Bool, geometry: [String: Double]) {
+            self.owner = owner; self.number = number; self.stream = stream; self.generation = generation
+            self.timing = timing; self.firstDraw = firstDraw
+            self.geometry = geometry
+        }
+        func commit(at time: Double = CACurrentMediaTime()) {
+            lock.lock(); guard committed == nil else { lock.unlock(); return }; committed = time; lock.unlock()
+            var values = geometry; values["first_draw"] = firstDraw ? 1 : 0
+            owner.record(self, kind: "gpu_submitted", time: time, values: values) { _ in
+                if self.firstDraw, let timing = self.timing { self.owner.metric("receive_to_commit", time - timing.received) }
+                if !self.firstDraw { self.owner.increment("redraws_submitted") }
+            }
+        }
+        func gpuCompleted(start: Double, end: Double, failed: Bool, callback: Double = CACurrentMediaTime()) {
+            lock.lock(); guard !gpuRecorded, let committed else { lock.unlock(); return }; gpuRecorded = true; lock.unlock()
+            let available = start.isFinite && end.isFinite && start > 0 && end >= start
+            let values = available ? ["gpu_start_ms": (start - owner.started) * 1000, "gpu_end_ms": (end - owner.started) * 1000] : [:]
+            owner.record(self, kind: failed ? "gpu_failed" : "gpu_completed", time: callback,
+                values: values) { _ in
+                guard !failed, available else { self.owner.increment("gpu_timing_unavailable"); return }
+                self.owner.metric("commit_to_gpu_start", start - committed)
+                self.owner.metric("gpu_execution", end - start)
+                self.owner.metric("gpu_end_to_callback", callback - end)
+            }
+        }
+        func mainCallback(after gpuCallback: Double, at time: Double = CACurrentMediaTime()) {
+            lock.lock(); guard !mainRecorded else { lock.unlock(); return }; mainRecorded = true; lock.unlock()
+            owner.record(self, kind: "main_completion_callbacks", time: time, values: [:]) { _ in
+                self.owner.metric("gpu_callback_to_main", time - gpuCallback)
+            }
+        }
+        func drawablePresented(at time: Double, callback: Double = CACurrentMediaTime()) {
+            lock.lock(); guard !presentedRecorded, let committed else { lock.unlock(); return }; presentedRecorded = true; lock.unlock()
+            owner.record(self, kind: time > 0 ? "drawable_presented" : "drawable_skipped", time: callback,
+                values: ["presented_ms": time > 0 ? (time - owner.started) * 1000 : 0]) { stale in
+                guard !stale, time.isFinite, time >= committed else { return }
+                self.owner.metric("commit_to_presented", time - committed)
+                if self.firstDraw, let timing = self.timing { self.owner.metric("receive_to_presented", time - timing.received) }
+                if let previous = self.owner.streams[self.stream]?.previousPresented, time > previous {
+                    self.owner.metric("drawable_interval", time - previous)
+                }
+                // Delayed/out-of-order callbacks never regress interval history.
+                if time > (self.owner.streams[self.stream]?.previousPresented ?? 0) {
+                    self.owner.streams[self.stream]?.previousPresented = time
+                }
+            }
+        }
+    }
+}
 
 @MainActor
 enum VMDisplayDiagnostics {
@@ -55,6 +297,7 @@ final class VMExternalDisplayLease {
     let texture: any MTLTexture
     let region: VMDisplayTextureRegion?
     let verticallyFlipped: Bool
+    let timing: VMNativeDisplayTiming?
     private var completion: (@MainActor (VMDisplayLeaseResult) -> Void)?
     private var submitted = false
     private var readers = 0
@@ -62,8 +305,10 @@ final class VMExternalDisplayLease {
     private(set) var hasPresented = false
 
     init(texture: any MTLTexture, region: VMDisplayTextureRegion? = nil, verticallyFlipped: Bool = false,
+         timing: VMNativeDisplayTiming? = nil,
          completion: @escaping @MainActor (VMDisplayLeaseResult) -> Void) {
         self.texture = texture; self.region = region; self.verticallyFlipped = verticallyFlipped
+        self.timing = timing
         self.completion = completion
     }
 
@@ -107,6 +352,7 @@ final class VMExternalDisplayLease {
 final class VMDisplayPresentationItem {
     enum Content { case rfb(VMDisplayFrame), external(VMExternalDisplayLease) }
     let content: Content
+    fileprivate var telemetryDraws = 0
     init(_ content: Content) { self.content = content }
     var lease: VMExternalDisplayLease? { if case .external(let lease) = content { lease } else { nil } }
     var size: CGSize {
@@ -358,6 +604,8 @@ final class VMMetalRenderer {
 final class VMMetalDisplayView: MTKView, MTKViewDelegate {
     private let renderer: VMMetalRenderer
     private let presentation = VMDisplayPresentationQueue()
+    private let telemetry: VMDisplayTelemetry?
+    private let telemetryStream: UInt64?
     private var redrawRequested = false
     private var loggedFirstFrame = false
     var onFailure: (() -> Void)?
@@ -373,6 +621,8 @@ final class VMMetalDisplayView: MTKView, MTKViewDelegate {
 
     private init(renderer: VMMetalRenderer) {
         self.renderer = renderer
+        telemetry = VMDisplayTelemetry.shared
+        telemetryStream = telemetry?.beginStream()
         super.init(frame: .zero, device: renderer.device)
         colorPixelFormat = .bgra8Unorm
         colorspace = CGColorSpace(name: CGColorSpace.sRGB)
@@ -387,6 +637,7 @@ final class VMMetalDisplayView: MTKView, MTKViewDelegate {
 
     required init(coder: NSCoder) { fatalError("Use make()") }
     deinit {
+        if let telemetryStream { telemetry?.endStream(telemetryStream) }
         let presentation = presentation
         Task { @MainActor in presentation.stop(reason: .presenterReleased) }
     }
@@ -402,8 +653,11 @@ final class VMMetalDisplayView: MTKView, MTKViewDelegate {
     /// reset/stop. The callback, not the return value, permits backing reuse.
     @discardableResult
     func present(_ lease: VMExternalDisplayLease) -> Bool {
+        let previousCoalesced = presentation.coalescedFrames
         let accepted = presentation.present(lease,
             validationFailure: renderer.externalTextureFailure(lease.texture, region: lease.region))
+        telemetry?.count(accepted ? "presenter_accepted" : "presenter_rejected")
+        if presentation.coalescedFrames > previousCoalesced { telemetry?.count("presenter_pending_replaced") }
         if accepted { needsDisplay = true }
         return accepted
     }
@@ -412,6 +666,7 @@ final class VMMetalDisplayView: MTKView, MTKViewDelegate {
         redrawRequested = false; loggedFirstFrame = false
         releaseDrawables()
         presentation.reset()
+        if let telemetryStream { telemetry?.reset(stream: telemetryStream, generation: presentation.generation) }
     }
 
     func stop() {
@@ -419,6 +674,7 @@ final class VMMetalDisplayView: MTKView, MTKViewDelegate {
         delegate = nil; onFailure = nil
         releaseDrawables()
         presentation.stop()
+        if let telemetryStream { telemetry?.endStream(telemetryStream) }
     }
 
     func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {
@@ -440,20 +696,40 @@ final class VMMetalDisplayView: MTKView, MTKViewDelegate {
             }
         } catch {
             presentation.fail(.encodingFailed)
+            if let telemetryStream { telemetry?.reset(stream: telemetryStream, generation: presentation.generation) }
             if presentation.failure == .encodingFailed { onFailure?() }
             return
         }
         let ticket = presentation.begin(item)
+        let measurement: VMDisplayTelemetry.Submission?
+        if let lease = item.lease, let telemetryStream {
+            measurement = telemetry?.submission(stream: telemetryStream, generation: ticket.generation,
+                timing: lease.timing, firstDraw: item.telemetryDraws == 0,
+                width: Int(item.size.width), height: Int(item.size.height),
+                drawableWidth: drawable.texture.width, drawableHeight: drawable.texture.height)
+            item.telemetryDraws += 1
+        } else { measurement = nil }
+        if let measurement {
+            drawable.addPresentedHandler { drawable in measurement.drawablePresented(at: drawable.presentedTime) }
+        }
         command.present(drawable)
         let drawableWidth = drawable.texture.width, drawableHeight = drawable.texture.height
         let presentation = presentation
         command.addCompletedHandler { [weak self, presentation, ticket] command in
             let failed = command.status == .error
+            let callbackTime = measurement == nil ? 0 : CACurrentMediaTime()
+            measurement?.gpuCompleted(start: command.gpuStartTime, end: command.gpuEndTime, failed: failed, callback: callbackTime)
             Task { @MainActor [weak self] in
+                measurement?.mainCallback(after: callbackTime)
                 if self == nil { presentation.stop(reason: .presenterReleased) }
                 let notifyFailure = presentation.complete(ticket, failed: failed)
                 guard let self, !presentation.stopped else { return }
-                if notifyFailure { self.onFailure?(); return }
+                if notifyFailure {
+                    if let telemetryStream = self.telemetryStream {
+                        self.telemetry?.reset(stream: telemetryStream, generation: presentation.generation)
+                    }
+                    self.onFailure?(); return
+                }
                 if !self.loggedFirstFrame && item.hasPixels && presentation.generation == ticket.generation && !failed {
                     self.loggedFirstFrame = true
                     VMDisplayDiagnostics.firstMetalFrame(width: Int(item.size.width), height: Int(item.size.height),
@@ -462,6 +738,7 @@ final class VMMetalDisplayView: MTKView, MTKViewDelegate {
                 if presentation.hasPending || self.redrawRequested { self.needsDisplay = true }
             }
         }
+        measurement?.commit()
         command.commit()
     }
 }

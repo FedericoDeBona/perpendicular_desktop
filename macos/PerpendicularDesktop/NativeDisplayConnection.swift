@@ -3,6 +3,7 @@ import Foundation
 #if PERPENDICULAR_NATIVE_DISPLAY
 import Darwin
 import Metal
+import QuartzCore
 
 enum NativeDisplayConnectionState: Equatable, Sendable {
     case connecting, connected, disconnected
@@ -49,7 +50,10 @@ final class NativeDisplayConnection {
             // must never reach the parent before its connected notification.
             self.didConnect()
             guard !self.disconnected else { delivery.retire(); return }
-            let lease = VMExternalDisplayLease(texture: delivery.texture) { _ in delivery.retire() }
+            let timing = delivery.timing.map { VMNativeDisplayTiming(received: $0.received, ready: $0.ready,
+                delivered: CACurrentMediaTime()) }
+            if let timing { VMDisplayTelemetry.shared?.delivered(timing) }
+            let lease = VMExternalDisplayLease(texture: delivery.texture, timing: timing) { _ in delivery.retire() }
             self.onLease(lease)
         }
         self.mailbox = mailbox
@@ -103,11 +107,12 @@ private enum NativeDisplayWorkerNotice: Sendable {
 /// its lock; the C connection/owned frame descriptors stay on the worker queue.
 private final class NativeDisplayDelivery: @unchecked Sendable {
     let texture: any MTLTexture
+    let timing: VMNativeDisplayTiming?
     private let backing: any MTLBuffer
     private let lock = NSLock()
     private var retirement: (@Sendable () -> Void)?
-    init(texture: any MTLTexture, backing: any MTLBuffer, retirement: @escaping @Sendable () -> Void) {
-        self.texture = texture; self.backing = backing; self.retirement = retirement
+    init(texture: any MTLTexture, backing: any MTLBuffer, timing: VMNativeDisplayTiming?, retirement: @escaping @Sendable () -> Void) {
+        self.texture = texture; self.backing = backing; self.timing = timing; self.retirement = retirement
     }
     func retire() {
         lock.lock(); let callback = retirement; retirement = nil; lock.unlock()
@@ -131,6 +136,7 @@ private final class NativeDisplayMailbox: @unchecked Sendable {
         let old = pending; pending = delivery
         let wake = !scheduled; scheduled = true
         lock.unlock()
+        if old != nil { VMDisplayTelemetry.shared?.count("mailbox_replaced") }
         old?.retire()
         if wake { Task { @MainActor [self] in drain() } }
     }
@@ -151,16 +157,19 @@ private final class NativeDisplayWorker: @unchecked Sendable {
     private final class Frame {
         var value: ndt_frame
         let deadline: Double
+        let received: Double?
         var dispatched = false
         var retired = false
-        init(_ value: ndt_frame) {
+        init(_ value: ndt_frame, received: Double?) {
             self.value = value
+            self.received = received
             deadline = ProcessInfo.processInfo.systemUptime + 1
         }
     }
     private let queue = DispatchQueue(label: "org.perpendicular.native-display", qos: .userInteractive)
     private let endpoint: NativeDisplayEndpoint
     private let device: any MTLDevice
+    private let telemetry = VMDisplayTelemetry.shared
     private let mailbox: NativeDisplayMailbox
     private let notice: @Sendable (NativeDisplayWorkerNotice) -> Void
     private var connection = ndt_connection()
@@ -217,7 +226,9 @@ private final class NativeDisplayWorker: @unchecked Sendable {
             guard result == NDT_OK else { close(code: result); return }
             let number = frame.metadata.id.frame
             guard frames[number] == nil else { ndt_frame_close(&frame); close(code: Int32(NDT_ERR_IDENTITY)); return }
-            frames[number] = Frame(frame)
+            let received = telemetry == nil ? nil : CACurrentMediaTime()
+            telemetry?.count("frames_received")
+            frames[number] = Frame(frame, received: received)
         }
         for number in frames.keys.sorted() {
             guard active, let frame = frames[number] else { continue }
@@ -234,15 +245,17 @@ private final class NativeDisplayWorker: @unchecked Sendable {
                 break
             }
             guard ready == NDT_OK else { close(code: ready); return }
-            guard let delivery = importFrame(frame.value, number: number) else {
+            let timing = frame.received.map { VMNativeDisplayTiming(received: $0, ready: CACurrentMediaTime(), delivered: nil) }
+            guard let delivery = importFrame(frame.value, number: number, timing: timing) else {
                 close(code: Int32(NDT_ERR_BOUNDS), reason: "The graphics renderer sent an unsupported frame."); return
             }
             frame.dispatched = true
+            telemetry?.count("frames_ready_imported")
             mailbox.offer(delivery)
         }
     }
 
-    private func importFrame(_ frame: ndt_frame, number: UInt64) -> NativeDisplayDelivery? {
+    private func importFrame(_ frame: ndt_frame, number: UInt64, timing: VMNativeDisplayTiming?) -> NativeDisplayDelivery? {
         let m = frame.metadata
         let width = UInt64(m.width), height = UInt64(m.height), pitch = UInt64(m.pitch)
         var extent: UInt64 = 0
@@ -260,7 +273,7 @@ private final class NativeDisplayWorker: @unchecked Sendable {
         let desc = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .bgra8Unorm, width: Int(width), height: Int(height), mipmapped: false)
         desc.storageMode = .shared; desc.usage = .shaderRead
         guard let texture = backing.makeTexture(descriptor: desc, offset: 0, bytesPerRow: Int(pitch)) else { return nil }
-        return NativeDisplayDelivery(texture: texture, backing: backing) { [self] in
+        return NativeDisplayDelivery(texture: texture, backing: backing, timing: timing) { [self] in
             queue.async { [self] in retire(number) }
         }
     }
@@ -288,6 +301,7 @@ private final class NativeDisplayWorker: @unchecked Sendable {
     private func close(failure: NativeDisplayFailure?) {
         guard active else { return }
         active = false
+        telemetry?.count(failure == nil ? "connections_closed" : "connection_failures")
         timer?.setEventHandler {}; timer?.cancel(); timer = nil
         ndt_close(&connection)
         var event = ndt_event()

@@ -1,6 +1,7 @@
 import Foundation
 import Darwin
 import Metal
+import QuartzCore
 
 @MainActor
 private final class Producer {
@@ -210,6 +211,47 @@ private enum NativeDisplayConnectionCheck {
         peerConnection.start(); try await waitFor { !peerErrors.isEmpty }
         precondition(peerFrames == 0 && peerErrors[0].code == NDT_ERR_PEER, "Incorrect renderer PID accepted")
         peerConnection.disconnect(); checks += 1
+
+        if let telemetry = VMDisplayTelemetry.shared {
+            stage("opt-in telemetry and blocked main-actor mailbox replacement")
+            let before = telemetry.snapshot().counters
+            let burst = try Producer(binary: regularBinary, mode: nil)
+            defer { burst.cleanup() }
+            try await waitFor { FileManager.default.fileExists(atPath: burst.endpoint.socketPath) }
+            let state = VMDisplayPresentationQueue()
+            var timings: [VMNativeDisplayTiming] = [], errors: [NativeDisplayFailure] = []
+            let connection = NativeDisplayConnection(endpoint: burst.endpoint, device: renderer.device,
+                onLease: { lease in
+                    if let timing = lease.timing { timings.append(timing) }
+                    state.present(lease)
+                }, onState: { if $0 == .disconnected { state.reset() } }, onFailure: { errors.append($0) })
+            connection.start()
+            // Deliberately prevent MainActor delivery while the independent C
+            // producer and receiver worker supply BOTH real ready frames. No
+            // GUI/guest input or live application is involved in this stall.
+            let deadline = CACurrentMediaTime() + 5
+            let expected = (before["frames_ready_imported"] ?? 0) + 2
+            while (telemetry.snapshot().counters["frames_ready_imported"] ?? 0) < expected && CACurrentMediaTime() < deadline { usleep(1000) }
+            precondition((telemetry.snapshot().counters["frames_ready_imported"] ?? 0) == expected, "Receiver did not receive bounded burst off the main actor")
+            usleep(50_000)
+            try await waitFor { state.next != nil }
+            precondition(state.next?.size == CGSize(width: 80, height: 40) && timings.count == 1 && errors.isEmpty,
+                "Mailbox did not replace the undisplayed first real frame")
+            precondition(timings[0].delivered! - timings[0].ready >= 0.05, "Injected main-actor stall missing from delivery timing")
+            let image = target(renderer.device, width: 80, height: 40)
+            _ = try submit(state, renderer, target: image)
+            try await waitFor { state.completedFrames == 1 }
+            pixels += checkPixels(image)
+            state.reset()
+            try await waitFor { !burst.process.isRunning }
+            connection.disconnect()
+            let after = telemetry.snapshot().counters
+            precondition((after["frames_received"] ?? 0) >= (before["frames_received"] ?? 0) + 2 &&
+                (after["mailbox_replaced"] ?? 0) == (before["mailbox_replaced"] ?? 0) + 1,
+                "Telemetry did not observe actual IPC receipt/mailbox replacement")
+            telemetry.checkpoint()
+            checks += 1
+        }
 
         let report: [String: Any] = ["result": "pass", "checks": checks, "device": renderer.device.name,
             "actual_GPU_pixels_verified": pixels, "zero_RFB_uploads": true,

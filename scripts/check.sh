@@ -45,6 +45,7 @@ fi
 if [[ "${PERPENDICULAR_METAL_TESTS:-0}" == 1 ]]; then
   "$ROOT/macos/Tests/run-display-presenter-tests.sh"
   "$ROOT/macos/Tests/run-external-presenter-tests.sh"
+  "$ROOT/macos/Tests/run-display-telemetry-tests.sh"
   "$ROOT/macos/Tests/run-native-display-connection-tests.sh"
   python3 "$ROOT/experimental/cocoa-native-display/test-publisher.py"
 fi
