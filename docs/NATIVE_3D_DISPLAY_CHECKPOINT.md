@@ -73,6 +73,57 @@ snapshots to separate presenter/compositor loss from guest/producer delivery.
 Source-writer synchronization, buffer pooling, local cursor, input-to-visible
 latency and installed 3D runtime integration remain incomplete.
 
+### Subsequent presentation, resize and shutdown checks
+
+In the same live guest and unchanged client, entering full screen selected
+1920×1440 automatically and returning selected 2048×1152. A second identical
+browser probe at full screen produced 1759 measured draws in 30009.5 ms,
+median 16.1/p95 31.6 ms, maximum 33.8 ms, with no gaps above 50 ms or GL/context/
+visibility errors. In a separate 25.260-second central host interval there were
+1147 received/completed frames, 693 positive presentation callbacks and 454
+zero-time callbacks: 45.41 received versus 27.43 confirmed presentations/sec.
+Different desktop geometry means this is not a controlled improvement over the
+earlier windowed run. Private reports use the `direct2-fullscreen` and
+`native-direct2-fullscreen-host-*` names under `.tools/`.
+
+A host-only fixture using the unchanged presenter completed 707 GPU commands;
+its latest 256 positive presentation intervals had median 16.667375 ms and
+p95 16.667625 ms. This shows a stable 60 Hz tail is possible in that fixture, not
+that the embedded Windows path achieves it. The initial activation period was
+mixed, so total counts divided by 12 seconds are not reported as steady FPS.
+
+A proposed removal of the native console parent's per-frame invalidation was
+compiled and exercised privately, then withdrawn from source. The client
+reconnected and displayed Windows, but later resize/reconnect transitions
+stalled on a black reconnecting view; a matched performance comparison was not
+obtained. Its first launch also lacked the required telemetry directory and
+therefore supplied no measurements. That directory must exist with mode 0700
+before the recorder is first initialized. No resulting performance gain is
+claimed and the proposed policy is not included in the app source.
+
+The new parent-clean/parent-dirty host probes both completed and drained every
+lease. Neither met their explicit active/key/visibility admission, so neither
+is accepted as a steady A/B result. Their differing raw presentation counts
+cannot establish causality under those conditions. Retained results:
+`.tools/visible-presentation-parent-ab2/{parent-clean,parent-dirty}/`.
+The standalone fixture and the pair are documented in
+[native display telemetry](NATIVE_DISPLAY_TELEMETRY.md#explicit-visible-host-probe).
+
+One passive sample of the stalled own QEMU process found the Cocoa event loop
+and QEMU main loop waiting normally, rather than blocked in `nextDrawable` or
+`eglSwapBuffers`. This bounded observation does not support an EGL deadlock
+explanation for that instant. Windows Guest Tools still answered a read-only
+display query with the actual 3D adapter and 1920×1440. Reconnect and resize
+reliability remain unresolved.
+
+Finally, a normal ACPI shutdown of the same QEMU PID 4503 completed at
+15:42:35 UTC with matching supervisor launch identity, success=true and exit 0.
+No assertion or STP-emulation log occurred in this launch. This qualifies one
+successful boot/workload/shutdown cycle, not proof that the new signed-offset
+branch executed or that all shutdown failures are fixed. The existing VM is
+now stopped; no force stop or new VM copy was used. Private exact receipt:
+`.tools/native-direct2-clean-shutdown.json`.
+
 ## Actual Windows run
 
 The existing Windows 11 — 3D Trial was reused, without another VM copy.

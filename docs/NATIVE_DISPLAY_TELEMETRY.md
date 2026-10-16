@@ -115,3 +115,51 @@ These describe the submit instant, not an uninterrupted visibility guarantee.
 Connection failure counters include numeric transport/errno classes without
 paths, endpoint identities, error text or guest content. They share the same
 bounded counter/event storage.
+
+## Explicit visible host probe
+
+`macos/Tests/VisiblePresentationProbe.swift` drives the unchanged production
+presenter with host-generated GPU colour snapshots. Exactly two reservations
+cover producer work and current/pending leases. Backing is reused only after
+normal retirement; stop cancels pending leases and drains GPU readers. There
+is no guest, transport, input injection or change to rendering policy.
+
+The runner defaults to compilation only. These commands prepare fresh private
+outputs without opening a window:
+
+```sh
+bash macos/Tests/run-visible-presentation-probe.sh --build-only
+bash macos/Tests/run-visible-presentation-probe.sh --build-pair
+```
+
+`--build-pair` compiles once and prepares two local launch bundles containing
+the identical compiler-produced executable. Both nest Metal in the same
+flipped black parent; only per-lease parent invalidation differs. They are not
+installed or registered. Open each prepared bundle explicitly when a visible
+test is intended; do not add this test to unattended checks. The alternative
+`--run-visible` mode explicitly opens one disposable test window.
+
+The probe reports its three controlled settings: `MODE` (`standalone` or
+`parent-flipped`), `PARENT_INVALIDATION` (`0`/`1`) and `HIDDEN_ASSIGNMENT`
+(`0`/`1`), each prefixed `PERPENDICULAR_PRESENTATION_PROBE_`. Defaults preserve
+the standalone presenter with no parent invalidation or hidden reassignment.
+Invalid combinations are rejected. The pair uses hidden reassignment 0 in
+both variants. Their launch metadata opts in and selects separate private
+output directories. This fixture does not replicate SwiftUI hosting/clipping.
+
+Reports contain at most 16 cumulative observations plus an optional central
+window: admission requires elapsed time >=4 seconds and at least 1 second
+continuously active, key, visible and unoccluded. The window ends at the first
+tick >=11 seconds, before the 12-second source stops. A later visibility
+interruption is explicit. Accept a steady comparison only when both windows
+are admitted, uninterrupted and otherwise match. Callback arrival can cross
+counter boundaries, and latest 256 metric samples are not recomputed for that
+window. Startup counts divided by requested duration are not steady FPS.
+
+The shell runner watches only its newly created process for 15 seconds.
+Bundle-launched probes also schedule a process-local 15-second exit after
+initialization; this does not bound OS launch or initialization time. Reports
+and telemetry use fresh 0600 files in an owned 0700 directory, never pixels or
+guest content. Actual Mac display presentation is distinct from GPU command
+completion; a zero `presentedTime` is not counted as visible output, consistent
+with [Apple's drawable timestamp documentation](https://developer.apple.com/documentation/metal/mtldrawable/presentedtime).
