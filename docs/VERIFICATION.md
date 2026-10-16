@@ -324,3 +324,26 @@ alongside the installed app: the existing guest process is still alive with
 its control endpoint unavailable, pending dismissal of the Desktop access
 request. The new Xcode agreement remains pending; no acceptance is implied
 by using the previously available Command Line Tools.
+
+The REA CLI blocker was subsequently resolved without accepting the pending
+Xcode agreement or changing persistent MCP configuration. REA 6.5.0 supports
+`REA_DARWIN_SWIFTC_PATH` and `SDKROOT` for its macOS process-ownership helper.
+Selecting `/Library/Developer/CommandLineTools/usr/bin/swiftc` and
+`/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk`, together with the existing
+Ghidra/Java installations, completed Ghidra default analysis of the same
+`prl_tg.sys`. A `DriverEntry` name search returned no matches; the PE header
+instead identifies entry address `0x140009088`. An address-based function
+query recovered its 56-byte body, assembly, pseudocode and two direct callees
+(`0x1400090c0` and `0x140009000`), with a normal return. Evidence IDs are
+`ev_adcb3168a871387dfd1c01336c86f5eb9887b2212f1d9f273d077e181e6b34d5`
+and `ev_e97a6195c7e3425f5b96d5df7139c0d878d9fc4300d1badea0c799931f24df4d`.
+Assembly preserves both incoming argument registers across the calls, while
+the inferred pseudocode signature only declares one: inferred signatures are
+not a recovered Windows driver ABI. The PDB is not loaded and original names
+remain unknown. This establishes a working CLI analysis route, not a cause for
+the guest's 0x139 failure. Complete evidence remains in ignored private storage.
+
+The diagnostic ISO is also staged read-only under the app's Application Support
+`Diagnostics` directory, outside Desktop, with a SHA-256 match to the prepared
+921,600-byte image. It is not attached: the earlier pending QMP operation must
+resolve first. No additional guest repair has been executed.
