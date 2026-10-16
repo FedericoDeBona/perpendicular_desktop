@@ -6,6 +6,33 @@ requests global graphics scheduler/recovery settings, notably
 `TdrDebugMode=1` (ignore timeouts). Nothing was installed or loaded, and no VM,
 app, stable runtime, certificate store or security setting was changed.
 
+## Windows preinstallation checkpoint — 2026-10-16
+
+The user subsequently authorized the concrete 3D trial, including the original
+INF's service/recovery effects and a per-process PowerShell execution-policy
+exception for our diagnostics. They requested that no further VM copies be
+made. The already prepared **3D Trial** booted normally with the installed 2D
+runtime; no 3D driver has yet been installed at this checkpoint.
+
+Actual elevated Windows PowerShell observations on Windows 11 Pro ARM64
+10.0.26300: all eleven full-file hashes match the reviewed manifest, and
+Windows `Get-AuthenticodeSignature` reports **Valid** for the catalog and all
+eight signed PE payloads. This is stronger Windows signing evidence than the
+earlier Mac-only chain check below, but is still not kernel-mode catalog policy
+acceptance or driver-load proof. Secure Boot reports **True**. Both global INF
+values are absent before installation. Device Guard reports VBS status 0 and
+security services running/configured `[0]`; these were observed, not disabled
+for the trial. The current BCD listing contains no displayed test-signing or
+integrity-disable option. `Get-Tpm` fails with **0x80284001**, consistent with
+the earlier guest baseline; do not call TPM readiness verified from that error.
+
+The full baseline is retained privately inside the guest. Host observation
+receipt: `.tools/windows-3d-preinstall-observations.json`. The reproducible
+[read-only baseline/media preparation](../experimental/windows-3d-trial/README.md)
+retains failed observations as unknown and never installs a package. Installing
+the unchanged package under Windows enforcement, identifying the loaded driver
+and proving actual hardware D3D11 rendering remain the next gates.
+
 ## Exact release identity
 
 The supplied file `/tmp/perpendicular-viogpu3d-release.zip` is 2,117,369 bytes.
