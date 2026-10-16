@@ -220,10 +220,33 @@ Windows completed a normal shutdown; an independent APFS clone of its single
 base HDS was created with the source stopped and fully hash-compared against
 the original (18,536,726,528 bytes). Its receipt and descriptor remain private
 under `.tools/vm-migration/`. The original VM remains registered and stopped.
-No force-stop, guest driver/security change, or Perpendicular boot has occurred.
-The owned QEMU runtime and secure firmware are being rebuilt from pinned source.
-Required next gates include conversion/import, real cursor shape/hide and native
-scanout composition, and measuring input-to-image latency before/after. A passed
+The pinned QEMU 11.1.2 runtime and secure firmware were rebuilt and bundled in
+the normal installed application, which passed strict/deep signature checks.
+This is the baseline 2D runtime, not the experimental 3D runtime. Conversion
+to compressed QCOW2 passed integrity checking and virtual disk comparisons
+both before and after import. Both comparisons reported identical images.
+The generated conversion intermediate was removed after verification; the
+original VM, read-only source snapshot and final imported disk remain intact.
+
+Starting the imported VM through the installed application's GUI reached
+Windows, which crashed and entered WinRE. Its startup repair log reported zero
+root causes, and no Minidump directory was found. The offline SYSTEM hive had
+Current/Default control set 1, stornvme Start 0, but StartOverride value 0 was 3.
+After successfully saving the complete hive inside the imported guest as
+`C:\Perpendicular'before'nvme'SYSTEM.hiv`, only that override was changed to
+DWORD 0. Readback and hive unload succeeded. A subsequent reboot entered the
+automatic diagnostic path again; desktop startup is still unverified. The exact
+crash stop code is unobserved. This storage migration intervention affects only
+the imported copy. Microsoft's [controller migration guidance](https://learn.microsoft.com/en-us/troubleshoot/azure/virtual-machines/windows/troubleshoot-nvme-boot-failure)
+explains the boot-driver requirement; the local registry readings justify the
+specific intervention without establishing the crash cause conclusively.
+
+Xcode 27.1 finished installing from Apple's App Store. Its first launch requires
+acceptance of the Xcode and Apple SDKs Agreement; explicit user confirmation
+has been requested and remains pending. Metal builds have not used this new
+toolchain yet.
+Required next gates include successful desktop startup, real cursor shape/hide
+and native scanout composition, and measuring input-to-image latency before/after. A passed
 socket/AppKit check is not a Windows smoothness or 3D integration result.
 
 The complete default `scripts/check.sh` passes on this checkout after the cursor
