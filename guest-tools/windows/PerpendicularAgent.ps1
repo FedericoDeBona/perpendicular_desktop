@@ -33,9 +33,9 @@ function Write-AgentHealthEvent {
           [long]$Timestamp = [Diagnostics.Stopwatch]::GetTimestamp(), [switch]$Fatal)
     try {
         if ($null -eq $Log -or @('starting', 'core_load', 'platform_check', 'session_check', 'native_init', 'clipboard_init',
-            'mutex_init', 'mutex_wait', 'duplicate_instance', 'channel_open', 'channel_request', 'channel_reset', 'cleanup', 'stopped') -cnotcontains $Stage) { return }
+            'mutex_init', 'mutex_wait', 'duplicate_instance', 'channel_open', 'channel_request', 'channel_reset', 'channel_close', 'cleanup', 'stopped') -cnotcontains $Stage) { return }
         $omitted = 0
-        if (-not $Fatal -and @('channel_open', 'channel_request', 'channel_reset') -ccontains $Stage) {
+        if (-not $Fatal -and @('channel_open', 'channel_request', 'channel_reset', 'channel_close') -ccontains $Stage) {
             if ($Log.Next.ContainsKey($Stage) -and $Timestamp -lt $Log.Next[$Stage]) {
                 $Log.Suppressed[$Stage] = [Math]::Min([long][int]::MaxValue, [long]$Log.Suppressed[$Stage] + 1)
                 return
@@ -80,6 +80,17 @@ function Write-AgentHealthEvent {
     }
 }
 
+function Close-AgentPort {
+    param($Port, $Health)
+    if ($null -eq $Port) { return }
+    try { $Port.Dispose() }
+    catch {
+        # FileStream disposal can flush buffered output and fail after an I/O
+        # reset. Keep this failure inside the channel reconnect boundary.
+        Write-AgentHealthEvent $Health 'channel_close' $_.Exception
+    }
+}
+
 $health = $null; $stage = 'starting'; $mutex = $null; $ownsMutex = $false
 try {
     $health = New-AgentHealthLog (Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'Perpendicular Desktop/Guest Agent')
@@ -121,7 +132,8 @@ try {
             # No request/response data or exception messages are retained.
             Write-AgentHealthEvent $health 'channel_reset' $_.Exception
         } finally {
-            if ($null -ne $port) { $port.Dispose() }
+            Close-AgentPort -Port $port -Health $health
+            $port = $null
         }
         Start-Sleep -Seconds 1
     }
