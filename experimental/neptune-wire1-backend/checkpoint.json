@@ -1,0 +1,38 @@
+{
+  "schema": 1,
+  "source_pin": "917b721c0f915c6524b416169fdce4427a39524f",
+  "source_patches": [],
+  "binary": {
+    "path": ".tools/graphics-wire1-backend/prefix/lib/libdxmt-native.dylib",
+    "sha256": "4fade33095e08b341ceae2a35ee5dcebb0c452eb6fcc52f562df6f0d223b0da9"
+  },
+  "files_sha256": {
+    "experimental/neptune-wire1-backend/build.py": "a88dea8209d0a6da598428a5b1b5801dcc7820eb848c8afb90ce33a623655240",
+    "experimental/neptune-wire1-backend/test.py": "7174fe2398e04cf370e0e68050fbfcf134efe343b53ef2b9f9aec76fc233267a",
+    "experimental/neptune-wire1-backend/native-check.cpp": "a6d52266735dae8d9c733f5d6703cec2608b4f7889921335e7befaac4c2a1048",
+    "experimental/neptune-wire1-backend/README.md": "9185b5a5e06ee1f25259d40155d5e6361acce357941fe219c555bbd49c271657",
+    "experimental/neptune-wire1-backend/LICENSE": "b87c35aef7b2cf14de854118ca55ce5c4b284c85b5f002421fb8d46d868c2d17",
+    "experimental/neptune-wire1-backend/COPYING.LIB": "e237fa56668030e928551ddd60f05df5fe957f75eab874bbd017e085ed722e7c",
+    "experimental/neptune-wire1-backend/LICENSE.OLD": "3422f02eb18f1e598731b586832afab8b322badd61d45a4b95674ceec4b6108d",
+    ".tools/graphics-wire1-backend/provenance/build.json": "2efd0eb0de4cfa1855b43927398031ad22ddefcdbfdf45b1692e85f650ee71a8",
+    ".tools/graphics-wire1-backend/provenance/source-files.json": "7c7310222687aebec79b7d6b922996b0530c7d06fcd91aaa0df1a22f44d9ee0c",
+    ".tools/graphics-wire1-backend/provenance/llvm-static-inputs.json": "e15e4d911bf4445903b867ec02a55172850c4dbf0d6972bcbb2fdbd704538c84",
+    ".tools/graphics-wire1-backend/logs/configure.log": "c5fbecc56ef3142d84d008e9036229f1388c7c6f1174738c147fa0f91b4919d7",
+    ".tools/graphics-wire1-backend/logs/compile.log": "befa7aab83577d1c5a910351883e77fb62147ba01a3c37ddb927094c9df576e2",
+    ".tools/graphics-wire1-backend/logs/install-private.log": "3297324d937d2e5f0f116db8db484cddd2d09169aa759e526bd2ef1ba0d912a2",
+    ".tools/graphics-wire1-backend/native-check/result.json": "4e01779743421473bc3173b8c6140e86cda91f73c3e84c5a9f7f44476cc78b4e",
+    ".tools/graphics-wire1-backend/native-check/compile.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    ".tools/graphics-wire1-backend/native-check/stderr.log": "b5b98373ca8591eb21e67ea632b23f67b6f1edcc6960ac83e07c54d64e4dd616",
+    ".tools/graphics-wire1-backend/native-check/renderer-shared-layout.h": "682861a17f5fba05e60c7f5b1ed09aab3ab7d286b1fffef2702986ebfc4fe2ea"
+  },
+  "build_exit": 0,
+  "native_fixture_exit": 0,
+  "native_GPU_pixels_verified": 2048,
+  "wrong_descriptor_version_rejected": true,
+  "matching_renderer_POD_layout": true,
+  "guest_CPU_executed": false,
+  "guest_disks": false,
+  "Neptune_COM_commands_sent": false,
+  "Windows_3D_verified": false,
+  "originals_unchanged": true
+}
