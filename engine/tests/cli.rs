@@ -1150,7 +1150,9 @@ elif args[0]=='convert':
     if mode=='race':
         with open(os.environ['PERPENDICULAR_EXPORT_DESTINATION'],'xb') as rival: rival.write(b"racing user's existing data")
     if mode=='slow':
-        with open(os.environ['PERPENDICULAR_EXPORT_READY'],'w') as ready: ready.write(str(os.getpid()))
+        ready_path=os.environ['PERPENDICULAR_EXPORT_READY']
+        with open(ready_path+'.pending','w') as ready: ready.write(str(os.getpid()))
+        os.replace(ready_path+'.pending',ready_path)
         while True: time.sleep(1)
     shutil.copyfile(args[-2],args[-1])
 else: sys.exit(3)
