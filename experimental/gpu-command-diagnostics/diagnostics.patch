@@ -1,0 +1,73 @@
+--- a/hw/display/virtio-gpu-virgl.c
++++ b/hw/display/virtio-gpu-virgl.c
+@@ -26,6 +26,30 @@
+ #include <virglrenderer.h>
+ 
+ #define NATIVE_HANDLE_SUPPORT_VERSION (1)
++
++/* Opt-in bounded metadata diagnostics; command processing holds the BQL. */
++static bool virgl_cmd_diagnostic_admit(void)
++{
++    static int enabled = -1;
++    static unsigned int records;
++
++    if (enabled < 0) {
++        enabled = g_strcmp0(g_getenv("PERPENDICULAR_GPU_COMMAND_DIAGNOSTICS"),
++                            "1") == 0;
++    }
++    if (!enabled) {
++        return false;
++    }
++    if (records < 64) {
++        records++;
++        return true;
++    }
++    if (records == 64) {
++        records++;
++        fprintf(stderr, "perpendicular-gpu-cmd suppressed after 64 records\n");
++    }
++    return false;
++}
+ 
+ /*
+  * VIRGL_CHECK_VERSION available since libvirglrenderer 1.0.1 and was fixed
+@@ -901,6 +925,12 @@
+                                    &resp.capset_max_size);
+     }
+     resp.hdr.type = VIRTIO_GPU_RESP_OK_CAPSET_INFO;
++    if (virgl_cmd_diagnostic_admit()) {
++        fprintf(stderr, "perpendicular-gpu-cmd capset-info index=%u "
++                "num_capsets=%u response_id=%u response_version=%u "
++                "response_size=%u\n", info.capset_index, g->capset_ids->len,
++                resp.capset_id, resp.capset_max_version, resp.capset_max_size);
++    }
+     virtio_gpu_ctrl_response(g, cmd, &resp.hdr, sizeof(resp));
+ }
+ 
+@@ -914,6 +944,14 @@
+ 
+     virgl_renderer_get_cap_set(gc.capset_id, &max_ver,
+                                &max_size);
++    if (virgl_cmd_diagnostic_admit()) {
++        fprintf(stderr, "perpendicular-gpu-cmd capset request_id=%u "
++                "request_version=%u num_capsets=%u backend_max_version=%u "
++                "backend_size=%u response_type=0x%08x\n", gc.capset_id,
++                gc.capset_version, g->capset_ids->len, max_ver, max_size,
++                max_size ? VIRTIO_GPU_RESP_OK_CAPSET :
++                           VIRTIO_GPU_RESP_ERR_INVALID_PARAMETER);
++    }
+     if (!max_size) {
+         cmd->error = VIRTIO_GPU_RESP_ERR_INVALID_PARAMETER;
+         return;
+@@ -1257,6 +1295,11 @@
+     bool cmd_suspended = false;
+ 
+     VIRTIO_GPU_FILL_CMD(cmd->cmd_hdr);
++    if (virgl_cmd_diagnostic_admit()) {
++        fprintf(stderr, "perpendicular-gpu-cmd entry type=0x%08x "
++                "flags=0x%08x ctx_id=%u\n", cmd->cmd_hdr.type,
++                cmd->cmd_hdr.flags, cmd->cmd_hdr.ctx_id);
++    }
+ 
+     virgl_renderer_force_ctx_0();
+     switch (cmd->cmd_hdr.type) {
