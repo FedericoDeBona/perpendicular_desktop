@@ -1,0 +1,28 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Perpendicular · WebGL2 triangle probe</title>
+  <link rel="stylesheet" href="style.css">
+  <script src="probe.js" defer></script>
+</head>
+<body>
+  <main>
+    <h1>WebGL2 triangle probe</h1>
+    <p>Two seconds of warm-up, then up to 30 seconds of rotating geometry at a fixed 800 × 450 drawing resolution. Keep this tab visible throughout.</p>
+    <p>This measures browser animation callback spacing. It does not measure physical display FPS, input latency, or prove hardware acceleration.</p>
+    <div class="controls">
+      <button id="start" type="button">Start once</button>
+      <button id="download" type="button" disabled>Download JSON</button>
+      <button id="send" type="button" disabled>Send to local test server</button>
+    </div>
+    <p id="state" role="status" aria-live="polite">Ready. No graphics context has been requested.</p>
+    <canvas id="canvas" width="800" height="450" aria-label="Rotating coloured WebGL2 triangle on black"></canvas>
+    <p>Sending is optional and happens only when clicked, to this page’s relative <code>./result</code> endpoint. There are no external resources or automatic uploads. Reload to run again.</p>
+    <h2>Report</h2>
+    <pre id="report">A report will appear after the run or a reported failure.</pre>
+  </main>
+</body>
+</html>

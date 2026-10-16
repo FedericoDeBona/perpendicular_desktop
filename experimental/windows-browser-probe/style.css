@@ -1,0 +1,14 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+:root { color-scheme: dark; font: 16px/1.5 system-ui, sans-serif; background: #11151c; color: #eef2f8; }
+body { margin: 0; }
+main { max-width: 960px; margin: 0 auto; padding: 24px; }
+h1 { font-size: 1.8rem; margin-top: 0; }
+h2 { font-size: 1.2rem; }
+p { max-width: 850px; color: #c6cfde; }
+.controls { display: flex; flex-wrap: wrap; gap: 12px; }
+button { font: inherit; border: 1px solid #6d8bb8; border-radius: 8px; padding: 10px 16px; background: #223e65; color: #fff; cursor: pointer; }
+button:disabled { opacity: .45; cursor: default; }
+button:focus-visible { outline: 3px solid #f6d57e; outline-offset: 3px; }
+#state { min-height: 1.5em; font-weight: 600; color: #fff; }
+canvas { display: block; width: 800px; height: auto; max-width: 100%; aspect-ratio: 16 / 9; background: #000; border: 1px solid #6b7587; }
+pre { padding: 16px; background: #080b10; border-radius: 8px; overflow: auto; font-size: 12px; max-height: 600px; }

@@ -113,8 +113,9 @@ this is a guest diagnostic, not a separately captured raw capset byte stream.
 
 1. Measure browser/application workloads, frame pacing and interaction beyond
    the bounded triangle check; WebGPU and accelerated rasterization remain gaps.
-2. Restore reliable Guest Tools access in the experimental QEMU profile;
-   reconnect, automatic resolution and clipboard are not yet qualified here.
+2. Qualify Guest Tools startup after a new cold boot in the experimental profile;
+   manual recovery now responds, but automatic resolution/reconnect and clipboard
+   still need end-to-end qualification here.
 3. Package the coherent graphics profile into the app with simple driver setup
    and recovery, then validate cold boot, shutdown and repeated use.
 4. Use optimized builds and measure frame pacing, input latency, copies,
@@ -164,3 +165,70 @@ vendor/backend allowlist. No browser security setting, blocklist override or
 experimental flag was changed to obtain this report.
 Private raw report `.tools/windows-edge-gpu-ipa4k1.txt`, SHA-256
 `ee87f3529c034313ec642bdad650468f504c8aa206f66ad67ff004ca3528c73c`.
+
+## Guest Tools manual recovery in the same 3D run
+
+The installed diagnostic confirmed the expected package and Limited/Interactive
+scheduled-task ownership, an available VirtIO serial device with no PnP error,
+successful native-source compilation and an allowed fixed-port open. The task
+was Ready with LastTaskResult1 and no owned agent process. This distinguishes
+the observed failure from a missing driver or denied port access, without
+isolating the earlier startup error.
+
+The installed Core/Display file hashes matched the current sources. After
+preserving the previous agent script, only the project's agent entry script
+was updated with bounded health logging; its source SHA-256 is
+`54435a715018344e9374fe84caf2f5f43fadc1ab0798fede7a914f7dbae7943a`.
+The verified existing task was started with unchanged action, principal,
+privileges and port ACL. The log records successful native/clipboard/singleton
+initialization and channel open. Its first read reset with HRESULT800705AA;
+the retry loop remained active. Subsequent host requests returned connected=true,
+protocol1/agent0.2.0, acknowledged a131-byte file transfer, and returned display
+status for the VirtIO3D controller at1280×1024 with can_resize=true.
+
+This establishes manual recovery and actual RPC/file-transfer functionality in
+the live 3D profile. The logger/restart is not an isolated diagnosis or proof
+that automatic startup is fixed after another boot. Clipboard capability
+advertisement is not a clipboard-content exchange test. Raw private recovery
+receipt `.tools/windows-tools-3d-health1.txt`, SHA-256
+`f60b2ffadceeeba33ba03eaa3d1920aa6e92eefc8ea3a523a92869862804cd7f`.
+
+Actual guest display requests subsequently changed1280×1024→1920×1200 and
+restored1280×1024. The real Cocoa console remained visible at the larger size;
+final guest status confirmed the restored dimensions. A1512×982 request was
+rejected as display_mode_unsupported, with the1920×1200 mode unchanged. Thus
+the current driver accepts enumerated modes; arbitrary window-size matching
+has not been established in this 3D profile. Raw receipts are
+`.tools/windows-tools-display-3d-resize1920.json`,
+`windows-tools-display-3d-resize1512.json`,
+`windows-tools-display-3d-resize1280.json` and final
+`windows-tools-display-3d-status2.json`.
+
+## Actual WebGL2 animation and pacing sample
+
+The original [browser probe](../experimental/windows-browser-probe/README.md)
+ran in Windows Edge with a fixed800×450 drawing buffer and1280×1024 desktop.
+The real console showed the rotating RGB triangle during the run. Both GLSL
+ES3.00 shaders compiled and linked. After2,012.9ms warm-up/120 draws, the
+30,004.3ms measured interval submitted1,762 draws. Reported rAF callback spacing:
+
+| Statistic | Actual value |
+| --- | --- |
+| Median | 16.1ms |
+| 95th percentile | 31.7ms |
+| Minimum / maximum | 1.3 / 34.5ms |
+| Gaps greater than50ms | 0 |
+
+The run had no visibility change, context loss or GL error. A single
+post-timing readback at the triangle centre returned RGBA[97,78,80,255]. The
+unmasked renderer names the VirtIO D3D11 ANGLE path. The report is completed,
+valid=true; it deliberately does not infer host acceleration from renderer
+names alone. Its raw SHA-256 is
+`139703738f77a6cc8c0c2810222b439b04d21d56d141d1931d3b7ca3e206d3d2`
+at `.tools/windows-browser-webgl2-ipa4k1.json`.
+
+This is one small diagnostic workload, not a physical display FPS measurement,
+an input-latency measurement or a comparison with Parallels. The p95 spacing
+already shows that median timing alone would hide less regular callbacks.
+Renderer/backend remain optimization0. Browser feature blocklists above remain
+in force, and the production app has not yet adopted this graphics path.
