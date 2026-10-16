@@ -90,8 +90,18 @@ struct VMDetailView: View {
             }
 
             if let error = vm.lastError, !error.isEmpty {
-                Label(error, systemImage: "exclamationmark.triangle.fill").font(.callout).foregroundStyle(.orange)
-                    .padding(12).frame(maxWidth: .infinity, alignment: .leading).background(.orange.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
+                VStack(alignment: .leading, spacing: 8) {
+                    Label(vm.state == "crashed" ? "Windows stopped unexpectedly." : "The virtual machine reported a problem.",
+                          systemImage: "exclamationmark.triangle.fill")
+                        .font(.callout).foregroundStyle(.orange)
+                    DisclosureGroup("Technical Details") {
+                        ScrollView {
+                            Text(error).font(.caption.monospaced()).textSelection(.enabled)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }.frame(height: 140)
+                    }.font(.caption)
+                }.padding(12).frame(maxWidth: .infinity, alignment: .leading)
+                    .background(.orange.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
                     .padding(.horizontal, 30).padding(.bottom, 14).textSelection(.enabled)
             }
 
