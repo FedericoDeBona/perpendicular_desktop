@@ -1,0 +1,28 @@
+{
+  "schema": 1,
+  "files_sha256": {
+    "experimental/neptune-wire1-backend/loader-check.py": "be6bbe5ca72d4cb07cb1c4f1ced9952dcbd7af5dfc1bae663d9a0d698adcc38a",
+    "experimental/neptune-wire1-backend/ipa-check.py": "69bab2f11311d13492d82acc0438637704b1ba0af32eb1778117110904554828",
+    "experimental/neptune-wire1-backend/LOADER_IPA.md": "6cb3174a3fd3ad146f41ad7cd076b981e75ce5156ad2dcea2984c45a98985b12",
+    ".tools/graphics-wire1-backend/loader-check/result.json": "4b9f22098bc48ed85509b80d6859ae2f27821d43cc7af6ca9efec220197bb6ac",
+    ".tools/graphics-wire1-backend/loader-check/qemu.log": "de063886e3532dcf8ca17641e7e19165d3eba4f6c2500a564f20de822f314f89",
+    ".tools/graphics-wire1-backend/ipa-check-4k-maponly/result.json": "8d9eb1d8a502a432117e3e248ee80faffdbf5d88aacaf64177bc71211e9b0453",
+    ".tools/graphics-wire1-backend/ipa-check-4k-maponly/qemu.log": "90b738b947c321831ca5346eba06a1334251f8543dd730b1fb5d052bd66d8636",
+    ".tools/graphics-wire1-backend/ipa-check-default-maponly/result.json": "ac77375d2dd3fc3f15b6313b3fe3c920c635228f0bbd6cee41ae9876c7b0493b",
+    ".tools/graphics-wire1-backend/ipa-check-default-maponly/qemu.log": "370417998d9e645010c78eedd7ff657f059de5d02cd87e80209114936682d3d5",
+    ".tools/graphics-wire1-backend/ipa-check-4k/qemu.log": "f86830c4e6bf45529e0fba0513c6cb7ccc219a98197212bbefeb8e3fe91bbe56",
+    ".tools/graphics-wire1-backend/ipa-check-4k/failure.json": "3dd25f4d26fa96c36561a21fd927d0247f6b87ef975e3059980434e4a1019830"
+  },
+  "backend_sha256": "4fade33095e08b341ceae2a35ee5dcebb0c452eb6fcc52f562df6f0d223b0da9",
+  "loader_verified": true,
+  "ipa4k_maponly_exit": 0,
+  "default_control_alignment_rejections": 3,
+  "guest_CPU_executed": false,
+  "guest_disks": false,
+  "COM_commands_sent": false,
+  "guest_CPU_mapping_access_verified": false,
+  "Windows_crash_resolution_verified": false,
+  "explicit_guest_unref_verified": false,
+  "retained_failed_teardown": "ipa-check-4k/failure.json",
+  "originals_unchanged": true
+}
