@@ -1,21 +1,49 @@
-# Windows ARM graphics: evidence and isolated experiment
+# Windows ARM graphics: installed 2D and isolated 3D experiments
 
-## Latest Windows and host checkpoints — 2026-10-15
+## Installed adaptive 2D checkpoint — 2026-10-16
 
-The installed native console now presents its RFB frames with Metal; a live
-completed-frame diagnostic confirms the actual GPU path. A separate Windows
-clone booted the pinned fork with hybrid `virtio-ramfb` at PCI slot 7. Windows
-validated and loaded the official ARM64 Red Hat DOD package, reports device
-error 0, and independently measured successful active-mode changes to
-**1920×1080** and **1920×1200**. Secure Boot still reports `True`. An unsupported
-1280×720 mode was refused without changing the display. This is a 2D
-display-only driver. A full Windows restart returned to the desktop. The
-scoped, explicitly approved per-instance port-access correction now allows
-Guest Tools 0.2.0 to connect through the limited desktop account; live display
-status reports the expected adapter, resize support and 1920×1200. The native
-sizing controller and bounded protocol are implemented and tested. Actual
-window-drag/fullscreen fitting and hardware 3D remain acceptance gates.
-[Runtime evidence and remaining gates](VERIFICATION.md).
+The normal installed app now starts the Windows graphics clone through its
+owned Rust engine/supervisor and bundled **QEMU 11.1.2**, with the explicit saved
+`virtio-ramfb` adapter. This production 2D path replaces the earlier private
+QEMU 10 trial wrapper. QMP confirms modern VirtIO display `1af4:1050` at PCI
+slot 7, the original USB/network/RNG/NVMe/serial/HDA positions and the emulated
+TPM. The overlay combines firmware RAMFB, the software VirtIO 2D renderer and
+HID input backpressure. OpenGL, VirGL, Rutabaga and Neptune are disabled; the
+normal firmware source is unchanged. Historical configurations still default
+to the standard RAMFB profile until the user explicitly changes them while
+stopped. [Engine contract](ENGINE_PROTOCOL.md).
+
+Windows actually reports the official ARM64 **Red Hat VirtIO GPU DOD
+22.7.38.43**, device error **0**, and a measured **1512×982** desktop. The
+limited-account Guest Tools 0.2.0 channel is connected. Native fullscreen was
+independently measured at **3024×1964** through Guest Tools; returning to a
+window reported native fitted **1920×1200**, then **1512×982** in a smaller
+window, with that last mode independently measured by the guest. One native
+78-character burst arrived exactly without clipboard or pacing workaround and
+produced **zero new HID overflows**; a further symbols/path and Control+A check
+passed. These observations verify bounded real 2D resize and input behavior.
+They do not measure sustained FPS or establish Windows hardware 3D acceleration.
+Windows DPI/scaling changes are unsupported by this contract.
+
+The installed console presents received RFB frames through Metal. A completed
+GPU-frame diagnostic previously confirmed this Mac presentation path; Metal
+presentation does not make the Windows DOD driver a 3D driver. Earlier actual
+guest tests applied 1920×1080/1920×1200 and refused unsupported 1280×720 without
+changing the current mode; Secure Boot reported `True` after those changes.
+
+The latest GUI adds bounded Guest Tools startup discovery and retains the
+connected console while shutdown is pending. Its expanded integration suite
+passes **41 fixtures**; root subsequently installed the signed bundle with the
+same QEMU bytes. **Live acceptance of that new startup bootstrap is still
+pending.** The earlier receipt marking it staged predates that installation.
+[Exact receipt hashes, source/binary identities, observations and remaining
+gates](VERIFICATION.md#normal-installed-adaptive-2d-runtime--2026-10-16).
+
+## Separate 3D research checkpoints
+
+The experiments below use separate private builds and diskless fixtures. Their
+Neptune/DXMT path is not included in the installed adaptive 2D runtime, and no
+Windows 3D or 60 FPS result is claimed.
 
 The Xcode/Metal dependency below is now resolved: Xcode 27.0 and Apple's Metal
 toolchain are verified locally, and official Homebrew LLVM 15.0.7 static
@@ -24,7 +52,8 @@ libepoxy, native DXMT, Neptune/virglrenderer and QEMU 10.0.12 have built under
 `.tools/graphics-experiment` with at most two compiler jobs and functional
 optimization level 0. The QEMU private copy passes strict signature verification
 with only the public Hypervisor entitlement, and `--version` succeeds. The
-packaged runtime and live VM were not replaced or reconfigured by this work.
+packaged runtime and live VM were not replaced or reconfigured by those 3D
+research builds. The later installed 2D overlay above is a separate change.
 
 The host-only Metal → ANGLE EGLImage → ES3 framebuffer → pixel-pack-buffer → CPU
 test passes **16 trials / 14,084,084 exact pixel comparisons**: private and shared
@@ -92,13 +121,15 @@ It supplies no recovered guest GPU protocol or runtime performance claim.
 
 ## Earlier source inspection and capability checks
 
-The research below preserves the earlier observations and proposals. Statements
-such as “Xcode pending” and “proposal not executed” describe that earlier stage;
-the host checkpoint above records the work completed since then.
+The research below preserves the 2026-10-15 source observations and proposals.
+Its references to the “current” RAMFB-only runtime, absent host resize requests,
+uninstalled DOD package, pending Xcode or proposed first tests describe that
+earlier stage. The installed-2D and separate-research checkpoints above record
+the work completed since then.
 
 Research snapshot: 2026-10-15. This document records source inspection and local capability checks. **Windows GPU acceleration has not been demonstrated in Perpendicular Desktop.** No graphics driver was installed and no running VM, firmware setting, security policy, or engine configuration was changed for this research.
 
-## Current working display
+## Earlier RAMFB-only display
 
 The packaged QEMU 11.1.2 is built with VNC, without OpenGL or Cocoa. Its display list is `none`, `curses`, `dbus`; its graphics devices include `ramfb` and the ordinary 2D `virtio-gpu` devices, but no GL or rutabaga variant. The engine selects `-display none -vga none -device ramfb`. HVF accelerates the guest CPU; it does not establish GPU acceleration.
 
@@ -106,7 +137,7 @@ RAMFB exposes guest memory configured through `fw_cfg` as a display surface. It 
 
 The existing driver media contains `Drivers/viogpudo/w11/ARM64`: a signed-package candidate for the Red Hat VirtIO GPU **display-only** driver, version 22.7.38.43 (INF date 2025-04-18). The SYS is ARM64. Upstream initializes a display-only WDDM driver through `DxgkInitializeDisplayOnlyDriver`; this is not a Direct3D user-mode driver. Its presence on the ISO does not mean it has been installed or tested with this VM. [Driver source](https://github.com/virtio-win/kvm-guest-drivers-windows/blob/c962dba85897b54da0060bcfa80f1b45e163a970/viogpu/viogpudo/driver.cpp), [Windows 11 ARM64 packaging](https://github.com/virtio-win/kvm-guest-drivers-windows/blob/c962dba85897b54da0060bcfa80f1b45e163a970/win11_arm64.ddf).
 
-## Resolution changes
+## Earlier resolution-change analysis
 
 There are three separate behaviors: scaling a host view, accepting a guest mode change, and asking Windows to select a new mode. Today the console handles incoming RFB `DesktopSize` and rescales its image; resizing the Mac window does not request a new Windows resolution.
 
@@ -264,8 +295,8 @@ The first independent backend test should create a Metal texture on ANGLE's quer
 
 This keeps an achievable CPU-copy display path for the native app, with a measurable cost: full 1080p BGRA readback is about 8.3 MB per frame, before VNC copies and transmission. Measure actual readback latency, CPU use, sustained frame rate, memory, and frame correctness; do not infer them from the earlier raw-VNC microbenchmark. A later shared Metal/IOSurface transport could avoid copies, but requires a separate lifecycle/security design.
 
-## Acceptance gates and next step
+## Earlier 3D acceptance plan
 
 The next concrete step is to resolve the full Xcode/Metal and native LLVM 15 toolchain, then build the pinned stack in a private prefix and run the **host-only ANGLE Metal import/readback test**. This can fail early without installing a guest driver or touching the active VM. A successful source build is not an acceleration result.
 
-Subsequent isolated guest acceptance requires: unchanged Secure Boot/TPM/HVCI and no test mode; successful signed driver load/reboot; 2D and resolution handoff without a black screen; D3D11 hardware adapter rendering a known scene with corresponding Metal GPU work (not WARP); repeated resize/reboot/stop-start checks; and finally exact colors/orientation plus stable updates in `VMConsoleView` through the new readback backend. External Cocoa rendering and integrated-console rendering are separate gates. Until these pass, GPU acceleration and automatic Windows resolution remain experimental proposals.
+Subsequent isolated 3D guest acceptance requires: unchanged Secure Boot/TPM/HVCI and no test mode; successful signed 3D driver load/reboot; 2D and resolution handoff without a black screen; D3D11 hardware adapter rendering a known scene with corresponding Metal GPU work (not WARP); repeated resize/reboot/stop-start checks; and finally exact colors/orientation plus stable updates in `VMConsoleView` through the new readback backend. External Cocoa rendering and integrated-console rendering are separate gates. Windows 3D acceleration remains unverified; the installed DOD-based automatic 2D resolution path has its own later acceptance above.

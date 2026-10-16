@@ -2,6 +2,15 @@ use crate::error::{Error, Result};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, clap::ValueEnum)]
+#[serde(rename_all = "kebab-case")]
+#[value(rename_all = "kebab-case")]
+pub enum DisplayAdapter {
+    #[default]
+    Ramfb,
+    VirtioRamfb,
+}
+
 fn default_keyboard_layout() -> String {
     "en-us".into()
 }
@@ -15,6 +24,7 @@ pub struct UpdateOptions<'a> {
     pub guest_tools_iso: Option<&'a Path>,
     pub keyboard_layout: Option<&'a str>,
     pub audio_output: Option<bool>,
+    pub display_adapter: Option<DisplayAdapter>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -39,6 +49,8 @@ pub struct Config {
     pub keyboard_layout: String,
     #[serde(default)]
     pub audio_output: bool,
+    #[serde(default)]
+    pub display_adapter: DisplayAdapter,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -72,6 +84,7 @@ pub struct Vm {
     pub mac_address: String,
     pub keyboard_layout: String,
     pub audio_output: bool,
+    pub display_adapter: DisplayAdapter,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -128,6 +141,30 @@ pub fn validate_resources(cpus: u16, memory_mib: u64, disk_gib: u64) -> Result<(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn display_adapter_is_a_strict_typed_wire_enum() {
+        for (value, adapter) in [
+            ("ramfb", DisplayAdapter::Ramfb),
+            ("virtio-ramfb", DisplayAdapter::VirtioRamfb),
+        ] {
+            assert_eq!(
+                serde_json::from_value::<DisplayAdapter>(serde_json::json!(value)).unwrap(),
+                adapter
+            );
+            assert_eq!(serde_json::to_value(adapter).unwrap(), value);
+        }
+        for value in [
+            serde_json::json!(null),
+            serde_json::json!(false),
+            serde_json::json!(1),
+            serde_json::json!("virtio_ramfb"),
+            serde_json::json!("virtio-gpu"),
+            serde_json::json!("RAMFB"),
+        ] {
+            assert!(serde_json::from_value::<DisplayAdapter>(value).is_err());
+        }
+        assert_eq!(DisplayAdapter::default(), DisplayAdapter::Ramfb);
+    }
     #[test]
     fn resources_enforce_windows_minimums_and_sane_limits() {
         assert!(validate_resources(4, 8192, 64).is_ok());

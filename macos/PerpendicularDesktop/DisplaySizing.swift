@@ -47,9 +47,27 @@ struct GuestDisplayResizeResult: Decodable, Sendable {
 }
 struct GuestDisplayResizeEnvelope: Decodable, Sendable { let display: GuestDisplayResizeResult }
 
+/// The shared engine queue may be occupied after a resize is scheduled. Recheck
+/// admission immediately before process launch; an already-started request cannot
+/// be revoked, and its eventual reply must still pass the controller's guards.
+final class GuestDisplayMutationPermit: @unchecked Sendable {
+    private let lock = NSLock()
+    private let deadline: Double
+    private var revoked = false
+    init(deadline: Double) { self.deadline = deadline }
+    func revoke() { lock.lock(); defer { lock.unlock() }; revoked = true }
+    func validate() throws {
+        lock.lock(); defer { lock.unlock() }
+        guard !revoked, ProcessInfo.processInfo.systemUptime < deadline else {
+            throw EngineFailure(message: "The display adjustment is no longer current. Check Display to try again.", code: "display_attempt_expired")
+        }
+    }
+}
+
 protocol GuestDisplayClient: Sendable {
     func guestDisplayStatus(_ vmID: String) async throws -> GuestDisplayStatus
-    func resizeGuestDisplay(_ vmID: String, mode: GuestDisplayMode, hostDpi: Int) async throws -> GuestDisplayResizeResult
+    func resizeGuestDisplay(_ vmID: String, mode: GuestDisplayMode, hostDpi: Int,
+                            permit: GuestDisplayMutationPermit?) async throws -> GuestDisplayResizeResult
 }
 
 extension EngineClient: GuestDisplayClient {
@@ -57,13 +75,15 @@ extension EngineClient: GuestDisplayClient {
         let result: GuestDisplayStatusEnvelope = try await execute(["guest-display-status", vmID])
         return result.display
     }
-    func resizeGuestDisplay(_ vmID: String, mode: GuestDisplayMode, hostDpi: Int) async throws -> GuestDisplayResizeResult {
+    func resizeGuestDisplay(_ vmID: String, mode: GuestDisplayMode, hostDpi: Int,
+                            permit: GuestDisplayMutationPermit? = nil) async throws -> GuestDisplayResizeResult {
         guard (640...3840).contains(mode.width), (480...2160).contains(mode.height),
               Int64(mode.width) * Int64(mode.height) <= 8_294_400, (96...288).contains(hostDpi) else {
             throw EngineFailure(message: "Choose a supported Windows display size.")
         }
         let result: GuestDisplayResizeEnvelope = try await execute(["guest-display-resize", vmID,
-            "--width", String(mode.width), "--height", String(mode.height), "--host-dpi", String(hostDpi)])
+            "--width", String(mode.width), "--height", String(mode.height), "--host-dpi", String(hostDpi)],
+            beforeExecution: { try permit?.validate() })
         return result.display
     }
 }
@@ -85,6 +105,7 @@ final class DisplaySizingController: ObservableObject {
     private var vmID: String?
     private var backendIdentity = ""
     private var active = false
+    private var wasRunning = false
     private var generation = 0
     private var connectionID: UUID?
     private var layout: RFBDesktopLayout?
@@ -98,19 +119,36 @@ final class DisplaySizingController: ObservableObject {
     private var lastAttempt = -Double.infinity
     private let acknowledgementTimeout: Double
     private let confirmationTimeout: Double
+    private let bootstrapDelays: [Double]
+    private let bootstrapWindow: Double
+    private struct Bootstrap {
+        enum State { case waiting, connected, exhausted }
+        let deadline: Double
+        var attempts = 0
+        var state: State = .waiting
+    }
+    private var bootstrap: Bootstrap?
+    private var bootstrapRetry: Task<Void, Never>?
+    private var bootstrapExpiry: Task<Void, Never>?
     private struct Pending {
-        enum Stage { case acknowledgement, guest, framebuffer }
+        enum Stage { case acknowledgement, guest, recovery, framebuffer }
         let request: VMConsoleResizeRequest
         let mode: GuestDisplayMode
         let hostDpi: Int
         var stage: Stage = .acknowledgement
         var guestConfirmed = false
+        var recoveryUsed = false
+        var confirmationDeadline: Double?
+        var permit: GuestDisplayMutationPermit?
     }
     private var pending: Pending?
 
-    init(acknowledgementTimeout: Double = 3, confirmationTimeout: Double = 8) {
+    init(acknowledgementTimeout: Double = 3, confirmationTimeout: Double = 8,
+         bootstrapDelays: [Double] = [2, 5, 10, 20], bootstrapWindow: Double = 60) {
         self.acknowledgementTimeout = acknowledgementTimeout
         self.confirmationTimeout = confirmationTimeout
+        self.bootstrapDelays = bootstrapDelays
+        self.bootstrapWindow = bootstrapWindow
     }
 
     var isWorking: Bool { engineBusy || pending != nil }
@@ -120,10 +158,13 @@ final class DisplaySizingController: ObservableObject {
                    client: any GuestDisplayClient) {
         let changedBackend = self.vmID != vmID || self.backendIdentity != backendIdentity
         let changedActive = active != (running && allowed)
+        let beganRunning = running && !wasRunning
+        wasRunning = running
         self.vmID = vmID; self.backendIdentity = backendIdentity; self.client = client
         active = running && allowed
-        guard changedBackend || changedActive else { return }
+        guard changedBackend || changedActive || beganRunning else { return }
         invalidate(clearCapabilities: true)
+        if changedBackend || beganRunning { bootstrap = nil }
         if changedBackend {
             connectionID = nil; layout = nil; actualFramebuffer = nil; viewport = nil
             retiredAcknowledgement = nil; lastAttempt = -Double.infinity
@@ -156,7 +197,8 @@ final class DisplaySizingController: ObservableObject {
                   points.width > 0, points.height > 0, scale > 0 else { return }
             if let viewport, viewport.points == points, viewport.scale == scale { return }
             viewport = (points, scale)
-            schedule()
+            if let attempt = pending, attempt.recoveryUsed, !retryTargetIsCurrent(attempt) { failChangedRecoveryTarget() }
+            else { schedule() }
         case .framebuffer(let id, let width, let height):
             guard id == connectionID, width > 0, height > 0 else { return }
             actualFramebuffer = .init(width: width, height: height)
@@ -164,6 +206,10 @@ final class DisplaySizingController: ObservableObject {
         case .layout(let id, let announcement):
             guard id == connectionID else { return }
             layout = announcement
+            if let attempt = pending, attempt.recoveryUsed, !retryTargetIsCurrent(attempt) {
+                failChangedRecoveryTarget()
+                return
+            }
             if retiredAcknowledgement == id, announcement.reason == 1 {
                 // A timed-out/disabled request has no wire ID. Drain its reply
                 // before another request can be correlated on this connection.
@@ -188,8 +234,9 @@ final class DisplaySizingController: ObservableObject {
 
     func checkAgain() {
         guard canCheckAgain else { return }
+        finishBootstrap(connected: false)
         invalidate(clearCapabilities: true)
-        ensureStatus()
+        ensureStatus(manual: true)
     }
 
     private func preferenceChanged() {
@@ -202,20 +249,41 @@ final class DisplaySizingController: ObservableObject {
         generation &+= 1
         debounce?.cancel(); debounce = nil
         timeout?.cancel(); timeout = nil
+        bootstrapRetry?.cancel(); bootstrapRetry = nil
+        bootstrapExpiry?.cancel(); bootstrapExpiry = nil
         if pending?.stage == .acknowledgement { retiredAcknowledgement = connectionID }
+        pending?.permit?.revoke()
         pending = nil; request = nil; wantsStatus = false
         if clearCapabilities {
             capabilities = nil; actualGuest = nil; statusAttempted = false; details = nil
         }
     }
 
-    private func ensureStatus() {
+    private func ensureStatus(manual: Bool = false) {
         guard enabled, active, connectionID != nil, let vmID, let client else {
             if enabled && active { set(.checking, "Waiting for the Windows display…") }
             return
         }
         guard !statusAttempted else { schedule(); return }
         guard !engineBusy else { wantsStatus = true; return }
+        if !manual {
+            if bootstrap == nil { bootstrap = Bootstrap(deadline: ProcessInfo.processInfo.systemUptime + bootstrapWindow) }
+            if bootstrap?.state == .exhausted {
+                set(.unavailable, "Check Guest Tools, then Check Display to try again.")
+                return
+            }
+            if bootstrap?.state == .waiting {
+                guard let budget = bootstrap, budget.attempts <= bootstrapDelays.count,
+                      ProcessInfo.processInfo.systemUptime < budget.deadline else {
+                    finishBootstrap(connected: false)
+                    set(.unavailable, "Check Guest Tools, then Check Display to try again.")
+                    return
+                }
+                bootstrap?.attempts += 1
+                armBootstrapExpiry()
+            }
+        }
+        let checkingBootstrap = bootstrap?.state == .waiting
         statusAttempted = true; engineBusy = true; wantsStatus = false
         let currentGeneration = generation
         set(.checking, "Checking automatic display sizing…")
@@ -226,21 +294,77 @@ final class DisplaySizingController: ObservableObject {
             guard let self else { return }
             self.engineBusy = false
             if currentGeneration == self.generation, self.active, self.enabled {
+                if checkingBootstrap, self.bootstrap?.state != .waiting ||
+                    (checkingBootstrap && ProcessInfo.processInfo.systemUptime >= (self.bootstrap?.deadline ?? -.infinity)) {
+                    self.finishBootstrap(connected: false)
+                    self.set(.unavailable, "Check Guest Tools, then Check Display to try again.")
+                    self.afterEngineOperation()
+                    return
+                }
                 switch result {
                 case .success(let status):
                     self.capabilities = status
                     self.actualGuest = status.current?.mode
                     if !status.connected {
-                        self.set(.unavailable, "Install or reconnect Guest Tools to fit Windows to the window.", detail: status.reason)
+                        if !self.retryBootstrap(code: status.code) {
+                            self.set(.unavailable, "Install or reconnect Guest Tools to fit Windows to the window.", detail: status.reason)
+                        }
                     } else if !status.canResize || !Self.valid(status) {
+                        self.finishBootstrap(connected: true)
                         self.set(.unavailable, "This Windows display cannot change resolution yet.", detail: status.reason)
-                    } else { self.schedule() }
+                    } else { self.finishBootstrap(connected: true); self.schedule() }
                 case .failure(let error):
-                    self.set(.unavailable, "Automatic display sizing is unavailable. Check Guest Tools, then try again.", detail: error.localizedDescription)
+                    if !self.retryBootstrap(code: (error as? EngineFailure)?.code) {
+                        self.set(.unavailable, "Automatic display sizing is unavailable. Check Guest Tools, then try again.", detail: error.localizedDescription)
+                    }
                 }
             }
             self.afterEngineOperation()
         }
+    }
+
+    private func finishBootstrap(connected: Bool) {
+        bootstrapRetry?.cancel(); bootstrapRetry = nil
+        bootstrapExpiry?.cancel(); bootstrapExpiry = nil
+        if connected { bootstrap?.state = .connected }
+        else if bootstrap?.state == .waiting { bootstrap?.state = .exhausted }
+    }
+
+    private func armBootstrapExpiry() {
+        guard bootstrapExpiry == nil, let budget = bootstrap, budget.state == .waiting else { return }
+        let currentGeneration = generation
+        bootstrapExpiry = Task { [weak self] in
+            do { try await Task.sleep(for: .seconds(max(0, budget.deadline - ProcessInfo.processInfo.systemUptime))) } catch { return }
+            guard let self, self.generation == currentGeneration, self.active, self.enabled,
+                  self.bootstrap?.state == .waiting else { return }
+            self.finishBootstrap(connected: false)
+            self.capabilities = nil; self.actualGuest = nil; self.statusAttempted = true
+            self.set(.unavailable, "Check Guest Tools, then Check Display to try again.")
+        }
+    }
+
+    private func retryBootstrap(code: String?) -> Bool {
+        guard ["guest_agent_timeout", "guest_agent_unavailable"].contains(code ?? ""),
+              let budget = bootstrap, budget.state == .waiting, budget.attempts > 0,
+              budget.attempts <= bootstrapDelays.count else {
+            finishBootstrap(connected: false)
+            return false
+        }
+        let delay = bootstrapDelays[budget.attempts - 1]
+        guard ProcessInfo.processInfo.systemUptime + delay < budget.deadline else {
+            finishBootstrap(connected: false)
+            return false
+        }
+        let currentGeneration = generation
+        set(.checking, "Waiting for Guest Tools to start…")
+        bootstrapRetry = Task { [weak self] in
+            do { try await Task.sleep(for: .seconds(delay)) } catch { return }
+            guard let self, self.generation == currentGeneration, self.active, self.enabled,
+                  self.bootstrap?.state == .waiting else { return }
+            self.bootstrapRetry = nil; self.statusAttempted = false
+            self.ensureStatus()
+        }
+        return true
     }
 
     private func afterEngineOperation() {
@@ -328,18 +452,34 @@ final class DisplaySizingController: ObservableObject {
 
     private func beginGuestResize() {
         guard var attempt = pending, attempt.stage == .acknowledgement,
-              !engineBusy, let client, let vmID else { return }
+              !engineBusy else { return }
+        let deadline = ProcessInfo.processInfo.systemUptime + confirmationTimeout
+        attempt.confirmationDeadline = deadline
+        attempt.permit = GuestDisplayMutationPermit(deadline: deadline)
         attempt.stage = .guest; pending = attempt
-        engineBusy = true
         armTimeout(seconds: confirmationTimeout, requestID: attempt.request.id, waitingForAcknowledgement: false)
+        sendGuestResize(attempt)
+    }
+
+    private func isCurrent(_ attempt: Pending, generation: Int) -> Bool {
+        generation == self.generation && active && enabled && connectionID == attempt.request.connectionID &&
+            pending?.request.id == attempt.request.id &&
+            ProcessInfo.processInfo.systemUptime < (attempt.confirmationDeadline ?? -.infinity)
+    }
+
+    private func sendGuestResize(_ attempt: Pending) {
         let currentGeneration = generation
+        guard isCurrent(attempt, generation: currentGeneration), !engineBusy, let client, let vmID else { return }
+        pending?.stage = .guest
+        engineBusy = true
+        lastAttempt = ProcessInfo.processInfo.systemUptime
         Task { [weak self] in
             let result: Result<GuestDisplayResizeResult, Error>
-            do { result = .success(try await client.resizeGuestDisplay(vmID, mode: attempt.mode, hostDpi: attempt.hostDpi)) }
+            do { result = .success(try await client.resizeGuestDisplay(vmID, mode: attempt.mode, hostDpi: attempt.hostDpi, permit: attempt.permit)) }
             catch { result = .failure(error) }
             guard let self else { return }
             self.engineBusy = false
-            if currentGeneration == self.generation, self.pending?.request.id == attempt.request.id, self.active, self.enabled {
+            if self.isCurrent(attempt, generation: currentGeneration) {
                 switch result {
                 case .success(let response):
                     guard response.applied, !response.dpiChanged, response.actual?.mode == attempt.mode,
@@ -354,16 +494,85 @@ final class DisplaySizingController: ObservableObject {
                     self.pending?.stage = .framebuffer
                     self.set(.waiting, "Waiting for Windows to update the display…")
                     self.finishIfConfirmed()
-                case .failure(let error): self.fail("Windows could not adjust the display. Check Guest Tools, then try again.", detail: error.localizedDescription)
+                case .failure(let error):
+                    if let failure = error as? EngineFailure, !attempt.recoveryUsed,
+                       ["guest_agent_timeout", "guest_agent_unavailable"].contains(failure.code ?? "") {
+                        self.recoverGuestResize(attempt, after: failure)
+                    } else {
+                        self.fail("Windows could not adjust the display. Check Guest Tools, then try again.", detail: error.localizedDescription)
+                    }
                 }
             }
             self.afterEngineOperation()
         }
     }
 
+    private func recoverGuestResize(_ attempt: Pending, after failure: EngineFailure) {
+        let currentGeneration = generation
+        guard isCurrent(attempt, generation: currentGeneration), !engineBusy, let client, let vmID else { return }
+        var recovery = attempt
+        recovery.recoveryUsed = true; recovery.stage = .recovery
+        pending = recovery
+        // A shared-queue delay can separate admission from actual execution.
+        // Throttle the retry from completion of the failed command as well.
+        lastAttempt = ProcessInfo.processInfo.systemUptime
+        engineBusy = true
+        set(.checking, "Checking the Windows display after a connection problem…", detail: failure.localizedDescription)
+        // Keep the original confirmation timer. A transport error grants one
+        // status observation and at most one retry, never more time or RFB hints.
+        Task { [weak self] in
+            let result: Result<GuestDisplayStatus, Error>
+            do { result = .success(try await client.guestDisplayStatus(vmID)) }
+            catch { result = .failure(error) }
+            guard let self else { return }
+            self.engineBusy = false
+            if self.isCurrent(recovery, generation: currentGeneration) {
+                switch result {
+                case .success(let status):
+                    guard status.connected, status.canResize, Self.valid(status), let measured = status.current?.mode else {
+                        self.fail("Windows could not confirm its display. Check Guest Tools, then try again.", detail: status.reason ?? status.code)
+                        self.afterEngineOperation()
+                        return
+                    }
+                    self.capabilities = status; self.actualGuest = measured
+                    if measured == recovery.mode {
+                        self.pending?.guestConfirmed = true; self.pending?.stage = .framebuffer
+                        self.set(.waiting, "Waiting for Windows to update the display…")
+                        self.finishIfConfirmed()
+                    } else if self.retryTargetIsCurrent(recovery) {
+                        let interval = max(0.75, Double(status.limits.minIntervalMs) / 1000)
+                        let delay = max(0, self.lastAttempt + interval - ProcessInfo.processInfo.systemUptime)
+                        self.set(.adjusting, "Retrying the Windows display adjustment…", detail: failure.localizedDescription)
+                        self.debounce = Task { [weak self] in
+                            do { try await Task.sleep(for: .seconds(delay)) } catch { return }
+                            guard let self, self.isCurrent(recovery, generation: currentGeneration) else { return }
+                            self.debounce = nil
+                            if self.retryTargetIsCurrent(recovery) { self.sendGuestResize(recovery) }
+                            else { self.failChangedRecoveryTarget() }
+                        }
+                    } else { self.failChangedRecoveryTarget() }
+                case .failure(let error):
+                    self.fail("Windows could not confirm its display. Check Guest Tools, then try again.", detail: error.localizedDescription)
+                }
+            }
+            self.afterEngineOperation()
+        }
+    }
+
+    private func retryTargetIsCurrent(_ attempt: Pending) -> Bool {
+        guard let capabilities, capabilities.modes.contains(attempt.mode), let target = targetMode() else { return false }
+        return target.mode == attempt.mode && target.dpi == attempt.hostDpi && layout?.singleScreenID == attempt.request.screenID
+    }
+
+    private func failChangedRecoveryTarget() {
+        fail("The window or display changed during recovery. Check Display to try again.", detail: nil)
+    }
+
     private func finishIfConfirmed() {
-        guard let attempt = pending, attempt.guestConfirmed, actualFramebuffer == attempt.mode else { return }
+        guard let attempt = pending, isCurrent(attempt, generation: generation),
+              attempt.guestConfirmed, actualFramebuffer == attempt.mode else { return }
         timeout?.cancel(); timeout = nil
+        attempt.permit?.revoke()
         pending = nil; request = nil
         set(.fitted(attempt.mode), "Windows display: \(attempt.mode.width) × \(attempt.mode.height)")
         if targetMode()?.mode != attempt.mode { schedule() }
@@ -383,6 +592,7 @@ final class DisplaySizingController: ObservableObject {
 
     private func fail(_ message: String, detail: String?) {
         timeout?.cancel(); timeout = nil; debounce?.cancel(); debounce = nil
+        pending?.permit?.revoke()
         pending = nil; request = nil
         // Stop automatic attempts until an explicit capability check or a new
         // VM/backend connection. Further viewport notifications cannot retry.

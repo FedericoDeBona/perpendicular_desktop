@@ -29,6 +29,17 @@ Optional ARM64 VirtIO drivers and the independently written Guest Tools can be p
 
 The app bundle contains the Rust engine, QEMU executables, private runtime libraries and firmware. Development builds use ad-hoc code signatures, including the hypervisor entitlement. Signing/notarization for a distributed release remains separate work.
 
+For the optional adaptive 2D display and keyboard backpressure runtime, first prepare the normal runtime/firmware above, then build and explicitly select the patched QEMU candidate:
+
+```sh
+.tools/build-venv/bin/python experimental/runtime-display/build.py \
+  --output .tools/runtime-display/local --jobs 2
+PERPENDICULAR_DISPLAY_RUNTIME_MANIFEST=.tools/runtime-display/local/provenance.json \
+  ./scripts/build-app.sh
+```
+
+The output directory must be fresh. Packaging verifies the candidate, source hashes and signature, and retains its patches and notices; firmware and `qemu-img` still come from the normal runtime. With a VM shut down, select **Configure → Adaptive resolution**. Windows also needs the compatible ARM64 VirtIO display driver and connected Guest Tools; enable **Display → Fit Windows to Window** to adjust its resolution. Existing VMs retain **Standard display** until explicitly changed. This path provides a 2D display, with Windows 3D acceleration still unverified. See [source, reproduction and runtime limits](experimental/runtime-display/README.md).
+
 Choose a Windows 11 **ARM64** installation ISO in the creation wizard. The Windows image and VM data stay outside Git. The Parallels Tools ISO is not a Windows installer and is not a runtime dependency.
 
 ## Structure

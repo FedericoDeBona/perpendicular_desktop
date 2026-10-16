@@ -75,6 +75,11 @@ impl Fixture {
         );
         serde_json::from_slice(&output.stdout).unwrap()
     }
+    fn reject(&self, args: &[&str]) -> Value {
+        let output = self.command().args(args).output().unwrap();
+        assert!(!output.status.success(), "operation unexpectedly succeeded");
+        serde_json::from_slice(&output.stdout).unwrap()
+    }
     fn create(&self) -> Value {
         self.invoke(&[
             "create",
@@ -91,6 +96,252 @@ impl Fixture {
         ])["vm"]
             .clone()
     }
+}
+
+#[test]
+fn display_adapter_default_is_read_only_for_legacy_metadata_and_rejects_unknown_data() {
+    let f = Fixture::new();
+    let vm = f.create();
+    let id = vm["id"].as_str().unwrap();
+    assert_eq!(vm["display_adapter"], "ramfb");
+    let path = Path::new(vm["directory"].as_str().unwrap()).join("config.json");
+    let mut legacy: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+    legacy.as_object_mut().unwrap().remove("display_adapter");
+    let legacy_bytes = serde_json::to_vec(&legacy).unwrap();
+    fs::write(&path, &legacy_bytes).unwrap();
+    assert_eq!(f.invoke(&["list"])["vms"][0]["display_adapter"], "ramfb");
+    assert_eq!(
+        fs::read(&path).unwrap(),
+        legacy_bytes,
+        "reading old metadata must never rewrite it"
+    );
+    for invalid in [
+        serde_json::json!(null),
+        serde_json::json!("virtio-gpu"),
+        serde_json::json!("virtio_ramfb"),
+        serde_json::json!(1),
+    ] {
+        let mut bad = legacy.clone();
+        bad["display_adapter"] = invalid;
+        let bytes = serde_json::to_vec(&bad).unwrap();
+        fs::write(&path, &bytes).unwrap();
+        let listed = f.invoke(&["list"]);
+        assert_eq!(listed["errors"][0]["error"]["code"], "invalid_json");
+        assert!(listed["vms"].as_array().unwrap().is_empty());
+        assert_eq!(fs::read(&path).unwrap(), bytes);
+    }
+    fs::write(&path, legacy_bytes).unwrap();
+    f.invoke(&["update", id, "--name", "Legacy updated"]);
+    let migrated: Value = serde_json::from_slice(&fs::read(path).unwrap()).unwrap();
+    assert_eq!(
+        migrated["display_adapter"], "ramfb",
+        "a normal explicit stopped update serializes the backward default"
+    );
+}
+
+#[test]
+fn display_adapter_persists_through_create_update_clone_import_and_snapshots() {
+    let f = Fixture::new();
+    let created = f.invoke(&[
+        "create",
+        "--name",
+        "Hybrid",
+        "--iso",
+        f.iso.to_str().unwrap(),
+        "--cpus",
+        "1",
+        "--memory-mib",
+        "4096",
+        "--display-adapter",
+        "virtio-ramfb",
+    ]);
+    let vm = &created["vm"];
+    let id = vm["id"].as_str().unwrap();
+    assert_eq!(vm["display_adapter"], "virtio-ramfb");
+    let snapshot = f.invoke(&["snapshot-create", id, "--name", "Hybrid metadata"]);
+    let snapshot_id = snapshot["snapshot"]["id"].as_str().unwrap();
+    let clone = f.invoke(&["clone", id, "--name", "Independent hybrid"]);
+    assert_eq!(clone["vm"]["display_adapter"], "virtio-ramfb");
+    assert_ne!(clone["vm"]["id"], id);
+    assert_ne!(clone["vm"]["mac_address"], vm["mac_address"]);
+    assert_eq!(
+        f.invoke(&["update", id, "--display-adapter", "ramfb"])["vm"]["display_adapter"],
+        "ramfb"
+    );
+    assert_eq!(
+        f.invoke(&["snapshot-restore", id, snapshot_id])["vm"]["display_adapter"],
+        "virtio-ramfb"
+    );
+    let snapshot_path = f
+        .root
+        .join("Snapshots")
+        .join(id)
+        .join(snapshot_id)
+        .join("config.json");
+    let mut snapshot_config: Value =
+        serde_json::from_slice(&fs::read(&snapshot_path).unwrap()).unwrap();
+    snapshot_config
+        .as_object_mut()
+        .unwrap()
+        .remove("display_adapter");
+    fs::write(snapshot_path, serde_json::to_vec(&snapshot_config).unwrap()).unwrap();
+    assert_eq!(
+        f.invoke(&["snapshot-restore", id, snapshot_id])["vm"]["display_adapter"],
+        "ramfb",
+        "historical snapshots keep the original RAMFB hardware default"
+    );
+    let source = Path::new(vm["disk_path"].as_str().unwrap());
+    let imported = f.invoke(&[
+        "import-disk",
+        "--name",
+        "Imported hybrid",
+        "--disk",
+        source.to_str().unwrap(),
+        "--cpus",
+        "1",
+        "--memory-mib",
+        "4096",
+        "--display-adapter",
+        "virtio-ramfb",
+    ]);
+    assert_eq!(imported["vm"]["display_adapter"], "virtio-ramfb");
+    let path = Path::new(imported["vm"]["directory"].as_str().unwrap()).join("config.json");
+    let saved: Value = serde_json::from_slice(&fs::read(path).unwrap()).unwrap();
+    assert_eq!(saved["display_adapter"], "virtio-ramfb");
+    assert_eq!(
+        f.reject(&["update", id, "--display-adapter", "virtio_ramfb"])["error"]["code"],
+        "invalid_arguments"
+    );
+    assert_eq!(
+        f.invoke(&["list"])["vms"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|vm| vm["id"] == id)
+            .unwrap()["display_adapter"],
+        "ramfb"
+    );
+}
+
+#[test]
+fn display_adapter_invalid_create_is_rejected_before_store_mutation() {
+    let f = Fixture::new();
+    let failure = f.reject(&[
+        "create",
+        "--name",
+        "Invalid",
+        "--iso",
+        f.iso.to_str().unwrap(),
+        "--display-adapter",
+        "other",
+    ]);
+    assert_eq!(failure["error"]["code"], "invalid_arguments");
+    assert!(!f.root.exists());
+}
+
+#[test]
+fn display_adapter_unsupported_runtime_is_rejected_before_any_vm_launch_or_repair() {
+    let f = Fixture::new();
+    let vm = f.create();
+    let id = vm["id"].as_str().unwrap();
+    f.invoke(&["update", id, "--display-adapter", "virtio-ramfb"]);
+    let directory = Path::new(vm["directory"].as_str().unwrap());
+    let saved_config = fs::read(directory.join("config.json")).unwrap();
+    let vars = fs::metadata(directory.join("efi-vars.fd"))
+        .unwrap()
+        .modified()
+        .unwrap();
+    let probe_trace = f._temp.path().join("probe-argv.jsonl");
+    let output = f
+        .command()
+        .env("PERPENDICULAR_MOCK_PROBE_TRACE", &probe_trace)
+        .args(["start", id])
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let failure: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(failure["error"]["code"], "display_adapter_unsupported");
+    assert_eq!(
+        fs::read_to_string(&probe_trace).unwrap().trim(),
+        r#"["-device", "help"]"#
+    );
+    assert!(!f.trace.exists());
+    assert!(!directory.join("qemu.log").exists());
+    assert!(!Path::new(vm["qmp_socket"].as_str().unwrap())
+        .parent()
+        .unwrap()
+        .join("launch.json")
+        .exists());
+    assert_eq!(
+        fs::read(directory.join("config.json")).unwrap(),
+        saved_config
+    );
+    assert_eq!(
+        fs::metadata(directory.join("efi-vars.fd"))
+            .unwrap()
+            .modified()
+            .unwrap(),
+        vars
+    );
+    let host = f.invoke(&["system-info"]);
+    assert_eq!(host["display_adapters"]["ramfb"]["available"], true);
+    assert_eq!(
+        host["display_adapters"]["virtio-ramfb"]["code"],
+        "display_adapter_unsupported"
+    );
+    let output = f
+        .command()
+        .env("PERPENDICULAR_MOCK_DISPLAY", "hybrid")
+        .arg("system-info")
+        .output()
+        .unwrap();
+    let supported: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(
+        supported["display_adapters"]["virtio-ramfb"],
+        serde_json::json!({"available":true,"code":"supported","reason":null})
+    );
+}
+
+#[test]
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+fn display_adapter_live_guards_and_legacy_launch_record_remain_owned_without_rewrite() {
+    let f = Fixture::new();
+    let vm = f.create();
+    let id = vm["id"].as_str().unwrap();
+    f.invoke(&["start", id]);
+    let directory = Path::new(vm["directory"].as_str().unwrap());
+    let path = directory.join("config.json");
+    let mut legacy: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+    legacy.as_object_mut().unwrap().remove("display_adapter");
+    let config_bytes = serde_json::to_vec(&legacy).unwrap();
+    fs::write(&path, &config_bytes).unwrap();
+    let runtime = Path::new(vm["qmp_socket"].as_str().unwrap())
+        .parent()
+        .unwrap();
+    let launch_path = runtime.join("launch.json");
+    let mut launch: Value = serde_json::from_slice(&fs::read(&launch_path).unwrap()).unwrap();
+    launch["config"]
+        .as_object_mut()
+        .unwrap()
+        .remove("display_adapter");
+    let launch_bytes = serde_json::to_vec(&launch).unwrap();
+    fs::write(&launch_path, &launch_bytes).unwrap();
+    let failure = f.reject(&["update", id, "--display-adapter", "virtio-ramfb"]);
+    assert_eq!(failure["error"]["code"], "vm_running");
+    fs::remove_file(runtime.join("runtime.json")).unwrap();
+    let listed = f.invoke(&["list"]);
+    assert_eq!(listed["vms"][0]["state"], "running");
+    assert_eq!(listed["vms"][0]["display_adapter"], "ramfb");
+    assert_eq!(fs::read(&path).unwrap(), config_bytes);
+    assert_eq!(fs::read(&launch_path).unwrap(), launch_bytes);
+    assert_eq!(
+        f.reject(&["update", id, "--display-adapter", "virtio-ramfb"])["error"]["code"],
+        "vm_running"
+    );
+    assert_eq!(f.reject(&["start", id])["error"]["code"], "vm_running");
+    assert_eq!(fs::read(&path).unwrap(), config_bytes);
+    assert_eq!(fs::read(&launch_path).unwrap(), launch_bytes);
+    f.invoke(&["stop", id, "--force"]);
 }
 
 impl Drop for Fixture {
@@ -1298,6 +1549,13 @@ esac
 const MOCK_QEMU: &str = r#"#!/usr/bin/python3
 import json, os, socket, sys
 args=sys.argv[1:]
+if args==['-device','help']:
+    trace=os.environ.get('PERPENDICULAR_MOCK_PROBE_TRACE')
+    if trace:
+        with open(trace,'a') as output: output.write(json.dumps(args)+'\n')
+    print('name "ramfb", bus System')
+    if os.environ.get('PERPENDICULAR_MOCK_DISPLAY')=='hybrid': print('name "virtio-ramfb", bus PCI')
+    sys.exit(0)
 def option(name): return args[args.index(name)+1]
 uuid=option('-uuid'); name=option('-name'); path=option('-qmp')[5:].split(',')[0]
 state='prelaunch'

@@ -2,6 +2,19 @@ import AppKit
 import Foundation
 import SwiftUI
 
+enum DisplayAdapter: String, Codable, CaseIterable, Identifiable, Sendable {
+    case ramfb
+    case virtioRAMFB = "virtio-ramfb"
+
+    var id: String { rawValue }
+    var label: String {
+        switch self {
+        case .ramfb: "Standard display"
+        case .virtioRAMFB: "Adaptive resolution"
+        }
+    }
+}
+
 struct VirtualMachine: Codable, Identifiable, Hashable, Sendable {
     let id: String
     var name: String
@@ -22,6 +35,38 @@ struct VirtualMachine: Codable, Identifiable, Hashable, Sendable {
     var guestToolsIsoPath: String?
     var keyboardLayout: String?
     var audioOutput: Bool?
+    var displayAdapter: DisplayAdapter
+
+    enum CodingKeys: String, CodingKey {
+        case id, name, state, cpus, memoryMib, diskGib, isoPath, directory, diskPath, createdAt
+        case backend, qmpSocket, vncSocket, lastError, tpmEnabled, secureBootState
+        case guestToolsIsoPath, keyboardLayout, audioOutput, displayAdapter
+    }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        id = try values.decode(String.self, forKey: .id)
+        name = try values.decode(String.self, forKey: .name)
+        state = try values.decode(String.self, forKey: .state)
+        cpus = try values.decode(Int.self, forKey: .cpus)
+        memoryMib = try values.decode(Int.self, forKey: .memoryMib)
+        diskGib = try values.decode(Int.self, forKey: .diskGib)
+        isoPath = try values.decodeIfPresent(String.self, forKey: .isoPath)
+        directory = try values.decode(String.self, forKey: .directory)
+        diskPath = try values.decode(String.self, forKey: .diskPath)
+        createdAt = try values.decode(String.self, forKey: .createdAt)
+        backend = try values.decode(String.self, forKey: .backend)
+        qmpSocket = try values.decode(String.self, forKey: .qmpSocket)
+        vncSocket = try values.decode(String.self, forKey: .vncSocket)
+        lastError = try values.decodeIfPresent(String.self, forKey: .lastError)
+        tpmEnabled = try values.decodeIfPresent(Bool.self, forKey: .tpmEnabled)
+        secureBootState = try values.decodeIfPresent(String.self, forKey: .secureBootState)
+        guestToolsIsoPath = try values.decodeIfPresent(String.self, forKey: .guestToolsIsoPath)
+        keyboardLayout = try values.decodeIfPresent(String.self, forKey: .keyboardLayout)
+        audioOutput = try values.decodeIfPresent(Bool.self, forKey: .audioOutput)
+        displayAdapter = values.contains(.displayAdapter)
+            ? try values.decode(DisplayAdapter.self, forKey: .displayAdapter) : .ramfb
+    }
 
     var isActive: Bool { ["running", "paused", "starting", "stopping"].contains(state) }
     var isStopped: Bool { ["stopped", "crashed"].contains(state) }
@@ -98,6 +143,7 @@ private struct FailureResponse: Decodable {
 
 struct EngineFailure: Error, LocalizedError, Sendable {
     let message: String
+    var code: String? = nil
     var errorDescription: String? { message }
 }
 
@@ -124,16 +170,18 @@ final class EngineClient: @unchecked Sendable {
         return candidates.first { files.isExecutableFile(atPath: $0.path) }
     }
 
-    func execute<T: Decodable & Sendable>(_ arguments: [String], as type: T.Type = T.self) async throws -> T {
+    func execute<T: Decodable & Sendable>(_ arguments: [String], as type: T.Type = T.self,
+                                         beforeExecution: (@Sendable () throws -> Void)? = nil) async throws -> T {
         try await withCheckedThrowingContinuation { continuation in
             queue.async {
-                do { continuation.resume(returning: try Self.run(arguments, as: type)) }
+                do { continuation.resume(returning: try Self.run(arguments, as: type, beforeExecution: beforeExecution)) }
                 catch { continuation.resume(throwing: error) }
             }
         }
     }
 
-    private static func run<T: Decodable & Sendable>(_ arguments: [String], as type: T.Type) throws -> T {
+    private static func run<T: Decodable & Sendable>(_ arguments: [String], as type: T.Type,
+                                                   beforeExecution: (@Sendable () throws -> Void)?) throws -> T {
         guard let executable = executableURL() else {
             throw EngineFailure(message: "The Perpendicular engine could not be found. Reinstall the application, or select a development engine using PERPENDICULAR_ENGINE.")
         }
@@ -154,6 +202,7 @@ final class EngineClient: @unchecked Sendable {
         process.standardOutput = output
         process.standardError = diagnostic
         process.standardInput = FileHandle.nullDevice
+        try beforeExecution?()
         try process.run()
         // Full copies can legitimately take much longer than lifecycle queries.
         let transfer = ["clone", "import-disk", "export-disk"].contains(arguments.first ?? "")
@@ -173,7 +222,7 @@ final class EngineClient: @unchecked Sendable {
         let decoder = JSONDecoder()
         decoder.keyDecodingStrategy = .convertFromSnakeCase
         if let failure = try? decoder.decode(FailureResponse.self, from: data) {
-            throw EngineFailure(message: failure.error.message)
+            throw EngineFailure(message: failure.error.message, code: failure.error.code)
         }
         guard process.terminationStatus == 0 else {
             let stderr = (try? String(contentsOf: errorURL, encoding: .utf8))?.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -210,6 +259,10 @@ final class LibraryModel: ObservableObject {
     }
     var selectedVM: VirtualMachine? { machines.first { $0.id == selectedID } }
     var canControl: Bool { didLoad && connectionError == nil && !isBusy }
+
+    func canConfigure(vmID: String) -> Bool {
+        canControl && machines.first(where: { $0.id == vmID })?.state == "stopped"
+    }
 
     func load() async {
         guard !isBusy else { return }
@@ -257,6 +310,21 @@ final class LibraryModel: ObservableObject {
         isBusy = false
         self.operation = ""
         await refresh()
+    }
+
+    func updateConfiguration(vmID: String, name: String, cpus: Int, memory: Int,
+                             keyboardLayout: String, audioOutput: Bool, displayAdapter: DisplayAdapter,
+                             iso: String?, driverISO: String?) async throws {
+        guard canConfigure(vmID: vmID), let vm = machines.first(where: { $0.id == vmID }) else {
+            throw EngineFailure(message: "Shut down the virtual machine and refresh its status before changing its configuration.")
+        }
+        var arguments = ["update", vmID, "--name", name.trimmingCharacters(in: .whitespacesAndNewlines),
+                         "--cpus", String(cpus), "--memory-mib", String(memory),
+                         "--keyboard-layout", keyboardLayout, "--audio-output", audioOutput ? "true" : "false"]
+        if displayAdapter != vm.displayAdapter { arguments += ["--display-adapter", displayAdapter.rawValue] }
+        if let iso, iso != vm.isoPath { arguments += ["--iso", iso] }
+        if let driverISO, driverISO != vm.guestToolsIsoPath { arguments += ["--guest-tools-iso", driverISO] }
+        try await perform(arguments, operation: "Saving configuration…")
     }
 
     func create(name: String, iso: String, cpus: Int, memory: Int, disk: Int) async throws {

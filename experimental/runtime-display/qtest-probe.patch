@@ -1,0 +1,169 @@
+--- a/ui/vnc.c
++++ b/ui/vnc.c
+@@ -4716,3 +4716,46 @@
+     qemu_add_opts(&qemu_vnc_opts);
+ }
+ opts_init(vnc_register_config);
++
++/* Separate QA patch only. Not present in the production candidate. */
++uint64_t vnc_runtime_test_visible(void);
++uint64_t vnc_runtime_test_slots(void);
++void vnc_runtime_test_rebind(uint64_t head, Error **errp);
++void vnc_runtime_test_display(bool create, Error **errp);
++
++uint64_t vnc_runtime_test_visible(void)
++{
++    VncDisplay *vd = vnc_display_find(NULL);
++    return vd ? UINT64_C(1) << qemu_console_get_index(vd->dcl.con) : 0;
++}
++uint64_t vnc_runtime_test_slots(void)
++{
++    uint64_t used = 0;
++    unsigned int i;
++    for (i = 0; i < VNC_INPUT_CLEANUP_SLOTS; i++) {
++        used += vnc_input_cleanups[i].con != NULL;
++    }
++    return used;
++}
++void vnc_runtime_test_rebind(uint64_t head, Error **errp)
++{
++    VncDisplay *vd = vnc_display_find(NULL);
++    VncState *vs = vd ? QTAILQ_FIRST(&vd->clients) : NULL;
++    if (!vs || head > 1 || !vnc_input_display_idle(vd)) {
++        error_setg(errp, "Cannot rebind while keyboard input is pending");
++        return;
++    }
++    vnc_input_queue_switch(vs, head);
++    vnc_input_try_switch(vs);
++}
++void vnc_runtime_test_display(bool create, Error **errp)
++{
++    VncDisplay *vd = vnc_display_find(NULL);
++    if (create) {
++        if (!vd) {
++            vnc_display_new("default", errp);
++        }
++    } else if (vd) {
++        vnc_display_free(vd);
++    }
++}
+--- a/hw/usb/dev-hid.c
++++ b/hw/usb/dev-hid.c
+@@ -35,6 +35,8 @@
+ #include "hw/usb/hid.h"
+ #include "hw/core/qdev-properties.h"
+ #include "qom/object.h"
++#include "qapi/visitor.h"
++#include "system/qtest.h"
+ 
+ struct USBHIDState {
+     USBDevice dev;
+@@ -43,6 +45,7 @@
+     uint32_t usb_version;
+     char *display;
+     uint32_t head;
++    bool input_test_ignore_ready;
+ };
+ 
+ #define TYPE_USB_HID "usb-hid"
+@@ -695,6 +698,75 @@
+     hid_free(&us->hid);
+ }
+ 
++uint64_t vnc_runtime_test_visible(void);
++uint64_t vnc_runtime_test_slots(void);
++void vnc_runtime_test_rebind(uint64_t head, Error **errp);
++void vnc_runtime_test_display(bool create, Error **errp);
++
++static bool usb_hid_input_test_ready(DeviceState *dev)
++{
++    USBHIDState *us = container_of((HIDState *)dev, USBHIDState, hid);
++
++    return us->input_test_ignore_ready || us->hid.n == 0;
++}
++static void usb_hid_input_test_pending(Object *obj, Visitor *v, const char *name,
++                                      void *opaque, Error **errp)
++{
++    uint64_t value = USB_HID(obj)->hid.n;
++
++    visit_type_uint64(v, name, &value, errp);
++}
++static void usb_hid_input_test_poll(Object *obj, Visitor *v, const char *name,
++                                   void *opaque, Error **errp)
++{
++    uint8_t report[8] = { 0 };
++    uint64_t value = 0;
++    int i;
++
++    hid_keyboard_poll(&USB_HID(obj)->hid, report, sizeof(report));
++    for (i = 0; i < sizeof(report); i++) {
++        value = (value << 8) | report[i];
++    }
++    visit_type_uint64(v, name, &value, errp);
++}
++static void usb_hid_input_test_get_bypass(Object *obj, Visitor *v, const char *name,
++                                         void *opaque, Error **errp)
++{
++    visit_type_bool(v, name, &USB_HID(obj)->input_test_ignore_ready, errp);
++}
++static void usb_hid_input_test_set_bypass(Object *obj, Visitor *v, const char *name,
++                                         void *opaque, Error **errp)
++{
++    visit_type_bool(v, name, &USB_HID(obj)->input_test_ignore_ready, errp);
++}
++static void usb_hid_input_test_visible(Object *obj, Visitor *v, const char *name,
++                                       void *opaque, Error **errp)
++{
++    uint64_t mask = vnc_runtime_test_visible();
++    visit_type_uint64(v, name, &mask, errp);
++}
++static void usb_hid_input_test_slots(Object *obj, Visitor *v, const char *name,
++                                     void *opaque, Error **errp)
++{
++    uint64_t slots = vnc_runtime_test_slots();
++    visit_type_uint64(v, name, &slots, errp);
++}
++static void usb_hid_input_test_rebind(Object *obj, Visitor *v, const char *name,
++                                      void *opaque, Error **errp)
++{
++    uint64_t head = 0;
++    if (visit_type_uint64(v, name, &head, errp)) {
++        vnc_runtime_test_rebind(head, errp);
++    }
++}
++static void usb_hid_input_test_display(Object *obj, Visitor *v, const char *name,
++                                       void *opaque, Error **errp)
++{
++    bool create = false;
++    if (visit_type_bool(v, name, &create, errp)) {
++        vnc_runtime_test_display(create, errp);
++    }
++}
+ static void usb_hid_initfn(USBDevice *dev, int kind,
+                            const USBDesc *usb1, const USBDesc *usb2,
+                            Error **errp)
+@@ -720,6 +792,24 @@
+     usb_desc_init(dev);
+     us->intr = usb_ep_get(dev, USB_TOKEN_IN, 1);
+     hid_init(&us->hid, kind, usb_hid_changed);
++    if (kind == HID_KEYBOARD && qtest_enabled()) {
++        qemu_input_handler_set_keyboard_ready(us->hid.s, usb_hid_input_test_ready);
++        object_property_add(OBJECT(dev), "x-input-test-pending", "uint64",
++                            usb_hid_input_test_pending, NULL, NULL, NULL);
++        object_property_add(OBJECT(dev), "x-input-test-poll", "uint64",
++                            usb_hid_input_test_poll, NULL, NULL, NULL);
++        object_property_add(OBJECT(dev), "x-input-test-visible-mask", "uint64",
++                            usb_hid_input_test_visible, NULL, NULL, NULL);
++        object_property_add(OBJECT(dev), "x-runtime-test-cleanup-slots", "uint64",
++                            usb_hid_input_test_slots, NULL, NULL, NULL);
++        object_property_add(OBJECT(dev), "x-runtime-test-display", "bool",
++                            NULL, usb_hid_input_test_display, NULL, NULL);
++        object_property_add(OBJECT(dev), "x-input-test-rebind", "uint64",
++                            NULL, usb_hid_input_test_rebind, NULL, NULL);
++        object_property_add(OBJECT(dev), "x-input-test-ignore-ready", "bool",
++                            usb_hid_input_test_get_bypass, usb_hid_input_test_set_bypass,
++                            NULL, NULL);
++    }
+     if (us->display && us->hid.s) {
+         qemu_input_handler_bind(us->hid.s, us->display, us->head, NULL);
+     }

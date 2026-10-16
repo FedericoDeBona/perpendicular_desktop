@@ -1,0 +1,46 @@
+{
+  "schema": 1,
+  "qemu_version": "11.1.2",
+  "upstream_archive_sha256": "731b5681e4bb18be313231579b8efd0296c5b015fa36dc533874b639ba838016",
+  "files": {
+    "hw/display/virtio-ramfb.c": null,
+    "hw/display/virtio-ramfb.h": null,
+    "hw/display/meson.build": "36fb16a74d50369756313baaecee09b687139effa5bfa3aed03e2e61025e6abd",
+    "include/ui/input.h": "7ebddaca72c431b3fd91fd4b96fb5c23d2bdd99b416da655625339b8d515426f",
+    "ui/input.c": "619089241c78af002e296ce54627ae2a30cb3421dc8684e8d879471e3af43b83",
+    "hw/input/hid.c": "583b803df07e7f9c46a56b189c4dda519f4ab7e30973e6dbe1472f3d5126ceda",
+    "ui/vnc.h": "5382ac63e7a21ed9879079b0f41076b9c2d488d438060bd6d90af322f0bcf7fa",
+    "ui/vnc.c": "491a8906ccffc3b39367ec30d35212f4dea011faab1a2ac4176978f7f0c51f0e",
+    "ui/vnc-jobs.c": "84806ac640a91af448febaf16ec6e6f687397e4bf8d73cbc16ca2f8f1cc2188c",
+    "ui/vnc-auth-sasl.c": "d40c8ac8efdd97bd20a595cc0ca967edfd2bb0d44bbbc233b2fe02d5e49ab178",
+    "ui/vnc-auth-vencrypt.c": "ea3ca8efffa2ae4484f5f54fb7cf91b87dd9dded8633f2e90875cebd1e51072c",
+    "ui/vnc-ws.c": "11b9ac92fe85314d6cc8cd9ef1c0a9eb859e0b35d44284e8aa2f16ee044e9cc0"
+  },
+  "patched_files": {
+    "hw/display/virtio-ramfb.c": "32e9ae4ed8796c358fdc6af5a80def62006009ddf0b0d08d26b9a2e5a38b06f9",
+    "hw/display/virtio-ramfb.h": "f122f09a0d06f4d214c1a42011f5105bafa16f42cd810a946d8ad0d4cfbc01c3",
+    "hw/display/meson.build": "caede67555cba70d70a09b897d13a123dcc3990256affa97d94fb97ef864453e",
+    "include/ui/input.h": "a1c2fbbd12cecff0f8c7cc2f4aa0c8bf83b94ba1663e9ea34fc8943f345c2e6e",
+    "ui/input.c": "58f7a044d95a919e887bac5eb186e080b8e2bddea4125592600303061571a0be",
+    "hw/input/hid.c": "6294e2d297900ce43ac56f14ffa23ad7bb659714d96b2cbb311de99f626ab822",
+    "ui/vnc.h": "8303661fdd6f6d434de89a5a6d2a51d0fadfcf1b440957d2c03e39fed0fa82a8",
+    "ui/vnc.c": "6256d21d34911f1efaca257d5c58fe87890a9493f244148829e31c5506b85921",
+    "ui/vnc-jobs.c": "d09d84644424354a22ec1d8fc72151d5365f1d1f33411d7495fe805ddf95970e",
+    "ui/vnc-auth-sasl.c": "e09e58566e46dbcf57ea2ee7eebbe19f9270ae3701c29612bbb46885f6230830",
+    "ui/vnc-auth-vencrypt.c": "5c82d13fd6dedd8b30a714c16a17afd64d7f66f1477815755979d44983ffe376",
+    "ui/vnc-ws.c": "36de73cde42294a6cd8904ff2e3083aa236d59c6b3ad30fa5a96faf02e3742ed"
+  },
+  "utm_revision": "88e5ee7ec6703662fec7b638cca74c4769e683d6",
+  "utm_files": {
+    "hw/display/virtio-ramfb.c": "a48017c8fc346e106c51dc77bd033194e63babc65660bc8ec5198c6f4d7cf267",
+    "hw/display/virtio-ramfb.h": "f122f09a0d06f4d214c1a42011f5105bafa16f42cd810a946d8ad0d4cfbc01c3"
+  },
+  "qa_files": {
+    "ui/vnc.c": "6256d21d34911f1efaca257d5c58fe87890a9493f244148829e31c5506b85921",
+    "hw/usb/dev-hid.c": "51619a7b99241667c593cc4d5c3c5bce998799a0676dc38af8b9495d4058d168"
+  },
+  "qa_patched_files": {
+    "ui/vnc.c": "605d16a65b94dd69e477d4b6f4533f976bc59ee66c967adc1e57841274c04f10",
+    "hw/usb/dev-hid.c": "174ab6825b5bece5a79065da38a55256a6949c734327d3e1d7a3b51590e1d551"
+  }
+}

@@ -15,6 +15,14 @@ QEMU source and corresponding license:
 https://download.qemu.org/qemu-11.1.2.tar.xz
 https://www.qemu.org/docs/master/about/license.html
 
+The optional adaptive-display runtime applies the GPLv2 QEMU patches retained
+in experimental/runtime-display. Its 2D RAMFB/VirtIO wrapper is adapted from the
+UTM QEMU fork at 88e5ee7ec6703662fec7b638cca74c4769e683d6:
+https://github.com/utmapp/qemu/tree/88e5ee7ec6703662fec7b638cca74c4769e683d6
+The applied patches, source/dependency provenance and notices accompany that
+modified binary in ThirdPartyNotices/PerpendicularRuntime. No Parallels code is
+used by that runtime.
+
 Secure firmware source (also included in the pinned QEMU source archive):
 https://github.com/tianocore/edk2
 

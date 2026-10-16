@@ -134,6 +134,7 @@ struct ConfigurationView: View {
     @ViewState<String?> private var driverISO: String?
     @ViewState<String> private var keyboardLayout = "en-us"
     @ViewState<Bool> private var audioOutput = false
+    @ViewState<DisplayAdapter> private var displayAdapter = .ramfb
     @ViewState<String?> private var localError: String?
 
     var body: some View {
@@ -150,6 +151,11 @@ struct ConfigurationView: View {
                     Text("Italian").tag("it")
                 }
                 Toggle("Play Windows audio on this Mac", isOn: $audioOutput)
+                Picker("Display", selection: $displayAdapter) {
+                    ForEach(DisplayAdapter.allCases) { adapter in Text(adapter.label).tag(adapter) }
+                }
+                Text("Adaptive resolution requires the VirtIO display driver in Windows. For automatic resizing, install Perpendicular Guest Tools and enable Fit Windows to Window.")
+                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 if let tpm = vm.tpmEnabled { LabeledContent("TPM 2.0", value: tpm ? "Enabled" : "Disabled") }
                 if let secureBoot = vm.secureBootState {
                     LabeledContent("Secure Boot", value: secureBoot == "verified" ? "Verified in guest" : "Not yet verified in guest")
@@ -166,22 +172,24 @@ struct ConfigurationView: View {
                         Button("Choose Driver ISO…") { if let path = chooseWindowsISO(current: driverISO, driverDisc: true) { driverISO = path } }
                     }
                 }
-            }.formStyle(.grouped)
+            }.formStyle(.grouped).disabled(!library.canConfigure(vmID: vm.id))
+            if !library.canConfigure(vmID: vm.id), !library.isBusy {
+                Text("Shut down this virtual machine and refresh its status to change its configuration.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
             HStack {
                 Spacer()
                 Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction).disabled(library.isBusy)
                 Button("Save Changes") {
                     Task {
-                        var args = ["update", vm.id, "--name", name.trimmingCharacters(in: .whitespacesAndNewlines), "--cpus", String(cpus), "--memory-mib", String(memory)]
-                        args += ["--keyboard-layout", keyboardLayout, "--audio-output", audioOutput ? "true" : "false"]
-                        if let iso, iso != vm.isoPath { args += ["--iso", iso] }
-                        if let driverISO, driverISO != vm.guestToolsIsoPath { args += ["--guest-tools-iso", driverISO] }
                         do {
-                            try await library.perform(args, operation: "Saving configuration…")
+                            try await library.updateConfiguration(vmID: vm.id, name: name, cpus: cpus, memory: memory,
+                                keyboardLayout: keyboardLayout, audioOutput: audioOutput, displayAdapter: displayAdapter,
+                                iso: iso, driverISO: driverISO)
                             dismiss()
                         } catch { localError = error.localizedDescription }
                     }
-                }.buttonStyle(.borderedProminent).keyboardShortcut(.defaultAction).disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !library.canControl || !vm.isStopped)
+                }.buttonStyle(.borderedProminent).keyboardShortcut(.defaultAction).disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !library.canConfigure(vmID: vm.id))
             }
         }.padding(26).frame(width: 580, height: 660).interactiveDismissDisabled(library.isBusy)
             .alert("Couldn’t Save Configuration", isPresented: Binding(get: { localError != nil }, set: { if !$0 { localError = nil } })) {
@@ -190,6 +198,7 @@ struct ConfigurationView: View {
             .onAppear {
                 name = vm.name; cpus = vm.cpus; memory = vm.memoryMib; iso = vm.isoPath; driverISO = vm.guestToolsIsoPath
                 keyboardLayout = vm.keyboardLayout ?? "en-us"; audioOutput = vm.audioOutput ?? false
+                displayAdapter = vm.displayAdapter
             }
     }
 }

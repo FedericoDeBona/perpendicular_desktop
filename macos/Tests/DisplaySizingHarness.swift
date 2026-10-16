@@ -16,6 +16,7 @@ private func runDisplaySizingFixture() throws {
         return data.split(separator: "\n").compactMap { try? JSONSerialization.jsonObject(with: Data($0.utf8)) as? [String: Any] }
     }
     func resizeCalls() -> [[String: Any]] { commands().filter { $0["command"] as? String == "guest-display-resize" } }
+    func commandNames() -> [String] { commands().compactMap { $0["command"] as? String } }
     func wait(_ description: String, _ predicate: () -> Bool, timeout: Double = 8) {
         let deadline = Date().addingTimeInterval(timeout)
         while !predicate(), Date() < deadline { RunLoop.current.run(until: Date().addingTimeInterval(0.01)) }
@@ -23,7 +24,9 @@ private func runDisplaySizingFixture() throws {
     }
     func pump(_ seconds: Double) { RunLoop.current.run(until: Date().addingTimeInterval(seconds)) }
     _ = NSApplication.shared
-    let controller = DisplaySizingController(acknowledgementTimeout: 0.45, confirmationTimeout: 1.6)
+    let controller = DisplaySizingController(acknowledgementTimeout: 0.45, confirmationTimeout: 1.6,
+        bootstrapDelays: scenario.hasPrefix("bootstrap-") ? [0.08, 0.08, 0.08, 0.08] : [2, 5, 10, 20],
+        bootstrapWindow: scenario == "bootstrap-deadline" ? 0.45 : 60)
     let view = VMFramebufferView(frame: NSRect(x: 0, y: 0, width: 640, height: 360))
     let window = NSWindow(contentRect: view.bounds, styleMask: [], backing: .buffered, defer: false)
     window.isReleasedWhenClosed = false
@@ -46,7 +49,150 @@ private func runDisplaySizingFixture() throws {
     view.configure(socketPath: socket, isActive: true)
     let target = GuestDisplayMode(width: 1280, height: 720)
     let original = GuestDisplayMode(width: 800, height: 600)
-    if ["success", "announcement", "retina", "coalescing", "frame-timeout"].contains(scenario) {
+    if scenario.hasPrefix("bootstrap-") {
+        let status = "guest-display-status"
+        if ["bootstrap-ready", "bootstrap-exhausted"].contains(scenario) {
+            if scenario == "bootstrap-exhausted" {
+                wait("bootstrap status budget exhausted") { controller.phase == .unavailable && commandNames().count == 5 }
+                precondition(commandNames() == Array(repeating: status, count: 5) && controller.request == nil)
+                for width in 1300..<1340 {
+                    controller.receive(.viewport(points: CGSize(width: width, height: 800), backingScale: 1), vmID: "fixture-vm")
+                }
+                controller.configure(vmID: "fixture-vm", backendIdentity: "fixture-display", running: true, allowed: false, client: client)
+                controller.configure(vmID: "fixture-vm", backendIdentity: "fixture-display", running: true, allowed: true, client: client)
+                controller.enabled = false; controller.enabled = true
+                pump(0.35)
+                precondition(commandNames().count == 5 && controller.request == nil, "Viewport/tab/preference changes refilled the bootstrap budget")
+                controller.receive(.viewport(points: CGSize(width: 1280, height: 720), backingScale: 1), vmID: "fixture-vm")
+                mark("agent-ready")
+                controller.checkAgain() // A deliberate user check still works after exhaustion.
+            }
+            wait("guest ready before normal resize confirmation") { controller.phase == .waiting }
+            let expectedStatuses = scenario == "bootstrap-ready" ? 3 : 6
+            precondition(commandNames() == Array(repeating: status, count: expectedStatuses) + ["guest-display-resize"], "Bootstrap mutated Windows before readiness or looped")
+            precondition(controller.actualFramebuffer == original && controller.phase != .fitted(target))
+            mark("allow-frame")
+            wait("bootstrap success still requires received pixels") { controller.phase == .fitted(target) }
+        } else if ["bootstrap-deadline", "bootstrap-hidden"].contains(scenario) {
+            wait("held bootstrap status") { exists("bootstrap-held") }
+            if scenario == "bootstrap-hidden" {
+                controller.configure(vmID: "fixture-vm", backendIdentity: "fixture-display", running: true, allowed: false, client: client)
+            } else {
+                wait("absolute bootstrap expiry") { controller.phase == .unavailable }
+            }
+            mark("release-bootstrap")
+            wait("late readiness result drained") { !controller.isWorking }
+            pump(0.35)
+            precondition(commandNames() == [status, status] && controller.request == nil && controller.phase != .fitted(target), "Expired/hidden bootstrap readiness mutated Windows")
+        } else {
+            if scenario == "bootstrap-cancelled" {
+                wait("bootstrap retry scheduled") { commandNames() == [status] && controller.phase == .checking && !controller.isWorking }
+                controller.stop(); view.configure(socketPath: socket, isActive: false)
+            } else { wait("non-transient bootstrap failure") { controller.phase == .unavailable } }
+            pump(0.35)
+            precondition(commandNames() == [status] && controller.request == nil, "Cancelled or non-transient bootstrap status was polled again")
+        }
+    } else if scenario.hasPrefix("recover-") {
+        let observed = ["guest-display-status", "guest-display-resize", "guest-display-status"]
+        let retried = observed + ["guest-display-resize"]
+        let successfulRetry = ["recover-retry", "recover-unavailable"].contains(scenario)
+        if successfulRetry || scenario == "recover-applied" {
+            wait("recovered measured guest while old framebuffer remains") { controller.phase == .waiting }
+            precondition(commandNames() == (successfulRetry ? retried : observed), "Recovery was not one status before at most one mutation")
+            precondition(controller.actualFramebuffer == original && controller.phase != .fitted(target), "Recovered guest-only result was shown as fitted")
+            if successfulRetry {
+                let calls = resizeCalls()
+                let interval = (calls[1]["time"] as! Double) - (calls[0]["time"] as! Double)
+                precondition(interval >= 0.74, "Recovery mutation bypassed the guest throttle: \(interval)")
+            }
+            mark("allow-frame")
+            wait("recovered guest and received pixels") { controller.phase == .fitted(target) }
+            precondition(controller.actualFramebuffer == target)
+        } else if scenario == "recover-frame-first" {
+            wait("held recovery status") { exists("status-held") }
+            mark("allow-frame")
+            wait("new framebuffer before authoritative status") { controller.actualFramebuffer == target }
+            precondition(controller.phase != .fitted(target), "Framebuffer-only recovery was shown as fitted")
+            mark("release-status")
+            wait("authoritative measurement completed recovery") { controller.phase == .fitted(target) }
+            precondition(commandNames() == observed, "An already-applied mode was mutated again")
+        } else if scenario.hasPrefix("recover-queued-") {
+            wait("held recovery status before queue blocker") { exists("status-held") }
+            var blockerCompleted = false
+            Task {
+                do { let _: CommandResult = try await client.execute(["hold-queue"]); blockerCompleted = true }
+                catch { preconditionFailure("Queue fixture failed: \(error)") }
+            }
+            pump(0.05) // Admit the blocker behind the still-held status command.
+            mark("release-status")
+            wait("shared engine queue occupied") { exists("queue-held") }
+            wait("retry admitted by controller") { controller.phase == .adjusting }
+            pump(0.8) // Pass the 750ms throttle while the subprocess queue stays held.
+            if scenario == "recover-queued-deadline" {
+                wait("queued retry retained original deadline", { controller.phase == .failed }, timeout: 1.1)
+            } else if scenario == "recover-queued-hidden" {
+                controller.configure(vmID: "fixture-vm", backendIdentity: "fixture-display", running: true, allowed: false, client: client)
+            } else {
+                controller.receive(.viewport(points: CGSize(width: 1600, height: 900), backingScale: 1), vmID: "fixture-vm")
+                precondition(controller.phase == .failed)
+            }
+            mark("release-queue")
+            wait("queued mutation rejected before subprocess execution") { blockerCompleted && !controller.isWorking }
+            precondition(commandNames() == observed + ["hold-queue"], "Expired or revoked queued mutation reached the guest subprocess")
+            precondition(controller.request == nil && controller.phase != .fitted(target))
+            controller.receive(.viewport(points: CGSize(width: 1600, height: 900), backingScale: 1), vmID: "fixture-vm")
+            pump(0.85)
+            precondition(commandNames() == observed + ["hold-queue"], "Revoked queued retry restarted automatically")
+        } else if ["recover-stop", "recover-disable", "recover-hidden", "recover-reconnect"].contains(scenario) {
+            wait("held recovery status before invalidation") { exists("status-held") }
+            if scenario == "recover-stop" {
+                controller.stop(); view.configure(socketPath: socket, isActive: false)
+            } else if scenario == "recover-disable" {
+                controller.enabled = false
+            } else if scenario == "recover-hidden" {
+                controller.configure(vmID: "fixture-vm", backendIdentity: "fixture-display", running: true, allowed: false, client: client)
+            } else {
+                view.configure(socketPath: socket, isActive: false)
+                view.configure(socketPath: socket, isActive: true)
+                wait("new real RFB connection") { exists("rfb-reconnected") }
+            }
+            mark("release-status")
+            wait("stale status process drained") { !controller.isWorking }
+            pump(0.85)
+            precondition(controller.request == nil && controller.phase != .fitted(target), "A stale status completed or retried an invalidated resize")
+            let expected = scenario == "recover-reconnect" ? observed + ["guest-display-status"] : observed
+            precondition(commandNames() == expected && resizeCalls().count == 1, "Invalidated recovery sent another mutation")
+            if scenario == "recover-disable" { precondition(controller.phase == .off) }
+            if scenario == "recover-reconnect" { precondition(controller.phase == .unavailable && controller.actualFramebuffer == original) }
+        } else {
+            if scenario == "recover-target-changed" {
+                wait("held status before target change") { exists("status-held") }
+                controller.receive(.viewport(points: CGSize(width: 1600, height: 900), backingScale: 1), vmID: "fixture-vm")
+                mark("release-status")
+            } else if scenario == "recover-deadline" {
+                wait("held status spanning original deadline") { exists("status-held") }
+                wait("original confirmation deadline, not a new recovery deadline", { controller.phase == .failed }, timeout: 1.35)
+                mark("release-status")
+                wait("expired status drained") { !controller.isWorking }
+            } else if scenario == "recover-retry-deadline" {
+                wait("held second mutation") { exists("retry-held") }
+                wait("retry did not extend original confirmation deadline", { controller.phase == .failed }, timeout: 1.15)
+                mark("release-retry")
+                wait("expired mutation drained") { !controller.isWorking }
+                mark("allow-frame")
+                wait("late pixels after expired guest response") { controller.actualFramebuffer == target }
+                precondition(controller.phase == .failed, "Late guest+framebuffer results escaped the original deadline")
+            }
+            wait("bounded recovery failure") { controller.phase == .failed }
+            let withoutRecovery = ["recover-protocol-error", "recover-ownership-error", "recover-message-only"].contains(scenario)
+            let expected = withoutRecovery ? Array(observed.prefix(2)) :
+                (["recover-second-timeout", "recover-retry-deadline"].contains(scenario) ? retried : observed)
+            precondition(commandNames() == expected && controller.request == nil, "Recovery exceeded its query/mutation budget")
+            controller.receive(.viewport(points: CGSize(width: 1600, height: 900), backingScale: 1), vmID: "fixture-vm")
+            pump(0.9)
+            precondition(commandNames() == expected && controller.phase == .failed, "Failed recovery looped on viewport changes")
+        }
+    } else if ["success", "announcement", "retina", "coalescing", "frame-timeout"].contains(scenario) {
         wait("guest confirmed while old framebuffer remains") { controller.phase == .waiting || controller.phase == .fitted(target) }
         precondition(controller.actualFramebuffer == original && controller.phase != .fitted(target),
                      "A forwarded/announced size or guest-only result was presented as applied")

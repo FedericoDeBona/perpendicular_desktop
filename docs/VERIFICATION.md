@@ -1,12 +1,12 @@
 # Runtime verification ledger
 
-Development host: Apple M4, 24 GiB RAM, macOS 27.2. Checks below were performed on 2026-10-15. This is a development record, not a claim of feature parity with Parallels Desktop.
+Development host: Apple M4, 24 GiB RAM, macOS 27.2. Checks below were performed on 2026-10-15–16. This is a development record, not a claim of feature parity with Parallels Desktop.
 
 ## Native application and engine
 
 - Optimized Swift 6 application built targeting macOS 14. The app bundle was signed ad hoc and passed `codesign --verify --deep --strict`.
 - QEMU, qemu-img, swtpm and 23 private runtime libraries were bundled. Inspection found no non-system absolute dylib dependencies. Executables run from the generated bundle, and engine discovery selects its bundled paths.
-- The complete bundle was installed under the user's Applications directory and passed deep/strict signature verification there. The baseline Windows VM ran with the installed bundled engine and QEMU; all discovered runtime, firmware and driver paths resolved inside that moved app. The separate graphics clone below deliberately uses a private experimental QEMU.
+- The complete bundle was installed under the user's Applications directory and passed deep/strict signature verification there. The baseline Windows VM ran with the installed bundled engine and QEMU; all discovered runtime, firmware and driver paths resolved inside that moved app. The graphics clone first used a private experimental QEMU; the 2026-10-16 checkpoint below uses the normal installed QEMU 11.1.2 bundle.
 - Creation through the actual native app selected the supplied ARM64 ISO and created a stopped VM with 4 CPUs, 8 GiB RAM and an 80 GiB sparse disk. The library displayed the result.
 - Rust unit/integration tests, native console/client/window tests and lint checks run with `scripts/check.sh`. The initial console cancellation fixture had a handshake/request race; its fix passed ten consecutive complete console runs.
 - Independent raw import and stopped clone were checked with real qemu-img: source bytes preserved, no backing-file dependencies, source unchanged, clone still valid after the disposable source was removed.
@@ -35,7 +35,7 @@ On the installed baseline desktop, `Confirm-SecureBootUEFI` subsequently returne
 
 ## Display and input
 
-The actual native `VMConsoleView` received an 800×600 framebuffer. Its raw RGB bytes matched an independent QMP export exactly: **0 differences across 1,440,000 bytes**. The native app displayed the live Windows installer. Guest keyboard input through QMP was used for firmware and Windows PE diagnostics; full native keyboard/layout and pointer behavior still needs an end-to-end Windows desktop check.
+The initial native `VMConsoleView` received an 800×600 framebuffer. Its raw RGB bytes matched an independent QMP export exactly: **0 differences across 1,440,000 bytes**. The native app displayed the live Windows installer. Guest keyboard input through QMP was used for firmware and Windows PE diagnostics; later desktop checks are recorded below.
 
 On the installed Windows desktop, native pointer actions opened Explorer and PowerShell. The Italian QEMU map correctly entered a Windows path, backslashes, colon, hyphens and a PowerShell `$` variable. A real Control-C attempt initially appended `c`; after modifier reconciliation was implemented and the app rebuilt/reinstalled, the same native input cancelled `modifier-check`, displayed `^C` and returned to a fresh prompt. Eleven causal native-event/wire regressions fail on the old implementation and pass with the correction. This is a concrete shortcut check, not evidence for every keyboard combination or dynamic guest resolution.
 
@@ -45,9 +45,9 @@ Actual fullscreen testing exposed a race where a retiring SwiftUI accessor could
 
 The installed application now presents immutable RFB frames through Metal, with one GPU submission and one replaceable pending frame. Actual live diagnostics confirmed a completed Metal frame from the Windows clone (`source=rfb`, 640×480 into a 3280×1474 drawable, no Core Graphics fallback). Offscreen GPU checks cover colors, orientation, opacity, fractional/integer scaling and lifecycle changes. This accelerates presentation on the Mac; it does not establish accelerated Windows rendering or a Windows frame-rate improvement.
 
-The new automatic-sizing controller serializes bounded RFB size hints and Guest Tools requests. It reports success only after both the guest's measured mode and actual received framebuffer pixels agree. Thirteen native/CLI/RFB integration fixtures pass, including rapid window changes, Retina scale, stale connections, missing acknowledgements, unsupported displays and false success replies. The guest-channel permission failure below is now resolved in the isolated clone. After the guest restart, the installed engine's actual `guest-display-status` reports `connected=true`, `can_resize=true`, the expected VirtIO DOD adapter and a measured 1920×1200 mode. Native window-drag/fullscreen acceptance is still pending; the Mac locked during that verification.
+The automatic-sizing controller serializes bounded RFB size hints and Guest Tools requests. It reports success only after both the guest's measured mode and actual received framebuffer pixels agree. Its initial thirteen native/CLI/RFB fixtures covered rapid window changes, Retina scale, stale connections, missing acknowledgements, unsupported displays and false success replies. After the guest-channel permission correction and restart, actual `guest-display-status` reported `connected=true`, `can_resize=true`, the expected VirtIO DOD adapter and a measured 1920×1200 mode. The subsequent normal-runtime window/fullscreen acceptance and expanded 41-fixture checkpoint are recorded below.
 
-The updated console passed 38 native fixtures, including bounded input queues, real recorded AppKit events, text-symbol normalization, background pacing and a numeric-only opt-in diagnostic. It was built, signed, installed and reconnected to the running clone without stopping Windows. Live diagnostics confirmed Metal presenting its 1920×1200 framebuffer without fallback. Slow native input then printed `/ * { } [ ] @ # 5"` exactly in Windows PowerShell. Command+R opened Windows Run without the old repeated `r`, and Escape returned to PowerShell. Fast input still lost characters or key releases. A controlled 11-character burst recorded all 11 native down/up events, all 13 normalized down/up events accepted and written, and 10.198–11.126 ms wire gaps. Enabling only QEMU's argument-free `hid_kbd_queue_full` tracepoint recorded ten actual HID overflows; Windows showed a stuck `H`. Slow explicit releases and Control+C recovered the prompt, and the tracepoint was disabled again. The loss is after the native writer; its finite-VNC-queue timing fixture does not model this actual HID overflow. That defect remains open.
+The updated console passed 38 native fixtures, including bounded input queues, real recorded AppKit events, text-symbol normalization, background pacing and a numeric-only opt-in diagnostic. It was built, signed, installed and reconnected to the running clone without stopping Windows. Live diagnostics confirmed Metal presenting its 1920×1200 framebuffer without fallback. Slow native input then printed `/ * { } [ ] @ # 5"` exactly in Windows PowerShell. Command+R opened Windows Run without the old repeated `r`, and Escape returned to PowerShell. Fast input still lost characters or key releases at that checkpoint. A controlled 11-character burst recorded all 11 native down/up events, all 13 normalized down/up events accepted and written, and 10.198–11.126 ms wire gaps. Enabling only QEMU's argument-free `hid_kbd_queue_full` tracepoint recorded ten actual HID overflows; Windows showed a stuck `H`. Slow explicit releases and Control+C recovered the prompt, and the tracepoint was disabled again. This localized the loss after the native writer; its finite-VNC-queue timing fixture did not model the actual HID overflow. The later QEMU 11 fix and bounded Windows regression are recorded below.
 
 A separate QEMU backpressure patch now waits for both the delayed input queue
 and active USB HID FIFO before consuming each complete RFB key message. Its
@@ -61,15 +61,86 @@ Bypassing only HID readiness reproduces exactly ten actual FIFO drops. The
 final separate binary has no QA probe and has the Hypervisor entitlement. A
 byte-identical private candidate passes strict signature verification after a
 byte-only copy avoids the build output's empty Finder/resource-fork metadata.
-It is not installed or used in the Windows VM;
-qtest's actual HID poll does not establish Windows USB scheduling or HVF input
-reliability. [Frozen patch, full reproduction and limits](../experimental/input-backpressure/README.md).
+That separate QEMU 10 candidate was not installed in the Windows VM. Its QEMU
+11 adaptation is included in the later normal-runtime checkpoint below;
+qtest alone does not establish Windows USB scheduling or HVF input reliability.
+[Frozen patch, full reproduction and limits](../experimental/input-backpressure/README.md).
 
-### Isolated Windows graphics clone
+### Earlier isolated Windows graphics clone
 
 With the baseline shut down cleanly, an independent 64 GiB qcow2 clone was created without a backing file. Its EFI variables and TPM files are independent copies, not writable shared state; copied TPM contents still represent the same initial cryptographic identity. The baseline image passed `qemu-img check` without repair and remains stopped.
 
-The clone boots through an identity- and file-bound private launch wrapper using the pinned QEMU fork and hybrid `virtio-ramfb` device. QMP confirms the display at PCI slot 7, the original USB/network/storage/serial/audio slots preserved and the TPM emulator retained. Windows reached its desktop. Windows verified the official Windows 11 ARM64 `viogpudo.cat` as `Valid`, signed by Microsoft Windows Hardware Compatibility Publisher. `pnputil` installed only that package as `oem4.inf` on `VEN_1AF4&DEV_1050`; CIM then reported **Red Hat VirtIO GPU DOD controller**, status `OK`, device error code `0`, version `22.7.38.43` and **1024×768**. The actual Win32 display module subsequently enumerated safe modes and applied **1920×1080** and **1920×1200** through `CDS_TEST` followed by an active-mode change. Each operation returned `applied=true`, `changed=true`, the measured requested dimensions and the expected adapter; the installed native console visibly received the changed display. A 1280×720 request was rejected as not exposed by this driver, preserving the previous mode. A subsequent full Windows restart returned to the desktop, and the live display module still identifies the expected adapter with resize support and 1920×1200 current mode. Post-reboot device-error/Secure Boot measurements and a complete QEMU stop/start acceptance remain separate checks. This is a display-only driver, not hardware 3D acceleration.
+The clone initially booted through an identity- and file-bound private launch wrapper using the pinned QEMU 10 fork and hybrid `virtio-ramfb` device. QMP confirmed the display at PCI slot 7, the original USB/network/storage/serial/audio slots preserved and the TPM emulator retained. Windows reached its desktop. Windows verified the official Windows 11 ARM64 `viogpudo.cat` as `Valid`, signed by Microsoft Windows Hardware Compatibility Publisher. `pnputil` installed only that package as `oem4.inf` on `VEN_1AF4&DEV_1050`; CIM then reported **Red Hat VirtIO GPU DOD controller**, status `OK`, device error code `0`, version `22.7.38.43` and **1024×768**. The actual Win32 display module subsequently enumerated safe modes and applied **1920×1080** and **1920×1200** through `CDS_TEST` followed by an active-mode change. Each operation returned `applied=true`, `changed=true`, the measured requested dimensions and the expected adapter; the installed native console visibly received the changed display. A 1280×720 request was rejected as not exposed by this driver, preserving the previous mode. A subsequent full Windows restart returned to the desktop, and the live display module still identified the expected adapter with resize support and 1920×1200 current mode. Root also observed `Confirm-SecureBootUEFI=True` after the DOD installation and mode changes. This is a display-only driver, not hardware 3D acceleration.
+
+### Normal installed adaptive 2D runtime — 2026-10-16
+
+The same graphics clone subsequently started from the normal installed app and
+owned engine supervisor, using the saved `display_adapter=virtio-ramfb` profile.
+The private QEMU 10 launch wrapper is no longer used by this path. The retained
+QMP receipt reports **QEMU 11.1.2**, a running guest, modern VirtIO display
+`1af4:1050` at PCI slot **7**, unchanged USB/network/RNG/NVMe/serial/HDA slots
+1–6, and the emulated TPM TIS still present. The production overlay contains
+only hybrid firmware-RAMFB/software-VirtIO-2D and HID-backpressure patches;
+OpenGL, VirGL, Rutabaga and Neptune are disabled. The normal firmware source
+is unchanged.
+
+Actual Windows and native-console acceptance on that installed runtime found:
+
+| Check | Observed result | Retained evidence |
+| --- | --- | --- |
+| Normal start and hardware layout | Windows desktop; QEMU 11.1.2, display slot 7 and TPM retained | `windows-adaptive-runtime-qmp.json` |
+| Driver health | Red Hat VirtIO GPU DOD **22.7.38.43**, `ConfigManagerErrorCode=0`; Windows measurement **1512×982** | Root's actual Windows screenshot observation; not inferred from the driver package or display-status schema |
+| Fast native text | One native `typeText` call produced **78 exact characters**, without clipboard or pacing workaround; **0 new HID overflow events** (counter 10 → 10); tracing disabled afterward | `windows-adaptive-hid-burst.json` |
+| Symbols and selection | Root observed 41 exact symbols/path characters plus newline after that burst, 120 total; Control+A selected 120/120 | `adaptive-runtime-root-validation.json` |
+| Native fullscreen | Guest Tools measured **3024×1964**, connected and resize-capable | `windows-adaptive-fullscreen-display.json` |
+| Return and smaller window | Native fitted state **1920×1200**, then **1512×982**; the latter also independently measured by Guest Tools | Aggregate validation and `windows-adaptive-small-window-display.json` |
+
+These are working 2D window/fullscreen and input checkpoints on one Windows
+guest. The two display-status receipts report `dpi_change_supported=false`
+and `dpi=null`; no Windows scaling/DPI change is established. No sustained
+frame rate, 60 FPS, Windows hardware 3D, DWM/Present correspondence or complete
+keyboard/layout coverage was measured. The isolated Neptune/DXMT work below
+remains experimental and is not part of this installed runtime.
+
+Root independently repeated the real fw_cfg → VirtIO 2D → RFB251 tests, input
+tests and ten-drop negative control, ASan/UBSan cleanup/identity negative,
+probe-free smoke, source/signature checks and ten packaging unit tests. The
+frozen build [provenance](../experimental/runtime-display/provenance.json)
+identifies the pre-relocation executable as
+`36ccc78a264ce650af2649e3ab8feea2bae30a08d869791fd5221ad1c11dbe22`.
+The installed runtime manifest and a read-only byte hash both identify the
+relocated/signed executable as
+`90b9c248a613cdcd1ac8b35b41d63b565dac541bb0e402bb64733092eff20caa`.
+The build provenance's `Windows_guest_acceptance=NOT RUN` records its earlier
+build-only freeze; the later Windows results above are retained separately.
+
+The expanded display-sizing integration log passes **41 fixtures**, including
+bounded startup retries, exhaustion, deadline, hidden view, terminal error and
+cancellation. Source inspection confirms serialized retries only for agent
+timeout/unavailable, with 2/5/10/20-second delays inside a 60-second startup
+budget. This is fixture evidence, not a live startup result. The aggregate
+receipt initially recorded that GUI as staged; root subsequently installed the
+final bootstrap GUI, including the console-during-stopping correction, and
+reported successful deep/strict signature verification. The installed QEMU
+bytes remain identical. **A fresh Windows startup with the bootstrap GUI is
+still unverified**; the running session's earlier resize checks do not prove it.
+
+The following ignored receipts/logs were read without contacting a VM. Full
+payloads remain private because some contain VM identities and local paths;
+these SHA-256 values bind the summarized evidence at this checkpoint:
+
+| Artifact under `.tools/` | SHA-256 |
+| --- | --- |
+| `windows-adaptive-runtime-qmp.json` | `cf370ce1cf65be7a3c4089d9768dcbb8f905854b3439b26c46ba42a5478f530c` |
+| `windows-adaptive-hid-burst.json` | `fd72dcc7c27a91de7ae1bf302be35a5915230a8c6c8b342f07609ed6fd67ab6c` |
+| `windows-adaptive-fullscreen-display.json` | `ac27ed4ab65c9a9f8cc316e15eb265c7c8dd7594bd6f7d8aee20dbf8b5c8ebb8` |
+| `windows-adaptive-small-window-display.json` | `55c86f4f09f98766bcd96e956b345ac74bfa1ad62608c07672ee58357cbc6ead` |
+| `adaptive-runtime-root-validation.json` | `b28dafa2157fcd5cb2fccdf5444b2cecf0e484a34650c504677a79d1a8d95aa6` |
+| `display-bootstrap-root-final.log` | `0870ed0ff73d0e93dd0290e3a77610d091a9612c01e10b027f7df7c708df5f26` |
+| `build-adaptive-bootstrap-root.log` | `6aa7e6bd6eecc718ce2cc5087a2f3f83340eb43d86345ff9e38e0bce1f99fb58` |
+| `build-adaptive-shutdown-console.log` | `6b73668525f05fab56a278006b222b6ee5959c7ddca8e1cde33d8fc39cbaa8bf` |
+
+### Separate 3D experiments
 
 The host-only Neptune/DXMT snapshot pipeline independently passed 8 frames and 7,042,042 exact VNC pixels, including 1920×1080 and resizing. Root repeated the actual pipeline successfully. Missing readiness produced no pixel read; ownership/ACK/disconnect guards and a causal broken-reader check also passed. A subsequent real-worker broker check passed three frames and 1,889,021 exact VNC pixels across worker restarts, resource invalidation and readiness/ACK failures; root repeated that check too. [Snapshot reproduction and limits](../experimental/neptune-snapshot/README.md), [real-worker broker checks](../experimental/neptune-broker/README.md).
 
@@ -97,7 +168,7 @@ The Windows GUI installer subsequently accepted the signed ARM64 network and ser
 
 The explicit per-port access helper passes 471 portable checks and the diagnostic passes 308; these compile the real C# while using synthetic descriptors and devnodes. The initial 75 synthetic checks also passed under actual Windows PowerShell 5.1. Actual inspection with the 355-check version identified a unique fixed alias, exact hardware/instance, healthy direct VirtIO serial PCI parent and raw-device capability. The raw PDO is classless: unified class retrieval returned `ERROR_NOT_FOUND` (1168), the legacy property returned invalid-data (13), and both probe values were empty. The validator accepts only that exact observed combination plus the other identity guards; it does not treat arbitrary lookup failures as a match.
 
-With the user's explicit action-time approval for the isolated clone, the helper saved a protected rollback receipt, added only that desktop owner's read/write ACE to this per-instance security property and verified readback. No global class ACL or agent privilege was changed. `RuntimeAccessVerified=False` described the helper's pre-restart result, not a completed runtime check. The updated agent was then installed for the same desktop account with its limited interactive task. After a full Windows restart, the actual native Guest Tools tab reported **Guest Tools connected / Perpendicular Guest Tools 0.2.0**, and the installed engine independently received a valid live display-status response. Clipboard/file action availability is observed; successful content transfer and automatic window-fit acceptance remain unverified. [Exact scope, rollback and invocation limits](GUEST_CHANNEL_ACCESS.md).
+With the user's explicit action-time approval for the isolated clone, the helper saved a protected rollback receipt, added only that desktop owner's read/write ACE to this per-instance security property and verified readback. No global class ACL or agent privilege was changed. `RuntimeAccessVerified=False` described the helper's pre-restart result, not a completed runtime check. The updated agent was then installed for the same desktop account with its limited interactive task. After a full Windows restart, the actual native Guest Tools tab reported **Guest Tools connected / Perpendicular Guest Tools 0.2.0**, and the installed engine independently received a valid live display-status response. The later normal-runtime checkpoint above verifies actual window/fullscreen fitting. Clipboard/file action availability is observed; successful content transfer remains unverified. [Exact scope, rollback and invocation limits](GUEST_CHANNEL_ACCESS.md).
 
 The successful Apply used an already elevated, same-account fresh Windows
 PowerShell 5.1 process and its normal confirmation prompt. A separate invocation
@@ -127,4 +198,4 @@ The complete normal check with the optional real Metal and PowerShell suites pas
 
 ## Remaining required work
 
-Verify Windows TPM health and desktop networking; finish deferred Windows updates; audio; clipboard, shared folders/transfers and USB integration; automatic window fitting, reliable fast keyboard delivery and Windows graphics acceleration; actual Windows snapshot recovery; current DBX revocation provisioning and release packaging. The authoritative feature checklist remains [FEATURES.md](FEATURES.md).
+Verify Windows TPM health and desktop networking; finish deferred Windows updates; audio; clipboard, shared folders/transfers and USB integration; fresh-start Guest Tools bootstrap, broader resize/input endurance and Windows graphics acceleration; actual Windows snapshot recovery; current DBX revocation provisioning and release packaging. The bounded adaptive-2D/fullscreen and fast-keyboard checks above are complete, without establishing all driver/mode/layout combinations or sustained fluidity. The authoritative feature checklist remains [FEATURES.md](FEATURES.md).

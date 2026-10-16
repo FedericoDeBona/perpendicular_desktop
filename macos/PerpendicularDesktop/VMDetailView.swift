@@ -35,7 +35,7 @@ struct VMDetailView: View {
                 Spacer()
                 lifecycleButtons.disabled(!library.canControl)
                 Menu {
-                    Button("Configure…", systemImage: "slider.horizontal.3") { showConfiguration = true }.disabled(!vm.isStopped)
+                    Button("Configure…", systemImage: "slider.horizontal.3") { showConfiguration = true }.disabled(!library.canConfigure(vmID: vm.id))
                     Button("Clone…", systemImage: "square.on.square") { NotificationCenter.default.post(name: .cloneVirtualMachine, object: nil) }.disabled(!vm.isStopped)
                     Button("Export Disk…", systemImage: "square.and.arrow.up") { NotificationCenter.default.post(name: .exportVirtualDisk, object: nil) }.disabled(vm.state != "stopped")
                     Button("Guest Tools…", systemImage: "arrow.left.arrow.right") { tab = "guest_tools" }
@@ -59,8 +59,8 @@ struct VMDetailView: View {
                 HardwarePill(icon: "internaldrive", value: "\(vm.diskGib) GB", label: "Storage")
                 Spacer()
                 Button { showConfiguration = true } label: { Label("Configure", systemImage: "slider.horizontal.3") }
-                    .disabled(!vm.isStopped || !library.canControl)
-                    .help(vm.isStopped ? "Configure virtual machine" : "Shut down this virtual machine to change its configuration")
+                    .disabled(!library.canConfigure(vmID: vm.id))
+                    .help(vm.state == "stopped" ? "Configure virtual machine" : "Shut down this virtual machine to change its configuration")
             }.padding(.horizontal, 30).padding(.bottom, 24)
 
             HStack {
@@ -133,10 +133,10 @@ struct VMDetailView: View {
         .onDisappear { displaySizing.stop() }
     }
 
-    private var displayContext: String { "\(vm.id)|\(vm.backend)|\(vm.vncSocket)|\(vm.state)|\(library.canControl)" }
+    private var displayContext: String { "\(vm.id)|\(vm.backend)|\(vm.vncSocket)|\(vm.state)|\(library.canControl)|\(tab)|\(immersive)" }
     private func configureDisplaySizing() {
         displaySizing.configure(vmID: vm.id, backendIdentity: "\(vm.backend)|\(vm.vncSocket)",
-            running: vm.state == "running", allowed: library.canControl, client: library.displayEngine)
+            running: vm.state == "running", allowed: library.canControl && (tab == "display" || immersive), client: library.displayEngine)
     }
     private var displayOptions: some View {
         Menu {
@@ -150,6 +150,7 @@ struct VMDetailView: View {
             }
         } label: { Label("Display", systemImage: "display") }
             .help("Choose whether Windows changes resolution to fit this window.")
+            .accessibilityValue(displaySizing.message)
     }
 
     @ViewBuilder private var lifecycleButtons: some View {
@@ -171,7 +172,7 @@ struct VMDetailView: View {
         return ZStack {
             RoundedRectangle(cornerRadius: radius).fill(Color(red: 0.065, green: 0.075, blue: 0.095))
             if vm.isActive {
-                VMConsoleView(socketPath: vm.vncSocket, isActive: vm.state == "running" || vm.state == "paused", keyboardLayout: vm.keyboardLayout ?? "en-us",
+                VMConsoleView(socketPath: vm.vncSocket, isActive: vm.state == "running" || vm.state == "paused" || vm.state == "stopping", keyboardLayout: vm.keyboardLayout ?? "en-us",
                     resizeRequest: displaySizing.request, onDisplayEvent: { event in
                         let id = vm.id
                         Task { @MainActor in displaySizing.receive(event, vmID: id) }
@@ -207,7 +208,7 @@ struct VMDetailView: View {
             }
             .overlay(alignment: .topLeading) {
                 if immersive {
-                    displayOptions.buttonStyle(.plain).foregroundStyle(.white)
+                    displayOptions.menuStyle(.borderlessButton).fixedSize().foregroundStyle(.white)
                         .padding(9).background(.black.opacity(0.65), in: Capsule()).padding(14)
                 }
             }

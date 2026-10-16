@@ -1,7 +1,7 @@
 use clap::{Parser, Subcommand};
 use perpendicular_engine::engine::Engine;
 use perpendicular_engine::error::{Error, Result};
-use perpendicular_engine::model::UpdateOptions;
+use perpendicular_engine::model::{DisplayAdapter, UpdateOptions};
 use serde_json::{json, Value};
 use std::path::PathBuf;
 
@@ -67,6 +67,8 @@ enum Commands {
         memory_mib: u64,
         #[arg(long, default_value_t = 64)]
         disk_gib: u64,
+        #[arg(long, value_enum, default_value = "ramfb")]
+        display_adapter: DisplayAdapter,
     },
     Clone {
         id: String,
@@ -91,6 +93,8 @@ enum Commands {
         memory_mib: u64,
         #[arg(long)]
         iso: Option<PathBuf>,
+        #[arg(long, value_enum, default_value = "ramfb")]
+        display_adapter: DisplayAdapter,
     },
     Start {
         id: String,
@@ -128,6 +132,8 @@ enum Commands {
         keyboard_layout: Option<String>,
         #[arg(long,action=clap::ArgAction::Set)]
         audio_output: Option<bool>,
+        #[arg(long, value_enum)]
+        display_adapter: Option<DisplayAdapter>,
     },
     Delete {
         id: String,
@@ -191,7 +197,8 @@ fn run(command: Commands) -> Result<Value> {
             cpus,
             memory_mib,
             disk_gib,
-        } => engine.create(&name, &iso, cpus, memory_mib, disk_gib),
+            display_adapter,
+        } => engine.create(&name, &iso, cpus, memory_mib, disk_gib, display_adapter),
         Commands::Clone { id, name } => engine.clone_vm(&id, &name),
         Commands::ExportDisk {
             id,
@@ -204,7 +211,15 @@ fn run(command: Commands) -> Result<Value> {
             cpus,
             memory_mib,
             iso,
-        } => engine.import_disk(&name, &disk, cpus, memory_mib, iso.as_deref()),
+            display_adapter,
+        } => engine.import_disk(
+            &name,
+            &disk,
+            cpus,
+            memory_mib,
+            iso.as_deref(),
+            display_adapter,
+        ),
         Commands::Start { id } => engine.start(&id),
         Commands::Pause { id } => engine.pause_or_resume(&id, false),
         Commands::Resume { id } => engine.pause_or_resume(&id, true),
@@ -220,6 +235,7 @@ fn run(command: Commands) -> Result<Value> {
             guest_tools_iso,
             keyboard_layout,
             audio_output,
+            display_adapter,
         } => engine.update(
             &id,
             UpdateOptions {
@@ -230,6 +246,7 @@ fn run(command: Commands) -> Result<Value> {
                 guest_tools_iso: guest_tools_iso.as_deref(),
                 keyboard_layout: keyboard_layout.as_deref(),
                 audio_output,
+                display_adapter,
             },
         ),
         Commands::Delete { id } => engine.delete(&id),

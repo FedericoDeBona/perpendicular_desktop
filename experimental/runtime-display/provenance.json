@@ -1,0 +1,156 @@
+{
+  "schema": 1,
+  "qemu_version": "11.1.2",
+  "upstream_archive": {
+    "path": ".tools/downloads/qemu-11.1.2.tar.xz",
+    "sha256": "731b5681e4bb18be313231579b8efd0296c5b015fa36dc533874b639ba838016"
+  },
+  "utm_source": {
+    "repository": "https://github.com/utmapp/qemu.git",
+    "revision": "88e5ee7ec6703662fec7b638cca74c4769e683d6",
+    "files_sha256": {
+      "hw/display/virtio-ramfb.c": "a48017c8fc346e106c51dc77bd033194e63babc65660bc8ec5198c6f4d7cf267",
+      "hw/display/virtio-ramfb.h": "f122f09a0d06f4d214c1a42011f5105bafa16f42cd810a946d8ad0d4cfbc01c3"
+    }
+  },
+  "production_patches": [
+    {
+      "path": "experimental/runtime-display/hybrid-2d.patch",
+      "sha256": "3706d1ba66cf09a08d8f8cb4ca1bd51c5c1baaf35e37c1671fdcdf8019a28ed4"
+    },
+    {
+      "path": "experimental/runtime-display/hid-backpressure.patch",
+      "sha256": "040fb61bdf4f591ec95b465eac4960cae0f9b9bffd06e1c6d19ad72b0aec74e3"
+    }
+  ],
+  "qa_patch": {
+    "path": "experimental/runtime-display/qtest-probe.patch",
+    "sha256": "8529247ca0714f6386fbbbe7018d3ae2852f1506b507bd0613b0eddf47679157",
+    "excluded_from_candidate": true
+  },
+  "candidate": {
+    "path": ".tools/runtime-display/final-production/candidate/qemu-system-aarch64",
+    "sha256": "36ccc78a264ce650af2649e3ab8feea2bae30a08d869791fd5221ad1c11dbe22",
+    "qa_probe_present": false,
+    "code_signature_verified": true,
+    "hypervisor_entitlement": true
+  },
+  "build": {
+    "source_path": ".tools/runtime-display/final-production/source",
+    "build_path": ".tools/runtime-display/final-production/build",
+    "configure_arguments": [
+      "--prefix=/Users/federico/Desktop/perpendicular_desktop/.tools/runtime-display/final-production/unused-prefix",
+      "--target-list=aarch64-softmmu",
+      "--python=/Users/federico/Desktop/perpendicular_desktop/.tools/build-venv/bin/python",
+      "--enable-hvf",
+      "--enable-vnc",
+      "--enable-slirp",
+      "--enable-tpm",
+      "--enable-tools",
+      "--disable-docs",
+      "--disable-werror",
+      "--disable-gtk",
+      "--disable-sdl",
+      "--disable-cocoa",
+      "--disable-rust",
+      "--disable-vnc-jpeg",
+      "--disable-vnc-sasl",
+      "--disable-slirp-smbd",
+      "--disable-pvg",
+      "--disable-opengl",
+      "--disable-virglrenderer",
+      "--disable-rutabaga-gfx"
+    ],
+    "jobs": 2,
+    "target": "qemu-system-aarch64",
+    "install_ran": false,
+    "dependency_environment": [
+      "Homebrew glib/pixman/libusb/gnutls",
+      "repository .tools/build-venv (Meson/Ninja/Python)"
+    ],
+    "private_dependencies": [
+      {
+        "path": ".tools/runtime-display/final-production/candidate/lib/libslirp.0.dylib",
+        "sha256": "529916db3d1bf9391b1d86bdb81980cfeab1cf1af473e565fed8c9f752f8ffab",
+        "component": "Slirp (archive subproject)"
+      }
+    ],
+    "gl_virgl_rutabaga_enabled": false,
+    "configured_vnc_header_consumers_rebuilt": [
+      "libsystem.a.p/ui_vnc-enc-zlib.c.o",
+      "libsystem.a.p/ui_vnc-enc-hextile.c.o",
+      "libsystem.a.p/ui_vnc.c.o",
+      "libsystem.a.p/ui_vnc-enc-tight.c.o",
+      "libsystem.a.p/ui_vnc-auth-vencrypt.c.o",
+      "libsystem.a.p/ui_vnc-ws.c.o",
+      "libsystem.a.p/ui_vnc-enc-zrle.c.o",
+      "libsystem.a.p/ui_vnc-jobs.c.o",
+      "libsystem.a.p/ui_vnc-clipboard.c.o",
+      "libsystem.a.p/ui_vnc-system.c.o"
+    ]
+  },
+  "notices": [
+    {
+      "path": "experimental/runtime-display/ATTRIBUTION.md",
+      "license": "QEMU GPL-2.0; UTM wrapper GPL-2.0-or-later; retained per-file notices"
+    },
+    {
+      "path": "experimental/runtime-display/COPYING.GPL-2.0",
+      "license": "GPL-2.0"
+    },
+    {
+      "path": "experimental/runtime-display/QEMU-LICENSE",
+      "license": "Upstream QEMU license explanation"
+    },
+    {
+      "path": "experimental/runtime-display/Slirp-COPYRIGHT",
+      "license": "Retained Slirp BSD/MIT notices"
+    },
+    {
+      "path": "experimental/runtime-display/source-pins.json",
+      "license": "Corresponding-source identity metadata"
+    },
+    {
+      "path": "experimental/runtime-display/README.md",
+      "license": "Corresponding-source build instructions"
+    },
+    {
+      "path": "experimental/runtime-display/build.py",
+      "license": "Corresponding-source reproducible build script"
+    },
+    {
+      "path": "experimental/runtime-display/Hypervisor.entitlements",
+      "license": "Corresponding-source build configuration"
+    }
+  ],
+  "validation": {
+    "full_fresh_build": "PASS: 2173 targets, max2jobs, target qemu-system-aarch64, no install",
+    "device_properties": "PASS: QEMU11.1.2, virtio-ramfb properties/modern PCI7 identity1af4:1050, no3D devices, TPM ppi property retained",
+    "firmware_RAMFB": "PASS: real fw_cfg DMA configuration + exact640x480red RFB pixels",
+    "VirtIO_2D_handoff": "PASS: actual modern control virtqueue create/attach/transfer/scanout/flush + exact800x600blue pixels",
+    "resize_hint_vs_actual": "PASS: RFB251 forwarded old800x600 frame; VirtIO GET_DISPLAY_INFO1280x800 hint; only guest scanout applies1280x800green",
+    "RFB_input_server": "PASS: 26 transitions, E0/E1, HUP/two-client ownership, switch and10FIFOdrop causal negative",
+    "QEMU11_display_lifetime": "PASS: real49teardown/reopen with suspended polls=1cleanupslot; actual USB removal does not reach replacement",
+    "ASan_UBSan_cleanup": "PASS: 2,000 teardowns; 32-slot bound; device/reference cleanup; replacement identity and rebind guards; identity-only negative fails causally",
+    "production_smoke": "PASS on final signed candidate: probe-free QMP/RFB/framebuffer and clean shutdown",
+    "Windows_guest_acceptance": "NOT RUN; root owns live acceptance",
+    "HVF_guest_execution": "NOT RUN; diskless qtest uses no guest CPU"
+  },
+  "qa_build": {
+    "path": ".tools/runtime-display/qa/qemu-system-aarch64",
+    "sha256": "06c26ad89a4dcb4e28db365deef76e58111d14d337e5988e2dcee5f8952df49b",
+    "excluded_from_candidate": true,
+    "source_path": ".tools/runtime-display/source",
+    "build_path": ".tools/runtime-display/build",
+    "source_pins_path": "experimental/runtime-display/source-pins.json",
+    "source_pins_sha256": "537083e1807894bccdc9d176b282f711f8275b925ca4a7f11ef30012f0909785",
+    "source_hash_rule": "patched_files with qa_patched_files overriding the two QA-patched translation units"
+  },
+  "validation_logs": [
+    ".tools/runtime-display/test-display-frozen.log",
+    ".tools/runtime-display/test-input-frozen.log",
+    ".tools/runtime-display/test-cleanup-final.log",
+    ".tools/runtime-display/test-smoke-frozen.log",
+    ".tools/runtime-display/test-properties-frozen.log"
+  ]
+}

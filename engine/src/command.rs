@@ -1,5 +1,5 @@
 use crate::error::{Error, Result};
-use crate::model::Config;
+use crate::model::{Config, DisplayAdapter};
 use crate::tools::Tools;
 use serde_json::json;
 use std::path::{Path, PathBuf};
@@ -82,6 +82,15 @@ pub fn qemu_arguments(
         "none".into(),
         "-S".into(),
     ];
+    if config.display_adapter == DisplayAdapter::VirtioRamfb {
+        // Remove only the standalone platform framebuffer. The hybrid device
+        // is appended after all existing devices below to preserve PCI slots.
+        let index = args
+            .windows(2)
+            .position(|pair| pair == ["-device", "ramfb"])
+            .expect("fixed RAMFB argument");
+        args.drain(index..index + 2);
+    }
     for (node, path, readonly, format) in [
         ("ueficode", config.firmware_code_path.clone(), true, "raw"),
         ("uefivars", vm_dir.join("efi-vars.fd"), false, "raw"),
@@ -175,6 +184,9 @@ pub fn qemu_arguments(
             "hda-output,bus=hda0.0,audiodev=audio0".into(),
         ]);
     }
+    if config.display_adapter == DisplayAdapter::VirtioRamfb {
+        args.extend(["-device".into(), "virtio-ramfb,id=display0,addr=0x7".into()]);
+    }
     Ok(args)
 }
 
@@ -221,6 +233,7 @@ mod tests {
             mac_address: "52:54:00:12:34:56".into(),
             keyboard_layout: "en-us".into(),
             audio_output: false,
+            display_adapter: DisplayAdapter::Ramfb,
         }
     }
     #[test]
@@ -307,5 +320,58 @@ mod tests {
         assert!(!args.iter().any(|arg| arg.contains("hda-duplex")
             || arg.contains("hda-micro")
             || arg.contains("capture")));
+    }
+
+    #[test]
+    fn hybrid_only_replaces_platform_ramfb_and_appends_fixed_pci_device_last() {
+        for audio in [false, true] {
+            for tpm in [false, true] {
+                let mut config = config();
+                config.audio_output = audio;
+                config.tpm_enabled = tpm;
+                let mut expected = qemu_arguments(
+                    &config,
+                    Path::new("/vm"),
+                    Path::new("/tmp/runtime"),
+                    "launch",
+                )
+                .unwrap();
+                let index = expected
+                    .windows(2)
+                    .position(|pair| pair == ["-device", "ramfb"])
+                    .unwrap();
+                expected.drain(index..index + 2);
+                expected.extend(["-device".into(), "virtio-ramfb,id=display0,addr=0x7".into()]);
+                config.display_adapter = DisplayAdapter::VirtioRamfb;
+                let actual = qemu_arguments(
+                    &config,
+                    Path::new("/vm"),
+                    Path::new("/tmp/runtime"),
+                    "launch",
+                )
+                .unwrap();
+                assert_eq!(actual, expected, "USB/network/rng/NVMe/serial/HDA/TPM/media argument order and values must be unchanged");
+                assert_eq!(
+                    &actual[actual.len() - 2..],
+                    ["-device", "virtio-ramfb,id=display0,addr=0x7"]
+                );
+                assert!(!actual.windows(2).any(|pair| pair == ["-device", "ramfb"]));
+                if audio {
+                    assert!(
+                        actual
+                            .iter()
+                            .position(|arg| arg.starts_with("hda-output,"))
+                            .unwrap()
+                            < actual.len() - 2
+                    );
+                }
+                assert_eq!(
+                    actual
+                        .iter()
+                        .any(|arg| arg == "tpm-tis-device,tpmdev=tpm0,ppi=off"),
+                    tpm
+                );
+            }
+        }
     }
 }

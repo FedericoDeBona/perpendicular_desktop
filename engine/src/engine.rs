@@ -4,8 +4,8 @@ use crate::error::{Error, Result};
 use crate::firmware::{prepare_variables, repair_variables};
 use crate::guest;
 use crate::model::{
-    validate_keyboard_layout, validate_name, validate_resources, Config, Runtime, Snapshot,
-    UpdateOptions, Vm,
+    validate_keyboard_layout, validate_name, validate_resources, Config, DisplayAdapter, Runtime,
+    Snapshot, UpdateOptions, Vm,
 };
 use crate::process::{
     launch_process_exists, launch_supervisor, process_state, ExitRecord, LaunchJob, ProcessState,
@@ -57,8 +57,12 @@ impl Engine {
             .unwrap_or(1));
         info["hypervisor_available"] = json!(hypervisor_available());
         info["data_dir"] = json!(self.store.root);
+        info["display_adapters"] = serde_json::to_value(crate::display_adapter::capabilities(
+            self.tools.qemu_path.as_deref(),
+        ))
+        .unwrap_or_else(|_| json!({}));
         info["secure_boot_verified"] = json!(false);
-        info["windows_readiness"] = json!({"tpm_available":self.tools.swtpm_path.is_some(),"tpm_physical_presence_interface":false,"secure_boot":"guest_verification_required","graphics":"Linear RAM framebuffer with UEFI GOP; Windows accelerated display driver is not implemented","network":"VirtIO guest driver required"});
+        info["windows_readiness"] = json!({"tpm_available":self.tools.swtpm_path.is_some(),"tpm_physical_presence_interface":false,"secure_boot":"guest_verification_required","graphics":"Standard RAMFB; adaptive 2D via virtio-ramfb requires a compatible runtime, Windows display driver and connected Guest Tools. 3D acceleration is unverified.","network":"VirtIO guest driver required"});
         info
     }
 
@@ -273,6 +277,7 @@ impl Engine {
             mac_address: config.mac_address.clone(),
             keyboard_layout: config.keyboard_layout.clone(),
             audio_output: config.audio_output,
+            display_adapter: config.display_adapter,
         })
     }
 
@@ -301,6 +306,7 @@ impl Engine {
         cpus: u16,
         memory_mib: u64,
         disk_gib: u64,
+        display_adapter: DisplayAdapter,
     ) -> Result<Value> {
         validate_name(name)?;
         validate_resources(cpus, memory_mib, disk_gib)?;
@@ -345,6 +351,7 @@ impl Engine {
             mac_address: new_mac(&id)?,
             keyboard_layout: "en-us".into(),
             audio_output: false,
+            display_adapter,
         };
         let result = (|| {
             run_output(
@@ -649,6 +656,7 @@ impl Engine {
         cpus: u16,
         memory_mib: u64,
         iso: Option<&Path>,
+        display_adapter: DisplayAdapter,
     ) -> Result<Value> {
         validate_name(name)?;
         self.validate_host(cpus, memory_mib)?;
@@ -708,6 +716,7 @@ impl Engine {
             mac_address: new_mac(&id)?,
             keyboard_layout: "en-us".into(),
             audio_output: false,
+            display_adapter,
         };
         let staging = self.store.root.join("VMs").join(format!(".import-{id}"));
         private_dir(&staging)?;
@@ -839,6 +848,14 @@ impl Engine {
     pub fn start(&self, id: &str) -> Result<Value> {
         let config = self.config(id)?;
         self.ensure_offline(id)?;
+        // Read-only capability preflight must precede firmware repair, runtime
+        // cleanup and every supervisor/TPM/VM spawn. RAMFB keeps its old path.
+        if config.display_adapter == DisplayAdapter::VirtioRamfb {
+            let qemu = self
+                .tools
+                .require(&self.tools.qemu_path, "qemu-system-aarch64")?;
+            crate::display_adapter::require_hybrid(qemu)?;
+        }
         if !hypervisor_available() {
             return Err(Error::new(
                 "hypervisor_unavailable",
@@ -1065,6 +1082,9 @@ impl Engine {
         }
         if let Some(enabled) = options.audio_output {
             config.audio_output = enabled;
+        }
+        if let Some(adapter) = options.display_adapter {
+            config.display_adapter = adapter;
         }
         validate_resources(config.cpus, config.memory_mib, config.disk_gib)?;
         self.validate_host(config.cpus, config.memory_mib)?;
