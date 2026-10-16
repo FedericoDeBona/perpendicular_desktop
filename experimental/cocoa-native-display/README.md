@@ -56,6 +56,24 @@ immutable NDT snapshot. It does not acquire, present or capture a
 compatible; unset, `0` and `true` do not enable direct mode. This is a process
 launch option, not an application preference.
 
+The same opt-in now retains an **internal NSWindow without ordering it on
+screen**. The process uses the Accessory activation policy instead of the
+foreground transformation; fullscreen and full keyboard-grab options are
+ignored in this mode. View, window, Metal device/queue, EGL context and the
+NSApplication runloop remain alive. This is a hidden-window bridge, not a
+windowless backend or a separation from NSView.
+
+During firmware/2D output, direct mode still runs `cocoa_refresh` and hardware
+updates but returns before rendering or swapping the invisible EGL window
+surface. VNC continues to carry firmware/2D pixels and input independently of
+Cocoa focus. This guard matters because the current ANGLE window-surface
+implementation can retry `nextDrawable` with its timeout disabled. Once a
+native scanout is available, the direct snapshot branch runs normally.
+Existing client policy after native output has activated is unchanged: this
+patch does not add an automatic native-to-2D client fallback. The publisher's
+existing connected-consumer activity remains unchanged; no global power or
+activation settings are altered.
+
 The new `perp_native_display_capture_region` API validates the texture/device,
 BGRA8 format, 2D/single-sample layout, command-buffer state and crop bounds
 without overflowing `origin + size`. Snapshot dimensions/pitch describe only
@@ -86,6 +104,11 @@ packaged, installed or tested in Windows, and contains the builder's original
 trace3 GPU profile rather than the later STP/HVF diagnostic combination.
 The live Windows trial and controlled presentation/latency comparison remain
 separate gates.
+
+The internal-hidden-window hooks are a subsequent source-only change to that
+candidate. Exact-anchor/reversal checks pass; a new private full build and
+runtime qualification are still required. The earlier `direct-source1` hash
+does not describe these new window/activation/2D-refresh hooks.
 
 The producer requires `PERP_NATIVE_DISPLAY_DIR` naming an already private0700
 runtime and `PERP_NATIVE_DISPLAY_SESSION` naming its32-hex launch identity.

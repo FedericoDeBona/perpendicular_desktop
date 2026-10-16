@@ -2,8 +2,9 @@
 
 This is an **opt-in experimental execution change**, not a general ARM emulator
 or a driver fix. It addresses one decoded form observed at an actual HVF ISV0
-abort: `STP Qt, Qt2, [Xn, #0]` (two 16-byte stores, signed-offset addressing,
-no writeback). Raw guest addresses remain private. The decoded word was also
+abort: `STP Qt, Qt2, [Xn, #imm]` (two 16-byte stores, signed-offset addressing,
+no writeback). The signed 7-bit immediate is scaled by 16 and ranges from
+−1024 through 1008 bytes. Raw guest addresses remain private. The decoded word was also
 checked using Apple's `llvm-objdump`; a matching sequence in a signed DLL was
 only a decoder fixture, not attribution of the fault PC to that DLL.
 
@@ -21,8 +22,11 @@ All these conditions are required before dispatch:
   no cache maintenance, stage1 table-walk, invalid FAR or external abort flag.
 - Actual synchronized CPU state is EL0 and little-endian. Explicit SCTLR_A
   alignment rules remain checked. SP-based instructions are excluded.
-- The current code word decodes to the exact zero-offset, no-writeback STP Q
-  form. The observed FAR equals the actual base X register.
+- The current code word decodes to the exact signed-offset, no-writeback STP Q
+  form. Checked addition/subtraction computes `Xn + sign_extend(imm7) * 16`;
+  overflow/underflow is rejected, and FAR must equal this effective address.
+  Xn is not modified. Both negative and positive offsets are allowed; no other
+  addressing form is admitted.
 - The entire 32-byte VA/IPA interval fits within one minimum 4K page, without
   wrapping; both page offsets agree. Operand addresses are not translated with
   debugger permissions. A cross-page access remains unsupported.
@@ -57,19 +61,25 @@ fault. The final operand write uses the hardware fault IPA, not debugger data
 translation. No general-register or operand payload is logged; successful
 handling emits at most 64 fixed metadata lines.
 
-MTE and other CPU profiles, other instructions, reads, writeback, offsets,
+MTE and other CPU profiles, other instructions, reads, writeback,
 EL1/BE, multi-page accesses and device side effects are not qualified. A correct
 PCI-hole write does not identify why Windows or a driver reached that hole.
 The 99-entry boot journal contained no blob maps, so it cannot establish an
 UNMAP lifetime race. Fast startup is an unconfirmed hypothesis.
 
-`check.c` verifies 32768 register combinations, rejects adjacent encoding bits,
+`check.c` exhausts all 128 immediates × 32768 register combinations, including SP
+rejection, and checks the observed opcodes, signed endpoints, arithmetic
+overflow/underflow, invalid offsets, adjacent addressing/type bits,
 loads/integer stores, unsupported abort classes/flags and page/wrap mismatches.
 These are decoder/range checks, not a synthetic proof of the complete HVF path.
-The isolated real HVF translation unit compiled and linked, and the candidate
-passed strict code signing with only the hypervisor entitlement. Runtime
-handling of the fault remains to be demonstrated; a boot with zero handling
-logs does not qualify this branch.
+The former zero-offset candidate compiled, linked and passed strict signing
+with only the hypervisor entitlement. Its actual private Windows boot logged
+one successful 32-byte dispatch for `0xad000400` (`stp q0, q1, [x0]`), then
+asserted at PC+4 for `0xad011404` (`stp q4, q5, [x0, #32]`) with FAR+32.
+Both opcodes were independently decoded with Apple's LLVM tool using an
+existing byte-identical fixture; no module attribution is inferred.
+That checkpoint motivates only the signed-immediate extension here; it does
+not qualify full execution, successful boot or shutdown of the new candidate.
 
 ```sh
 cc -std=c11 -Wall -Wextra -Werror experimental/hvf-stp-pci-hole/check.c -o /tmp/perpendicular-stp-check

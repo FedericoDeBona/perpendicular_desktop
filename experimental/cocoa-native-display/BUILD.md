@@ -42,6 +42,30 @@ drawable capture or presentation is performed in that branch. The publisher
 still makes an immutable GPU snapshot, and the source's producer-fence
 qualification is unchanged. Cocoa context/window removal is a separate step.
 
+Direct mode also skips the initial `makeKeyAndOrderFront`, leaving the created
+NSWindow and attached view alive but not shown. It skips
+`TransformProcessType(...ForegroundApplication)` and sets the public Accessory
+activation policy after `sharedApplication`; rejection is a real startup
+error. Fullscreen and full-grab conditions are gated off for direct mode.
+Default-mode behavior is retained. This is not a windowless producer: the
+Metal device/queue, layers, EGL context, UI scale state and NSApplication
+runloop still belong to the existing Cocoa objects.
+
+Immediately **after** `cocoa_refresh(dcl)`, direct mode returns from
+`cocoa_gl_refresh` when no native scanout source exists. This preserves
+`graphic_hw_update` and the VNC firmware/2D/input path while avoiding a draw or
+swap of the invisible EGL window surface. ANGLE's window-surface drawable
+retry can disable its timeout, so hiding the window without this guard is
+insufficient. No display listener is removed, no worker gains access to QEMU
+state, and no renderer/backend/guest protocol is changed. Existing application
+native-to-2D fallback policy is unchanged.
+
+Pure fixtures require each new ordering/activation/fullscreen/grab anchor to
+be unique, reject its removal or duplication, verify hardware refresh precedes
+the early return and GL swap, and preserve window/view/EGL/runloop setup.
+Reversing every edit still reconstructs the complete pristine Cocoa source.
+These checks do not claim the hidden producer has passed a live Windows trial.
+
 The copied read structure has one retry flag for its owned deferred bottom
 half. A direct-mode admission guard in `cocoa_gl_read_dispatch` preserves dirty
 demand while disconnected/full without allocating or dispatching. Transient

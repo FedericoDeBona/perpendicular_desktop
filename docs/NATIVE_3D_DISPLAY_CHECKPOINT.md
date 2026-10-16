@@ -6,9 +6,72 @@ Mouse, keyboard and automatic resolution selection work on this path. The
 ordinary installed application still uses its validated 2D runtime. This is an
 integration checkpoint, not production packaging or performance parity.
 
-An additional direct-source candidate was compiled on 2026-10-16; it is not
-the path used for the Windows observations below. See its qualification scope
-under [Direct source candidate](#direct-source-candidate).
+A subsequent direct-source candidate now also boots the same Windows guest and
+displays Edge in the native client without showing the producer's Cocoa window.
+The newer run and its unresolved presentation loss are recorded under
+[Hidden direct-source run](#hidden-direct-source-run). Earlier observations
+below retain their original runtime scope.
+
+## Hidden direct-source run
+
+The first combined direct-source/STP candidate launched after correcting a
+trial-client TPM executable mismatch (bundled versus pinned Homebrew swtpm).
+That initial refusal occurred before QEMU and was not a graphics failure.
+The actual subsequent QEMU PID 1940 handled one zero-offset STP Q store, then
+aborted on the adjacent signed-offset instruction. The original failure and
+null exit-code field were preserved. An offline qcow2 check found no image
+errors; it does not certify the Windows filesystem.
+
+The next candidate combines the signed-offset extension described in
+[the HVF experiment](../experimental/hvf-stp-pci-hole/README.md) with direct
+scanout publication and a hidden internal Cocoa window. It retains the view,
+Metal/EGL context, queue and event loop; this is not a windowless engine. The
+hidden producer skips the firmware/2D EGL swap path, avoiding a wait for an
+invisible drawable. Direct 3D snapshots occur before Cocoa drawable acquisition.
+One immutable GPU snapshot copy and unique per-frame allocation still remain.
+
+Build receipt: `.tools/cocoa-native-display-build/direct-stp2-hidden/build.json`.
+Only three display objects and the HVF object changed relative to its seed;
+GPU/PCI/reset objects and 3375 protected inputs were verified unchanged.
+Signed candidate SHA-256:
+`4249af46e8a1a2aa1bec545b9737f15148d0831cefc0ac3558406a31b091cce4`.
+Packaged executable SHA-256:
+`e319fdf585fc59834afa015915ac1f8e8922e6a4161cbcd7cb5082ed0717e41c`.
+Strict signature verification passed with only the Hypervisor entitlement.
+Decoder/range tests under ASan/UBSan exhaust 4194314 cases; the actual HVF
+translation unit compiled and linked. Those checks alone do not qualify every
+hardware fault path or prove a general shutdown fix.
+
+The existing guest started as QEMU PID 4503 with native client PID 4424. Actual
+visible observations: Windows desktop, Edge, an automatically selected
+2048×1152 desktop and a rotating WebGL2 triangle, with no separate producer
+window. No VM copy, driver replacement or security-setting change was made.
+The ordinary installed application still uses its earlier 2D runtime.
+
+The local browser probe completed 110 warm-up and 1651 measured draws in
+2013.2/30014.5 ms respectively. rAF spacing median 16.8 ms, p95 31.7 ms,
+maximum 625.8 ms, with 8 gaps above 50 ms. Shaders linked, verification pixel was
+97/78/80/255, with no GL errors, context loss or document visibility change.
+Private report: `.tools/windows-browser-webgl2-direct1.json`. Guest rAF is not
+Mac presentation FPS or input latency.
+
+A separate host recorder sampled the live native telemetry every 0.5 seconds.
+Within a 25.311-second continuous interval of that workload it observed 900
+received frames, 899 GPU completions, 380 positive drawable presentation
+callbacks and 520 callbacks with `presentedTime == 0`. This is approximately
+35.56 received and15.01 confirmed presentations per second. There were no
+connection failures or resets in that interval. This interval is not the exact
+guest 30-second interval, an A/B comparison or a physical-photon measurement.
+Private samples/derived summary:
+`.tools/native-direct2-probe-host-samples.jsonl` and
+`.tools/native-direct2-probe-host-summary.json`.
+
+The direct path is therefore functionally exercised, but poor presentation
+remains a measured problem. GPU completion is not counted as visible output.
+Next discrimination: exercise the unchanged presenter with host-generated GPU
+snapshots to separate presenter/compositor loss from guest/producer delivery.
+Source-writer synchronization, buffer pooling, local cursor, input-to-visible
+latency and installed 3D runtime integration remain incomplete.
 
 ## Actual Windows run
 

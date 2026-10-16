@@ -165,6 +165,11 @@ ADMISSION_GUARD = """    if (perp_native_display_direct() && !perp_native_displa
 """
 REFRESH_HOOK = """
 #ifdef USE_METAL
+    if (perp_native_display_direct() && !gl_scanout_src) {
+        /* Firmware/2D pixels and input still use VNC. Do not render/swap the
+         * invisible EGL window surface: ANGLE may wait for a drawable. */
+        return;
+    }
     if (gl_scanout_src && perp_native_display_needs_refresh()) {
         qatomic_set(&gl_dirty, true);
     }
@@ -178,6 +183,9 @@ def cocoa_edits():
     reset = 'static void cocoa_gl_scanout_disable(DisplayChangeListener *dcl)\n{\n'
     refresh = 'static void cocoa_gl_refresh(DisplayChangeListener *dcl)\n{\n    cocoa_refresh(dcl);\n'
     dispatch = 'static void cocoa_gl_read_dispatch(void)\n{\n'
+    foreground = ('    ProcessSerialNumber psn = { 0, kCurrentProcess };\n'
+                  '    TransformProcessType(&psn, kProcessTransformToForegroundApplication);\n')
+    application = '    [QemuApplication sharedApplication];\n'
     return [
         (include, include + '\n#include "publisher.h"'),
         ('    MTLSize size;\n} CocoaGLRead;', '    MTLSize size;\n    bool retry;\n} CocoaGLRead;'),
@@ -189,6 +197,30 @@ def cocoa_edits():
         (dispatch, DEFER_HELPER + dispatch + ADMISSION_GUARD),
         (reset, reset + '#ifdef USE_METAL\n    perp_native_display_reset();\n#endif\n'),
         (refresh, refresh + REFRESH_HOOK),
+        ('        [window makeKeyAndOrderFront:self];',
+         '#ifdef USE_METAL\n'
+         '        if (!perp_native_display_direct()) {\n'
+         '#endif\n'
+         '            [window makeKeyAndOrderFront:self];\n'
+         '#ifdef USE_METAL\n'
+         '        }\n'
+         '#endif'),
+        (foreground, '#ifdef USE_METAL\n'
+         '    if (!perp_native_display_direct()) {\n'
+         '#endif\n' + foreground + '#ifdef USE_METAL\n    }\n#endif\n'),
+        (application, application + '#ifdef USE_METAL\n'
+         '    if (perp_native_display_direct() &&\n'
+         '        ![NSApp setActivationPolicy:NSApplicationActivationPolicyAccessory]) {\n'
+         '        error_report("(cocoa) cannot configure native display helper activation policy");\n'
+         '        exit(1);\n'
+         '    }\n'
+         '#endif\n'),
+        ('    if (opts->has_full_screen && opts->full_screen) {',
+         '    if (\n#ifdef USE_METAL\n        !perp_native_display_direct() &&\n#endif\n'
+         '        opts->has_full_screen && opts->full_screen) {'),
+        ('    if (opts->u.cocoa.has_full_grab && opts->u.cocoa.full_grab) {',
+         '    if (\n#ifdef USE_METAL\n        !perp_native_display_direct() &&\n#endif\n'
+         '        opts->u.cocoa.has_full_grab && opts->u.cocoa.full_grab) {'),
         ('    return dcl->ops == &dcl_gl_ops;',
          '    return dcl->ops == &dcl_gl_ops\n#ifdef USE_METAL\n'
          '        || (perp_native_display_enabled() && !dcl->ops->dpy_gl_update)\n#endif\n        ;'),
@@ -339,6 +371,26 @@ def self_test():
             'Deferred retry must preserve dirty without immediate redispatch')
     require(ADMISSION_GUARD in result and 'perp_native_display_can_capture()' in ADMISSION_GUARD,
             'Direct full-budget admission must preserve demand')
+    refresh_start = result.index('static void cocoa_gl_refresh(DisplayChangeListener *dcl)\n{')
+    refresh_end = result.index('\nstatic void cocoa_gl_scanout_disable', refresh_start)
+    refresh_body = result[refresh_start:refresh_end]
+    no_source = refresh_body.index('perp_native_display_direct() && !gl_scanout_src')
+    require(refresh_body.index('    cocoa_refresh(dcl);') < no_source < refresh_body.index('eglSwapBuffers(') and
+            '        return;\n' in refresh_body[no_source:refresh_body.index('perp_native_display_needs_refresh()')],
+            'Direct firmware/2D must update hardware before bypassing invisible GL rendering/swap')
+    require('window = [[NSWindow alloc] initWithContentRect:frame' in result and
+            '[window setContentView:cocoaView];' in result and
+            '    [NSApp run];' in result and
+            'egl_surface = qemu_egl_init_surface(gl_view_ctx, cocoaView.glLayer);' in result,
+            'Hidden-window mode must retain window/view, EGL context and application runloop')
+    for before, _ in cocoa_edits():
+        for altered in (original.replace(before, '/* missing anchor */', 1), original + '\n' + before):
+            try:
+                patch_cocoa(altered)
+            except ValueError:
+                pass
+            else:
+                raise ValueError('Missing/duplicated Cocoa patch anchor was accepted: ' + before[:90])
     require(restored == original, 'Patch changed unrelated source')
     for bad in (result, original.replace('[blit endEncoding];', '[blit endEncoding];\n        [blit endEncoding];'), original.replace('drawFrame:(CocoaGLRead *)read', 'drawFrame:(void *)read'),
                 original.replace('static void cocoa_gl_read_dispatch(void)\n{', 'static void cocoa_gl_read_dispatch_changed(void)\n{'),

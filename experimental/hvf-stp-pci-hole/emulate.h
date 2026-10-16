@@ -65,6 +65,8 @@ static bool perp_hvf_stp_q_pci_hole(CPUState *cpu, uint64_t syndrome,
     hv_simd_fp_uchar16_t first, second;
     uint8_t bytes[32];
     uint32_t word;
+    uint64_t effective_address;
+    int64_t offset;
     unsigned rt, rt2, rn;
     MemTxResult result;
     static unsigned logged;
@@ -81,10 +83,13 @@ static bool perp_hvf_stp_q_pci_hole(CPUState *cpu, uint64_t syndrome,
         arm_cpu_data_is_big_endian(env) ||
         ((arm_sctlr(env, 0) & SCTLR_A) && (va & 15)) ||
         !perp_stp_q_code(cpu, &word) ||
-        !perp_stp_q_decode(word, &rt, &rt2, &rn) || env->xregs[rn] != va) {
+        !perp_stp_q_decode(word, &rt, &rt2, &rn, &offset) ||
+        !perp_stp_q_address(env->xregs[rn], offset, &effective_address) ||
+        effective_address != va) {
         return false;
     }
-    /* The hardware fault supplies the first operand's VA/IPA. The complete
+    /* The hardware FAR must equal checked Xn + signed imm7 * 16; Xn is never
+     * written back. The fault supplies the first operand's VA/IPA. The complete
      * access must stay in one minimum 4K page; no debugger operand translation
      * or assumption across stage1/stage2 page boundaries is used. */
     section = memory_region_find(address_space_memory.root, pa, sizeof(bytes));
