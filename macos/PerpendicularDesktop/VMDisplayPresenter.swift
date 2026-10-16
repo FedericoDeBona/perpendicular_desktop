@@ -106,12 +106,14 @@ final class VMDisplayTelemetry: @unchecked Sendable {
         }
     }
     func submission(stream: UInt64, generation: UInt64, timing: VMNativeDisplayTiming?, firstDraw: Bool,
-                    width: Int = 0, height: Int = 0, drawableWidth: Int = 0, drawableHeight: Int = 0) -> Submission {
+                    width: Int = 0, height: Int = 0, drawableWidth: Int = 0, drawableHeight: Int = 0,
+                    displayContext: [String: Double] = [:]) -> Submission {
         lock.lock(); nextSubmission &+= 1; let number = nextSubmission; lock.unlock()
         return Submission(owner: self, number: number, stream: stream, generation: generation,
                           timing: timing, firstDraw: firstDraw,
                           geometry: ["source_width": Double(width), "source_height": Double(height),
-                                     "drawable_width": Double(drawableWidth), "drawable_height": Double(drawableHeight)])
+                                     "drawable_width": Double(drawableWidth), "drawable_height": Double(drawableHeight)]
+                              .merging(displayContext) { original, _ in original })
     }
     private func increment(_ key: String) {
         guard counters[key] != nil || counters.count < 32 else { return }
@@ -706,7 +708,17 @@ final class VMMetalDisplayView: MTKView, MTKViewDelegate {
             measurement = telemetry?.submission(stream: telemetryStream, generation: ticket.generation,
                 timing: lease.timing, firstDraw: item.telemetryDraws == 0,
                 width: Int(item.size.width), height: Int(item.size.height),
-                drawableWidth: drawable.texture.width, drawableHeight: drawable.texture.height)
+                drawableWidth: drawable.texture.width, drawableHeight: drawable.texture.height,
+                displayContext: [
+                    "window_visible": window?.isVisible == true ? 1 : 0,
+                    "window_unoccluded": window?.occlusionState.contains(.visible) == true ? 1 : 0,
+                    "window_key": window?.isKeyWindow == true ? 1 : 0,
+                    "app_active": NSApp.isActive ? 1 : 0,
+                    "view_hidden": isHiddenOrHasHiddenAncestor ? 1 : 0,
+                    "view_transaction": presentsWithTransaction ? 1 : 0,
+                    "layer_transaction": (layer as? CAMetalLayer).map { $0.presentsWithTransaction ? 1 : 0 } ?? -1,
+                    "display_sync": (layer as? CAMetalLayer).map { $0.displaySyncEnabled ? 1 : 0 } ?? -1
+                ])
             item.telemetryDraws += 1
         } else { measurement = nil }
         if let measurement {

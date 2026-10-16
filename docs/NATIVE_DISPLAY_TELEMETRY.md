@@ -107,3 +107,11 @@ receiver suite also continues to run with the diagnostic disabled.
 
 Windows measurements belong to a subsequent root-owned live trial of the exact
 built client. No app/VM/runtime is launched or changed by the source tests.
+
+Submission events additionally record scalar window/layer context: window
+visibility/occlusion/key state, app activity, hidden ancestry, the actual view
+and layer `presentsWithTransaction` values, and layer `displaySyncEnabled`.
+These describe the submit instant, not an uninterrupted visibility guarantee.
+Connection failure counters include numeric transport/errno classes without
+paths, endpoint identities, error text or guest content. They share the same
+bounded counter/event storage.

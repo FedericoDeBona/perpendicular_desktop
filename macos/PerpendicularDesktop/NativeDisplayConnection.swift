@@ -302,6 +302,10 @@ private final class NativeDisplayWorker: @unchecked Sendable {
         guard active else { return }
         active = false
         telemetry?.count(failure == nil ? "connections_closed" : "connection_failures")
+        if let failure {
+            telemetry?.count("connection_code_\(failure.code)")
+            telemetry?.count("connection_errno_\(failure.systemError)")
+        }
         timer?.setEventHandler {}; timer?.cancel(); timer = nil
         ndt_close(&connection)
         var event = ndt_event()
