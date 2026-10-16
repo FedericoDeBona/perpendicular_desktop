@@ -210,3 +210,66 @@ Final combined validation also passed with both opt-ins enabled:
 This includes the final135-second startup fixture, Guest Tools reconnect checks,
 the external/receiver Metal checks and both actual publisher GPU fixtures.
 Private complete log: `.build/checks/native-integration3.log`.
+
+## Subsequent window and shutdown checks
+
+The private native client2 build includes the180-second admission policy and
+passed strict bundle signature validation. On the already running guest, a
+host window zoom selected1920×1440; restoring the window by double-clicking its
+title bar automatically selected1920×1200. Both modes displayed actual native
+Windows pixels. This is a real host window size change, separate from the
+previous unsuccessful border-drag attempt.
+
+An intervening black image was also present in the producer's Cocoa window;
+one guest click restored both producer and native client. A read-only Windows
+`powercfg /query SCHEME_CURRENT SUB_VIDEO VIDEOIDLE` then reported300 seconds
+on AC and180 seconds on battery. This supports display inactivity as an
+explanation; it does not establish an additional Metal resize defect or prove
+that every black-frame case is inactivity. Power policy was unchanged.
+
+A second full guest shutdown reproduced the existing `assert(isv)` abort at
+12:51:41UTC in PID72915. The original failure ledger and private full log were
+preserved. An offline qcow2 check again reported no image errors; that check
+does not certify the guest filesystem. No new VM copy was made.
+
+The diagnostic-only HVF insertion was separately compiled and linked into a
+fresh native candidate while preserving the existing Cocoa/publisher/transport
+objects and all3320 recorded protected inputs. Strict signing retains only the
+Hypervisor entitlement. Packaged binary SHA-256:
+`dc0782d1682c5c0c1d18a92362fb3fc0e21fb57d47ad09993dd29defc2af0d1b`.
+It retains the abort and adds only bounded fault metadata, with no emulation,
+PC adjustment, guest memory read or mapping change. The same existing VM was
+started with this diagnostic candidate at12:52:43UTC, PID81708. The native client survived the stopped/running transition, automatically
+reconnected to the new authenticated endpoint and displayed the boot/login
+sequence. Cold-boot sizing then confirmed1920×1200 without Check Display,
+console/tab switching, viewport changes or a manual agent start. An independent
+read-only guest-status probe first returned unavailable/timeout; a later
+read-only display-status query confirmed the actual3D adapter and1920×1200.
+The successful UI observation preceded opening any diagnostic guest shell.
+The next shutdown did reproduce the failure and captured the metadata below;
+this candidate is diagnostic only, not a shutdown fix.
+Private build/package receipts are in `.tools/cocoa-native-display-build/hvf1/`
+and `.tools/cocoa-native-display-hvf1/`; prior failure evidence is under
+`.tools/native-output2-*`.
+
+The second guest boot report confirms the installed fixed agent autostarted as
+one owned process PID4856 at12:55:15UTC, about144seconds after Windows boot.
+Actual reset/close `8007022A` recurred and recovered to a successful request.
+This further validates both the bounded longer startup admission and the close
+exception correction. Private report `.tools/windows-tools-native7-boot.txt`,
+SHA-256 `ed9945aa6d5107714d1bcbcfd1f81aaa28768c3a9636da6336180aba4cec69b2`.
+
+
+The diagnostic run aborted at12:59:41UTC during the next full guest shutdown.
+The new event reports ISV=0, a write, valid PC/FAR, FSC0x06 and a FlatView match
+to `gpex_mmio_window`, with no RAM/ROM/ROMD backing and no dirty logging. Thus
+this particular fault is not identified as a mapped RAM dirty-write trap. It
+points to an unassigned PCI MMIO access at the captured instant; it does not
+yet prove which resource previously occupied the address or whether a guest
+reference outlived an unmap. Raw guest addresses remain in the private receipt
+`.tools/native-hvf1-failure.json`, alongside the preserved launch/exit/log.
+The original assertion remained and the failure ledger records the real abort.
+A further offline qcow2 check reported no image errors. The VM is stopped;
+no new copy, driver replacement, signature change or security exception was
+introduced for this diagnostic run. Next work is to correlate the fault with
+GPU BAR/resource map/unmap lifetime before choosing a correction.
