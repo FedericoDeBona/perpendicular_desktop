@@ -159,8 +159,9 @@ not prove complete noncontiguous function bodies. Unmapped data, external
 calls, Objective-C dispatch types and exception edges remain limitations.
 
 The guest GPU protocol, producer fences, complete buffer-reuse algorithm,
-currently active Parallels backend, runtime frame cadence and mouse path remain
-unresolved. No runtime frame trace or full graphics reconstruction is claimed.
+currently active Parallels backend and runtime frame cadence remain unresolved.
+The following input study recovers selected static paths, not a complete mouse
+algorithm. No runtime frame trace or full graphics reconstruction is claimed.
 
 A bounded input inventory selected a smaller next target:
 `Contents/Frameworks/libPrlGui.3.dylib`, ARM64 slice 5,320,192 bytes, SHA-256
@@ -171,3 +172,48 @@ mouse-event SDK operations and retains mouse sender/grabber/controller type
 names. These are target-selection findings, not recovered input algorithms.
 The two original carriers and extracted slices are hash-bound in the private
 `input-two-image-inventory.json`; Qt frameworks were not scanned recursively.
+
+### Targeted mouse paths on 2026-10-16
+
+Four raw ARM64 intervals, totaling 1,044 bytes, were analyzed with REA 6.5.0
+and Ghidra 12.1.4. Their adjacent `LC_FUNCTION_STARTS` boundaries, original
+instructions and indirect import-symbol slots were independently checked.
+These checks used the following hash-verified slices from the same installed
+Parallels version; neither target was executed or attached to a debugger.
+
+| ARM64 input | SHA-256 |
+| --- | --- |
+| `Contents/MacOS/prl_client_app`, 30,306,576 bytes | `779a96576a8cbfb091777da811f6012389db763f3a1003f4491c953ac450eb76` |
+| `Contents/Frameworks/libPrlGui.3.dylib`, 5,320,192 bytes | `bbd2f37d8319e7075c07b23633b0e96533cfacb5217dff8ea8ef04ee3cf77602` |
+
+| Input / preferred address / interval | Independent static observation | REA evidence |
+| --- | --- | --- |
+| Client / `0x10026856c` / 252 bytes | Calls `WidgetUtils::getWidgetTransformMatrix`, `QMatrix::map` and `WidgetUtils::mapToGlobal`. One branch conditionally disassociates mouse movement from the cursor, calls `CGWarpMouseCursorPosition`, then conditionally restores the saved association-state byte. The other branch calls `WidgetUtils::setCursorPos`. | `ev_b89b70c836fb5177a5ab29a935a984f7168f831ad870aaf0f981036e9bb7ab7a` |
+| Client / `0x100268668` / 68 bytes | Compares a requested association value with a stored byte and calls `CGAssociateMouseAndMouseCursorPosition` when they differ. | `ev_05d402e8d198f913a6cd33c9ee8c5a7689185baa088969d8a43c85fe3e95bb42` |
+| GUI / `0x3af7c` / 64 bytes | The exported `WidgetUtils::setCursorPos(QPointF const&)` creates a host mouse-move event at the supplied point, posts it at the HID event tap, then tail-calls `CFRelease`. This supplies a concrete implementation for the client's imported alternative above. | `ev_90b9a620bddeff438fda15c838c8d2c0a9dcf95dfd16f2494ceb282b548c5c78` |
+| Client / `0x10026ae40` / 660 bytes | Two failure branches precede event construction. Bounded embedded log references identify their conditions as an ungrabbed mouse and an invalid VM instance, and identify the send path as relative movement. That path converts two floating-point coordinates, constructs a 44-byte record and calls `PrlDevMouse_Event`, then frees the temporary SDK handle. | `ev_824a13e52ddf7b99a25a974cc3a4cc43cd3052cd8ba46402888ac1e48691167c` |
+
+The GUI routine's event constants were checked against the local Apple SDK:
+type five is `kCGEventMouseMoved`, and tap zero is `kCGHIDEventTap`. Its raw
+decompilation truncates at the external tail branch; the original instruction
+and indirect-symbol slot identify `CFRelease`. The other three queries recover
+a normal return. The event sender reports overlapping-global-symbol warnings;
+external helpers, exception paths and the SDK record's complete semantics are
+not recovered. Untyped external calls also limit the decompiler's treatment of
+floating-point coordinate arguments, so instruction and import checks support
+the narrower observations in the table.
+
+This establishes separate host cursor positioning and guest event submission
+paths in the shipped artifacts. It does not prove when either path runs,
+absolute-mode behavior, the complete grab/cursor-visibility state machine,
+coalescing, latency, event delivery permissions or loss-free forwarding. No
+client function is assigned to a proprietary C++ class solely from nearby
+RTTI strings. Our implementation should validate coordinate transforms,
+cursor association and guest delivery independently; that is an architectural
+inference, not copied implementation.
+
+Complete Evidence, original-byte assembly, bounded string references and
+carrier/slice/raw interval manifests remain private under
+`research/private/parallels-graphics/targeted/mouse/`. The private receipt is
+SHA-256 `fa7414efaa9098401a89e780dd7bd9e4fb7c75bc439fb3a9891864a463f946d5`.
+No proprietary pseudocode or original instruction listing is published here.
