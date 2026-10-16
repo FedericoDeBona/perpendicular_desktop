@@ -145,3 +145,41 @@ The updated normal app subsequently launched the same VM again and reached
 the desktop. This adds a completed normal shutdown/restart after driver and
 agent installation; it remains a bounded boot check, without proving sustained
 stability or a working Guest Tools channel.
+
+### Approved per-device access and connected channel
+
+The user subsequently approved the exact per-device read/write correction.
+After the previous restart, Windows assigned the read-only `PERPDRIVERS` disc
+to `E:`; the old `D:` drive was empty. A fresh administrator `Inspect` from
+the verified disc again confirmed the exact limited interactive task, desktop
+account, unique healthy raw port and one-SID access proposal. No broader
+device class or agent privilege was changed.
+
+`Apply` saved its protected rollback receipt, wrote the per-instance security
+property and verified its readback. The receipt remains in Windows under
+`%ProgramData%\Perpendicular Guest Channel Access\Receipts`; its exact ID is
+retained in the ignored local migration receipt. The helper correctly left
+runtime access unverified until restart. The administrative console was then
+closed, the engine requested a normal shutdown, and both engine state and the
+app confirmed Stopped before Start was clicked in the installed app.
+
+The same imported VM reached its desktop again. After automatic agent startup,
+two consecutive engine status exchanges returned **connected**, protocol 1,
+agent 0.2.0, ARM64, desktop session 1, with clipboard, file-write and display
+channel capabilities. This is actual communication from the normal user
+agent after restart, superseding the pending-access and timeout checkpoint
+above. No clipboard contents were read or written by this acceptance.
+
+The display query independently reported Microsoft Basic Display Driver,
+800×600, one safe mode and `can_resize=false`, consistent with this VM's
+unchanged RAMFB adapter. A working control channel does not supply an adaptive
+display driver or Windows 3D acceleration. A new 53-byte canary was transferred
+to Windows Downloads. `Get-FileHash` in a separately opened, non-elevated
+Windows PowerShell returned the same SHA-256 as the Mac source:
+`7ea1e394d56bbaeb741e72b2ef35f890a92055578a37788d5ac57b02703daf68`.
+This verifies the small transfer's bytes independently of the agent's reply;
+it does not establish large-file throughput or the clipboard round trip.
+
+This establishes one successful restart with the approved override and bounded
+real exchanges. Repeated device recreation, long-term reconnect stability,
+graphics acceleration and input-to-image latency remain separate requirements.

@@ -413,3 +413,18 @@ confirmed a healthy serial controller but fixed-port open failed with error 5.
 Administrator Inspect produced the exact per-instance permission proposal;
 Apply remains pending user confirmation. DNS/TCP connectivity to Microsoft's
 port 443 succeeded. [Detailed scope and remaining limits](WINDOWS_MIGRATION_DIAGNOSTICS.md).
+
+### Imported Guest Tools connected after approved access — 2026-10-16
+
+The exact per-instance correction above was explicitly approved, reinspected,
+applied and read back with a protected Windows rollback receipt. Following a
+normal shutdown and Start from the installed app, the same VM reached its
+desktop and its user agent answered two consecutive status requests: connected,
+protocol 1, agent 0.2.0, ARM64, session 1. The display channel also answered,
+reporting the actual fixed 800×600 Basic Display Driver and no alternative
+safe mode. A small canary file transfer returned 53 bytes written in Downloads;
+Windows PowerShell independently computed the same SHA-256 as the Mac source.
+The normal app's Guest Tools tab visibly reported connected and version 0.2.0.
+No clipboard contents were accessed. This supersedes the pending permission
+status above; it does not establish adaptive display, 3D or long-term stability.
+[Exact sequence and acceptance limits](WINDOWS_MIGRATION_DIAGNOSTICS.md#approved-per-device-access-and-connected-channel).
