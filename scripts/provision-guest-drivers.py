@@ -23,22 +23,52 @@ def digest(path):
     return h.hexdigest()
 
 
+def extract_driver_content(source, content, extractor):
+    if extractor:
+        subprocess.run([extractor, "x", "-y", "-o" + str(content), str(source),
+                        "Drivers/*", "virtio-win_license.txt"], check=True, stdout=subprocess.DEVNULL)
+        return
+    # macOS can read this pinned ISO without an additional package manager.
+    # Keep it read-only and out of Finder; always release our own mount.
+    mount = content.parent / "mounted-source"
+    mount.mkdir()
+    subprocess.run(["hdiutil", "attach", "-readonly", "-nobrowse", "-mountpoint",
+                    str(mount), str(source)], check=True, stdout=subprocess.DEVNULL)
+    try:
+        drivers = mount / "Drivers"
+        license_file = mount / "virtio-win_license.txt"
+        if not drivers.is_dir() or not license_file.is_file():
+            raise SystemExit("Expected drivers and license are missing from the mounted source")
+        content.mkdir()
+        shutil.copytree(drivers, content / "Drivers")
+        shutil.copy2(license_file, content / license_file.name)
+    finally:
+        subprocess.run(["hdiutil", "detach", str(mount)], check=True,
+                       stdout=subprocess.DEVNULL)
+
+
 def main():
     extractor = shutil.which("7z") or shutil.which("7zz")
-    if not extractor:
+    if not extractor and not shutil.which("hdiutil"):
         raise SystemExit("Install an ISO extractor first: brew install sevenzip")
     DOWNLOADS.mkdir(parents=True, exist_ok=True)
     source = DOWNLOADS / "utm-guest-tools.iso"
     if not source.exists():
-        with urllib.request.urlopen(SOURCE_URL) as response, source.open("wb") as output:
-            shutil.copyfileobj(response, output)
+        request = urllib.request.Request(SOURCE_URL, headers={"User-Agent": "PerpendicularDesktop/0.1"})
+        # Do not leave a truncated cache entry after a failed download.
+        with tempfile.TemporaryDirectory(prefix="driver-download-", dir=DOWNLOADS) as temporary:
+            download = Path(temporary) / "source.iso"
+            with urllib.request.urlopen(request, timeout=60) as response, download.open("wb") as output:
+                shutil.copyfileobj(response, output)
+            if digest(download) != SOURCE_SHA256:
+                raise SystemExit("Guest driver source checksum mismatch; inspect an updated artifact before changing the pin")
+            download.replace(source)
     if digest(source) != SOURCE_SHA256:
         raise SystemExit("Guest driver source checksum mismatch; inspect an updated artifact before changing the pin")
     with tempfile.TemporaryDirectory(prefix="drivers-", dir=DOWNLOADS) as temporary:
         staging = Path(temporary)
         content = staging / "content"
-        subprocess.run([extractor, "x", "-y", "-o" + str(content), str(source),
-                        "Drivers/*", "virtio-win_license.txt"], check=True, stdout=subprocess.DEVNULL)
+        extract_driver_content(source, content, extractor)
         for path in content.rglob("*"):
             if path.is_file() and path.name != "virtio-win_license.txt":
                 if "arm64" not in [part.lower() for part in path.relative_to(content).parts]:
