@@ -235,8 +235,10 @@ Current/Default control set 1, stornvme Start 0, but StartOverride value 0 was 3
 After successfully saving the complete hive inside the imported guest as
 `C:\Perpendicular'before'nvme'SYSTEM.hiv`, only that override was changed to
 DWORD 0. Readback and hive unload succeeded. A subsequent reboot entered the
-automatic diagnostic path again; desktop startup is still unverified. The exact
-crash stop code is unobserved. This storage migration intervention affects only
+automatic diagnostic path again. Choosing Continue then produced a visible
+`KERNEL_SECURITY_CHECK_FAILURE (0x139)` stop screen; desktop startup still fails.
+The NVMe change alone does not resolve this separate kernel failure, whose
+responsible module and bugcheck parameters remain unknown. This intervention affects only
 the imported copy. Microsoft's [controller migration guidance](https://learn.microsoft.com/en-us/troubleshoot/azure/virtual-machines/windows/troubleshoot-nvme-boot-failure)
 explains the boot-driver requirement; the local registry readings justify the
 specific intervention without establishing the crash cause conclusively.
