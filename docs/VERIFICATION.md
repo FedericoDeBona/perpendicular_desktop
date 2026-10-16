@@ -428,3 +428,45 @@ The normal app's Guest Tools tab visibly reported connected and version 0.2.0.
 No clipboard contents were accessed. This supersedes the pending permission
 status above; it does not establish adaptive display, 3D or long-term stability.
 [Exact sequence and acceptance limits](WINDOWS_MIGRATION_DIAGNOSTICS.md#approved-per-device-access-and-connected-channel).
+
+
+### Imported VM adaptive 2D restored with a fresh CLT build — 2026-10-16
+
+This checkpoint concerns the imported 4-core/4-GiB VM above. The adaptive
+runtime entries earlier in this ledger describe a previous installation; the
+bundle present before this change lacked `virtio-ramfb`. The runtime builder
+now respects the caller's developer tools instead of forcing full Xcode.
+A fresh pinned QEMU 11.1.2 production build completed with Command Line Tools,
+software 2D and the reviewed hybrid-display/HID patches. Its unsigned-source
+selection and signed candidate are recorded in private provenance; candidate
+SHA-256 is `ca9056b5036bb896c802b9f7e9bc4893ad31c5762fe7f76f1eed2d3493f0b8e1`.
+The real diskless display test passed firmware RAMFB pixels, modern VirtIO at
+slot 7, framebuffer handoff and a guest-applied RFB resize to 1280×800. The
+probe-free production QMP/RFB/shutdown smoke passed, as did all ten runtime
+bundling checks. The smoke harness refuses application-bundle paths by design;
+its attempt against the packaged path was refused before launching a child.
+The packaged executable separately advertised `virtio-ramfb` and the full
+bundle passed deep strict signature verification.
+
+Windows independently reported the official ARM64 DOD catalog signature as
+`Valid`; staging only `viogpudo.inf` added `oem11.inf`. After normal shutdown
+and closing the app, the checked runtime was installed with the previous app
+and RAMFB profile retained for rollback. Main app and engine executable
+contents, compared after removing signatures from temporary copies, are
+unchanged. Only the stopped VM's display-adapter setting was changed.
+The normal app's Start reached the Windows desktop; QMP confirmed the modern
+1AF4:1050 display at slot 7. Guest Tools reconnected and Windows reported the
+Red Hat VirtIO GPU DOD controller, resize support and 1920×1200. Entering native
+full screen changed the measured guest mode to 2560×1600; returning changed
+it back to 1920×1200, with the desktop visibly present in both states.
+A display-channel request during transition was temporarily unavailable;
+a later request succeeded. This is bounded 2D evidence, not a 3D, latency,
+keyboard-endurance or sustained-stability result. Private state, hardware and
+mode responses are retained in `.tools/vm-migration/adaptive-2d-current.json`.
+
+A second normal shutdown and Start completed with a new engine launch identity.
+The same user agent reconnected automatically, and the display channel again
+reported the DOD adapter, `can_resize=true` and 1920×1200. No new device ACL
+change was needed. The display name changed from DISPLAY2 to DISPLAY1 across
+boot; no stable display ordinal is assumed. Driver PnP error code and version
+were not independently queried in this checkpoint.

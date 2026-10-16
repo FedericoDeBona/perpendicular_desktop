@@ -38,6 +38,13 @@ Use the repository's provisioned Python/Meson/Ninja environment and Homebrew lib
 
 The byte-copied candidate avoids FinderInfo/ResourceFork metadata. Before signing, its uninstalled Slirp dependency is copied into a private `candidate/lib` directory and assigned absolute dependency IDs. That library's license is retained in `Slirp-COPYRIGHT`. The only candidate executable entitlement is `com.apple.security.hypervisor=true`; strict signature, thin ARM64 identity and probe absence are checked. Root bundling reads the actual bytes/signature and rewrites library paths in its own output.
 
+The builder preserves the caller's developer-tool selection. A host with usable
+Command Line Tools can select them explicitly with
+`DEVELOPER_DIR=/Library/Developer/CommandLineTools` and the corresponding
+`SDKROOT`, `CC`, `CXX` and `OBJC` environment values; full Xcode is not forced
+for this software 2D build. The selected environment is recorded in the new
+build's provenance, alongside its actual configure/build logs.
+
 `provenance.json` records the frozen candidate, archive, source revision, patch hashes, notices, exact build arguments and validation. A fresh builder run produces its own manifest beside its private build; select that file explicitly when reviewing another build. Firmware and `qemu-img` continue to come from the root-owned normal prefix.
 
 ## Separate QA build and tests

@@ -93,7 +93,8 @@ def main():
         for name,expected in pins['qa_patched_files'].items():
             if digest(source/name)!=expected:raise SystemExit('QA source mismatch: '+name)
     environment=os.environ.copy()
-    environment['DEVELOPER_DIR']='/Applications/Xcode.app/Contents/Developer'
+    # Honor the caller's developer selection. Forcing full Xcode breaks an
+    # otherwise working Command Line Tools build and can hit an unrelated EULA.
     environment['PATH']=str(REPO/'.tools/build-venv/bin')+':/opt/homebrew/bin:'+environment.get('PATH','')
     environment.pop('PKG_CONFIG_PATH',None);environment.pop('PYTHONPATH',None)
     arguments=['--prefix='+str(output/'unused-prefix'),'--target-list=aarch64-softmmu','--python='+str(REPO/'.tools/build-venv/bin/python'),'--enable-hvf','--enable-vnc','--enable-slirp','--enable-tpm','--enable-tools','--disable-docs','--disable-werror','--disable-gtk','--disable-sdl','--disable-cocoa','--disable-rust','--disable-vnc-jpeg','--disable-vnc-sasl','--disable-slirp-smbd','--disable-pvg','--disable-opengl','--disable-virglrenderer','--disable-rutabaga-gfx']
@@ -102,6 +103,8 @@ def main():
     candidate=prepare_candidate(build,output/'candidate')
     report=provenance(candidate,source,build,arguments,args.qa)
     report['build']['jobs']=args.jobs
+    report['build']['toolchain_environment']={name:environment.get(name) for name in
+        ('DEVELOPER_DIR','SDKROOT','CC','CXX','OBJC','MACOSX_DEPLOYMENT_TARGET')}
     (output/'provenance.json').write_text(json.dumps(report,indent=2)+'\n')
     print(json.dumps(report['candidate'],indent=2))
     print('Private source/build/candidate only; no install, firmware, media or VM change.')
