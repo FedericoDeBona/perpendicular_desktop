@@ -33,6 +33,7 @@ python3 -m unittest discover -s "$ROOT/scripts/tests" -p 'test_*.py'
 python3 "$ROOT/scripts/graphics-tests.py"
 if [[ -n "${PERPENDICULAR_POWERSHELL:-}" ]]; then
   "$PERPENDICULAR_POWERSHELL" -NoProfile -File "$ROOT/guest-tools/windows/tests/Test-AgentCore.ps1"
+  "$PERPENDICULAR_POWERSHELL" -NoProfile -File "$ROOT/guest-tools/windows/tests/Test-AgentHealthLog.ps1"
   "$PERPENDICULAR_POWERSHELL" -NoProfile -File "$ROOT/guest-tools/windows/tests/Test-AgentDisplay.ps1"
   "$PERPENDICULAR_POWERSHELL" -NoProfile -File "$ROOT/guest-tools/windows/tests/Test-GuestToolsInstaller.ps1"
   "$PERPENDICULAR_POWERSHELL" -NoProfile -File "$ROOT/guest-tools/windows/tests/Test-AgentTaskOwnership.ps1"
