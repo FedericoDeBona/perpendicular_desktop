@@ -177,6 +177,7 @@ struct VMDetailView: View {
                         let id = vm.id
                         Task { @MainActor in displaySizing.receive(event, vmID: id) }
                     })
+                    .withNativeDisplay(vm.nativeDisplay)
                     .clipShape(RoundedRectangle(cornerRadius: radius))
                 if vm.state == "paused" {
                     VStack(spacing: 12) {

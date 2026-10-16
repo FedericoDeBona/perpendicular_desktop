@@ -4,8 +4,8 @@ use crate::error::{Error, Result};
 use crate::firmware::{prepare_variables, repair_variables};
 use crate::guest;
 use crate::model::{
-    validate_keyboard_layout, validate_name, validate_resources, Config, DisplayAdapter, Runtime,
-    Snapshot, UpdateOptions, Vm,
+    validate_keyboard_layout, validate_name, validate_resources, Config, DisplayAdapter,
+    NativeDisplayEndpoint, Runtime, Snapshot, UpdateOptions, Vm,
 };
 use crate::process::{
     launch_process_exists, launch_supervisor, process_state, ExitRecord, LaunchJob, ProcessState,
@@ -18,7 +18,7 @@ use fs2::FileExt;
 use serde_json::{json, Value};
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Seek, SeekFrom};
-use std::os::unix::fs::OpenOptionsExt;
+use std::os::unix::fs::{FileTypeExt, MetadataExt, OpenOptionsExt};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::thread;
@@ -158,6 +158,10 @@ impl Engine {
         let runtime_dir = self.store.runtime_dir(&config.id)?;
         let qmp_socket = runtime_dir.join("qmp.sock");
         let vnc_socket = runtime_dir.join("vnc.sock");
+        // Existing runtime reads normalize directory permissions. Do not let
+        // that advertise a previously non-private display endpoint this read.
+        let native_directory_was_private = native_display_directory_is_private(&runtime_dir);
+        let mut native_display = None;
         let (mut state, mut last_error) = ("stopped".to_owned(), None);
         if let Some(runtime) = self.runtime(&config.id)? {
             match self
@@ -165,6 +169,15 @@ impl Engine {
                 .and_then(|mut qmp| qmp.status())
             {
                 Ok(status) => {
+                    // This branch alone has both runtime.json and successful
+                    // QMP UUID + launch-name + status verification. Incomplete
+                    // launch-record recovery deliberately cannot expose IPC.
+                    native_display = native_display_endpoint(
+                        &runtime_dir,
+                        &config.id,
+                        &runtime,
+                        native_directory_was_private,
+                    );
                     state = match status.as_str() {
                         "running" => {
                             if runtime.shutdown_requested {
@@ -278,6 +291,7 @@ impl Engine {
             keyboard_layout: config.keyboard_layout.clone(),
             audio_output: config.audio_output,
             display_adapter: config.display_adapter,
+            native_display,
         })
     }
 
@@ -1266,6 +1280,57 @@ impl Engine {
     }
 }
 
+fn native_display_directory_is_private(path: &Path) -> bool {
+    fs::symlink_metadata(path).is_ok_and(|metadata| {
+        metadata.is_dir()
+            && metadata.uid() == unsafe { libc::geteuid() }
+            && metadata.mode() & 0o7777 == 0o700
+    })
+}
+
+/// Called only after this runtime's QMP UUID/name/status were verified. A
+/// separate launch.json recovery never establishes this server PID contract.
+fn native_display_endpoint(
+    runtime_dir: &Path,
+    id: &str,
+    runtime: &Runtime,
+    directory_was_private: bool,
+) -> Option<NativeDisplayEndpoint> {
+    if !directory_was_private || !native_display_directory_is_private(runtime_dir) {
+        return None;
+    }
+    let server_pid = i32::try_from(runtime.pid).ok().filter(|pid| *pid > 0)?;
+    let prefix = format!("perpendicular-{id}-");
+    let token = runtime.launch_name.strip_prefix(&prefix)?;
+    if token.len() != 32 || !token.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return None;
+    }
+    let session = u128::from_str_radix(token, 16)
+        .ok()
+        .filter(|value| *value != 0)?;
+    let socket_path = runtime_dir.join("native-display.sock");
+    let metadata = fs::symlink_metadata(&socket_path).ok()?;
+    let expected_uid = unsafe { libc::geteuid() };
+    if !metadata.file_type().is_socket()
+        || metadata.uid() != expected_uid
+        || metadata.mode() & 0o7777 != 0o600
+        || !matches!(
+            process_state(runtime, &runtime_dir.join("qmp.sock")),
+            ProcessState::OwnedLive
+        )
+    {
+        return None;
+    }
+    Some(NativeDisplayEndpoint {
+        socket_path,
+        server_pid,
+        expected_uid,
+        session_hi: (session >> 64) as u64,
+        session_lo: session as u64,
+        epoch: 1,
+    })
+}
+
 fn new_mac(id: &str) -> Result<String> {
     let uuid = Store::id(id)?;
     let bytes = uuid.as_bytes();
@@ -1314,4 +1379,406 @@ fn log_tail(path: &Path) -> String {
     let mut data = Vec::new();
     let _ = file.take(4096).read_to_end(&mut data);
     String::from_utf8_lossy(&data).trim().to_owned()
+}
+
+#[cfg(test)]
+mod native_display_tests {
+    use super::*;
+    use crate::process::started_at;
+    use std::io::{BufRead, BufReader, Write};
+    use std::os::unix::fs::{symlink, PermissionsExt};
+    use std::os::unix::net::UnixListener;
+    use std::process::{Child, Stdio};
+
+    const ID: &str = "967358aa-d020-4fa7-a466-9ec8b82e1520";
+    const SESSION: &str = "0123456789abcdeffedcba9876543210";
+
+    fn permissions(path: &Path, mode: u32) {
+        fs::set_permissions(path, fs::Permissions::from_mode(mode)).unwrap();
+    }
+
+    fn temporary_directory() -> tempfile::TempDir {
+        // Keep real Unix socket paths below macOS's sockaddr_un limit.
+        tempfile::Builder::new()
+            .prefix("pnd-")
+            .tempdir_in("/tmp")
+            .unwrap()
+    }
+
+    struct OwnedProcess(Child);
+
+    impl OwnedProcess {
+        fn new(launch_name: &str, qmp_path: &Path) -> (Self, Runtime) {
+            // This harmless, blocked shell has the same argv identity markers
+            // inspected by production process_state. It never launches QEMU.
+            let child = Command::new("/bin/sh")
+                .args([
+                    "-c",
+                    "while IFS= read -r line; do :; done",
+                    "native-display-fixture",
+                    launch_name,
+                ])
+                .arg(qmp_path)
+                .stdin(Stdio::piped())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()
+                .unwrap();
+            let owned = Self(child);
+            let runtime = Runtime {
+                pid: owned.0.id(),
+                process_started_at: started_at(owned.0.id()).unwrap(),
+                launch_name: launch_name.into(),
+                shutdown_requested: false,
+                last_error: None,
+            };
+            assert!(matches!(
+                process_state(&runtime, qmp_path),
+                ProcessState::OwnedLive
+            ));
+            (owned, runtime)
+        }
+    }
+
+    impl Drop for OwnedProcess {
+        fn drop(&mut self) {
+            // Only the Child we created is ever signalled, including on panic.
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+        }
+    }
+
+    struct Fixture {
+        engine: Engine,
+        config: Config,
+        directory: PathBuf,
+        _temporary: tempfile::TempDir,
+    }
+
+    impl Fixture {
+        fn new() -> Self {
+            let temporary = temporary_directory();
+            let mut store = Store::open(temporary.path().join("data")).unwrap();
+            // Store::open created this empty, fresh-owner directory. Keep all
+            // further fixture state inside the one temporary directory.
+            fs::remove_dir(&store.runtime_root).unwrap();
+            store.runtime_root = temporary.path().join("r");
+            private_dir(&store.runtime_root).unwrap();
+            let vm_dir = store.vm_dir(ID).unwrap();
+            private_dir(&vm_dir).unwrap();
+            fs::write(vm_dir.join("system.qcow2"), b"fixture, not a VM disk").unwrap();
+            let config = Config {
+                format_version: 1,
+                id: ID.into(),
+                name: "Native display fixture".into(),
+                cpus: 1,
+                memory_mib: 4096,
+                disk_gib: 64,
+                iso_path: None,
+                guest_tools_iso_path: None,
+                created_at: "2026-10-16T00:00:00Z".into(),
+                firmware_code_path: vm_dir.join("efi-code.fd"),
+                tpm_enabled: false,
+                secure_boot_state: "guest_verification_required".into(),
+                mac_address: "52:54:00:00:00:01".into(),
+                keyboard_layout: "en-us".into(),
+                audio_output: false,
+                display_adapter: DisplayAdapter::Ramfb,
+            };
+            let directory = store.runtime_dir(ID).unwrap();
+            private_dir(&directory).unwrap();
+            Self {
+                engine: Engine {
+                    store,
+                    tools: Tools::default(),
+                },
+                config,
+                directory,
+                _temporary: temporary,
+            }
+        }
+
+        fn native_listener(&self) -> UnixListener {
+            let path = self.directory.join("native-display.sock");
+            let listener = UnixListener::bind(&path).unwrap();
+            permissions(&path, 0o600);
+            listener
+        }
+
+        fn process(&self) -> (OwnedProcess, Runtime) {
+            OwnedProcess::new(
+                &format!("perpendicular-{ID}-{SESSION}"),
+                &self.directory.join("qmp.sock"),
+            )
+        }
+    }
+
+    // A bounded read-only QMP fixture; any mutating command panics the worker.
+    fn qmp_fixture(
+        directory: &Path,
+        uuid: &str,
+        launch_name: &str,
+        status: Option<&str>,
+    ) -> thread::JoinHandle<Vec<String>> {
+        let listener = UnixListener::bind(directory.join("qmp.sock")).unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let uuid = uuid.to_owned();
+        let launch_name = launch_name.to_owned();
+        let status = status.map(str::to_owned);
+        thread::spawn(move || {
+            let deadline = Instant::now() + Duration::from_secs(3);
+            let mut peer = loop {
+                match listener.accept() {
+                    Ok((peer, _)) => break peer,
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                        assert!(Instant::now() < deadline, "QMP fixture was not contacted");
+                        thread::sleep(Duration::from_millis(5));
+                    }
+                    Err(error) => panic!("QMP fixture: {error}"),
+                }
+            };
+            peer.set_nonblocking(false).unwrap();
+            peer.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
+            writeln!(peer, "{}", json!({"QMP":{}})).unwrap();
+            let mut reader = BufReader::new(peer.try_clone().unwrap());
+            let mut commands = Vec::new();
+            loop {
+                let mut line = String::new();
+                if reader.read_line(&mut line).unwrap() == 0 {
+                    break;
+                }
+                let request: Value = serde_json::from_str(&line).unwrap();
+                let command = request["execute"].as_str().unwrap();
+                commands.push(command.into());
+                let result = match command {
+                    "qmp_capabilities" => json!({}),
+                    "query-uuid" => json!({"UUID":uuid}),
+                    "query-name" => json!({"name":launch_name}),
+                    "query-status" => match &status {
+                        Some(status) => json!({"status":status}),
+                        None => json!({}),
+                    },
+                    _ => panic!("non-read-only command in endpoint lookup: {command}"),
+                };
+                writeln!(peer, "{}", json!({"return":result,"id":request["id"]})).unwrap();
+                if command == "query-status" {
+                    break;
+                }
+            }
+            commands
+        })
+    }
+
+    #[test]
+    fn native_display_exports_exact_session_only_for_verified_live_runtime() {
+        let fixture = Fixture::new();
+        let _listener = fixture.native_listener();
+        let (_process, runtime) = fixture.process();
+        atomic_json(&fixture.directory.join("runtime.json"), &runtime).unwrap();
+        let qmp = qmp_fixture(
+            &fixture.directory,
+            ID,
+            &runtime.launch_name,
+            Some("running"),
+        );
+        let vm = fixture.engine.view(&fixture.config).unwrap();
+        assert_eq!(vm.state, "running");
+        assert_eq!(
+            serde_json::to_value(vm.native_display.unwrap()).unwrap(),
+            json!({
+                "socket_path":fixture.directory.join("native-display.sock"),
+                "server_pid":runtime.pid,
+                "expected_uid":unsafe { libc::geteuid() },
+                "session_hi":0x0123_4567_89ab_cdef_u64,
+                "session_lo":0xfedc_ba98_7654_3210_u64,
+                "epoch":1
+            })
+        );
+        assert_eq!(
+            qmp.join().unwrap(),
+            [
+                "qmp_capabilities",
+                "query-uuid",
+                "query-name",
+                "query-status"
+            ]
+        );
+    }
+
+    #[test]
+    fn native_display_rejects_absent_regular_symlink_and_nonprivate_socket() {
+        let fixture = Fixture::new();
+        let (_process, runtime) = fixture.process();
+        let endpoint = || native_display_endpoint(&fixture.directory, ID, &runtime, true);
+        assert!(endpoint().is_none());
+        let path = fixture.directory.join("native-display.sock");
+        fs::write(&path, b"not a socket").unwrap();
+        permissions(&path, 0o600);
+        assert!(endpoint().is_none());
+        fs::remove_file(&path).unwrap();
+        let target = fixture.directory.join("other.sock");
+        let _target_listener = UnixListener::bind(&target).unwrap();
+        permissions(&target, 0o600);
+        symlink(&target, &path).unwrap();
+        assert!(endpoint().is_none());
+        fs::remove_file(&path).unwrap();
+        let _listener = fixture.native_listener();
+        for mode in [0o400, 0o644, 0o666, 0o700, 0o1600] {
+            permissions(&path, mode);
+            assert!(endpoint().is_none(), "socket mode {mode:o}");
+        }
+        permissions(&path, 0o600);
+        assert!(endpoint().is_some());
+    }
+
+    #[test]
+    fn native_display_rejects_nonprivate_or_symlink_runtime_directory() {
+        let fixture = Fixture::new();
+        let _listener = fixture.native_listener();
+        let (_process, runtime) = fixture.process();
+        for mode in [0o500, 0o750, 0o770, 0o1700] {
+            permissions(&fixture.directory, mode);
+            assert!(!native_display_directory_is_private(&fixture.directory));
+            assert!(native_display_endpoint(&fixture.directory, ID, &runtime, true).is_none());
+        }
+        permissions(&fixture.directory, 0o700);
+        let alias = fixture.directory.parent().unwrap().join("alias");
+        symlink(&fixture.directory, &alias).unwrap();
+        assert!(!native_display_directory_is_private(&alias));
+        assert!(native_display_endpoint(&alias, ID, &runtime, true).is_none());
+        assert!(native_display_endpoint(&fixture.directory, ID, &runtime, false).is_none());
+    }
+
+    #[test]
+    fn native_display_rejects_invalid_session_pid_and_stale_process_identity() {
+        let fixture = Fixture::new();
+        let _listener = fixture.native_listener();
+        let (_process, runtime) = fixture.process();
+        for token in [
+            "0123456789abcdeffedcba987654321",
+            "0123456789abcdeffedcba98765432100",
+            "01234567-89ab-cdef-fedc-ba9876543210",
+            "g123456789abcdeffedcba9876543210",
+            "0123456789abcdeffedcba987654321 ",
+            "00000000000000000000000000000000",
+        ] {
+            let mut invalid = runtime.clone();
+            invalid.launch_name = format!("perpendicular-{ID}-{token}");
+            assert!(native_display_endpoint(&fixture.directory, ID, &invalid, true).is_none());
+        }
+        let mut invalid = runtime.clone();
+        invalid.launch_name = format!("unowned-{ID}-{SESSION}");
+        assert!(native_display_endpoint(&fixture.directory, ID, &invalid, true).is_none());
+        assert!(native_display_endpoint(
+            &fixture.directory,
+            "ff7358aa-d020-4fa7-a466-9ec8b82e1520",
+            &runtime,
+            true
+        )
+        .is_none());
+        for pid in [0, i32::MAX as u32 + 1, u32::MAX] {
+            let mut invalid = runtime.clone();
+            invalid.pid = pid;
+            assert!(native_display_endpoint(&fixture.directory, ID, &invalid, true).is_none());
+        }
+        let mut stale = runtime.clone();
+        stale.process_started_at = "different process start".into();
+        assert!(native_display_endpoint(&fixture.directory, ID, &stale, true).is_none());
+        let mut unrelated = runtime;
+        unrelated.pid = std::process::id();
+        unrelated.process_started_at = started_at(unrelated.pid).unwrap();
+        assert!(native_display_endpoint(&fixture.directory, ID, &unrelated, true).is_none());
+    }
+
+    #[test]
+    fn native_display_is_absent_when_qmp_identity_or_status_is_unverified() {
+        for (uuid, name, status) in [
+            (
+                "wrong-vm",
+                format!("perpendicular-{ID}-{SESSION}"),
+                Some("running"),
+            ),
+            (ID, "wrong-launch".into(), Some("running")),
+            (ID, format!("perpendicular-{ID}-{SESSION}"), None),
+        ] {
+            let fixture = Fixture::new();
+            let _listener = fixture.native_listener();
+            let (_process, runtime) = fixture.process();
+            atomic_json(&fixture.directory.join("runtime.json"), &runtime).unwrap();
+            let qmp = qmp_fixture(&fixture.directory, uuid, &name, status);
+            let vm = fixture.engine.view(&fixture.config).unwrap();
+            assert_eq!(vm.state, "crashed");
+            assert!(vm.native_display.is_none());
+            assert!(serde_json::to_value(vm)
+                .unwrap()
+                .get("native_display")
+                .is_none());
+            let commands = qmp.join().unwrap();
+            assert_eq!(commands.len(), if status.is_none() { 4 } else { 3 });
+        }
+    }
+
+    #[test]
+    fn native_display_does_not_use_launch_record_recovery_or_normalized_permissions() {
+        let fixture = Fixture::new();
+        let _listener = fixture.native_listener();
+        let (_process, runtime) = fixture.process();
+        let job = LaunchJob {
+            config: fixture.config.clone(),
+            vm_dir: fixture.engine.store.vm_dir(ID).unwrap(),
+            runtime_dir: fixture.directory.clone(),
+            launch_name: runtime.launch_name.clone(),
+            qemu: PathBuf::from("/nonexistent-fixture-qemu"),
+            swtpm: None,
+        };
+        atomic_json(&fixture.directory.join("launch.json"), &job).unwrap();
+        let qmp = qmp_fixture(
+            &fixture.directory,
+            ID,
+            &runtime.launch_name,
+            Some("running"),
+        );
+        let recovered = fixture.engine.view(&fixture.config).unwrap();
+        assert_eq!(recovered.state, "running");
+        assert!(recovered.native_display.is_none());
+        qmp.join().unwrap();
+        fs::remove_file(fixture.directory.join("qmp.sock")).unwrap();
+
+        atomic_json(&fixture.directory.join("runtime.json"), &runtime).unwrap();
+        permissions(&fixture.directory, 0o750);
+        let qmp = qmp_fixture(
+            &fixture.directory,
+            ID,
+            &runtime.launch_name,
+            Some("running"),
+        );
+        let normalized = fixture.engine.view(&fixture.config).unwrap();
+        assert_eq!(normalized.state, "running");
+        assert!(normalized.native_display.is_none());
+        qmp.join().unwrap();
+    }
+
+    #[test]
+    fn native_display_is_optional_for_ordinary_and_stopped_vms() {
+        let fixture = Fixture::new();
+        let stopped = fixture.engine.view(&fixture.config).unwrap();
+        assert_eq!(stopped.state, "stopped");
+        assert!(serde_json::to_value(stopped)
+            .unwrap()
+            .get("native_display")
+            .is_none());
+
+        let (_process, runtime) = fixture.process();
+        atomic_json(&fixture.directory.join("runtime.json"), &runtime).unwrap();
+        let qmp = qmp_fixture(
+            &fixture.directory,
+            ID,
+            &runtime.launch_name,
+            Some("running"),
+        );
+        let ordinary = fixture.engine.view(&fixture.config).unwrap();
+        assert_eq!(ordinary.state, "running");
+        assert!(ordinary.native_display.is_none());
+        qmp.join().unwrap();
+    }
 }

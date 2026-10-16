@@ -12,6 +12,7 @@ trap 'rm -rf "$test_work_dir"' EXIT
 # production protocol internals can stay private. Tests are outside the app's
 # PerpendicularDesktop/*.swift build glob.
 cat "$repo_dir/macos/PerpendicularDesktop/VMKeyboardText.swift" \
+    "$repo_dir/macos/PerpendicularDesktop/NativeDisplayEndpoint.swift" \
     "$repo_dir/macos/PerpendicularDesktop/RFBDesktopResize.swift" \
     "$repo_dir/macos/PerpendicularDesktop/VMDisplayPresenter.swift" \
     "$repo_dir/macos/PerpendicularDesktop/VMConsole.swift" \

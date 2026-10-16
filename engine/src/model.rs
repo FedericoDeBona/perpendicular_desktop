@@ -63,6 +63,16 @@ pub struct Runtime {
 }
 
 #[derive(Debug, Clone, Serialize)]
+pub struct NativeDisplayEndpoint {
+    pub socket_path: PathBuf,
+    pub server_pid: i32,
+    pub expected_uid: u32,
+    pub session_hi: u64,
+    pub session_lo: u64,
+    pub epoch: u64,
+}
+
+#[derive(Debug, Clone, Serialize)]
 pub struct Vm {
     pub id: String,
     pub name: String,
@@ -85,6 +95,8 @@ pub struct Vm {
     pub keyboard_layout: String,
     pub audio_output: bool,
     pub display_adapter: DisplayAdapter,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub native_display: Option<NativeDisplayEndpoint>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -49,3 +49,8 @@ Raw local evidence stays in ignored `research/private/`. Published implementatio
 Active development. The complete objective is **not achieved**. Runtime evidence and remaining requirements will be recorded here as they are verified.
 
 Verified details and outstanding runtime checks are recorded in [VERIFICATION.md](VERIFICATION.md), including a real Windows PE boot and its `UEFISecureBootEnabled=1` observation. A checked creation/configuration item does not imply that the guest's installation or desktop integration is complete.
+
+The [native 3D display checkpoint](NATIVE_3D_DISPLAY_CHECKPOINT.md) records real
+Windows/Edge output inside the private app candidate, RFB input, automatic
+supported-mode selection, bounded FD/Metal transport tests and remaining
+production/pacing/recovery gates. The ordinary installed runtime remains 2D.

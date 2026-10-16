@@ -36,11 +36,13 @@ struct VirtualMachine: Codable, Identifiable, Hashable, Sendable {
     var keyboardLayout: String?
     var audioOutput: Bool?
     var displayAdapter: DisplayAdapter
+    var nativeDisplay: NativeDisplayEndpoint?
 
     enum CodingKeys: String, CodingKey {
         case id, name, state, cpus, memoryMib, diskGib, isoPath, directory, diskPath, createdAt
         case backend, qmpSocket, vncSocket, lastError, tpmEnabled, secureBootState
         case guestToolsIsoPath, keyboardLayout, audioOutput, displayAdapter
+        case nativeDisplay
     }
 
     init(from decoder: Decoder) throws {
@@ -66,6 +68,7 @@ struct VirtualMachine: Codable, Identifiable, Hashable, Sendable {
         audioOutput = try values.decodeIfPresent(Bool.self, forKey: .audioOutput)
         displayAdapter = values.contains(.displayAdapter)
             ? try values.decode(DisplayAdapter.self, forKey: .displayAdapter) : .ramfb
+        nativeDisplay = try values.decodeIfPresent(NativeDisplayEndpoint.self, forKey: .nativeDisplay)
     }
 
     var isActive: Bool { ["running", "paused", "starting", "stopping"].contains(state) }

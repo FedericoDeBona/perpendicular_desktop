@@ -56,6 +56,7 @@ struct EngineClientCheck {
         precondition(vm.id == "vm-123" && vm.memoryMib == 8192 && vm.diskGib == 80)
         precondition(vm.isoPath == nil && vm.state == "paused" && vm.isActive && !vm.isStopped)
         precondition(vm.displayAdapter == .ramfb, "Historical JSON must keep the standard display")
+        precondition(vm.nativeDisplay == nil, "Historical JSON has no native stream")
         let encoder = JSONEncoder()
         encoder.keyEncodingStrategy = .convertToSnakeCase
         let decoder = JSONDecoder()
@@ -68,6 +69,18 @@ struct EngineClientCheck {
             let encoded = try JSONSerialization.jsonObject(with: encoder.encode(decoded)) as! [String: Any]
             precondition(encoded["display_adapter"] as? String == adapter.rawValue)
         }
+        let endpointJSON = Data("""
+        {"socket_path":"/tmp/vm/native-display.sock","server_pid":123,"expected_uid":501,
+         "session_hi":17375808098319191535,"session_lo":1311768467463790321,"epoch":1}
+        """.utf8)
+        let endpoint = try decoder.decode(NativeDisplayEndpoint.self, from: endpointJSON)
+        precondition(endpoint.serverPID == 123 && endpoint.expectedUID == 501)
+        precondition(endpoint.sessionHi == 0xf123456789abcdef && endpoint.sessionLo == 0x123456789abcdef1,
+                     "Launch identity must retain all64bits")
+        vmJSON["native_display"] = try JSONSerialization.jsonObject(with: endpointJSON)
+        let nativeVM = try decoder.decode(VirtualMachine.self, from: JSONSerialization.data(withJSONObject: vmJSON))
+        precondition(nativeVM.nativeDisplay == endpoint)
+        vmJSON.removeValue(forKey: "native_display")
         for invalid: Any in ["unknown-display", 1, NSNull()] {
             vmJSON["display_adapter"] = invalid
             do {

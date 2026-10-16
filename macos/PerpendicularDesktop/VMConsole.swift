@@ -27,6 +27,13 @@ struct VMConsoleView: NSViewRepresentable {
     let keyboardLayout: String
     let resizeRequest: VMConsoleResizeRequest?
     let onDisplayEvent: (@MainActor (VMConsoleDisplayEvent) -> Void)?
+    private var nativeDisplayEndpoint: NativeDisplayEndpoint?
+
+    func withNativeDisplay(_ endpoint: NativeDisplayEndpoint?) -> VMConsoleView {
+        var result = self
+        result.nativeDisplayEndpoint = endpoint
+        return result
+    }
 
     init(socketPath: String, isActive: Bool, keyboardLayout: String = "en-us", resizeRequest: VMConsoleResizeRequest? = nil,
          onDisplayEvent: (@MainActor (VMConsoleDisplayEvent) -> Void)? = nil) {
@@ -41,6 +48,9 @@ struct VMConsoleView: NSViewRepresentable {
         let view = VMFramebufferView()
         view.onDisplayEvent = onDisplayEvent
         view.configureKeyboardLayout(keyboardLayout)
+#if PERPENDICULAR_NATIVE_DISPLAY
+        view.configureNativeDisplay(nativeDisplayEndpoint)
+#endif
         view.configure(socketPath: socketPath, isActive: isActive)
         view.requestDesktopSize(resizeRequest)
         return view
@@ -49,6 +59,9 @@ struct VMConsoleView: NSViewRepresentable {
     func updateNSView(_ nsView: VMFramebufferView, context: Context) {
         nsView.onDisplayEvent = onDisplayEvent
         nsView.configureKeyboardLayout(keyboardLayout)
+#if PERPENDICULAR_NATIVE_DISPLAY
+        nsView.configureNativeDisplay(nativeDisplayEndpoint)
+#endif
         nsView.configure(socketPath: socketPath, isActive: isActive)
         nsView.requestDesktopSize(resizeRequest)
     }
@@ -72,6 +85,14 @@ final class VMFramebufferView: NSView {
     private var framebuffer: CGImage?
     private var latestFrame: RFBFrame?
     private var metalDisplay: VMMetalDisplayView?
+#if PERPENDICULAR_NATIVE_DISPLAY
+    private var nativeEndpoint: NativeDisplayEndpoint?
+    private var nativeConnection: NativeDisplayConnection?
+    private var nativeReconnect: DispatchWorkItem?
+    private var nativeHasActivated = false
+    private var nativeHasPixels = false
+    private var nativeGeneration = 0
+#endif
     private var framebufferSize = CGSize.zero
     private var status = "Console is stopped"
     private var tracking: NSTrackingArea?
@@ -121,10 +142,19 @@ final class VMFramebufferView: NSView {
         needsDisplay = true
         updatePresenterVisibility()
         if isActive && !socketPath.isEmpty { connect() }
+#if PERPENDICULAR_NATIVE_DISPLAY
+        if isActive { connectNativeDisplay() }
+#endif
     }
 
     func disconnect() {
         active = false
+#if PERPENDICULAR_NATIVE_DISPLAY
+        nativeGeneration &+= 1
+        nativeReconnect?.cancel(); nativeReconnect = nil
+        nativeConnection?.disconnect(); nativeConnection = nil
+        nativeHasActivated = false; nativeHasPixels = false
+#endif
         keyReleaseMonitor = nil
         generation &+= 1
         reconnectWork?.cancel()
@@ -160,7 +190,11 @@ final class VMFramebufferView: NSView {
             onReady: { [weak self] name in
                 Task { @MainActor in
                     guard let self, self.generation == currentGeneration, self.active else { return }
+#if PERPENDICULAR_NATIVE_DISPLAY
+                    if !self.nativeHasActivated { self.status = "Waiting for display…" }
+#else
                     self.status = "Waiting for display…"
+#endif
                     self.onDisplayEvent?(.connection(currentConnectionID))
                     self.reportViewport()
                     self.setAccessibilityHelp("\(name). Click to send keyboard and mouse input to the virtual machine.")
@@ -194,7 +228,11 @@ final class VMFramebufferView: NSView {
                     self.synthesizedModifiers.removeAll()
                     self.textStrokes.removeAll(); self.textStrokeOrder.removeAll(); self.optionIntent = .none
                     self.pointerButtons = 0
+#if PERPENDICULAR_NATIVE_DISPLAY
+                    if !self.nativeHasActivated { self.status = "\(message)\nReconnecting…" }
+#else
                     self.status = "\(message)\nReconnecting…"
+#endif
                     self.needsDisplay = true
                     self.updatePresenterVisibility()
                     let work = DispatchWorkItem { [weak self] in
@@ -209,7 +247,75 @@ final class VMFramebufferView: NSView {
         client.start()
     }
 
+#if PERPENDICULAR_NATIVE_DISPLAY
+    func configureNativeDisplay(_ endpoint: NativeDisplayEndpoint?) {
+        guard endpoint != nativeEndpoint else { return }
+        let wasActive = active, path = configuredPath
+        disconnect()
+        nativeEndpoint = endpoint
+        if wasActive { configure(socketPath: path, isActive: true) }
+    }
+
+    private func connectNativeDisplay() {
+        guard active, let endpoint = nativeEndpoint, nativeConnection == nil else { return }
+        if metalDisplay == nil { installMetalPresenter() }
+        guard let presenter = metalDisplay, let device = presenter.device else {
+            status = "The 3D display needs Metal. Reopen the console to try again."
+            needsDisplay = true
+            return
+        }
+        nativeGeneration &+= 1
+        let current = nativeGeneration
+        let client = NativeDisplayConnection(endpoint: endpoint, device: device,
+            onLease: { [weak self] lease in
+                guard let self, self.active, self.nativeGeneration == current,
+                      let presenter = self.metalDisplay else { lease.discard(); return }
+                guard presenter.present(lease) else { return }
+                self.nativeHasActivated = true; self.nativeHasPixels = true
+                self.latestFrame = nil; self.framebuffer = nil
+                self.framebufferSize = CGSize(width: lease.texture.width, height: lease.texture.height)
+                self.status = ""
+                self.updatePresenterVisibility(); self.needsDisplay = true
+                if let connectionID = self.connectionID {
+                    self.onDisplayEvent?(.framebuffer(connectionID, width: lease.texture.width, height: lease.texture.height))
+                }
+            },
+            onState: { [weak self] state in
+                guard state == .disconnected else { return }
+                self?.nativeDisplayDisconnected(generation: current)
+            },
+            onFailure: { [weak self] _ in self?.nativeDisplayDisconnected(generation: current) })
+        nativeConnection = client
+        client.start()
+    }
+
+    private func nativeDisplayDisconnected(generation expected: Int) {
+        guard active, nativeEndpoint != nil, nativeGeneration == expected else { return }
+        nativeHasPixels = false
+        metalDisplay?.reset()
+        latestFrame = nil; framebuffer = nil
+        status = "The 3D display disconnected. Reconnecting…"
+        updatePresenterVisibility(); needsDisplay = true
+        let previous = nativeConnection
+        nativeConnection = nil
+        previous?.disconnect()
+        guard nativeReconnect == nil else { return }
+        let work = DispatchWorkItem { [weak self] in
+            guard let self, self.active, self.nativeGeneration == expected else { return }
+            self.nativeReconnect = nil
+            self.connectNativeDisplay()
+        }
+        nativeReconnect = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1, execute: work)
+    }
+#endif
+
     private func present(_ frame: RFBFrame) {
+#if PERPENDICULAR_NATIVE_DISPLAY
+        // Once native output has activated, RFB supplies input/layout only.
+        // A broken native channel must not show a placeholder as current 3D.
+        guard !nativeHasActivated else { return }
+#endif
         latestFrame = frame
         framebufferSize = CGSize(width: frame.width, height: frame.height)
         status = ""
@@ -265,6 +371,12 @@ final class VMFramebufferView: NSView {
             self.metalDisplay?.stop()
             self.metalDisplay?.removeFromSuperview()
             self.metalDisplay = nil
+#if PERPENDICULAR_NATIVE_DISPLAY
+            if self.nativeHasActivated {
+                self.nativeDisplayDisconnected(generation: self.nativeGeneration)
+                return
+            }
+#endif
             self.framebuffer = self.latestFrame.flatMap(Self.makeImage)
             VMDisplayDiagnostics.fallback(width: Int(self.framebufferSize.width), height: Int(self.framebufferSize.height))
             self.needsDisplay = true
@@ -274,7 +386,11 @@ final class VMFramebufferView: NSView {
     }
 
     private func updatePresenterVisibility() {
-        metalDisplay?.isHidden = window == nil || !status.isEmpty || latestFrame == nil
+        var hasPixels = latestFrame != nil
+#if PERPENDICULAR_NATIVE_DISPLAY
+        hasPixels = hasPixels || nativeHasPixels
+#endif
+        metalDisplay?.isHidden = window == nil || !status.isEmpty || !hasPixels
         if metalDisplay?.isHidden != false, framebuffer == nil, let latestFrame {
             framebuffer = Self.makeImage(latestFrame)
         }

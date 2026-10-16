@@ -7,6 +7,10 @@ Edge also selects that adapter for its ANGLE D3D11 path. This is a positive Wind
 it is not application compatibility, Parallels performance parity or a
 production-ready graphics package.
 
+A later [native-app integration checkpoint](NATIVE_3D_DISPLAY_CHECKPOINT.md)
+records this path inside the application console, including a new actual
+WebGL2 measurement and supported-mode automatic resizing.
+
 ## Matched configuration
 
 The existing trial VM/disk was reused throughout; no further VM copies were

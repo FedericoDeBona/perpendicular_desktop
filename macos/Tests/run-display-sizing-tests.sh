@@ -5,6 +5,7 @@ repo_dir="$(cd "$test_dir/../.." && pwd)"
 test_work_dir="$(mktemp -d /tmp/prp-size.XXXXXX)"
 trap 'rm -rf "$test_work_dir"' EXIT
 cat "$repo_dir/macos/PerpendicularDesktop/VMKeyboardText.swift" \
+    "$repo_dir/macos/PerpendicularDesktop/NativeDisplayEndpoint.swift" \
     "$repo_dir/macos/PerpendicularDesktop/RFBDesktopResize.swift" \
     "$repo_dir/macos/PerpendicularDesktop/VMDisplayPresenter.swift" \
     "$repo_dir/macos/PerpendicularDesktop/VMConsole.swift" \
