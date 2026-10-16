@@ -10,6 +10,8 @@ param(
 )
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
+# ValidateSet accepts all casings; pass the canonical labels to the C# API too.
+$Mode = if ($Mode -ieq 'Device') { 'Device' } else { 'Scene' }
 if ($Exclusive -and $Mode -ne 'Scene') { throw '-Exclusive requires -Mode Scene.' }
 if ([string]::IsNullOrWhiteSpace($ReportPath)) {
     $ReportPath = Join-Path ([IO.Path]::GetTempPath()) ('Perpendicular-D3D11-' + [Guid]::NewGuid().ToString('N') + '.json')

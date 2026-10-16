@@ -3,12 +3,23 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.IO;
 using System.Runtime.InteropServices;
+using System.Security.Cryptography;
 using System.Text;
 using System.Threading;
 
 namespace Perpendicular3D
 {
+    public sealed class UmdModuleReport
+    {
+        public string path;
+        public string sha256;
+        public long? disk_file_bytes;
+        public string hash_status = "unknown";
+        public string hash_error;
+    }
+
     public sealed class ProbeReport
     {
         public int protocol = 1;
@@ -36,9 +47,16 @@ namespace Perpendicular3D
         public string revision;
         public string adapter_luid;
         public uint adapter_flags;
+        public bool dxgi_software_flag;
         public bool software_adapter;
+        public string expected_adapter = "PCI vendor 0x1AF4, device 0x1050 (VirtIO GPU)";
+        public bool expected_adapter_verified;
         public bool hardware_adapter_verified;
+        public bool host_acceleration_verified = false;
         public string system_d3d11_path;
+        public string umd_inventory_status = "not_attempted";
+        public string umd_inventory_error;
+        public UmdModuleReport[] umd_modules = new UmdModuleReport[0];
         public bool scene_attempted;
         public bool scene_completed;
         public bool exclusive_requested;
@@ -85,6 +103,7 @@ namespace Perpendicular3D
         private const uint BgraSupport = 0x20;
         private const uint SoftwareAdapterFlag = 2;
         private const int StatusOccluded = 0x087A0001;
+        private const long MaxUmdFileBytes = 8 * 1024 * 1024;
         private static readonly uint[] Levels = { 0xb100, 0xb000, 0xa100, 0xa000 };
         private static readonly Guid DxgiDeviceId = new Guid("54ec77fa-1377-44e6-8c32-88fd5f44c84c");
         private static readonly Guid Adapter1Id = new Guid("29038f61-3839-4626-91fd-086879011a05");
@@ -167,8 +186,98 @@ namespace Perpendicular3D
         {
             return ((level >> 12) & 15).ToString() + "_" + ((level >> 8) & 15).ToString();
         }
+        private static string NormalizeMode(string mode)
+        {
+            if (String.Equals(mode, "Device", StringComparison.OrdinalIgnoreCase)) return "Device";
+            if (String.Equals(mode, "Scene", StringComparison.OrdinalIgnoreCase)) return "Scene";
+            throw new ProbeFailure("arguments", "Use Device or Scene (case insensitive).", null);
+        }
         private static bool IsNativeArm64(ushort process, ushort native, int pointerBytes) { return process == 0 && native == 0xaa64 && pointerBytes == 8; }
         private static bool IsSoftware(uint flags) { return (flags & SoftwareAdapterFlag) != 0; }
+        private static bool IsUmdName(string name)
+        {
+            return name != null && name.StartsWith("neptune_umd", StringComparison.OrdinalIgnoreCase) && name.EndsWith(".dll", StringComparison.OrdinalIgnoreCase);
+        }
+        private static string InventoryError(Exception error)
+        {
+            string text = error.GetType().Name + ": " + error.Message;
+            return text.Length <= 512 ? text : text.Substring(0, 512);
+        }
+        private static UmdModuleReport HashUmdFile(string path, ref long remainingBytes)
+        {
+            UmdModuleReport result = new UmdModuleReport(); result.path = path;
+            try
+            {
+                using (FileStream stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read | FileShare.Delete))
+                {
+                    long length = stream.Length; result.disk_file_bytes = length;
+                    if (length > MaxUmdFileBytes || length > remainingBytes) throw new IOException("UMD file or aggregate hash byte limit exceeded");
+                    remainingBytes -= length;
+                    using (SHA256 hash = SHA256.Create())
+                    {
+                        byte[] buffer = new byte[65536]; long unread = length;
+                        while (unread > 0)
+                        {
+                            int count = stream.Read(buffer, 0, (int)Math.Min(unread, buffer.Length));
+                            if (count == 0) throw new IOException("UMD file shortened during hashing");
+                            hash.TransformBlock(buffer, 0, count, buffer, 0); unread -= count;
+                        }
+                        if (stream.ReadByte() != -1) throw new IOException("UMD file grew during hashing");
+                        hash.TransformFinalBlock(new byte[0], 0, 0);
+                        result.sha256 = BitConverter.ToString(hash.Hash).Replace("-", "").ToLowerInvariant();
+                        result.hash_status = "available";
+                    }
+                }
+            }
+            catch (Exception error) { result.sha256 = null; result.hash_status = "unknown"; result.hash_error = InventoryError(error); }
+            return result;
+        }
+        private static void CaptureUmdModules(ProbeReport report)
+        {
+            List<UmdModuleReport> found = new List<UmdModuleReport>();
+            report.umd_inventory_status = "complete";
+            long remainingBytes = 32 * 1024 * 1024;
+            try
+            {
+                using (Process self = Process.GetCurrentProcess())
+                {
+                    ProcessModuleCollection modules = self.Modules;
+                    if (modules.Count > 1024) throw new IOException("Own-process module enumeration limit exceeded");
+                    foreach (ProcessModule module in modules)
+                    {
+                        if (!IsUmdName(module.ModuleName)) continue;
+                        if (found.Count == 8) throw new IOException("Matching UMD module count limit exceeded");
+                        string path = module.FileName;
+                        if (String.IsNullOrEmpty(path) || path.Length > 32768) throw new IOException("UMD module path unavailable or too long");
+                        UmdModuleReport item = HashUmdFile(path, ref remainingBytes); found.Add(item);
+                        if (item.hash_status != "available") report.umd_inventory_status = "partial";
+                    }
+                }
+            }
+            catch (Exception error)
+            {
+                report.umd_inventory_status = found.Count == 0 ? "unknown" : "partial";
+                report.umd_inventory_error = InventoryError(error);
+            }
+            report.umd_modules = found.ToArray();
+        }
+        private static void ValidateAdapter(ProbeReport report, AdapterDesc1 desc)
+        {
+            report.adapter_description = desc.Description;
+            report.vendor_id = "0x" + desc.VendorId.ToString("X8"); report.device_id = "0x" + desc.DeviceId.ToString("X8");
+            report.subsystem_id = "0x" + desc.SubSysId.ToString("X8"); report.revision = "0x" + desc.Revision.ToString("X8");
+            report.adapter_luid = unchecked((uint)desc.AdapterLuid.High).ToString("X8") + ":" + desc.AdapterLuid.Low.ToString("X8");
+            report.adapter_flags = desc.Flags;
+            report.dxgi_software_flag = IsSoftware(desc.Flags);
+            // Actual Windows baseline returned this software renderer with Flags=0.
+            report.software_adapter = report.dxgi_software_flag || (desc.VendorId == 0x1414 && desc.DeviceId == 0x008c);
+            if (report.software_adapter) throw new ProbeFailure("adapter", "Software adapter (DXGI flag or Microsoft Basic Render ID); Device/Scene refused.", null);
+            if (desc.VendorId != 0x1af4 || desc.DeviceId != 0x1050)
+                throw new ProbeFailure("adapter_target", "Expected VirtIO GPU vendor 0x1AF4/device 0x1050; Device/Scene refused.", null);
+            report.expected_adapter_verified = true;
+            // Compatibility field: only API creation plus target identity, never host-GPU proof.
+            report.hardware_adapter_verified = report.device_creation_succeeded;
+        }
         private static bool ObservePresent(ProbeReport report, int hr)
         {
             report.present_attempts++; report.last_present_hresult = Hex(hr);
@@ -197,7 +306,8 @@ namespace Perpendicular3D
             IntPtr device = IntPtr.Zero, context = IntPtr.Zero, dxgi = IntPtr.Zero, adapter = IntPtr.Zero, adapter1 = IntPtr.Zero;
             try
             {
-                if ((mode != "Device" && mode != "Scene") || (exclusive && mode != "Scene") || frames < 1 || frames > 600 || seconds < 1 || seconds > 30)
+                mode = NormalizeMode(mode); report.mode = mode;
+                if ((exclusive && mode != "Scene") || frames < 1 || frames > 600 || seconds < 1 || seconds > 30)
                     throw new ProbeFailure("arguments", "Use Device/Scene; exclusive only with Scene; 1..600 frames, 1..30 seconds.", null);
                 if (Environment.OSVersion.Platform != PlatformID.Win32NT)
                     throw new ProbeFailure("platform", "This diagnostic requires Windows; no native graphics function was called.", null);
@@ -211,6 +321,7 @@ namespace Perpendicular3D
                 uint level;
                 int hr = Native.D3D11CreateDevice(IntPtr.Zero, HardwareDriver, IntPtr.Zero, BgraSupport, Levels, (uint)Levels.Length, SdkVersion, out device, out level, out context);
                 report.device_creation_hresult = Hex(hr);
+                CaptureUmdModules(report);
                 Check(hr, "D3D11CreateDevice(HARDWARE)");
                 if (device == IntPtr.Zero || context == IntPtr.Zero) throw new ProbeFailure("device", "Creation returned null device/context", null);
                 report.device_creation_succeeded = true; report.feature_level = FeatureLevel(level);
@@ -221,13 +332,7 @@ namespace Perpendicular3D
                 adapter1 = Interface(adapter, Adapter1Id, "IDXGIAdapter1");
                 AdapterDesc1 desc;
                 Check(Method<GetDescNative>(adapter1, GetDesc1Slot)(adapter1, out desc), "GetDesc1");
-                report.adapter_description = desc.Description;
-                report.vendor_id = "0x" + desc.VendorId.ToString("X8"); report.device_id = "0x" + desc.DeviceId.ToString("X8");
-                report.subsystem_id = "0x" + desc.SubSysId.ToString("X8"); report.revision = "0x" + desc.Revision.ToString("X8");
-                report.adapter_luid = unchecked((uint)desc.AdapterLuid.High).ToString("X8") + ":" + desc.AdapterLuid.Low.ToString("X8");
-                report.adapter_flags = desc.Flags; report.software_adapter = IsSoftware(desc.Flags);
-                if (report.software_adapter) throw new ProbeFailure("adapter", "DXGI reports a software adapter; scene refused.", null);
-                report.hardware_adapter_verified = true;
+                ValidateAdapter(report, desc);
                 if (mode == "Scene") RenderScene(report, device, context, adapter, exclusive, frames, seconds);
                 report.success = mode == "Device" || report.scene_completed;
             }
@@ -425,6 +530,61 @@ namespace Perpendicular3D
             passed.Add("Feature-level and negative HRESULT reporting");
             if (HardwareDriver != 1 || SdkVersion != 7 || !IsNativeArm64(0, 0xaa64, 8) || IsNativeArm64(0x8664, 0xaa64, 8) || IsNativeArm64(0, 0x8664, 8) || IsNativeArm64(0, 0xaa64, 4) || !IsSoftware(2) || IsSoftware(0)) throw new Exception("Hardware/native-architecture admission failed");
             passed.Add("HARDWARE constant, ARM64-only admission and software-adapter rejection");
+            string[] modes = { "Device", "device", "DEVICE", "DeViCe", "Scene", "scene", "SCENE", "sCeNe" };
+            foreach (string mode in modes)
+            {
+                string expected = mode.StartsWith("d", StringComparison.OrdinalIgnoreCase) ? "Device" : "Scene";
+                if (NormalizeMode(mode) != expected) throw new Exception("Mode casing was not canonicalized");
+                if (Environment.OSVersion.Platform != PlatformID.Win32NT)
+                {
+                    ProbeReport denied = Run(mode, expected == "Scene", 1, 1);
+                    if (denied.mode != expected || denied.error_stage != "platform" || denied.success || denied.native_arm64 || denied.scene_attempted || denied.device_creation_succeeded)
+                        throw new Exception("Accepted mode casing failed arguments or reached native calls");
+                }
+            }
+            foreach (string mode in new string[] { null, "", " device", "Scenes", "WARP" })
+            {
+                ProbeReport denied = Run(mode, false, 1, 1);
+                if (denied.error_stage != "arguments" || denied.device_creation_succeeded || denied.scene_attempted) throw new Exception("Invalid mode was admitted");
+            }
+            passed.Add("Eight Device/Scene casings canonicalized; invalid modes rejected before native calls");
+            foreach (uint[] identity in new uint[][] { new uint[] { 0x1414, 0x008c, 0 }, new uint[] { 0x1234, 0x1050, 0 }, new uint[] { 0x1af4, 0x1050, 2 }, new uint[] { 0x1af4, 0x1050, 0 } })
+            {
+                AdapterDesc1 desc = new AdapterDesc1();
+                desc.Description = identity[0] == 0x1414 ? "Microsoft Basic Render Driver" : "Test adapter";
+                desc.VendorId = identity[0]; desc.DeviceId = identity[1]; desc.Flags = identity[2];
+                ProbeReport candidate = new ProbeReport();
+                candidate.device_creation_succeeded = true; candidate.device_creation_hresult = "0x00000000";
+                candidate.native_arm64 = true; candidate.feature_level = "11_1";
+                bool denied = false; string stage = null;
+                try { ValidateAdapter(candidate, desc); } catch (ProbeFailure error) { denied = true; stage = error.Stage; }
+                bool expected = identity[0] == 0x1af4 && identity[1] == 0x1050 && identity[2] == 0;
+                if (denied == expected || candidate.expected_adapter_verified != expected || candidate.hardware_adapter_verified != expected || candidate.host_acceleration_verified || candidate.scene_attempted)
+                    throw new Exception("Target identity/software classification escaped admission");
+                if (identity[0] == 0x1414 && (stage != "adapter" || !candidate.software_adapter || candidate.dxgi_software_flag || candidate.adapter_description != "Microsoft Basic Render Driver" || candidate.vendor_id != "0x00001414" || candidate.device_id != "0x0000008C"))
+                    throw new Exception("Actual Windows Basic Render flags=0 counterexample was not rejected");
+                if (identity[0] == 0x1234 && stage != "adapter_target") throw new Exception("Unexpected non-software adapter was admitted");
+            }
+            passed.Add("Actual Basic Render S_OK/11_1/flags=0 counterexample rejected; only non-software VirtIO 1AF4:1050 admitted, host acceleration unclaimed");
+            if (!IsUmdName("neptune_umd.dll") || !IsUmdName("NEPTUNE_UMD_ARM64.DLL") || IsUmdName(null) || IsUmdName("otherneptune_umd.dll") || IsUmdName("neptune_umd.dll.extra"))
+                throw new Exception("UMD module-name filter escaped its prefix/suffix");
+            string fixture = Path.GetTempFileName();
+            try
+            {
+                File.WriteAllBytes(fixture, Encoding.ASCII.GetBytes("abc"));
+                long budget = 3; UmdModuleReport hashed = HashUmdFile(fixture, ref budget);
+                if (hashed.hash_status != "available" || hashed.sha256 != "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad" || hashed.disk_file_bytes != 3 || budget != 0)
+                    throw new Exception("Full UMD-file SHA256/budget mismatch");
+                budget = 2; hashed = HashUmdFile(fixture, ref budget);
+                if (hashed.hash_status != "unknown" || hashed.sha256 != null || hashed.hash_error == null || budget != 2) throw new Exception("UMD aggregate hash budget escaped its bound");
+                using (FileStream stream = new FileStream(fixture, FileMode.Open, FileAccess.Write)) { stream.SetLength(MaxUmdFileBytes + 1); }
+                budget = 32 * 1024 * 1024; hashed = HashUmdFile(fixture, ref budget);
+                if (hashed.hash_status != "unknown" || hashed.sha256 != null || hashed.hash_error == null || budget != 32 * 1024 * 1024) throw new Exception("UMD file hash limit escaped its bound");
+                File.Delete(fixture); hashed = HashUmdFile(fixture, ref budget);
+                if (hashed.hash_status != "unknown" || hashed.sha256 != null || hashed.hash_error == null) throw new Exception("Unavailable UMD file was reported as hashed");
+            }
+            finally { if (File.Exists(fixture)) File.Delete(fixture); }
+            passed.Add("Neptune-only module filter; full known SHA256, aggregate/per-file bounds and unavailable-file unknown status");
             ProbeReport present = new ProbeReport();
             if (!ObservePresent(present, 0) || ObservePresent(present, StatusOccluded) || present.present_s_ok != 1 || present.present_occluded != 1) throw new Exception("Present status was reported as success");
             foreach (int failed in new int[] { unchecked((int)0x887A0005), 0x087A0007 })
