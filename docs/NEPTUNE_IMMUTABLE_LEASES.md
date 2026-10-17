@@ -6,6 +6,65 @@ This is an opt-in private host extension. It preserves the matched renderer
 descriptor. Private broker version **3** is distinct from those guest/native
 versions. Host v2 remains the default build recipe.
 
+## Attachments to commandless contexts — 2026-10-17
+
+Actual Windows attachment logging distinguishes the creator from the importing
+context. Six initial 1280×1024 output resources13–18 belong to context9 and
+are attached to context31, which creates no command ring in that trace. Later
+2048×1152 outputs have the same creator/consumer relation. A separate actual
+owned import reports a different canonical D3D device (resource77/context9);
+that does not prove that the output surfaces themselves were reopened there.
+Ordinary creator reattachment is already short-circuited in the upstream proxy;
+a real creator-attachment fixture passes without any admission change. No
+same-device exception was added on that hypothesis.
+
+The proxy now distinguishes contexts that have never received a nonempty
+SUBMIT_CMD. Attaching a source to such a context records a bounded per-resource
+32-bit context-slot mask without tainting it. Before forwarding that context's
+first command, the proxy permanently taints every recorded source and completes
+the existing per-resource DENY handshake. If any barrier fails, the command is
+not forwarded and the consumer is closed. A context that has already received
+commands still follows the original immediate denial path. Stopping a context
+clears its slot from every resource before reuse. Unsupported proxy transfer
+operations already return failure; resource attachment and fence retirement
+do not execute the Neptune command decoder. Thus this rule does not infer
+read-only use from a process name or from lack of observed GPU activity.
+
+`--passive-attach` creates a real second context and attaches both outputs before
+native scanout, while the existing 19-image sequence verifies unchanged held
+images, resize, reconnect, owned input and source pressure. Both the private and
+relocated app runs pass 1,015,802 exact pixels, 22 GPU reads and zero RFB uploads
+(`passive-positive1`, `passive-packaged1`, each `result.json` under the private
+QEMU profile). The final anonymous writer is still rejected.
+
+`--activate-attached` instead creates a real ring in that attached context while
+the first red native image is held. The log records denial of resource200
+(granted) and201 before the second worker reports its CREATE_RING. Its next
+frame times out, the renderer reports selected resource200 tainted, and the
+held red pixels remain intact. Receipt `passive-activate-negative1` is an
+expected failure, not a passing presentation result. Existing historical-owned
+reopen denial also retains the red image and times out in
+`attach-owner-history-negative1`. Raw Windows diagnostics are preserved in
+`windows-native3d-20261017/{import-owner1,attach-owner1}-*`.
+
+The subsequent actual Windows run publishes101 native snapshots; the consumer
+ACKs100 and the app visibly displays the Windows desktop. There are zero QEMU
+sink copies, publisher source mappings or publisher backing allocations. The
+selected resource17/context9 is known and untainted. Actual worker statistics
+record256 received snapshots,155 cancellations and a36,700,160-byte peak of
+producer snapshot storage. These counts are observations, not a frame-rate or
+latency measurement.
+
+Capture subsequently closes at `perp_snapshot_signal`, generated line214:
+the existing single-fence/monotonic-value guard. The exact clause among changed
+fence identity, non-increasing value and already-completed value is not isolated
+by that log. The producer remains one ring with no owner/import/layout rejection.
+The final displayed image therefore freezes; this is not stable Windows 3D
+qualification. Guest Tools still connects and reports the actual 3D controller
+at2048×1152. Private receipts `windows-native3d-20261017/passive1-*` preserve the
+live counts and first fault. Completion readiness must support real guest fence
+usage before promotion of the candidate.
+
 ## Boot FLUSH admission — 2026-10-17
 
 The first precise QEMU diagnostic in Windows reports `flush rejected

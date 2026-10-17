@@ -44,6 +44,8 @@ def main():
     parser.add_argument('--withhold-producer-token', action='store_true', help='Negative control: real GPU work finishes but the worker ready token is withheld')
     parser.add_argument('--source-pressure', action='store_true', help='Keep twelve additional unselected shared sources alive during native presentation')
     parser.add_argument('--import-input', action='store_true', help='Read a texture from a second renderer worker into the selected output')
+    parser.add_argument('--passive-attach', action='store_true', help='Attach outputs to a second context that receives no graphics commands')
+    parser.add_argument('--activate-attached', action='store_true', help='Negative control: start a real ring after a passive attachment and a retained image')
     parser.add_argument('--boot-flush', action='store_true', help='Flush a real legacy 2D scanout before the first native selection')
     parser.add_argument('--owned-input', action='store_true', help='Reopen a never-granted owned source as input while an independent output is presented')
     parser.add_argument('--import-selected-output', action='store_true', help='Negative control: import the selected output while its old image is retained')
@@ -51,6 +53,7 @@ def main():
     parser.add_argument('--reexport-input', action='store_true', help='Negative control: an imported texture reexport must not become an exclusive output')
     parser.add_argument('--label', default=None, help='Fresh receipt name; preserves previous attempts')
     args = parser.parse_args()
+    args.passive_attach = args.passive_attach or args.activate_attached
     args.import_input = args.import_input or args.reexport_input
     args.native = args.native or args.swift_receiver
     require(not args.withhold_native_update or args.native, 'Withheld-update control requires --native')
@@ -298,6 +301,13 @@ def main():
                                 self.originals.append((address + offset, pitch))
                     neptune = Wire1Neptune(gpu)
                     width, height = neptune.create(64, 32)
+                    if args.passive_attach:
+                        require(args.sync_qemu, 'Passive attachment requires automatic synchronization')
+                        require(not (args.import_input or args.import_selected_output), 'Passive context needs its own identity')
+                        gpu.send(0x200, fixture.live.pack('II', 7, 7)+b'passive'+b'\0'*57, context=2)
+                        for resource in (200, 201):
+                            gpu.send(0x202, struct.pack('<2I', resource, 0), context=2)
+                        report['passive_attachments'] = {'context':2,'resources':[200,201],'commands_sent':False}
                     for index, color in enumerate(((1, 0, 0, 1), (0, 1, 0, 1))):
                         neptune.clear(index, color, width, height)
                     neptune.signal(1)
@@ -476,6 +486,22 @@ def main():
                                 'retained_red_image_intact':True,'before_rejected_frame':sync_stats()}
                             control('frame 1 G 64 32')
                             raise RuntimeError('Reexported input was incorrectly admitted as an exclusive output')
+                        if args.activate_attached:
+                            # A real CREATE_RING is the first executable batch.
+                            # Its sources must be denied before this reaches the
+                            # worker, even though no texture import occurs yet.
+                            gpu.send(0x10c,fixture.live.pack('IIIIQQ',409,2,3,0,0,131072),context=2)
+                            gpu.send(0x208,fixture.live.pack('IIQ',409,0,0x7000000),context=2)
+                            gpu.t.write(gpu.bar[4]+0x7000000,b'\0'*131072)
+                            body=fixture.live.pack('Q8IQ4I',1,409,0,4,8,4096,65536,128,128,1000000,0,0,0,0)
+                            batch=fixture.live.command(0x10000,body=body)
+                            gpu.send(0x207,fixture.live.pack('II',len(batch),0)+batch,context=2)
+                            paint(0,(0,1,0,1),3)
+                            control('recheck 0 R 64 32')
+                            report['passive_activation_denial']={'actual_CREATE_RING_sent':True,
+                                'retained_red_image_intact':True,'before_rejected_frame':sync_stats()}
+                            control('frame 1 G 64 32')
+                            raise RuntimeError('Passive consumer executed commands without revoking capture')
                         if args.import_owned_output:
                             # Selection clears the old claim's granted bit, but
                             # its earlier epoch and held image still exist.

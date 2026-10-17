@@ -19,7 +19,7 @@
 typedef struct LiveExport {uint64_t blob,object;uint32_t resource;} LiveExport;
 typedef struct LiveWorker {
     uint32_t id;uint64_t epoch;int fd;struct proxy_socket *control;
-    bool hello,bad,enabled,revoking;
+    bool hello,bad,enabled,revoking,commands_started;
     uint32_t retired_batch;
     uint32_t capture_resource;
     LiveExport exports[LIVE_MAX_SOURCES];
@@ -27,7 +27,7 @@ typedef struct LiveWorker {
     _Alignas(8) unsigned char input[248];size_t have,want;int rights[2];unsigned fd_count;
 } LiveWorker;
 typedef struct LiveResource {
-    uint32_t id,context,last_generation;uint64_t worker_epoch,epoch,blob,object,bytes;
+    uint32_t id,context,last_generation,passive_contexts;uint64_t worker_epoch,epoch,blob,object,bytes;
     bool tainted,granted,deny_acked;
 } LiveResource;
 typedef struct LiveFrame {
@@ -97,7 +97,11 @@ void perp_live_context_stop(uint32_t id)
     for(unsigned i=0;i<LIVE_MAX_CANDIDATES;i++)if(frames[i].used && frames[i].header.context_id==id && !frames[i].leased) {
         close_rights(frames[i].fds,2);memset(&frames[i],0,sizeof(frames[i]));
     }
-    for(unsigned i=0;i<MAX_RESOURCES;i++)if(resources[i].context==id)memset(&resources[i],0,sizeof(resources[i]));
+    uint32_t bit=1u<<(unsigned)(w-workers);
+    for(unsigned i=0;i<MAX_RESOURCES;i++) {
+        resources[i].passive_contexts&=~bit;
+        if(resources[i].context==id)memset(&resources[i],0,sizeof(resources[i]));
+    }
     memset(w,0,sizeof(*w));
 }
 void perp_live_resource_created(uint32_t id,uint32_t context,uint64_t blob,uint64_t bytes)
@@ -207,7 +211,19 @@ static void receive_messages(LiveWorker *w)
 }
 bool perp_live_before_import(uint32_t context,uint32_t id)
 {
-    (void)context;LiveResource *r=resource(id);if(!r)return true;r->tainted=true;
+    LiveResource *r=resource(id);if(!r)return true;
+    LiveWorker *consumer=worker(context);
+    /* Resource attachment alone creates no D3D objects or ring. A context
+     * that has never received SUBMIT_CMD cannot write the backing. Its first
+     * command must revoke all these sources before that command is forwarded. */
+    if(consumer && !consumer->bad && !consumer->commands_started) {
+        uint32_t bit=1u<<(unsigned)(consumer-workers);
+        if(!(r->passive_contexts&bit))fprintf(stderr,"perp-live: passive attachment resource=%u creator=%u consumer=%u\n",id,r->context,context);
+        r->passive_contexts|=bit;return true;
+    }
+    if(!r->tainted)fprintf(stderr,"perp-live: attachment taint resource=%u creator=%u consumer=%u granted=%u\n",
+        id,r->context,context,r->granted);
+    r->tainted=true;
     if(!r->granted)return true;
     LiveWorker *w=worker(r->context);if(!w || w->bad)return false;
     PerpBrokerHeader deny={.kind=LIVE_DENY,.resource_id=r->id,.resource_epoch=r->epoch,.blob_id=r->blob,.object_id=r->object};
@@ -215,6 +231,22 @@ bool perp_live_before_import(uint32_t context,uint32_t id)
     uint64_t deadline=now()+1100000000ull;
     while(!r->deny_acked && !w->bad && now()<deadline) {receive_messages(w);struct pollfd p={w->fd,POLLIN,0};poll(&p,1,1);}
     if(!r->deny_acked) {imports_denied++;return false;}return true;
+}
+bool perp_live_before_commands(uint32_t context)
+{
+    if(!enabled())return true;
+    LiveWorker *w=worker(context);if(!w)return true;
+    if(w->bad)return false;
+    if(w->commands_started)return true;
+    w->commands_started=true;
+    uint32_t bit=1u<<(unsigned)(w-workers);
+    for(unsigned i=0;i<MAX_RESOURCES;i++)if(resources[i].passive_contexts&bit) {
+        resources[i].passive_contexts&=~bit;
+        if(!perp_live_before_import(context,resources[i].id)) {
+            fail_worker(w,"first command could not revoke passive attachment");return false;
+        }
+    }
+    return true;
 }
 bool perp_live_scanout_select(uint32_t id)
 {

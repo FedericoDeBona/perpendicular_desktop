@@ -44,7 +44,9 @@ def patch_renderer():
     shared=copied/'npt_shared.c';text=shared.read_text()
     text=replace(text,'#include "snapshot.h"','#include "snapshot.h"\n#include "live.h"')
     text=replace(text,'   perp_snapshot_import(ctx, cmd->res_id);',
-        '   if (!perp_live_worker_import(ctx, cmd->res_id)) return NPT_E_INVALIDARG;')
+        '')
+    text=replace(text,'   /* Wait for the attach-forwarded resource.',
+        '   if (!perp_live_worker_import(ctx, cmd->res_id, device)) return NPT_E_INVALIDARG;\n\n   /* Wait for the attach-forwarded resource.')
     text=replace(text,'   /* The freshly imported texture carries one reference; the object',
         '   perp_live_worker_imported(ctx, texture);\n\n   /* The freshly imported texture carries one reference; the object')
     text=replace(text,'   if (NPT_SUCCEEDED(hr) && !nt_handle)\n      perp_snapshot_export(ctx, texture_id, blob_id, texture, (const void *)(uintptr_t)handle);',
@@ -82,6 +84,9 @@ def patch_renderer():
     text=replace(text,'   /* The current render protocol only supports importing dma-buf, shm or pipe resource',
         '   if (!perp_live_before_import(ctx->base.ctx_id, res_id)) return;\n\n'
         '   /* The current render protocol only supports importing dma-buf, shm or pipe resource')
+    text=replace(text,'   if (!size)\n      return 0;\n\n   struct render_context_op_submit_cmd_request req = {',
+        '   if (!size)\n      return 0;\n\n   if (!perp_live_before_commands(ctx->base.ctx_id)) return -1;\n\n'
+        '   struct render_context_op_submit_cmd_request req = {')
     (copied/'proxy_context.c').write_text(text);sources.append(copied/'proxy_context.c')
     text=(root/'src/virglrenderer.c').read_text()
     text=replace(text,'#include "virglrenderer.h"','#include "virglrenderer.h"\n#include "live.h"')

@@ -29,7 +29,7 @@ static void live_fault_at_locked(const char *function,unsigned line)
     }
     live_faulted=true;live_enabled=false;
 }
-bool perp_live_worker_import(struct npt_context *ctx,uint32_t resource)
+bool perp_live_worker_import(struct npt_context *ctx,uint32_t resource,void *device)
 {
     lock();bool good=ctx==live_context;
     /* Incoming textures are inputs, not automatically scanout sources.
@@ -38,6 +38,15 @@ bool perp_live_worker_import(struct npt_context *ctx,uint32_t resource)
      * exports are tainted by the VM-global proxy before attachment. */
     for(unsigned i=0;good && i<LIVE_MAX_SOURCES;i++)if(live_claims[i].resource==resource && resource) {
         LiveClaim *claim=&live_claims[i];
+        if(!claim->import_reported) {
+            bool known=false,same_device=false;
+            for(unsigned j=0;j<MAX_EXPORTS;j++)if(entries[j].ctx==ctx && entries[j].blob_id==claim->blob) {
+                known=true;same_device=identical(entries[j].owner,device);break;
+            }
+            fprintf(stderr,"perp-live-worker: owned import context=%u resource=%u source_known=%u same_device=%u enabled=%u epoch=%llu\n",
+                ctx->ctx_id,resource,known,same_device,live_enabled,(unsigned long long)claim->epoch);
+            claim->import_reported=true;
+        }
         /* Epoch zero proves this source has NEVER been granted. Selection
          * clears granted on older sources, so that boolean is insufficient.
          * No GPU snapshot can exist for a never-granted source. */

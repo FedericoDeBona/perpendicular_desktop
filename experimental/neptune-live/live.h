@@ -21,6 +21,7 @@ void perp_live_context_start(uint32_t id,uint32_t capset,struct proxy_socket *so
 void perp_live_context_stop(uint32_t id);
 void perp_live_resource_created(uint32_t id,uint32_t context,uint64_t blob,uint64_t bytes);
 void perp_live_resource_destroy(uint32_t id);
+bool perp_live_before_commands(uint32_t context);
 bool perp_live_before_import(uint32_t context,uint32_t resource);
 void perp_live_renderer_reset(void);
 /* These three entry points are consumed by actual QEMU scanout callbacks. */
@@ -39,7 +40,7 @@ LIVE_PUBLIC char *perp_live_scanout_stats(void);
 /* Actual server dispatch extension, installed only in the private overlay. */
 bool perp_live_worker_command(uint32_t context,const void *bytes,size_t count,const int *fds,unsigned fd_count);
 void perp_live_worker_claim(uint32_t context,uint32_t resource,uint64_t blob);
-bool perp_live_worker_import(struct npt_context *ctx,uint32_t resource);
+bool perp_live_worker_import(struct npt_context *ctx,uint32_t resource,void *device);
 void perp_live_worker_imported(struct npt_context *ctx,void *texture);
 bool perp_live_worker_source(struct npt_context *ctx,void *texture);
 void perp_live_worker_resource_destroy(uint32_t context,uint32_t resource);
