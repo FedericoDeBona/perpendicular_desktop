@@ -689,3 +689,53 @@ No installed runtime or VM was changed. Real QEMU broker admission, active
 Signal-driven capture/retirement, direct consumer delivery and compositor
 shared-resource ownership remain unqualified; the earlier fixture still
 supplies its own writer wait. This does not establish automatic Windows sync.
+
+
+### Actual automatic producer synchronization → Swift Metal — 2026-10-17
+
+The matched Wire1 host extension now runs through real QEMU scanout ingress.
+A separately linked QEMU candidate replaces only the two GPU objects and adds
+`qemu-native-sync.m`. The normal worker Signal override queues immutable copies
+before the original Signal; the VM-global proxy associates export/claim/resource
+epochs and checks actual readiness. The native sink consumes only those ready
+snapshots, copies to the existing publisher and retires the worker lease from
+the actual copy completion on QEMU's main loop. Source-generation checks keep
+old completions from clearing a replacement read. Unsupported selections and
+flushes cannot fall through to the old unfenced update path. No per-frame
+Cocoa drawable, PBO or CPU pixel readback is used in this sink; startup still
+retains Cocoa/ANGLE.
+
+Final positive receipt:
+`.tools/graphics-rebuild-qemu-native-20261016/automatic-drained6/result.json`.
+It passes 19 snapshots/three retained-source rechecks, 1,015,802 exact pixels,
+22 production-renderer GPU reads, zero RFB uploads, resize and two connections.
+Native publication uses no test-supplied producer fence wait. Decoder/control
+round trips order admission/credits, not GPU completion. The setup COM check
+still verifies its own fence separately. Before the first consumer connects,
+the fixture overwrites and verifies all 4,096 original texture pixels as magenta;
+the later red snapshot therefore cannot be a late copy of the original.
+
+Final normal-pipeline counters show 19 worker snapshot reads, 27 cancelled
+nonselected snapshots, zero pending broker leases, no rejection and no active
+native read. Publisher counters show 19 completed/publications, 6 backing
+allocations and 13 reuses. All publisher backings/mappings are released and
+occupancy/cache are zero before recording; asynchronous disconnect is drained
+explicitly. An additional anonymous blob scanout has no export/writer identity:
+the controlled rejection sets failure, consumes its flush and publishes no
+extra frame. QEMU exits 0 with paused CPU/no guest disks.
+
+The separate `automatic-token-final7` negative completes real GPU fence value 2
+and verifies the original overwrite while withholding the worker ready token.
+The actual broker reports `producer completion timeout`; the Swift receiver
+fails before its first native frame. This distinguishes actual availability
+from an otherwise completed GPU operation. Both attempts preserve the original
+app and protected inputs. QEMU candidate/build/protected-source receipts are
+under `.tools/graphics-rebuild-sync-qemu3-20261017/`.
+
+Two GPU copies remain: worker snapshot plus native publication. The single-
+writer/import/multi-ring rejection scope is retained. This does not qualify
+Windows compositor shared-resource ownership, all static reconnect cases,
+visible drawable presentation, pending-GPU shutdown, latency/FPS or the normal
+installed app. The odd-sized blob emits HVF mapping-alignment warnings; paused
+qtest access is not proof of a running guest's CPU mapping. These gates remain
+open before a Windows candidate can replace the ordinary 2D runtime.

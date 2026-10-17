@@ -51,6 +51,15 @@ left at exit. Rendering remains offscreen, with the producer fence wait supplied
 by the fixture. This qualifies component pairing, not visible app/Windows use.
 [Swift integration evidence](VERIFICATION.md#actual-qemu--production-swift-receiverrenderer--2026-10-17).
 
+The next private candidate also exercises the matched worker's automatic
+copy-before-Signal path through actual QEMU scanout ingress and the Swift
+receiver. The same pixel/resize/reconnect sequence passes without a publication
+fence wait supplied by the fixture; an original-overwrite challenge and withheld
+ready-token negative establish the checked snapshot/readiness boundary. There
+are currently two GPU copies and the original single-writer/import/multi-ring
+guards remain. This is not Windows or installed-runtime qualification.
+[Automatic synchronization evidence](VERIFICATION.md#actual-automatic-producer-synchronization--swift-metal--2026-10-17).
+
 ## Hidden direct-source run
 
 The first combined direct-source/STP candidate launched after correcting a

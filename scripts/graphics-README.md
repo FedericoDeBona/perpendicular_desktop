@@ -328,3 +328,49 @@ does not exercise snapshot capture, remove the fixture's producer wait, or
 qualify Windows. The next integration must connect the real QEMU scanout
 ingress to this matching host extension and test actual Signal-driven capture
 and retirement before enabling it in a Windows candidate.
+
+## Automatic Signal-driven Wire1 scanout
+
+Link the matching synchronization renderer into a separate QEMU overlay:
+
+```sh
+.tools/build-venv/bin/python scripts/graphics-wire1-sync-qemu.py --qemu .tools/graphics-rebuild-qemu-native-20261016 --sync-renderer .tools/graphics-rebuild-sync2-20261017 --output .tools/graphics-rebuild-sync-qemu-new
+.tools/build-venv/bin/python scripts/graphics-qemu-probe.py --profile .tools/graphics-rebuild-qemu-native-20261016 --sync-qemu .tools/graphics-rebuild-sync-qemu-new --swift-receiver --label automatic-sync-new
+```
+
+The builder copies/patches only two GPU source files, compiles the native sink
+against their actual QEMU recipes, and relinks a private candidate. Explicit
+reused link inputs and selected original artifacts are protected by hashes;
+signing grants only Hypervisor access. No runtime is installed or VM started.
+
+Real SET_SCANOUT_BLOB/RESOURCE_FLUSH ingress selects the checked resource in
+the VM-global proxy broker. The original worker's real Signal override queues
+its immutable snapshot copy before Signal; the broker waits for that actual
+completion descriptor. QEMU imports the ready snapshot as a Metal texture and
+copies it into the existing bounded native publisher. That copy's real GPU
+completion retires the worker lease on QEMU's main loop. Unsupported selections
+and subsequent flushes are consumed as rejection, without re-entering the old
+unfenced update path. Per-frame Cocoa drawable acquisition, PBO and CPU pixel
+readback are absent from this sink. Cocoa/ANGLE initialization still exists in
+the base candidate.
+
+The automatic probe uses decoder/control admission round trips but performs no
+producer fence-value wait for native publication. Before its first consumer
+connects, it overwrites and verifies both original textures as magenta: the
+later red result must come from the earlier immutable worker snapshot. Then
+the ordinary Swift reader/renderer runs the same updates, resize and reconnect.
+It waits for asynchronous producer teardown before recording drained counters,
+and rejects an anonymous scanout with no checked writer/export identity.
+
+For the readiness negative, add `--withhold-producer-token` and a fresh label.
+The real copy/Signal and checked original overwrite complete, while the worker
+token remains withheld. This command must fail before its first native frame;
+the broker must report a producer-completion timeout. The failed receipt is
+expected safety evidence, not a passing graphics result.
+
+This development path currently makes **two GPU copies** (worker snapshot and
+native publication). It retains the single-writer, bounded export and import/
+multi-ring rejection guards; arbitrary compositor aliasing is unsupported.
+Reconnection is tested with an image produced while disconnected, not every
+static reconnect case. This is not Windows, visible drawable, shutdown-under-
+pending-GPU, latency/FPS or installed-app qualification.

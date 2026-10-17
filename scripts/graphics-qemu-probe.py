@@ -37,11 +37,15 @@ def main():
     parser.add_argument('--native', action='store_true', help='Also verify real scanout snapshots with a Metal receiver')
     parser.add_argument('--swift-receiver', action='store_true', help='Use the app production Swift receiver/renderer; implies --native')
     parser.add_argument('--sync-renderer', type=Path, help='Private matched synchronization renderer; capture remains disabled in this probe')
+    parser.add_argument('--sync-qemu', type=Path, help='Matched private QEMU overlay; enables actual automatic producer synchronization')
     parser.add_argument('--withhold-native-update', action='store_true', help='Negative control: omit the green update; --native must fail')
+    parser.add_argument('--withhold-producer-token', action='store_true', help='Negative control: real GPU work finishes but the worker ready token is withheld')
     parser.add_argument('--label', default=None, help='Fresh receipt name; preserves previous attempts')
     args = parser.parse_args()
     args.native = args.native or args.swift_receiver
     require(not args.withhold_native_update or args.native, 'Withheld-update control requires --native')
+    require(not args.withhold_producer_token or args.sync_qemu, 'Withheld producer token requires automatic synchronization')
+    require(not (args.withhold_native_update and args.withhold_producer_token), 'Select one causal negative control')
     args.com = args.com or args.native
     base = args.profile.absolute()
     require(base.parent.resolve() == (ROOT / '.tools').resolve() and not base.is_symlink() and
@@ -56,6 +60,21 @@ def main():
     backend = Path(manifest['plan']['backend'])
     protected = {**manifest['plan']['dependencies'], **json.loads((base / 'protected.json').read_text()),
                  str(binary): sha(binary), str(base / 'build.json'): sha(base / 'build.json')}
+    if args.sync_qemu:
+        require(args.native, 'Automatic synchronization probe requires a native receiver')
+        profile = args.sync_qemu.absolute()
+        require(profile.parent.resolve() == (ROOT / '.tools').resolve() and not profile.is_symlink() and
+                re.fullmatch(r'graphics-rebuild-[a-z0-9-]{1,64}', profile.name), 'Expected private QEMU sync profile')
+        profile = profile.parent.resolve() / profile.name
+        overlay = json.loads((profile / 'build.json').read_text())
+        require(overlay['qemu_profile'] == str(base), 'QEMU overlay base mismatch')
+        if args.sync_renderer:
+            require(str(args.sync_renderer.resolve()) == overlay['sync_renderer'], 'Synchronization renderer mismatch')
+        else: args.sync_renderer = Path(overlay['sync_renderer'])
+        binary = profile / 'qemu-system-aarch64'
+        require(overlay['candidate'] == str(binary) and sha(binary) == overlay['candidate_sha256'], 'QEMU overlay identity changed')
+        protected.update(json.loads((profile / 'protected.json').read_text()))
+        protected[str(binary)] = sha(binary); protected[str(profile / 'build.json')] = sha(profile / 'build.json')
     if args.sync_renderer:
         sync = args.sync_renderer.absolute()
         require(sync.parent.resolve() == (ROOT / '.tools').resolve() and not sync.is_symlink() and
@@ -89,6 +108,8 @@ def main():
         'DYLD_PRINT_LIBRARIES': '1', 'ANGLE_DEFAULT_PLATFORM': 'metal', 'NPT_BACKEND': 'dxmt',
         'RENDER_SERVER_EXEC_PATH': str(renderer / 'prefix/libexec/virgl_render_server'),
         'PERP_NATIVE_DISPLAY_DIRECT': '1'}
+    if args.sync_qemu: selected['PERP_NEPTUNE_SCANOUT_BROKER'] = '1'
+    if args.withhold_producer_token: selected['PERP_LIVE_TEST_WITHHOLD'] = '1'
     for key in ('NPT_D3D11_LIBRARY_PATH', 'NPT_DXGI_LIBRARY_PATH', 'NPT_D3D12_LIBRARY_PATH'):
         selected[key] = str(backend / 'prefix/lib/libdxmt-native.dylib')
     env = {key: value for key, value in os.environ.items()
@@ -100,8 +121,9 @@ def main():
               'rendering_verified': False, 'source': str(Path(__file__).relative_to(ROOT)),
               'source_sha256': sha(Path(__file__))}
     if args.sync_renderer:
-        report['synchronization_extension'] = {'renderer': str(renderer), 'capture_enabled': False,
-            'scope': 'Ordinary decoder/backend regression only; copy-before-Signal is not exercised'}
+        report['synchronization_extension'] = {'renderer': str(renderer), 'capture_enabled': bool(args.sync_qemu),
+            'scope': 'Actual worker copy-before-Signal and QEMU broker' if args.sync_qemu else
+                     'Ordinary decoder/backend regression only; copy-before-Signal is not exercised'}
     peers = []; process = None; q = None; receiver = None; receiver_log = None
     if args.native:
         source = ROOT / 'experimental/cocoa-native-display/qemu-receiver.m'
@@ -239,21 +261,58 @@ def main():
                     report['owned_processes_after_COM'] = owned_processes()
                     if args.native:
                         endpoint = runtime / 'native-display.sock'
+                        def sync_stats():
+                            return json.loads(q.call('qom-get', {'path': '/machine/peripheral/freshprobe/virtio-backend',
+                                'property': 'perp-live-stats'}))
+                        def wait_sync(predicate):
+                            end = time.monotonic() + 5
+                            while True:
+                                state = sync_stats()
+                                require(not state['failed'] and not state['renderer']['closed'], 'Automatic synchronization path closed: ' + json.dumps(state))
+                                if predicate(state): return state
+                                require(time.monotonic() < end, 'Automatic synchronization admission timeout: ' + json.dumps(state))
+                                time.sleep(.005)
                         def paint(index, color, token):
+                            if args.sync_qemu:
+                                gpu.scanout(neptune.resource_base + index, width, height)
+                                gpu.flush(neptune.resource_base + index, width, height)
+                                wait_sync(lambda state: state['renderer']['active_context'] == 1 and state['renderer']['pending'] == 0)
+                                # A decoder/control round trip orders earlier
+                                # worker ACKs before the next fixture commands.
+                                # GetType is not a GPU wait or fence-value poll.
+                                neptune.call(fixture.live.method('ID3D11DeviceContext', 'GetType'), 11)
                             neptune.clear(index, color, width, height)
                             neptune.signal(token)
-                            end = time.monotonic() + 10
-                            while True:
-                                reply = neptune.call(fixture.live.method('ID3D11Fence', 'GetCompletedValue'), 2)
-                                if struct.unpack_from('<Q', reply, 8)[0] >= token: break
-                                require(time.monotonic() < end, 'Native test producer GPU fence timeout')
-                                time.sleep(.005)
+                            if not args.sync_qemu:
+                                end = time.monotonic() + 10
+                                while True:
+                                    reply = neptune.call(fixture.live.method('ID3D11Fence', 'GetCompletedValue'), 2)
+                                    if struct.unpack_from('<Q', reply, 8)[0] >= token: break
+                                    require(time.monotonic() < end, 'Native test producer GPU fence timeout')
+                                    time.sleep(.005)
                             gpu.scanout(neptune.resource_base + index, width, height)
                             gpu.flush(neptune.resource_base + index, width, height)
                         # This fixture explicitly proves its writer completed
                         # before FLUSH; it does not establish that contract for
                         # arbitrary Windows/multicontext producer submissions.
                         paint(0, (1, 0, 0, 1), 2)
+                        if args.sync_qemu:
+                            # No consumer is connected yet, so QEMU cannot have
+                            # copied the worker snapshot. Overwrite and verify
+                            # BOTH original resources first. The later red
+                            # result must therefore come from the immutable
+                            # copy queued by the actual Signal override.
+                            neptune.overwrite(width, height)
+                            report['automatic_snapshot_challenge'] = {
+                                'originals_overwritten_before_consumer_connected': True,
+                                'original_pixels_verified_magenta': 2 * width * height,
+                                'publication_fence_wait_supplied_by_fixture': False}
+                            if args.withhold_producer_token:
+                                reply = neptune.call(fixture.live.method('ID3D11Fence', 'GetCompletedValue'), 2)
+                                value = struct.unpack_from('<Q', reply, 8)[0]
+                                require(value >= 2, 'Negative control did not finish actual GPU work')
+                                report['withheld_token_proof'] = {'actual_GPU_completed_value': value,
+                                    'snapshot_not_ready': True, 'before_consumer': sync_stats()}
                         end = time.monotonic() + 10
                         while not endpoint.exists():
                             require(process.poll() is None and time.monotonic() < end, 'Native listener unavailable')
@@ -265,7 +324,7 @@ def main():
                         actions = []
                         report['native_snapshot'] = {'result': 'running', 'actions': actions,
                             'scanout_tested': True, 'visible_presentation_tested': False,
-                            'producer_fence_wait_supplied_by_fixture': True, 'Windows_tested': False}
+                            'producer_fence_wait_supplied_by_fixture': not bool(args.sync_qemu), 'Windows_tested': False}
                         def control(text):
                             action = {'command': text}; actions.append(action)
                             receiver.stdin.write(text + '\n'); receiver.stdin.flush()
@@ -277,6 +336,7 @@ def main():
                             return response
                         control('connect')
                         control('frame 0 R 64 32')
+                        require(not args.withhold_producer_token, 'Withheld producer token was incorrectly published')
                         if not args.withhold_native_update:
                             paint(1, (0, 1, 0, 1), 3)
                         control('frame 1 G 64 32')
@@ -304,6 +364,8 @@ def main():
                         paint(0, (0, 0, 1, 1), 19)
                         control('frame 0 B 64 32')
                         control('disconnect')
+                        if args.sync_qemu:
+                            wait_sync(lambda state: not state['publisher_can_capture'])
                         # Retain the old unacknowledged mapping while a new
                         # connection receives a different image with no new
                         # guest update after connect.
@@ -317,7 +379,24 @@ def main():
                         require(receiver.returncode == 0, 'Metal receiver failed')
                         report['native_snapshot'] = {'result': 'pass', 'reader': summary, 'actions': actions,
                             'scanout_tested': True, 'visible_presentation_tested': False,
-                            'producer_fence_wait_supplied_by_fixture': True, 'Windows_tested': False}
+                            'producer_fence_wait_supplied_by_fixture': not bool(args.sync_qemu), 'Windows_tested': False}
+                        if args.sync_qemu:
+                            report['native_snapshot']['sync_stats'] = wait_sync(lambda state:
+                                state['renderer']['pending'] == 0 and state['publisher']['occupied'] == 0 and
+                                state['publisher']['cached_backings'] == 0 and
+                                state['publisher']['backing_allocations'] == state['publisher']['backing_releases'] and
+                                state['publisher']['mappings'] == state['publisher']['unmappings'])
+                            # A valid anonymous blob has no checked export or
+                            # writer identity. Its scanout/flush must be consumed
+                            # as a rejection, never resume the unfenced path.
+                            gpu.create_blob(250, 0, 16384)
+                            gpu.scanout(250, width, height); gpu.flush(250, width, height)
+                            rejected = sync_stats()
+                            require(rejected['failed'] and rejected['blocked_flushes'] > 0,
+                                    'Unknown scanout resumed the unfenced fallback')
+                            require(rejected['publisher']['published'] == report['native_snapshot']['sync_stats']['publisher']['published'],
+                                    'Unknown writer supplied an extra snapshot')
+                            report['native_snapshot']['unknown_writer_rejected'] = rejected
                     require(q.call('query-status')['status'] == 'prelaunch', 'Guest CPU must remain paused')
                 q.call('quit'); process.wait(timeout=5)
                 require(process.returncode == 0, 'QEMU failed during quit')
