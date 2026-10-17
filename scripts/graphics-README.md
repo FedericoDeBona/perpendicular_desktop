@@ -287,3 +287,44 @@ extend lease retirement deliberately so old source textures can be re-rendered
 after later producer updates and a disconnect. ACK follows completed GPU reads
 and production queue retirement/reset. `--withhold-native-update` also applies
 to this variant and must fail when the omitted green image never arrives.
+
+## Matched Wire1 synchronization extension
+
+The earlier worker/proxy synchronization experiment uses a newer native shared
+descriptor. Build its separate Wire1 adaptation against the complete matched
+renderer/backend profiles:
+
+```sh
+.tools/build-venv/bin/python scripts/graphics-wire1-sync-build.py --renderer .tools/graphics-rebuild-renderer-20261016 --backend .tools/graphics-rebuild-backend-20261016 --output .tools/graphics-rebuild-sync-new
+```
+
+Output must be fresh. It copies the whole selected renderer, applies the
+existing unique source hooks and compiles/installs privately with at most two
+jobs and optimization 3. All original dependencies, source recipes and the
+installed app are hashed before/after. It uses the actual old backend's
+72-byte `DMTX` v2 declaration; the old descriptor lacks Usage, so that property
+is checked with the actual texture's `GetDesc`. Shared texture creation uses
+the old backend's ordinary SHARED path, which is already linear. Generated
+guest protocol headers remain unchanged (Wire1).
+
+The distinct private **host extension** is version 2 and carries a 96-byte
+snapshot packet. It is not interchangeable with the earlier version-1
+development transport or the newer native descriptor. The existing
+copy-before-Signal hook, exact owner/fence checks, increasing fence values,
+bounded candidate/snapshot budgets, import rejection, multi-ring rejection,
+resource generations and ACK validation are retained. This does not add
+arbitrary compositor alias/multi-writer support.
+
+Check ordinary decoder behavior with capture disabled, using a fresh label:
+
+```sh
+.tools/build-venv/bin/python scripts/graphics-qemu-probe.py --profile .tools/graphics-rebuild-qemu-native-20261016 --sync-renderer .tools/graphics-rebuild-sync-new --com --label sync-disabled-new
+```
+
+The probe verifies the selected build/plan/source inventory and actual loaded
+renderer/backend/server identities. It deliberately keeps broker admission
+disabled. Passing this check establishes ordinary decoder compatibility; it
+does not exercise snapshot capture, remove the fixture's producer wait, or
+qualify Windows. The next integration must connect the real QEMU scanout
+ingress to this matching host extension and test actual Signal-driven capture
+and retirement before enabling it in a Windows candidate.

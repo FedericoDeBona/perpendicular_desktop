@@ -36,6 +36,7 @@ def main():
     parser.add_argument('--com', action='store_true', help='Also exercise the real Wire1 decoder, shared textures and GPU fences')
     parser.add_argument('--native', action='store_true', help='Also verify real scanout snapshots with a Metal receiver')
     parser.add_argument('--swift-receiver', action='store_true', help='Use the app production Swift receiver/renderer; implies --native')
+    parser.add_argument('--sync-renderer', type=Path, help='Private matched synchronization renderer; capture remains disabled in this probe')
     parser.add_argument('--withhold-native-update', action='store_true', help='Negative control: omit the green update; --native must fail')
     parser.add_argument('--label', default=None, help='Fresh receipt name; preserves previous attempts')
     args = parser.parse_args()
@@ -55,6 +56,24 @@ def main():
     backend = Path(manifest['plan']['backend'])
     protected = {**manifest['plan']['dependencies'], **json.loads((base / 'protected.json').read_text()),
                  str(binary): sha(binary), str(base / 'build.json'): sha(base / 'build.json')}
+    if args.sync_renderer:
+        sync = args.sync_renderer.absolute()
+        require(sync.parent.resolve() == (ROOT / '.tools').resolve() and not sync.is_symlink() and
+                re.fullmatch(r'graphics-rebuild-[a-z0-9-]{1,64}', sync.name), 'Expected private synchronization profile')
+        sync = sync.parent.resolve() / sync.name
+        receipt = json.loads((sync / 'build.json').read_text())
+        plan = json.loads((sync / 'plan.json').read_text())
+        require(sha(sync / 'plan.json') == receipt['plan_sha256'] and
+                sha(sync / 'source-files.json') == receipt['source_inventory_sha256'], 'Synchronization build identity changed')
+        require(plan['renderer'] == str(renderer) and plan['backend'] == str(backend) and
+                plan['source_pin'] == recipe.PINS['renderer']['pin'] and plan['backend_pin'] == recipe.PINS['backend']['pin'] and
+                plan['host_transport_version'] == 2 and plan['guest_wire_version'] == 1, 'Matched synchronization pair required')
+        for path in (sync / 'prefix/lib/libvirglrenderer.1.dylib', sync / 'prefix/libexec/virgl_render_server'):
+            require(sha(path) == receipt['binaries'][str(path)], 'Synchronization binary changed')
+            protected[str(path)] = sha(path)
+        protected.update(json.loads((sync / 'protected.json').read_text()))
+        protected[str(sync / 'build.json')] = sha(sync / 'build.json')
+        renderer = sync
 
     def verify():
         for name, expected in protected.items():
@@ -80,6 +99,9 @@ def main():
               'guest_CPU_executed': False, 'guest_disks': False, 'COM_commands_sent': False,
               'rendering_verified': False, 'source': str(Path(__file__).relative_to(ROOT)),
               'source_sha256': sha(Path(__file__))}
+    if args.sync_renderer:
+        report['synchronization_extension'] = {'renderer': str(renderer), 'capture_enabled': False,
+            'scope': 'Ordinary decoder/backend regression only; copy-before-Signal is not exercised'}
     peers = []; process = None; q = None; receiver = None; receiver_log = None
     if args.native:
         source = ROOT / 'experimental/cocoa-native-display/qemu-receiver.m'

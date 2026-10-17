@@ -659,3 +659,33 @@ This closes the current-host receiver/renderer pairing gap for the explicitly
 ordered fixture. It does not exercise MTKView/drawable presentation, the
 ordinary app launch, automatic Windows/multicontext writer synchronization,
 input latency or FPS. The producer fence wait is still supplied by the fixture.
+
+
+### Wire1 copy-before-Signal source adaptation — 2026-10-17
+
+The existing worker/proxy bridge now has a separately built adaptation to the
+complete matched Wire1 renderer and old DXMT backend. It retains the real
+Signal override's copy-before-original-Signal order and all existing
+owner/import/multi-ring/fence/resource/ACK rejection paths. The bridge's
+transport uses the actual old backend header (72-byte DMTX v2, FD offset 8),
+not a substituted newer native layout. Its private host protocol is explicitly
+version 2 with a 96-byte snapshot packet. The selected renderer's generated
+guest protocol header remains byte-identical/Wire1. The absent old descriptor
+Usage field is checked using the real texture's `GetDesc`; ordinary old-backend
+SHARED allocation supplies its linear backing.
+
+All 91 renderer/server build steps completed at optimization 3, two jobs.
+Both artifacts are arm64 and pass strict signatures. New source inventories,
+all protected recipes/dependencies and installed app hashes rechecked unchanged.
+The owned diskless/paused QEMU ordinary-COM probe loaded the new renderer and
+matching server/backend, then passed the same device/textures/fence test and
+8,192 exact pixel checks with **capture disabled**. This is a regression check,
+not execution of the new copy-before-Signal path. QEMU exited 0.
+
+Private build/source/verification receipts are under
+`.tools/graphics-rebuild-sync2-20261017/`; the actual decoder receipt is
+`.tools/graphics-rebuild-qemu-native-20261016/sync-disabled-com1/result.json`.
+No installed runtime or VM was changed. Real QEMU broker admission, active
+Signal-driven capture/retirement, direct consumer delivery and compositor
+shared-resource ownership remain unqualified; the earlier fixture still
+supplies its own writer wait. This does not establish automatic Windows sync.
