@@ -60,6 +60,45 @@ pub fn assert_regular(path: &Path) -> Result<()> {
     Ok(())
 }
 
+/// Make an independent copy-on-write file when the filesystem supports it.
+/// Caller must hold the offline VM lock. Never replaces an existing target.
+pub fn try_clone_file(source: &Path, destination: &Path) -> Result<bool> {
+    assert_regular(source)?;
+    match fs::symlink_metadata(destination) {
+        Ok(_) => {
+            return Err(Error::new(
+                "path_exists",
+                "Snapshot destination already exists",
+            ))
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => (),
+        Err(error) => return Err(error.into()),
+    }
+    #[cfg(target_os = "macos")]
+    {
+        use std::ffi::CString;
+        use std::os::unix::ffi::OsStrExt;
+        let input = CString::new(source.as_os_str().as_bytes())
+            .map_err(|_| Error::new("invalid_path", "Invalid snapshot source path"))?;
+        let output = CString::new(destination.as_os_str().as_bytes())
+            .map_err(|_| Error::new("invalid_path", "Invalid snapshot destination path"))?;
+        // CLONE_NOFOLLOW from the macOS SDK sys/clonefile.h; libc exposes the
+        // function but not this flag.
+        if unsafe { libc::clonefile(input.as_ptr(), output.as_ptr(), 0x0001) } == 0 {
+            File::open(destination)?.sync_all()?;
+            return Ok(true);
+        }
+        let error = std::io::Error::last_os_error();
+        if !matches!(
+            error.raw_os_error(),
+            Some(libc::ENOTSUP | libc::EXDEV | libc::EINVAL)
+        ) {
+            return Err(Error::io("Create filesystem snapshot copy", error));
+        }
+    }
+    Ok(false)
+}
+
 pub fn read_json<T: DeserializeOwned>(path: &Path) -> Result<T> {
     assert_regular(path)?;
     let mut input = Vec::new();
@@ -207,6 +246,29 @@ pub fn copy_tree(source: &Path, destination: &Path) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn filesystem_clone_is_independent_and_never_replaces_or_follows_links() {
+        let directory = tempfile::tempdir().unwrap();
+        let source = directory.path().join("source");
+        let copy = directory.path().join("snapshot");
+        fs::write(&source, b"original").unwrap();
+        assert!(try_clone_file(&source, &copy).unwrap());
+        assert_ne!(
+            fs::metadata(&source).unwrap().ino(),
+            fs::metadata(&copy).unwrap().ino()
+        );
+        fs::write(&source, b"new guest writes").unwrap();
+        assert_eq!(fs::read(&copy).unwrap(), b"original");
+        fs::write(&copy, b"snapshot writes").unwrap();
+        assert_eq!(fs::read(&source).unwrap(), b"new guest writes");
+        assert!(try_clone_file(&source, &copy).is_err());
+        assert_eq!(fs::read(&copy).unwrap(), b"snapshot writes");
+        let link = directory.path().join("link");
+        std::os::unix::fs::symlink(&source, &link).unwrap();
+        assert!(try_clone_file(&link, &directory.path().join("unsafe")).is_err());
+    }
     #[test]
     fn identifiers_cannot_escape_vm_root() {
         for input in [

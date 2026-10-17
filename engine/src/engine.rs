@@ -1180,11 +1180,11 @@ impl Engine {
             consistency: "offline_disk_firmware_tpm".into(),
         };
         let result = (|| {
-            self.copy_vm_state(&self.store.vm_dir(id)?, &staging, &image)?;
+            let disk_copy_method = self.copy_vm_state(&self.store.vm_dir(id)?, &staging, &image)?;
             atomic_json(&staging.join("config.json"), &config)?;
             atomic_json(&staging.join("snapshot.json"), &snapshot)?;
             fs::rename(&staging, root.join(&snapshot_id))?;
-            Ok(json!({"snapshot":snapshot}))
+            Ok(json!({"snapshot":snapshot,"disk_copy_method":disk_copy_method}))
         })();
         if result.is_err() {
             let _ = fs::remove_dir_all(staging);
@@ -1192,24 +1192,41 @@ impl Engine {
         result
     }
 
-    fn copy_vm_state(&self, source: &Path, target: &Path, image: &Path) -> Result<()> {
+    fn copy_vm_state(&self, source: &Path, target: &Path, image: &Path) -> Result<&'static str> {
         for name in ["system.qcow2", "efi-code.fd", "efi-vars.fd"] {
             assert_regular(&source.join(name))?;
         }
-        run_output(
-            Command::new(image)
-                .args(["convert", "-f", "qcow2", "-O", "qcow2"])
-                .arg(source.join("system.qcow2"))
-                .arg(target.join("system.qcow2")),
-            "Copy offline VM disk",
-        )?;
+        let source_disk = source.join("system.qcow2");
+        let target_disk = target.join("system.qcow2");
+        let standalone = Command::new(image)
+            .args(["info", "--output=json"])
+            .arg(&source_disk)
+            .output()
+            .ok()
+            .filter(|output| output.status.success())
+            .and_then(|output| serde_json::from_slice::<Value>(&output.stdout).ok())
+            .is_some_and(|info| crate::disk::can_clone_qcow2(&info));
+        let cloned = standalone && crate::storage::try_clone_file(&source_disk, &target_disk)?;
+        if !cloned {
+            run_output(
+                Command::new(image)
+                    .args(["convert", "-f", "qcow2", "-O", "qcow2"])
+                    .arg(&source_disk)
+                    .arg(&target_disk),
+                "Copy offline VM disk",
+            )?;
+        }
         for name in ["efi-code.fd", "efi-vars.fd"] {
             fs::copy(source.join(name), target.join(name))?;
         }
         if source.join("tpm").exists() {
             copy_tree(&source.join("tpm"), &target.join("tpm"))?;
         }
-        Ok(())
+        Ok(if cloned {
+            "filesystem_clone"
+        } else {
+            "image_conversion"
+        })
     }
 
     fn snapshot(&self, id: &str, snapshot_id: &str) -> Result<(PathBuf, Snapshot)> {

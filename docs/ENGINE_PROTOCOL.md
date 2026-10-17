@@ -18,6 +18,15 @@ The executable is `perpendicular-engine`. Every invocation prints one JSON objec
 - `delete ID`: stopped VM only, moves its directory to an application-owned recoverable trash and returns `{"deleted":ID}`.
 - `snapshots ID`: returns `{"snapshots":[{"id":"...","name":"...","created_at":"ISO8601"}]}`.
 - `snapshot-create ID --name NAME`, `snapshot-restore ID SNAPSHOT_ID`, `snapshot-delete ID SNAPSHOT_ID`: return JSON and support stopped VMs initially. Online snapshot support remains in the feature checklist until implemented and verified.
+
+Offline snapshot, clone and restore copies use an independent filesystem clone
+on supported macOS filesystems for a verified self-contained QCOW2 image.
+Backing files, external data files, encryption or unknown image metadata retain
+the image-conversion path. Firmware and TPM state are copied with the disk.
+Snapshot creation additionally returns `disk_copy_method` as `filesystem_clone`
+or `image_conversion`; the saved snapshot schema is unchanged. The VM remains
+locked and stopped throughout the operation. Existing destinations are never
+replaced by the filesystem clone.
 - `guest-status ID`: returns `{"status":{...}}` with `connected`, explicit capabilities and guest-reported security values. A stopped guest, absent channel, timeout or unavailable agent returns an unavailable status with its actual reason.
 - `guest-display-status ID`: returns `{"display":{connected,can_resize,reason,current,modes,dpi_change_supported,limits}}`. `current` is a measured primary display object or null; `modes` contains only bounded safe enumerated physical-pixel sizes. Readiness does not imply mode-setting support.
 - `guest-display-resize ID --width W --height H [--host-dpi 96]`: returns `{"display":{applied,changed,code,reason,requested,actual,dpi_changed,retry_after_ms}}`. A processed unsupported request returns `applied=false` and the actual mode. CLI success alone is not applied success. Dimensions must be 640–3840 by 480–2160, no more than 8,294,400 pixels; host DPI 96–288 is an advisory hint and never changes Windows scaling. See [guest display protocol](GUEST_DISPLAY.md) for the exact schema and debounce policy.

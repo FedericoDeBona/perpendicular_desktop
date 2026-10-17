@@ -14,6 +14,20 @@ pub struct DiskInfo {
     pub backing_filename: Option<String>,
 }
 
+pub(crate) fn can_clone_qcow2(info: &serde_json::Value) -> bool {
+    let data = &info["format-specific"]["data"];
+    info["format"] == "qcow2"
+        && info["format-specific"]["type"] == "qcow2"
+        && data.is_object()
+        && info["virtual-size"].as_u64().is_some_and(|size| size > 0)
+        && info["backing-filename"].is_null()
+        && info["full-backing-filename"].is_null()
+        && info["data-file"].is_null()
+        && data["data-file"].is_null()
+        && data["encrypt"].is_null()
+        && (info["encrypted"].is_null() || info["encrypted"] == false)
+}
+
 pub fn inspect_import(image_tool: &Path, source: &Path) -> Result<DiskInfo> {
     let output = Command::new(image_tool)
         .args(["info", "--output=json"])
@@ -61,6 +75,28 @@ pub(crate) fn validate_import(info: &DiskInfo) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn filesystem_clone_requires_a_known_self_contained_qcow2() {
+        let base = serde_json::json!({"format":"qcow2","virtual-size":4096,
+            "format-specific":{"type":"qcow2","data":{"compat":"1.1"}}});
+        assert!(can_clone_qcow2(&base));
+        for field in [
+            "backing-filename",
+            "full-backing-filename",
+            "data-file",
+            "encrypted",
+        ] {
+            let mut value = base.clone();
+            value[field] = serde_json::json!("external");
+            assert!(!can_clone_qcow2(&value));
+        }
+        for field in ["data-file", "encrypt"] {
+            let mut value = base.clone();
+            value["format-specific"]["data"][field] = serde_json::json!("external");
+            assert!(!can_clone_qcow2(&value));
+        }
+        assert!(!can_clone_qcow2(&serde_json::json!({"format":"qcow2"})));
+    }
     #[test]
     fn accepts_standalone_formats_but_rejects_unsafe_or_unsupported_images() {
         let mut info = DiskInfo {
