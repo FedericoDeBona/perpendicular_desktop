@@ -154,5 +154,7 @@ These checks execute no guest CPU or disks and perform no visible presentation.
 They do not measure Windows interaction latency, frame pacing, real GPU-driver
 mapping of odd-sized blobs, arbitrary multi-context producers, shutdown with
 pending GPU work, installed-app 3D stability or resource consumption in normal
-use. Startup still initializes Cocoa/ANGLE. Removing the per-frame copy does
-not by itself prove that the QEMU window can be removed from startup.
+use. Default startup still initializes Cocoa/ANGLE. The subsequent opt-in
+[native headless backend](../experimental/native-metal-headless/README.md)
+qualifies windowless startup with these actual decoder/receiver fixtures;
+installed-app and running-Windows qualification remain outstanding.

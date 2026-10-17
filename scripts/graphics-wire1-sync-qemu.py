@@ -39,6 +39,8 @@ def main():
     parser.add_argument('--qemu', type=Path, required=True)
     parser.add_argument('--sync-renderer', type=Path, required=True)
     parser.add_argument('--output', type=Path, required=True)
+    parser.add_argument('--headless', action='store_true', help='Also link the native Metal pbuffer backend; host v3 only')
+    parser.add_argument('--headless-keep-context', action='store_true', help='Unsafe private thread-handoff negative control; requires --headless')
     args = parser.parse_args()
     paths = [p.absolute() for p in (args.output, args.qemu, args.sync_renderer)]
     for p in paths:
@@ -49,6 +51,8 @@ def main():
     qreceipt = json.loads((qemu / 'build.json').read_text())
     sreceipt = json.loads((sync / 'build.json').read_text())
     plan = json.loads((sync / 'plan.json').read_text())
+    require(not args.headless_keep_context or args.headless,'Handoff negative control requires --headless')
+    require(not args.headless or plan['host_transport_version']==3,'Native headless requires immutable host-v3 leases')
     require(qreceipt['plan']['qemu_pin'] == '88e5ee7ec6703662fec7b638cca74c4769e683d6' and
             qreceipt['plan']['renderer'] == plan['renderer'] and qreceipt['plan']['backend'] == plan['backend'] and
             plan['host_transport_version'] in (2,3) and plan['guest_wire_version'] == 1, 'Matched host/guest profiles required')
@@ -67,6 +71,9 @@ def main():
               qemu / 'build/build.ninja', qemu / 'build/compile_commands.json'):
         protected[str(p)] = sha(p)
     if plan['host_transport_version'] == 3: protected[str(publisher)] = sha(publisher)
+    headless=ROOT / 'experimental/native-metal-headless'
+    if args.headless:
+        for name in ('backend.h','backend.m'): protected[str(headless / name)]=sha(headless / name)
     def verify():
         for name, expected in protected.items():
             require(sha(Path(name)) == expected, 'Protected build/app input changed: ' + name)
@@ -106,11 +113,21 @@ def main():
     anchor = 'static void virtio_gpu_gl_class_init(ObjectClass *klass, void *data)\n{'
     text = replace(text, anchor, 'static char *perp_sync_stats(Object *obj, Error **errp) {return perp_live_qemu_stats();}\n' +
         anchor + '\n    object_class_property_add_str(klass,"perp-live-stats",perp_sync_stats,NULL);')
+    if args.headless:
+        text=replace(text,'#include "qemu-live.h"','#include "qemu-live.h"\n#include "backend.h"')
+        text=replace(text,anchor,'static char *perp_headless_stats(Object *obj, Error **errp) {return perp_native_headless_stats();}\n'+anchor+
+            '\n    object_class_property_add_str(klass,"perp-headless-stats",perp_headless_stats,NULL);')
     (copied / 'virtio-gpu-gl.c').write_text(text)
     shutil.copyfile(sink, copied / sink.name)
     shutil.copyfile(qheader, copied / qheader.name)
     shutil.copyfile(pheader, copied / pheader.name)
     shutil.copyfile(nheader, copied / nheader.name)
+    if args.headless:
+        for name in ('backend.h','backend.m'): shutil.copyfile(headless / name,copied / name)
+        if args.headless_keep_context:
+            path=copied / 'backend.m';text=path.read_text()
+            path.write_text(replace(text,'    if(!eglMakeCurrent(display,EGL_NO_SURFACE,EGL_NO_SURFACE,EGL_NO_CONTEXT))fatal_egl("release initialization context");',
+                '    /* Unsafe private causal control: keep context current on init thread. */'))
     private = sync / 'src/virglrenderer/src/perp-sync'
     for name in ('live.h', 'wire1-layout.h', 'broker.h'):
         protected[str(private / name)] = sha(private / name)
@@ -121,9 +138,11 @@ def main():
         commands = subprocess.check_output([str(TOOLS / 'ninja'), '-t', 'commands', target], cwd=build, env=env, text=True)
         return shlex.split(commands.splitlines()[-1])
     objects = []
-    for name, target in [('virtio-gpu-virgl.c', 'libcommon.a.p/hw_display_virtio-gpu-virgl.c.o'),
+    targets=[('virtio-gpu-virgl.c', 'libcommon.a.p/hw_display_virtio-gpu-virgl.c.o'),
                          ('virtio-gpu-gl.c', 'libcommon.a.p/hw_display_virtio-gpu-gl.c.o'),
-                         (sink.name, 'libcommon.a.p/ui_cocoa.m.o')]:
+                         (sink.name, 'libcommon.a.p/ui_cocoa.m.o')]
+    if args.headless:targets.append(('backend.m','libcommon.a.p/ui_cocoa.m.o'))
+    for name,target in targets:
         argv = recipe(target); obj = base / (name + '.o'); objects.append(obj)
         argv[argv.index('-c')+1] = str(copied / name)
         for option in ('-o', '-MQ', '-MF'):
@@ -139,6 +158,9 @@ def main():
     matching = [i for i, arg in enumerate(link) if arg.endswith(('/libvirglrenderer.dylib', '/libvirglrenderer.1.dylib'))]
     require(len(matching) == 1, 'Renderer link identity changed'); link[matching[0]] = str(library)
     link.insert(3, str(objects[2])); link.extend(['-Wl,-rpath,'+str(library.parent)])
+    if args.headless:
+        require(not any(arg.endswith('/ui_egl-headless.c.o') for arg in link),'Another egl-headless backend is already linked')
+        link.insert(3,str(objects[3]))
     if plan['host_transport_version'] == 3:
         # The base QEMU archive predates external retirement callbacks. Build
         # the current ARC publisher and replace precisely that one link edge.
@@ -170,6 +192,7 @@ def main():
         'candidate': str(candidate), 'candidate_sha256': sha(candidate), 'recipe_sha256': sha(Path(__file__)),
         'sources': {str(p.relative_to(base)): sha(p) for p in copied.iterdir()}, 'installed_app_unchanged': True,
         'host_transport_version':plan['host_transport_version'],
+        'native_headless_available':args.headless,'unsafe_test_keep_context':args.headless_keep_context,
         'VM_started': False, 'scope': ('Worker immutable snapshot FD directly to native publisher; cropped scanouts retain GPU-copy fallback'
             if plan['host_transport_version']==3 else 'Worker GPU snapshot plus native-publisher GPU copy') + '; no Windows qualification'})
     print('Private synchronization QEMU linked; runtime qualification remains pending.', flush=True)

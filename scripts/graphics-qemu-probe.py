@@ -38,6 +38,7 @@ def main():
     parser.add_argument('--swift-receiver', action='store_true', help='Use the app production Swift receiver/renderer; implies --native')
     parser.add_argument('--sync-renderer', type=Path, help='Private matched synchronization renderer; capture remains disabled in this probe')
     parser.add_argument('--sync-qemu', type=Path, help='Matched private QEMU overlay; enables actual automatic producer synchronization')
+    parser.add_argument('--headless', action='store_true', help='Use the opt-in native Metal pbuffer backend instead of Cocoa')
     parser.add_argument('--withhold-native-update', action='store_true', help='Negative control: omit the green update; --native must fail')
     parser.add_argument('--withhold-producer-token', action='store_true', help='Negative control: real GPU work finishes but the worker ready token is withheld')
     parser.add_argument('--label', default=None, help='Fresh receipt name; preserves previous attempts')
@@ -45,6 +46,7 @@ def main():
     args.native = args.native or args.swift_receiver
     require(not args.withhold_native_update or args.native, 'Withheld-update control requires --native')
     require(not args.withhold_producer_token or args.sync_qemu, 'Withheld producer token requires automatic synchronization')
+    require(not args.headless or args.sync_qemu,'Native headless requires the synchronization QEMU overlay')
     require(not (args.withhold_native_update and args.withhold_producer_token), 'Select one causal negative control')
     args.com = args.com or args.native
     base = args.profile.absolute()
@@ -68,6 +70,7 @@ def main():
                 re.fullmatch(r'graphics-rebuild-[a-z0-9-]{1,64}', profile.name), 'Expected private QEMU sync profile')
         profile = profile.parent.resolve() / profile.name
         overlay = json.loads((profile / 'build.json').read_text())
+        require(not args.headless or overlay.get('native_headless_available'),'QEMU overlay has no native headless backend')
         require(overlay['qemu_profile'] == str(base), 'QEMU overlay base mismatch')
         if args.sync_renderer:
             require(str(args.sync_renderer.resolve()) == overlay['sync_renderer'], 'Synchronization renderer mismatch')
@@ -160,7 +163,7 @@ def main():
             command = [str(binary), '-L', str(base / 'src/qemu/pc-bios'), '-no-user-config', '-nodefaults',
                 '-name', 'Perpendicular owned fresh capset fixture', '-machine', 'virt,gic-version=3,highmem=off',
                 '-accel', 'hvf,ipa-granule-size=4096' if args.com else 'hvf', '-cpu', 'host', '-m', '128M', '-smp', '1', '-S', '-nic', 'none',
-                '-vga', 'none', '-display', 'cocoa,gl=es',
+                '-vga', 'none', '-display', 'egl-headless,gl=es' if args.headless else 'cocoa,gl=es',
                 '-device', 'virtio-ramfb-gl,id=freshprobe,addr=7,disable-legacy=on,neptune=on,blob=on,hostmem=256M',
                 '-qmp', 'unix:' + str(runtime / 'qmp.sock') + ',server=on,wait=off',
                 '-qtest', 'unix:' + str(runtime / 'qtest.sock') + ',server=on,wait=off',
@@ -175,6 +178,13 @@ def main():
                 q = fixture.headless.QMP(peer)
                 report['status'] = q.call('query-status')
                 require(report['status']['status'] == 'prelaunch' and q.call('query-block') == [], 'Expected paused diskless machine')
+                def headless_stats():
+                    return json.loads(q.call('qom-get',{'path':'/machine/peripheral/freshprobe/virtio-backend','property':'perp-headless-stats'}))
+                if args.headless:
+                    state=headless_stats();report['headless_start']=state
+                    require(state['initialized'] and not state['cocoa_application'] and state['cocoa_windows']==0 and
+                        state['init_context_released'] and state['pbuffer_width']==state['pbuffer_height']==1 and
+                        state['root_ES_version']==3 and not state['CPU_readback_supported'],'Native headless initialization differs')
                 peer = fixture.headless.connect(runtime / 'qtest.sock', process); peers.append(peer)
                 gpu = fixture.GPU(fixture.live.QTest(peer))
                 info = [struct.unpack_from('<IIII', gpu.send(0x108, struct.pack('<II', i, 0)), 24) for i in range(3)]
@@ -423,6 +433,11 @@ def main():
                                     'Unknown writer supplied an extra snapshot')
                             report['native_snapshot']['unknown_writer_rejected'] = rejected
                     require(q.call('query-status')['status'] == 'prelaunch', 'Guest CPU must remain paused')
+                if args.headless:
+                    state=headless_stats();report['headless_final']=state
+                    require(state['initialized'] and not state['closed'] and not state['cocoa_application'] and state['cocoa_windows']==0 and
+                        state['thread_handoff_checked'] and state['unproven_scanouts']==state['unproven_updates']==0,
+                        'Native headless unexpectedly entered the unfenced/window path')
                 q.call('quit'); process.wait(timeout=5)
                 require(process.returncode == 0, 'QEMU failed during quit')
                 report['exit_code'] = process.returncode
@@ -439,6 +454,11 @@ def main():
                     fixture.stop_group(process)
                 for peer in peers: peer.close()
         lines = (output / 'qemu.log').read_text(errors='replace').splitlines()
+        if args.headless:
+            shutdowns=[json.loads(line.split('perp-native-headless: shutdown ',1)[1]) for line in lines if 'perp-native-headless: shutdown ' in line]
+            require(len(shutdowns)==1 and shutdowns[0]['closed'] and shutdowns[0]['client_contexts']==0 and
+                shutdowns[0]['context_creates']==shutdowns[0]['context_destroys'],'Headless EGL shutdown did not drain contexts')
+            report['headless_shutdown']=shutdowns[0]
         loaded = [line for line in lines if 'dyld[' in line and any(name in line for name in
                   ('libvirglrenderer', 'virgl_render_server', 'libdxmt-native', 'libEGL.dylib', 'libGLESv2.dylib'))]
         report['loaded_library_lines'] = loaded
