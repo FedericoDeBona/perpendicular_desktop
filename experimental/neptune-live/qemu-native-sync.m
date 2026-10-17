@@ -151,7 +151,11 @@ bool perp_live_qemu_select(void *owner, QemuConsole *console, unsigned output, u
     const char *enabled = getenv("PERP_NEPTUNE_SCANOUT_BROKER");
     if (!enabled || strcmp(enabled, "1")) return false;
     bool admitted = perp_live_scanout_select(resource);
-    if (!admitted || output || (display.owner && display.owner != owner)) { display.failed = true; return true; }
+    if (!admitted || output || (display.owner && display.owner != owner)) {
+        if (!display.failed) fprintf(stderr,"perp-native: selection rejected resource=%u output=%u admitted=%u owner_match=%u previous=%u\n",
+            resource,output,admitted,!display.owner || display.owner==owner,display.resource);
+        display.failed = true; return true;
+    }
     if (display.resource != resource || display.width != width || display.height != height || display.x != x ||
         display.y != y || display.crop_width != crop_width || display.crop_height != crop_height) {
         display.generation = ++generations; display.current = NULL;
@@ -168,9 +172,17 @@ bool perp_live_qemu_select(void *owner, QemuConsole *console, unsigned output, u
 bool perp_live_qemu_flush(void *owner, unsigned output, uint32_t resource) {
     const char *enabled = getenv("PERP_NEPTUNE_SCANOUT_BROKER");
     if (!enabled || strcmp(enabled, "1")) return false;
+    /* Legacy boot scanouts issue FLUSH before any native source is selected.
+     * Drop that update without poisoning later admission or entering an
+     * unfenced fallback. A rejected native selection remains failed. */
+    if (!display.owner && !display.resource && !display.failed && !output) {
+        blocked_flushes++; return true;
+    }
     /* An unsupported selection must not re-enter the old unfenced update
      * path through a later FLUSH. Preserve that fallback only when disabled. */
     if (display.owner != owner || output || display.resource != resource) {
+        if (!display.failed) fprintf(stderr,"perp-native: flush rejected resource=%u selected=%u output=%u owner_match=%u\n",
+            resource,display.resource,output,display.owner==owner);
         display.failed = true; blocked_flushes++; return true;
     }
     tick(NULL); return true;

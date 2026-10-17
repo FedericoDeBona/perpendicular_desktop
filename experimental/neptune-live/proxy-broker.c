@@ -306,7 +306,11 @@ void perp_live_renderer_reset(void)
 char *perp_live_scanout_stats(void)
 {
     unsigned pending=0;for(unsigned i=0;i<LIVE_MAX_CANDIDATES;i++)pending+=frames[i].used;
-    char *result=NULL;asprintf(&result,"{\"received\":%llu,\"completed\":%llu,\"cancelled\":%llu,\"rejected\":%llu,\"pending\":%u,\"selected\":%u,\"active_context\":%u,\"peak_snapshot_bytes\":%llu,\"max_pending\":%llu,\"closed\":%s}",
-        (unsigned long long)received,(unsigned long long)completed,(unsigned long long)cancelled,(unsigned long long)rejected,pending,selected,active,
+    LiveResource *target=resource(selected);LiveWorker *owner=target?worker(target->context):NULL;
+    bool export_known=false;
+    if(owner)for(unsigned i=0;i<LIVE_MAX_SOURCES;i++)
+        export_known|=owner->exports[i].blob==target->blob && owner->exports[i].resource==target->id;
+    char *result=NULL;asprintf(&result,"{\"received\":%llu,\"completed\":%llu,\"cancelled\":%llu,\"rejected\":%llu,\"pending\":%u,\"selected\":%u,\"selected_context\":%u,\"selected_tainted\":%s,\"selected_export_known\":%s,\"active_context\":%u,\"peak_snapshot_bytes\":%llu,\"max_pending\":%llu,\"closed\":%s}",
+        (unsigned long long)received,(unsigned long long)completed,(unsigned long long)cancelled,(unsigned long long)rejected,pending,selected,target?target->context:0,target && target->tainted?"true":"false",export_known?"true":"false",active,
         (unsigned long long)peak_bytes,(unsigned long long)max_pending,permanently_failed?"true":"false");return result;
 }

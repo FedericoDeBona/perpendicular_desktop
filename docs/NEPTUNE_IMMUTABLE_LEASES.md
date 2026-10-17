@@ -6,6 +6,38 @@ This is an opt-in private host extension. It preserves the matched renderer
 descriptor. Private broker version **3** is distinct from those guest/native
 versions. Host v2 remains the default build recipe.
 
+## Boot FLUSH admission — 2026-10-17
+
+The first precise QEMU diagnostic in Windows reports `flush rejected
+resource=2 selected=0 output=0 owner_match=0`: a real legacy boot scanout
+updates before the first native selection. That update previously latched the
+native display's failure flag forever. Before any native owner/resource or
+failure exists, output0 FLUSH is now consumed without capture or fallback.
+An unsupported native selection or a mismatch after selection still fails
+closed. The first actual selection/flush rejection is logged once. Read-only
+broker statistics also identify the selected context, taint and known export.
+
+`--boot-flush` creates an actual 2D resource, selects it with SET_SCANOUT and
+flushes before creating the native producer. The previous binary fails the
+same run at `Automatic synchronization path closed` (receipt
+`boot-flush-before1`). The corrected private and relocated application binaries
+pass the complete 19-image/1,015,802-pixel sequence, owned-input/source-pressure,
+resize and held-image reconnect checks (`boot-flush-positive2` and
+`boot-flush-packaged1`, each `result.json` under the usual private QEMU profile).
+The final anonymous-source negative still fails admission without publication.
+The headless counter explicitly records the one deliberate legacy boot
+scanout; native updates do not add any unfenced update or scanout.
+
+The actual Windows run now keeps `failed=false`, `publisher_can_capture=true`
+and zero worker rejections. It still delivers zero frames: selected sources16
+and later86 belong to context7, have known exports and are tainted. Consumer
+COM device/writer identity has not yet been established; shared resources are
+still excluded from capture. Raw evidence is private in
+`windows-native3d-20261017/boot-flush1-*`. This fixes an observed boot-admission
+bug, not Windows presentation or measured latency. The immediately preceding
+diagnostic trial exited normally with code0; one early successful shutdown
+does not resolve the previously reproduced ISV0 shutdown assertion.
+
 ## Never-granted owned inputs — 2026-10-17
 
 Precise first-fault logging isolated the previous Windows rejection to

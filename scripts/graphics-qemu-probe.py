@@ -44,6 +44,7 @@ def main():
     parser.add_argument('--withhold-producer-token', action='store_true', help='Negative control: real GPU work finishes but the worker ready token is withheld')
     parser.add_argument('--source-pressure', action='store_true', help='Keep twelve additional unselected shared sources alive during native presentation')
     parser.add_argument('--import-input', action='store_true', help='Read a texture from a second renderer worker into the selected output')
+    parser.add_argument('--boot-flush', action='store_true', help='Flush a real legacy 2D scanout before the first native selection')
     parser.add_argument('--owned-input', action='store_true', help='Reopen a never-granted owned source as input while an independent output is presented')
     parser.add_argument('--import-selected-output', action='store_true', help='Negative control: import the selected output while its old image is retained')
     parser.add_argument('--import-owned-output', action='store_true', help='Negative control: reject an owned output reopen without the proxy denial handshake')
@@ -232,6 +233,13 @@ def main():
                 report['actual_neptune_capset'] = {'wire_format_version': wire, 'flags': flags}
                 require(wire == 1 and flags == 0xb6, 'Unexpected Wire1 capset')
                 report['control_opcodes_sent'] = [0x108, 0x108, 0x108, 0x109]
+                if args.boot_flush:
+                    require(args.sync_qemu, 'Boot flush requires automatic synchronization')
+                    gpu.send(0x101, struct.pack('<4I', 2, 1, 64, 32), context=0)
+                    gpu.send(0x103, struct.pack('<6I', 0, 0, 64, 32, 0, 2), context=0)
+                    gpu.flush(2, 64, 32)
+                    report['legacy_boot_flush'] = {'resource': 2, 'actual_2D_scanout': True}
+
                 def owned_processes():
                     rows = []
                     for line in subprocess.check_output(['/bin/ps', '-ww', '-axo', 'pid=,ppid=,comm='], text=True).splitlines():
@@ -588,7 +596,8 @@ def main():
                 if args.headless:
                     state=headless_stats();report['headless_final']=state
                     require(state['initialized'] and not state['closed'] and not state['cocoa_application'] and state['cocoa_windows']==0 and
-                        state['thread_handoff_checked'] and state['unproven_scanouts']==state['unproven_updates']==0,
+                        state['thread_handoff_checked'] and state['unproven_scanouts']==(1 if args.boot_flush else 0) and
+                        state['unproven_updates']==0,
                         'Native headless unexpectedly entered the unfenced/window path')
                 q.call('quit'); process.wait(timeout=5)
                 require(process.returncode == 0, 'QEMU failed during quit')
