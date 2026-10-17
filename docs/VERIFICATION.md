@@ -598,3 +598,36 @@ entry point in the renderer. It sends no scanout and does not exercise the
 compiled publisher, establish producer ordering across contexts, execute
 Windows or measure presentation/latency. This QEMU profile still lacks the
 prior STP/HVF and HID changes and is not installed.
+
+
+### Actual QEMU native scanout → Metal reader — 2026-10-17
+
+The current QEMU candidate above now passes a real native scanout fixture.
+The unchanged matching renderer's normal COM decoder creates the textures;
+actual virtqueue SET_SCANOUT_BLOB/RESOURCE_FLUSH reaches QEMU's compiled
+direct-source Cocoa hook and the current publisher. A separate process uses
+the production C transport, imports the shared backing as a Metal buffer/linear
+texture, performs a GPU blit, waits for completion, then verifies exact pixels.
+The diagnostic readback exists only in this reader, not the publisher/app path.
+
+The final run passed 19 snapshots and three held-image rechecks, totaling
+1,015,802 exact pixels. It exercised repeated alternating colors,
+64×32 → 803×607 → 64×32, an old small snapshot retained during the larger
+scanout, and two connections. An unacknowledged blue snapshot retained across
+disconnect still reads blue after the new connection receives magenta. No new
+producer update occurs after that second connect: normal refresh delivers the
+already-existing image. Zero queued older frames needed skipping in this run.
+The reader drained all frames/mappings (`active_frames: 0`) before exit and
+QEMU exited 0. CPU remained paused and no disks were attached.
+
+Private receipt: `.tools/graphics-rebuild-qemu-native-20261016/native-final3/result.json`.
+It binds the probe, reader, transport and actual loaded stack identities.
+The causal `--withhold-native-update` control omits the first green update;
+the reader fails waiting for it rather than accepting the prior red image.
+Its separate failed receipt/log remain under `native-withheld-final4`.
+
+The fixture waits for a real producer fence before every scanout/flush. This
+does not establish the missing automatic writer barrier for Windows or
+multiple contexts. It is not a visible presentation test, the app's Swift
+receiver/presenter, latency/FPS measurement, producer allocation/reuse counter,
+or Windows/installed-runtime qualification. Those gates remain open.

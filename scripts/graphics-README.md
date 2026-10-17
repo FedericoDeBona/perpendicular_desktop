@@ -241,3 +241,31 @@ the native publisher or execute Windows. Use `--label` with a fresh name to
 retain another attempt; existing receipts are never overwritten. Full source,
 dependency hashes and logs remain in the private profile; console output is a
 compact result.
+
+To include actual native scanout publication and an independent Metal reader:
+
+```sh
+.tools/build-venv/bin/python scripts/graphics-qemu-probe.py --profile .tools/graphics-rebuild-qemu-native-20261016 --native --label native-check-new
+```
+
+This compiles `experimental/cocoa-native-display/qemu-receiver.m` against the
+production C transport, then exercises real decoder-created scanouts through
+the existing QEMU direct-source publisher. The separate reader imports each
+shared backing as a Metal linear texture, copies through its own GPU queue and
+waits for GPU completion before ACK. Pixel readback is diagnostic only.
+Nineteen snapshots cover repeated red/green updates, 64×32 → 803×607 → 64×32,
+retained old snapshots and a second connection. The latter receives a static
+image without another producer update after connect. Old unacknowledged storage
+is checked again after the replacement connection receives a different image.
+All reader frames/mappings must drain before exit.
+
+The fixture explicitly waits for the actual producer GPU fence **before**
+scanout/flush. It verifies this ordered case, not automatic Windows writer
+ownership or multicontext synchronization. It does not show a drawable, run the
+app's Swift receiver/presenter, measure presentation latency or install a
+runtime. Producer backing reuse counts are not exposed by this QEMU profile.
+
+For a causal negative, add `--withhold-native-update` and a fresh label. This
+deliberately omits the first green update; the command must exit nonzero while
+waiting for green. Its failed receipt and receiver log are expected evidence,
+not a successful graphics result.

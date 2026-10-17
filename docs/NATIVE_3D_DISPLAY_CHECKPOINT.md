@@ -32,11 +32,17 @@ sizes or recycle an unacknowledged snapshot fail the resize and old-image
 checks respectively. The native receiver and external-presenter suites also
 passed their GPU-before-ACK, replacement, reset and disconnect checks.
 
-These are component and allocation results. This source has not yet been
-compiled into a fresh QEMU/native Windows candidate or installed; the earlier
-live Windows results below still belong to their frozen artifacts. Writer
-synchronization, measured Windows presentation/latency and installed 3D
-integration remain outstanding. [Publisher contract and tests](../experimental/cocoa-native-display/README.md).
+The publisher has subsequently been compiled into a fresh current-host QEMU
+candidate and exercised through real decoder-created native scanouts. A separate
+Metal reader passed 19 snapshots, resize and reconnect with 1,015,802 exact
+pixels and no reader frames left at exit. That fixture explicitly waits for
+the producer's real GPU fence before each scanout; it does not qualify the
+automatic Windows writer barrier or producer reuse counts in QEMU. See the
+[current verification ledger](VERIFICATION.md#actual-qemu-native-scanout--metal-reader--2026-10-17).
+It is not installed or tested with Windows; the earlier live Windows results
+below still belong to their frozen artifacts. Writer synchronization, measured
+Windows presentation/latency and installed 3D integration remain outstanding.
+[Publisher contract and tests](../experimental/cocoa-native-display/README.md).
 
 ## Hidden direct-source run
 

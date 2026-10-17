@@ -7,6 +7,7 @@ import json
 import os
 from pathlib import Path
 import re
+import select
 import struct
 import subprocess
 import sys
@@ -33,8 +34,12 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--profile', required=True, type=Path)
     parser.add_argument('--com', action='store_true', help='Also exercise the real Wire1 decoder, shared textures and GPU fences')
+    parser.add_argument('--native', action='store_true', help='Also verify real scanout snapshots with a Metal receiver')
+    parser.add_argument('--withhold-native-update', action='store_true', help='Negative control: omit the green update; --native must fail')
     parser.add_argument('--label', default=None, help='Fresh receipt name; preserves previous attempts')
     args = parser.parse_args()
+    require(not args.withhold_native_update or args.native, 'Withheld-update control requires --native')
+    args.com = args.com or args.native
     base = args.profile.absolute()
     require(base.parent.resolve() == (ROOT / '.tools').resolve() and not base.is_symlink() and
             re.fullmatch(r'graphics-rebuild-[a-z0-9-]{1,64}', base.name), 'Expected fresh-build profile')
@@ -54,7 +59,7 @@ def main():
             require(sha(Path(name)) == expected, 'Protected artifact changed: ' + name)
 
     verify()
-    label = args.label or ('com-probe' if args.com else 'capset-probe')
+    label = args.label or ('native-probe' if args.native else 'com-probe' if args.com else 'capset-probe')
     require(re.fullmatch(r'[a-z0-9-]{1,64}', label), 'Invalid receipt name')
     output = base / label; output.mkdir(mode=0o700, exist_ok=False)
     angle = COMMON / 'prefix/ANGLE.xcarchive/Products/usr/local/lib'
@@ -73,10 +78,26 @@ def main():
               'guest_CPU_executed': False, 'guest_disks': False, 'COM_commands_sent': False,
               'rendering_verified': False, 'source': str(Path(__file__).relative_to(ROOT)),
               'source_sha256': sha(Path(__file__))}
-    peers = []; process = None; q = None
+    peers = []; process = None; q = None; receiver = None; receiver_log = None
+    if args.native:
+        source = ROOT / 'experimental/cocoa-native-display/qemu-receiver.m'
+        transport = ROOT / 'experimental/native-display-transport'
+        compiler_env = dict(env, DEVELOPER_DIR='/Applications/Xcode.app/Contents/Developer')
+        with (output / 'receiver-compile.log').open('w') as log:
+            subprocess.run(['xcrun', 'clang', '-std=c17', '-Wall', '-Wextra', '-Werror', '-c', str(transport / 'ndt.c'),
+                '-o', str(output / 'ndt.o')], env=compiler_env, stdout=log, stderr=subprocess.STDOUT, check=True)
+            subprocess.run(['xcrun', 'clang', '-fobjc-arc', '-fblocks', '-Wall', '-Wextra', '-Werror',
+                '-I' + str(transport), str(source), str(output / 'ndt.o'), '-framework', 'Foundation',
+                '-framework', 'Metal', '-o', str(output / 'metal-receiver')], env=compiler_env, stdout=log,
+                stderr=subprocess.STDOUT, check=True)
+        report['receiver_inputs'] = {str(p.relative_to(ROOT)): sha(p) for p in (source, transport / 'ndt.h', transport / 'ndt.c')}
+        report['receiver_sha256'] = sha(output / 'metal-receiver')
     try:
         with tempfile.TemporaryDirectory(prefix='perp-fresh-cap-', dir='/tmp') as temp, (output / 'qemu.log').open('w') as log:
             runtime = Path(temp)
+            if args.native:
+                env.update(PERP_NATIVE_DISPLAY_DIR=str(runtime),
+                           PERP_NATIVE_DISPLAY_SESSION='f123456789abcdef123456789abcdef1')
             command = [str(binary), '-L', str(base / 'src/qemu/pc-bios'), '-no-user-config', '-nodefaults',
                 '-name', 'Perpendicular owned fresh capset fixture', '-machine', 'virt,gic-version=3,highmem=off',
                 '-accel', 'hvf,ipa-granule-size=4096' if args.com else 'hvf', '-cpu', 'host', '-m', '128M', '-smp', '1', '-S', '-nic', 'none',
@@ -133,9 +154,33 @@ def main():
                     require(reply_layout and reply_layout[1].strip() == 'struct npt_reply_header header;',
                             'Expected HRESULT-only Wire1 QueryInterface reply')
                     class Wire1Neptune(fixture.live.Neptune):
+                        view_base = 30
+                        resource_base = 200
                         def query(self, object_id, interface, guest_id):
                             self.call(0x20001, object_id, fixture.live.iid(interface) + struct.pack('<Q', guest_id))
                             return guest_id
+                        def clear(self, index, rgba, width, height, rect=None):
+                            body = fixture.live.pack('QQ4fQ4iI', self.view_base + index, 4, *rgba, 1,
+                                *(rect or (0, 0, width, height)), 1)
+                            self.emit(fixture.live.command(fixture.live.method('ID3D11DeviceContext1', 'ClearView'), self.writer, body))
+                        def resized_textures(self, width, height):
+                            self.originals = []; self.view_base = 50; self.resource_base = 220
+                            for index in range(2):
+                                description = fixture.live.pack('11I', width, height, 1, 1, 87, 1, 0, 0, 0x28, 0, 0x2 | 0x40000000)
+                                self.call(fixture.live.method('ID3D11Device', 'CreateTexture2D'), 10,
+                                    fixture.live.pack('Q', 1) + description + fixture.live.pack('QQ', 0, 40 + index))
+                                self.call(fixture.live.method('ID3D11Device', 'CreateRenderTargetView'), 10,
+                                    fixture.live.pack('QQQ', 40 + index, 0, 50 + index))
+                                self.call(0x40000, 40 + index, fixture.live.pack('QII', 120 + index, 9, 8192))
+                                metadata = self.t.read(self.memory + 8192, 88)
+                                allocation = struct.unpack_from('<Q', metadata, 8)[0]
+                                require(0 < allocation <= 64 * 1024 * 1024, 'Resized texture allocation')
+                                self.gpu.create_blob(220 + index, 120 + index, allocation)
+                                address = self.gpu.map_blob(220 + index, 0x4000000 + 0x1000000 * index)
+                                offset, pitch = struct.unpack_from('<QQ', metadata, 24)
+                                require(pitch >= width * 4 and offset + (height - 1) * pitch + width * 4 <= allocation,
+                                        'Resized texture layout')
+                                self.originals.append((address + offset, pitch))
                     neptune = Wire1Neptune(gpu)
                     width, height = neptune.create(64, 32)
                     for index, color in enumerate(((1, 0, 0, 1), (0, 1, 0, 1))):
@@ -158,11 +203,97 @@ def main():
                         'pixels_verified': 4 * width * height, 'GPU_fence_completed_value': value,
                         'actual_decoder_used': True, 'scanout_tested': False, 'Windows_tested': False}
                     report['owned_processes_after_COM'] = owned_processes()
+                    if args.native:
+                        endpoint = runtime / 'native-display.sock'
+                        def paint(index, color, token):
+                            neptune.clear(index, color, width, height)
+                            neptune.signal(token)
+                            end = time.monotonic() + 10
+                            while True:
+                                reply = neptune.call(fixture.live.method('ID3D11Fence', 'GetCompletedValue'), 2)
+                                if struct.unpack_from('<Q', reply, 8)[0] >= token: break
+                                require(time.monotonic() < end, 'Native test producer GPU fence timeout')
+                                time.sleep(.005)
+                            gpu.scanout(neptune.resource_base + index, width, height)
+                            gpu.flush(neptune.resource_base + index, width, height)
+                        # This fixture explicitly proves its writer completed
+                        # before FLUSH; it does not establish that contract for
+                        # arbitrary Windows/multicontext producer submissions.
+                        paint(0, (1, 0, 0, 1), 2)
+                        end = time.monotonic() + 10
+                        while not endpoint.exists():
+                            require(process.poll() is None and time.monotonic() < end, 'Native listener unavailable')
+                            time.sleep(.01)
+                        receiver_log = (output / 'receiver.log').open('w')
+                        receiver = subprocess.Popen([str(output / 'metal-receiver'), str(endpoint), str(process.pid),
+                            env['PERP_NATIVE_DISPLAY_SESSION']], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                            stderr=receiver_log, text=True, bufsize=1)
+                        actions = []
+                        report['native_snapshot'] = {'result': 'running', 'actions': actions,
+                            'scanout_tested': True, 'visible_presentation_tested': False,
+                            'producer_fence_wait_supplied_by_fixture': True, 'Windows_tested': False}
+                        def control(text):
+                            action = {'command': text}; actions.append(action)
+                            receiver.stdin.write(text + '\n'); receiver.stdin.flush()
+                            require(select.select([receiver.stdout], [], [], 25)[0], 'Metal receiver control timeout')
+                            line = receiver.stdout.readline()
+                            require(line, 'Metal receiver exited; see receiver.log')
+                            response = json.loads(line); require(response['ok'], 'Metal receiver rejected command')
+                            action['response'] = response
+                            return response
+                        control('connect')
+                        control('frame 0 R 64 32')
+                        if not args.withhold_native_update:
+                            paint(1, (0, 1, 0, 1), 3)
+                        control('frame 1 G 64 32')
+                        control('recheck 0 R 64 32')
+                        control('ack 0'); control('ack 1')
+                        for index in range(12):
+                            green = bool(index % 2)
+                            paint(index % 2, (0, 1, 0, 1) if green else (1, 0, 0, 1), 4 + index)
+                            control('frame 0 ' + ('G' if green else 'R') + ' 64 32')
+                            control('ack 0')
+                        paint(0, (1, 0, 0, 1), 16)
+                        control('frame 0 R 64 32')
+                        original_textures = neptune.originals
+                        width, height = 803, 607
+                        neptune.resized_textures(width, height)
+                        paint(1, (0, 1, 0, 1), 17)
+                        control('frame 1 G 803 607')
+                        control('recheck 0 R 64 32')
+                        control('ack 0'); control('ack 1')
+                        paint(0, (1, 0, 0, 1), 18)
+                        control('frame 0 R 803 607'); control('ack 0')
+                        width, height = 64, 32
+                        neptune.originals = original_textures
+                        neptune.view_base = 30; neptune.resource_base = 200
+                        paint(0, (0, 0, 1, 1), 19)
+                        control('frame 0 B 64 32')
+                        control('disconnect')
+                        # Retain the old unacknowledged mapping while a new
+                        # connection receives a different image with no new
+                        # guest update after connect.
+                        paint(1, (1, 0, 1, 1), 20)
+                        time.sleep(.05)
+                        control('connect')
+                        control('frame 1 M 64 32')
+                        control('recheck 0 B 64 32')
+                        control('ack 1'); control('drop 0')
+                        summary = control('quit'); receiver.wait(timeout=5)
+                        require(receiver.returncode == 0, 'Metal receiver failed')
+                        report['native_snapshot'] = {'result': 'pass', 'reader': summary, 'actions': actions,
+                            'scanout_tested': True, 'visible_presentation_tested': False,
+                            'producer_fence_wait_supplied_by_fixture': True, 'Windows_tested': False}
                     require(q.call('query-status')['status'] == 'prelaunch', 'Guest CPU must remain paused')
                 q.call('quit'); process.wait(timeout=5)
                 require(process.returncode == 0, 'QEMU failed during quit')
                 report['exit_code'] = process.returncode
             finally:
+                if receiver is not None and receiver.poll() is None:
+                    receiver.terminate()
+                    try: receiver.wait(timeout=3)
+                    except subprocess.TimeoutExpired: receiver.kill(); receiver.wait(timeout=3)
+                if receiver_log is not None: receiver_log.close()
                 if process is not None:
                     if process.poll() is None and q is not None:
                         try: q.call('quit'); process.wait(timeout=3)
@@ -184,11 +315,14 @@ def main():
         verify(); report['result'] = 'pass'
     except BaseException as error:
         report.update(result='fail', error=str(error))
+        if report.get('native_snapshot', {}).get('result') == 'running':
+            report['native_snapshot']['result'] = 'fail'
         raise
     finally:
         recipe.save(output / 'result.json', report)
     print(json.dumps({key: report[key] for key in ('result', 'actual_neptune_capset', 'matching_server_observed')} |
-                     {'COM_result': report.get('COM_result'), 'receipt': str(output / 'result.json')}, indent=2))
+                     {'COM_result': report.get('COM_result'), 'native_snapshot': report.get('native_snapshot', {}).get('reader'),
+                      'receipt': str(output / 'result.json')}, indent=2))
 
 
 if __name__ == '__main__':
