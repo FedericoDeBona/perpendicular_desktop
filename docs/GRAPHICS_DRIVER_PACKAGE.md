@@ -122,6 +122,8 @@ During the subsequent normal shutdown request, native QEMU also aborted at
 The pre-driver checkpoint was restored in 0.056 seconds, preserving the trial
 state in the engine's recovery Trash directory. This restores the original
 driver, graphics recovery settings, firmware/TPM and 2D configuration together.
+The restored VM booted to the visible desktop again; Guest Tools independently
+reported the DOD controller at 1920×1200 with its display channel connected.
 Private trial receipts and logs are retained under
 `research/private/windows-native3d-20261017/`. The installed application remains
 unchanged; native 3D must not be promoted while these failures remain.
