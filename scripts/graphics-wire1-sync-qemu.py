@@ -41,6 +41,7 @@ def main():
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--headless', action='store_true', help='Also link the native Metal pbuffer backend; host v3 only')
     parser.add_argument('--headless-keep-context', action='store_true', help='Unsafe private thread-handoff negative control; requires --headless')
+    parser.add_argument('--vm-runtime', action='store_true', help='Carry the pinned HID backpressure patch and default-off reviewed STP PCI-hole handler')
     args = parser.parse_args()
     paths = [p.absolute() for p in (args.output, args.qemu, args.sync_renderer)]
     for p in paths:
@@ -53,6 +54,7 @@ def main():
     plan = json.loads((sync / 'plan.json').read_text())
     require(not args.headless_keep_context or args.headless,'Handoff negative control requires --headless')
     require(not args.headless or plan['host_transport_version']==3,'Native headless requires immutable host-v3 leases')
+    require(not args.vm_runtime or (args.headless and not args.headless_keep_context),'VM runtime requires the normal native headless backend')
     require(qreceipt['plan']['qemu_pin'] == '88e5ee7ec6703662fec7b638cca74c4769e683d6' and
             qreceipt['plan']['renderer'] == plan['renderer'] and qreceipt['plan']['backend'] == plan['backend'] and
             plan['host_transport_version'] in (2,3) and plan['guest_wire_version'] == 1, 'Matched host/guest profiles required')
@@ -74,6 +76,11 @@ def main():
     headless=ROOT / 'experimental/native-metal-headless'
     if args.headless:
         for name in ('backend.h','backend.m'): protected[str(headless / name)]=sha(headless / name)
+    input_patch=ROOT / 'experimental/input-backpressure'
+    stp=ROOT / 'experimental/hvf-stp-pci-hole'
+    if args.vm_runtime:
+        for p in (input_patch / 'source-hashes.json',input_patch / 'qemu-10.0.12-backpressure.patch',
+                  stp / 'prepare.py',stp / 'emulate.h',stp / 'decode.h'):protected[str(p)]=sha(p)
     def verify():
         for name, expected in protected.items():
             require(sha(Path(name)) == expected, 'Protected build/app input changed: ' + name)
@@ -137,24 +144,66 @@ def main():
     def recipe(target):
         commands = subprocess.check_output([str(TOOLS / 'ninja'), '-t', 'commands', target], cwd=build, env=env, text=True)
         return shlex.split(commands.splitlines()[-1])
+    vm_targets=[]
+    if args.vm_runtime:
+        vm=copied / 'vm';vm.mkdir()
+        pins=json.loads((input_patch / 'source-hashes.json').read_text())
+        require(pins['source_revision']==qreceipt['plan']['qemu_pin'],'Input patch source revision mismatch')
+        for name,digest in pins['files'].items():
+            original=source / name;require(sha(original)==digest,'Input patch base changed: '+name)
+            protected[str(original)]=digest
+            destination=vm / name;destination.parent.mkdir(parents=True,exist_ok=True);shutil.copyfile(original,destination)
+        run('patch-input',['/usr/bin/patch','--batch','-p1','-i',input_patch / 'qemu-10.0.12-backpressure.patch'],vm)
+        for name,digest in pins['patched_files'].items():require(sha(vm / name)==digest,'Input patch output changed: '+name)
+        original=source / 'target/arm/hvf/hvf.c';protected[str(original)]=sha(original)
+        hvf=original.read_text();hook=load('stp_carry',stp / 'prepare.py').HOOK
+        hvf=replace(hvf,'#include "gdbstub/enums.h"','#include "gdbstub/enums.h"\n#include "perp-stp/emulate.h"')
+        hvf=replace(hvf,'        assert(isv);',hook+'        assert(isv);')
+        destination=vm / 'target/arm/hvf/hvf.c';destination.parent.mkdir(parents=True,exist_ok=True);destination.write_text(hvf)
+        (vm / 'perp-stp').mkdir()
+        for name in ('decode.h','emulate.h'):shutil.copyfile(stp / name,vm / 'perp-stp' / name)
+        original_link=recipe('qemu-system-aarch64-unsigned')
+        entries=json.loads((build / 'compile_commands.json').read_text())
+        for entry in entries:
+            original=(Path(entry['directory']) / entry['file']).resolve()
+            if not original.is_relative_to(source):continue
+            name=original.relative_to(source).as_posix()
+            if name not in ('ui/input.c','hw/input/hid.c','target/arm/hvf/hvf.c') and not (name.startswith('ui/vnc') and name.endswith('.c')):continue
+            argv=shlex.split(entry['command']);target=argv[argv.index('-o')+1]
+            if target not in original_link:continue
+            require(original_link.count(target)==1,'Input/HVF link edge changed: '+name)
+            destination=vm / name
+            if not destination.exists():shutil.copyfile(original,destination)
+            protected[str(original)]=sha(original)
+            vm_targets.append(('vm/'+name,target))
+        require({'vm/ui/input.c','vm/hw/input/hid.c','vm/target/arm/hvf/hvf.c','vm/ui/vnc.c'} <= {p[0] for p in vm_targets},'Required input/HVF units absent')
+        save(base / 'protected.json',protected)
     objects = []
     targets=[('virtio-gpu-virgl.c', 'libcommon.a.p/hw_display_virtio-gpu-virgl.c.o'),
                          ('virtio-gpu-gl.c', 'libcommon.a.p/hw_display_virtio-gpu-gl.c.o'),
                          (sink.name, 'libcommon.a.p/ui_cocoa.m.o')]
     if args.headless:targets.append(('backend.m','libcommon.a.p/ui_cocoa.m.o'))
+    targets.extend(vm_targets)
     for name,target in targets:
         argv = recipe(target); obj = base / (name + '.o'); objects.append(obj)
+        obj.parent.mkdir(parents=True,exist_ok=True)
         argv[argv.index('-c')+1] = str(copied / name)
         for option in ('-o', '-MQ', '-MF'):
             argv[argv.index(option)+1] = str(obj) + ('.d' if option == '-MF' else '')
         argv.extend(['-I'+str(copied), '-I'+str(source / 'hw/display'), '-I'+str(build / 'hw/display'),
             '-I'+str(Path(plan['backend']) / 'prefix/include'), '-Wno-unused-parameter'])
-        run('compile-'+name, argv, build)
+        if name.startswith('vm/'):
+            relative=name.removeprefix('vm/')
+            argv[1:1]=['-iquote',str(copied / 'vm/include'),'-iquote',str(copied / 'vm'),
+                '-iquote',str((source / relative).parent)]
+        run('compile-'+name.replace('/','_'), argv, build)
     link = recipe('qemu-system-aarch64-unsigned')
     candidate = base / 'qemu-system-aarch64'
     link[link.index('-o')+1] = str(candidate)
     for old, new in zip(('libcommon.a.p/hw_display_virtio-gpu-virgl.c.o', 'libcommon.a.p/hw_display_virtio-gpu-gl.c.o'), objects):
         require(link.count(old) == 1, 'GPU link edge changed'); link[link.index(old)] = str(new)
+    for (name,target),obj in zip(vm_targets,objects[3+int(args.headless):]):
+        require(link.count(target)==1,'Input/HVF link edge changed');link[link.index(target)]=str(obj)
     matching = [i for i, arg in enumerate(link) if arg.endswith(('/libvirglrenderer.dylib', '/libvirglrenderer.1.dylib'))]
     require(len(matching) == 1, 'Renderer link identity changed'); link[matching[0]] = str(library)
     link.insert(3, str(objects[2])); link.extend(['-Wl,-rpath,'+str(library.parent)])
@@ -190,9 +239,10 @@ def main():
     verify()
     save(base / 'build.json', {'result': 'built_not_runtime_verified', 'qemu_profile': str(qemu), 'sync_renderer': str(sync),
         'candidate': str(candidate), 'candidate_sha256': sha(candidate), 'recipe_sha256': sha(Path(__file__)),
-        'sources': {str(p.relative_to(base)): sha(p) for p in copied.iterdir()}, 'installed_app_unchanged': True,
+        'sources': {str(p.relative_to(base)): sha(p) for p in copied.rglob('*') if p.is_file()}, 'installed_app_unchanged': True,
         'host_transport_version':plan['host_transport_version'],
         'native_headless_available':args.headless,'unsafe_test_keep_context':args.headless_keep_context,
+        'input_backpressure':args.vm_runtime,'hvf_stp_hole_default_off':args.vm_runtime,
         'VM_started': False, 'scope': ('Worker immutable snapshot FD directly to native publisher; cropped scanouts retain GPU-copy fallback'
             if plan['host_transport_version']==3 else 'Worker GPU snapshot plus native-publisher GPU copy') + '; no Windows qualification'})
     print('Private synchronization QEMU linked; runtime qualification remains pending.', flush=True)

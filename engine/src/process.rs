@@ -231,6 +231,19 @@ fn supervise_inner(job: &LaunchJob) -> Result<std::process::ExitStatus> {
     }
     let result = (|| {
         let mut command = Command::new(&job.qemu);
+        if job.config.display_adapter == crate::model::DisplayAdapter::VirtioRamfbGl {
+            let root = job.qemu.parent().and_then(Path::parent).ok_or_else(|| {
+                Error::new(
+                    "native_graphics_unavailable",
+                    "Native graphics runtime directory is missing",
+                )
+            })?;
+            crate::native_graphics::NativeGraphics::from_directory(root)?.configure(
+                &mut command,
+                &job.runtime_dir,
+                &job.launch_name,
+            )?;
+        }
         command
             .args(qemu_arguments(
                 &job.config,

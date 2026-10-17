@@ -39,6 +39,7 @@ def main():
     parser.add_argument('--sync-renderer', type=Path, help='Private matched synchronization renderer; capture remains disabled in this probe')
     parser.add_argument('--sync-qemu', type=Path, help='Matched private QEMU overlay; enables actual automatic producer synchronization')
     parser.add_argument('--headless', action='store_true', help='Use the opt-in native Metal pbuffer backend instead of Cocoa')
+    parser.add_argument('--packaged-runtime', type=Path, help='Verify the app Native3D binaries/libraries after relocation; requires --headless')
     parser.add_argument('--withhold-native-update', action='store_true', help='Negative control: omit the green update; --native must fail')
     parser.add_argument('--withhold-producer-token', action='store_true', help='Negative control: real GPU work finishes but the worker ready token is withheld')
     parser.add_argument('--label', default=None, help='Fresh receipt name; preserves previous attempts')
@@ -47,6 +48,7 @@ def main():
     require(not args.withhold_native_update or args.native, 'Withheld-update control requires --native')
     require(not args.withhold_producer_token or args.sync_qemu, 'Withheld producer token requires automatic synchronization')
     require(not args.headless or args.sync_qemu,'Native headless requires the synchronization QEMU overlay')
+    require(not args.packaged_runtime or args.headless,'Packaged runtime qualification requires --headless')
     require(not (args.withhold_native_update and args.withhold_producer_token), 'Select one causal negative control')
     args.com = args.com or args.native
     base = args.profile.absolute()
@@ -100,6 +102,26 @@ def main():
         protected[str(sync / 'build.json')] = sha(sync / 'build.json')
         renderer = sync
 
+    expected_renderer=renderer / 'prefix/lib/libvirglrenderer.1.dylib'
+    expected_backend=backend / 'prefix/lib/libdxmt-native.dylib'
+    expected_server=renderer / 'prefix/libexec/virgl_render_server'
+    packaged=None
+    if args.packaged_runtime:
+        packaged=args.packaged_runtime.resolve(strict=True)
+        require(packaged.is_relative_to(ROOT) and packaged.name=='Native3D','Expected a private app Native3D directory')
+        metadata=json.loads((packaged / 'runtime.json').read_text())
+        require(metadata['schema']==1 and metadata['source_receipt_sha256']==sha(profile / 'build.json') and
+            metadata['host_transport_version']==3 and metadata['guest_wire_version']==1,'Packaged source/ABI mismatch')
+        for name,digest in metadata['files'].items():
+            path=packaged / name
+            require(path.resolve().is_relative_to(packaged) and sha(path)==digest,'Packaged code changed: '+name)
+            protected[str(path)]=digest
+        protected[str(packaged / 'runtime.json')]=sha(packaged / 'runtime.json')
+        binary=packaged / 'bin/qemu-system-aarch64'
+        expected_renderer=packaged / 'lib/libvirglrenderer.1.dylib'
+        expected_backend=packaged / 'lib/libdxmt-native.dylib'
+        expected_server=packaged / 'bin/virgl_render_server'
+
     def verify():
         for name, expected in protected.items():
             require(sha(Path(name)) == expected, 'Protected artifact changed: ' + name)
@@ -110,14 +132,15 @@ def main():
     output = base / label; output.mkdir(mode=0o700, exist_ok=False)
     angle = COMMON / 'prefix/ANGLE.xcarchive/Products/usr/local/lib'
     libraries = ':'.join(map(str, (renderer / 'prefix/lib', backend / 'prefix/lib', base / 'prefix/lib', COMMON / 'prefix/lib', angle)))
+    if packaged:libraries=str(packaged / 'lib')
     selected = {'DYLD_LIBRARY_PATH': libraries, 'DYLD_FALLBACK_LIBRARY_PATH': libraries,
         'DYLD_PRINT_LIBRARIES': '1', 'ANGLE_DEFAULT_PLATFORM': 'metal', 'NPT_BACKEND': 'dxmt',
-        'RENDER_SERVER_EXEC_PATH': str(renderer / 'prefix/libexec/virgl_render_server'),
+        'RENDER_SERVER_EXEC_PATH': str(expected_server),
         'PERP_NATIVE_DISPLAY_DIRECT': '1'}
     if args.sync_qemu: selected['PERP_NEPTUNE_SCANOUT_BROKER'] = '1'
     if args.withhold_producer_token: selected['PERP_LIVE_TEST_WITHHOLD'] = '1'
     for key in ('NPT_D3D11_LIBRARY_PATH', 'NPT_DXGI_LIBRARY_PATH', 'NPT_D3D12_LIBRARY_PATH'):
-        selected[key] = str(backend / 'prefix/lib/libdxmt-native.dylib')
+        selected[key] = str(expected_backend)
     env = {key: value for key, value in os.environ.items()
            if not key.startswith(('DYLD_', 'QEMU_', 'VIRGL_', 'NPT_', 'ANGLE_', 'PERP_')) and
            key not in ('RENDER_SERVER_EXEC_PATH', 'DXMT_LOG_PATH', 'LD_LIBRARY_PATH', 'LD_PRELOAD')}
@@ -462,11 +485,13 @@ def main():
         loaded = [line for line in lines if 'dyld[' in line and any(name in line for name in
                   ('libvirglrenderer', 'virgl_render_server', 'libdxmt-native', 'libEGL.dylib', 'libGLESv2.dylib'))]
         report['loaded_library_lines'] = loaded
-        for name in (renderer / 'prefix/lib/libvirglrenderer.1.dylib', backend / 'prefix/lib/libdxmt-native.dylib'):
+        for name in (expected_renderer,expected_backend):
             require(any(str(name) in line for line in loaded), 'Expected loaded library absent: ' + str(name))
         require(not any(str(COMMON / 'prefix/lib/libvirglrenderer') in line or
                         str(COMMON / 'prefix/lib/libdxmt-native') in line for line in loaded), 'Different ABI library loaded')
-        report['matching_server_observed'] = any(row['executable'] == str(renderer / 'prefix/libexec/virgl_render_server')
+        if packaged:
+            require(not any(str(ROOT / '.tools') in line for line in loaded),'Packaged runtime loaded a research graphics library')
+        report['matching_server_observed'] = any(row['executable'] == str(expected_server)
             for row in report['owned_processes'] + report.get('owned_processes_after_COM', []))
         if args.com:
             require(report['matching_server_observed'], 'Matching renderer server was not observed')

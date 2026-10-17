@@ -62,6 +62,8 @@ impl Engine {
         ))
         .unwrap_or_else(|_| json!({}));
         info["secure_boot_verified"] = json!(false);
+        info["native_graphics_available"] =
+            json!(crate::native_graphics::NativeGraphics::discover(&self.tools).is_ok());
         info["windows_readiness"] = json!({"tpm_available":self.tools.swtpm_path.is_some(),"tpm_physical_presence_interface":false,"secure_boot":"guest_verification_required","graphics":"Standard RAMFB; adaptive 2D via virtio-ramfb requires a compatible runtime, Windows display driver and connected Guest Tools. 3D acceleration is unverified.","network":"VirtIO guest driver required"});
         info
     }
@@ -877,10 +879,13 @@ impl Engine {
             ));
         }
         self.validate_host(config.cpus, config.memory_mib)?;
-        let qemu = self
-            .tools
-            .require(&self.tools.qemu_path, "qemu-system-aarch64")?
-            .to_path_buf();
+        let qemu = if config.display_adapter == DisplayAdapter::VirtioRamfbGl {
+            crate::native_graphics::NativeGraphics::discover(&self.tools)?.qemu
+        } else {
+            self.tools
+                .require(&self.tools.qemu_path, "qemu-system-aarch64")?
+                .to_path_buf()
+        };
         if config.tpm_enabled {
             self.tools
                 .require(&self.tools.swtpm_path, "swtpm (required by this VM)")?;

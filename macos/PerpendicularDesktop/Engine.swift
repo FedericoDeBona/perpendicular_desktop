@@ -5,12 +5,14 @@ import SwiftUI
 enum DisplayAdapter: String, Codable, CaseIterable, Identifiable, Sendable {
     case ramfb
     case virtioRAMFB = "virtio-ramfb"
+    case native3D = "virtio-ramfb-gl"
 
     var id: String { rawValue }
     var label: String {
         switch self {
         case .ramfb: "Standard display"
         case .virtioRAMFB: "Adaptive resolution"
+        case .native3D: "3D graphics (experimental)"
         }
     }
 }
@@ -89,6 +91,14 @@ struct VirtualMachine: Codable, Identifiable, Hashable, Sendable {
 }
 
 struct HostInfo: Decodable, Sendable {
+    let nativeGraphicsAvailable: Bool?
+    var native3DSelectable: Bool {
+#if PERPENDICULAR_NATIVE_DISPLAY
+        nativeGraphicsAvailable == true
+#else
+        false
+#endif
+    }
     let architecture: String
     let memoryBytes: UInt64
     let hypervisorAvailable: Bool

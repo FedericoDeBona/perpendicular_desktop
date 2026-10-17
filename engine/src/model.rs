@@ -9,6 +9,7 @@ pub enum DisplayAdapter {
     #[default]
     Ramfb,
     VirtioRamfb,
+    VirtioRamfbGl,
 }
 
 fn default_keyboard_layout() -> String {
@@ -158,6 +159,7 @@ mod tests {
         for (value, adapter) in [
             ("ramfb", DisplayAdapter::Ramfb),
             ("virtio-ramfb", DisplayAdapter::VirtioRamfb),
+            ("virtio-ramfb-gl", DisplayAdapter::VirtioRamfbGl),
         ] {
             assert_eq!(
                 serde_json::from_value::<DisplayAdapter>(serde_json::json!(value)).unwrap(),

@@ -152,7 +152,9 @@ struct ConfigurationView: View {
                 }
                 Toggle("Play Windows audio on this Mac", isOn: $audioOutput)
                 Picker("Display", selection: $displayAdapter) {
-                    ForEach(DisplayAdapter.allCases) { adapter in Text(adapter.label).tag(adapter) }
+                    ForEach(DisplayAdapter.allCases) { adapter in
+                        Text(adapter.label).tag(adapter).disabled(adapter == .native3D && library.host?.native3DSelectable != true)
+                    }
                 }
                 Text("Adaptive resolution requires the VirtIO display driver in Windows. For automatic resizing, install Perpendicular Guest Tools and enable Fit Windows to Window.")
                     .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)

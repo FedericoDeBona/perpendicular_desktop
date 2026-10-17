@@ -82,7 +82,7 @@ pub fn qemu_arguments(
         "none".into(),
         "-S".into(),
     ];
-    if config.display_adapter == DisplayAdapter::VirtioRamfb {
+    if config.display_adapter != DisplayAdapter::Ramfb {
         // Remove only the standalone platform framebuffer. The hybrid device
         // is appended after all existing devices below to preserve PCI slots.
         let index = args
@@ -90,6 +90,12 @@ pub fn qemu_arguments(
             .position(|pair| pair == ["-device", "ramfb"])
             .expect("fixed RAMFB argument");
         args.drain(index..index + 2);
+    }
+    if config.display_adapter == DisplayAdapter::VirtioRamfbGl {
+        let accel = args.iter().position(|arg| arg == "-accel").unwrap();
+        args[accel + 1] = "hvf,ipa-granule-size=4096".into();
+        let display = args.iter().position(|arg| arg == "-display").unwrap();
+        args[display + 1] = "egl-headless,gl=es".into();
     }
     for (node, path, readonly, format) in [
         ("ueficode", config.firmware_code_path.clone(), true, "raw"),
@@ -157,7 +163,14 @@ pub fn qemu_arguments(
             // HVF requires host-page aligned mappings (16 KiB on Apple Silicon),
             // so disable this optional physical-presence interface while
             // retaining the real TPM 2.0 device and persistent swtpm state.
-            "tpm-tis-device,tpmdev=tpm0,ppi=off".into(),
+            if config.display_adapter == DisplayAdapter::VirtioRamfbGl {
+                // The matched older fork has no optional PPI property. Its
+                // existing TPM device and persistent state remain enabled.
+                "tpm-tis-device,tpmdev=tpm0"
+            } else {
+                "tpm-tis-device,tpmdev=tpm0,ppi=off"
+            }
+            .into(),
         ]);
     }
     // Keep newly introduced PCI devices after the existing NVMe controller so
@@ -186,6 +199,9 @@ pub fn qemu_arguments(
     }
     if config.display_adapter == DisplayAdapter::VirtioRamfb {
         args.extend(["-device".into(), "virtio-ramfb,id=display0,addr=0x7".into()]);
+    }
+    if config.display_adapter == DisplayAdapter::VirtioRamfbGl {
+        args.extend(["-device".into(), "virtio-ramfb-gl,id=display0,addr=0x7,disable-legacy=on,neptune=on,blob=on,hostmem=256M".into()]);
     }
     Ok(args)
 }
@@ -301,6 +317,36 @@ mod tests {
             .iter()
             .any(|arg| arg == "if=none,media=cdrom,id=installiso,readonly=on"));
         assert!(!args.iter().any(|arg| arg == "-tpmdev"));
+    }
+
+    #[test]
+    fn native_3d_preserves_disks_input_tpm_and_owned_control_endpoints() {
+        let mut c = config();
+        let old = qemu_arguments(&c, Path::new("/vm"), Path::new("/tmp/owned"), "launch").unwrap();
+        c.display_adapter = DisplayAdapter::VirtioRamfbGl;
+        let new = qemu_arguments(&c, Path::new("/vm"), Path::new("/tmp/owned"), "launch").unwrap();
+        assert!(new
+            .windows(2)
+            .any(|p| p == ["-display", "egl-headless,gl=es"]));
+        assert!(new
+            .windows(2)
+            .any(|p| p == ["-accel", "hvf,ipa-granule-size=4096"]));
+        assert!(!new.iter().any(|p| p == "ramfb" || p == "cocoa,gl=es"));
+        assert!(new.iter().any(|p| p == "virtio-ramfb-gl,id=display0,addr=0x7,disable-legacy=on,neptune=on,blob=on,hostmem=256M"));
+        assert!(new.iter().any(|p| p == "tpm-tis-device,tpmdev=tpm0"));
+        for pair in old
+            .windows(2)
+            .filter(|p| ["-blockdev", "-vnc", "-qmp", "-uuid"].contains(&p[0].as_str()))
+        {
+            assert!(new.windows(2).any(|p| p == pair));
+        }
+        for device in [
+            "usb-kbd,bus=usb.0",
+            "usb-tablet,bus=usb.0",
+            "virtio-serial-pci,id=guestserial",
+        ] {
+            assert!(new.iter().any(|p| p == device));
+        }
     }
 
     #[test]

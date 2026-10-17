@@ -8,6 +8,7 @@ pub mod export;
 pub mod firmware;
 pub mod guest;
 pub mod model;
+pub mod native_graphics;
 pub mod process;
 pub mod qmp;
 pub mod storage;

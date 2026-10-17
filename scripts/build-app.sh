@@ -13,10 +13,10 @@ cp "$ROOT/macos/Info.plist" "$APP/Contents/Info.plist"
 cp "$ROOT/engine/target/release/perpendicular-engine" "$APP/Contents/Resources/perpendicular-engine"
 swift_args=(-swift-version 6 -O -parse-as-library
   -target arm64-apple-macosx14.0 -sdk "$(xcrun --show-sdk-path)")
-if [[ "${PERPENDICULAR_NATIVE_DISPLAY:-0}" == 1 ]]; then
+if [[ "${PERPENDICULAR_NATIVE_DISPLAY:-0}" == 1 || -n "${PERPENDICULAR_NATIVE_GRAPHICS_PROFILE:-}" ]]; then
   native_build="$ROOT/.build/native-display"
   mkdir -p "$native_build"
-  xcrun clang -std=c17 -O2 -Wall -Wextra -Werror \
+  xcrun clang -target arm64-apple-macosx14.0 -std=c17 -O2 -Wall -Wextra -Werror \
     -c "$ROOT/experimental/native-display-transport/ndt.c" -o "$native_build/ndt.o"
   swift_args+=(-D PERPENDICULAR_NATIVE_DISPLAY -import-objc-header "$ROOT/experimental/native-display-transport/ndt.h" "$native_build/ndt.o")
 fi
@@ -24,6 +24,11 @@ xcrun swiftc "${swift_args[@]}" "$ROOT"/macos/PerpendicularDesktop/*.swift \
   -o "$APP/Contents/MacOS/Perpendicular Desktop"
 if [[ "${PERPENDICULAR_BUNDLE_RUNTIME:-1}" == 1 ]]; then
   "${PYTHON:-python3}" "$ROOT/scripts/bundle-runtime.py" "$APP" "$ROOT/.tools/qemu"
+fi
+if [[ -n "${PERPENDICULAR_NATIVE_GRAPHICS_PROFILE:-}" ]]; then
+  "${PYTHON:-python3}" "$ROOT/scripts/bundle-native-graphics.py" --app "$APP" \
+    --profile "$PERPENDICULAR_NATIVE_GRAPHICS_PROFILE" \
+    --qualification "${PERPENDICULAR_NATIVE_GRAPHICS_QUALIFICATION:?A passing exact native graphics qualification is required}"
 fi
 "${PYTHON:-python3}" "$ROOT/scripts/clean-build-metadata.py" "$APP"
 codesign --force --sign - --entitlements "$ROOT/macos/Hypervisor.entitlements" "$APP/Contents/Resources/perpendicular-engine"
