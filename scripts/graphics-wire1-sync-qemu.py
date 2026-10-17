@@ -51,7 +51,7 @@ def main():
     plan = json.loads((sync / 'plan.json').read_text())
     require(qreceipt['plan']['qemu_pin'] == '88e5ee7ec6703662fec7b638cca74c4769e683d6' and
             qreceipt['plan']['renderer'] == plan['renderer'] and qreceipt['plan']['backend'] == plan['backend'] and
-            plan['host_transport_version'] == 2 and plan['guest_wire_version'] == 1, 'Matched host/guest profiles required')
+            plan['host_transport_version'] in (2,3) and plan['guest_wire_version'] == 1, 'Matched host/guest profiles required')
     require(sha(sync / 'plan.json') == sreceipt['plan_sha256'] and
             sha(sync / 'source-files.json') == sreceipt['source_inventory_sha256'], 'Sync build identity changed')
     library = sync / 'prefix/lib/libvirglrenderer.1.dylib'
@@ -62,9 +62,11 @@ def main():
     qheader = ROOT / 'experimental/neptune-live/qemu-live.h'
     pheader = ROOT / 'experimental/cocoa-native-display/publisher.h'
     nheader = ROOT / 'experimental/native-display-transport/ndt.h'
+    publisher = ROOT / 'experimental/cocoa-native-display/publisher.m'
     for p in (Path(__file__), qemu / 'build.json', sync / 'build.json', sink, qheader, pheader, nheader,
               qemu / 'build/build.ninja', qemu / 'build/compile_commands.json'):
         protected[str(p)] = sha(p)
+    if plan['host_transport_version'] == 3: protected[str(publisher)] = sha(publisher)
     def verify():
         for name, expected in protected.items():
             require(sha(Path(name)) == expected, 'Protected build/app input changed: ' + name)
@@ -137,6 +139,16 @@ def main():
     matching = [i for i, arg in enumerate(link) if arg.endswith(('/libvirglrenderer.dylib', '/libvirglrenderer.1.dylib'))]
     require(len(matching) == 1, 'Renderer link identity changed'); link[matching[0]] = str(library)
     link.insert(3, str(objects[2])); link.extend(['-Wl,-rpath,'+str(library.parent)])
+    if plan['host_transport_version'] == 3:
+        # The base QEMU archive predates external retirement callbacks. Build
+        # the current ARC publisher and replace precisely that one link edge.
+        shutil.copyfile(publisher,copied / publisher.name)
+        pubobj=base / 'publisher.o'; archive=base / 'libperp-native-publisher.a'
+        run('compile-publisher',['xcrun','clang','-target','arm64-apple-macosx14.0','-O3','-fobjc-arc',
+            '-std=gnu11','-Wall','-Wextra','-Werror','-I'+str(copied),'-c',copied / publisher.name,'-o',pubobj])
+        run('archive-publisher',['xcrun','ar','rcs',archive,pubobj])
+        edges=[i for i,arg in enumerate(link) if arg.endswith('/libperp-native-publisher.a')]
+        require(len(edges)==1,'Native publisher archive identity changed');link[edges[0]]=str(archive)
     # Bind every reused explicit object/archive/library in the actual link
     # recipe, rather than treating a Ninja file hash as their byte identity.
     for arg in link[1:]:
@@ -157,7 +169,9 @@ def main():
     save(base / 'build.json', {'result': 'built_not_runtime_verified', 'qemu_profile': str(qemu), 'sync_renderer': str(sync),
         'candidate': str(candidate), 'candidate_sha256': sha(candidate), 'recipe_sha256': sha(Path(__file__)),
         'sources': {str(p.relative_to(base)): sha(p) for p in copied.iterdir()}, 'installed_app_unchanged': True,
-        'VM_started': False, 'scope': 'Worker GPU snapshot plus native-publisher GPU copy; no PBO/readback, no Windows qualification'})
+        'host_transport_version':plan['host_transport_version'],
+        'VM_started': False, 'scope': ('Worker immutable snapshot FD directly to native publisher; cropped scanouts retain GPU-copy fallback'
+            if plan['host_transport_version']==3 else 'Worker GPU snapshot plus native-publisher GPU copy') + '; no Windows qualification'})
     print('Private synchronization QEMU linked; runtime qualification remains pending.', flush=True)
 
 

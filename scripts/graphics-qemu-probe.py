@@ -60,6 +60,7 @@ def main():
     backend = Path(manifest['plan']['backend'])
     protected = {**manifest['plan']['dependencies'], **json.loads((base / 'protected.json').read_text()),
                  str(binary): sha(binary), str(base / 'build.json'): sha(base / 'build.json')}
+    host_version=2
     if args.sync_qemu:
         require(args.native, 'Automatic synchronization probe requires a native receiver')
         profile = args.sync_qemu.absolute()
@@ -86,7 +87,9 @@ def main():
                 sha(sync / 'source-files.json') == receipt['source_inventory_sha256'], 'Synchronization build identity changed')
         require(plan['renderer'] == str(renderer) and plan['backend'] == str(backend) and
                 plan['source_pin'] == recipe.PINS['renderer']['pin'] and plan['backend_pin'] == recipe.PINS['backend']['pin'] and
-                plan['host_transport_version'] == 2 and plan['guest_wire_version'] == 1, 'Matched synchronization pair required')
+                plan['host_transport_version'] in (2,3) and plan['guest_wire_version'] == 1, 'Matched synchronization pair required')
+        host_version=plan['host_transport_version']
+        if args.sync_qemu: require(overlay.get('host_transport_version',2)==host_version,'QEMU host transport mismatch')
         for path in (sync / 'prefix/lib/libvirglrenderer.1.dylib', sync / 'prefix/libexec/virgl_render_server'):
             require(sha(path) == receipt['binaries'][str(path)], 'Synchronization binary changed')
             protected[str(path)] = sha(path)
@@ -276,7 +279,8 @@ def main():
                             if args.sync_qemu:
                                 gpu.scanout(neptune.resource_base + index, width, height)
                                 gpu.flush(neptune.resource_base + index, width, height)
-                                wait_sync(lambda state: state['renderer']['active_context'] == 1 and state['renderer']['pending'] == 0)
+                                wait_sync(lambda state: state['renderer']['active_context'] == 1 and
+                                    (host_version==3 or state['renderer']['pending'] == 0))
                                 # A decoder/control round trip orders earlier
                                 # worker ACKs before the next fixture commands.
                                 # GetType is not a GPU wait or fence-value poll.
@@ -366,6 +370,12 @@ def main():
                         control('disconnect')
                         if args.sync_qemu:
                             wait_sync(lambda state: not state['publisher_can_capture'])
+                            if host_version==3:
+                                wait_sync(lambda state: state['renderer']['worker_abandoned']>=1)
+                                # Challenge the original resource of the held
+                                # blue snapshot, too. Reusing it after a mere
+                                # disconnect would turn the old blue FD green.
+                                neptune.clear(0,(0,1,0,1),width,height)
                         # Retain the old unacknowledged mapping while a new
                         # connection receives a different image with no new
                         # guest update after connect.
@@ -375,6 +385,12 @@ def main():
                         control('frame 1 M 64 32')
                         control('recheck 0 B 64 32')
                         control('ack 1'); control('drop 0')
+                        if args.sync_qemu and host_version==3:
+                            # ACK production is asynchronous. Closing the reader
+                            # immediately after enqueueing its final ACK would
+                            # correctly abandon that last allocation instead.
+                            wait_sync(lambda state: state['publisher']['occupied']==0 and state['renderer']['pending']==0 and
+                                state['renderer']['worker_retirements']==state['renderer']['received'])
                         summary = control('quit'); receiver.wait(timeout=5)
                         require(receiver.returncode == 0, 'Metal receiver failed')
                         report['native_snapshot'] = {'result': 'pass', 'reader': summary, 'actions': actions,
@@ -383,9 +399,18 @@ def main():
                         if args.sync_qemu:
                             report['native_snapshot']['sync_stats'] = wait_sync(lambda state:
                                 state['renderer']['pending'] == 0 and state['publisher']['occupied'] == 0 and
+                                not state['publisher_can_capture'] and
                                 state['publisher']['cached_backings'] == 0 and
                                 state['publisher']['backing_allocations'] == state['publisher']['backing_releases'] and
                                 state['publisher']['mappings'] == state['publisher']['unmappings'])
+                            if host_version==3:
+                                state=report['native_snapshot']['sync_stats']
+                                skipped=sum(action['response'].get('skipped',0) for action in actions if action['command'].startswith('frame '))
+                                require(state['copies']==0 and state['mappings_released']==0 and state['external_submitted']==19+skipped and
+                                    state['external_acked']==18+skipped and state['external_abandoned']==1,'Direct lease accounting differs')
+                                require(state['publisher']['backing_allocations']==0 and state['publisher']['mappings']==0 and
+                                    state['renderer']['worker_reuses']>0 and state['renderer']['worker_abandoned']==1,
+                                    'Direct worker leases were not reused/abandoned correctly')
                             # A valid anonymous blob has no checked export or
                             # writer identity. Its scanout/flush must be consumed
                             # as a rejection, never resume the unfenced path.

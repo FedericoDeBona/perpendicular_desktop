@@ -18,7 +18,7 @@
 typedef struct NativeRead {
     uint64_t generation;
     PerpLiveLease lease;
-    bool success;
+    bool success,external;
 } NativeRead;
 static struct {
     void *owner; QemuConsole *console;
@@ -32,10 +32,20 @@ static id<MTLCommandQueue> queue;
 static id<MTLSharedEvent> held_event;
 static bool hold_read, hold_gpu, delay_done;
 static NativeRead *delayed;
-static uint64_t generations, copies, cancelled, mappings_released, blocked_flushes;
+static uint64_t generations, copies, cancelled, mappings_released, blocked_flushes,external_submitted,external_acked,external_abandoned;
 
 static void completed(void *opaque) {
     NativeRead *read = opaque;
+#if PERP_BROKER_VERSION == 3
+    if (read->external) {
+        /* Accepted external snapshots can outlive selection/reset. Their exact
+         * ACK authorizes reuse; disconnect must abandon the allocation even
+         * when this callback belongs to an old display generation. */
+        if (read->success) {perp_live_scanout_done(&read->lease,true);external_acked++;}
+        else {perp_live_scanout_abandon(&read->lease);external_abandoned++;}
+        g_free(read);return;
+    }
+#endif
     if (delay_done && !delayed) { delayed = read; return; }
     bool active = read->generation == display.generation && read == display.current;
     perp_live_scanout_done(&read->lease, read->success && active);
@@ -59,7 +69,7 @@ void perp_live_qemu_set_hold_adapter(bool value) {
 static bool publish(PerpLiveLease *lease) {
     const dxmt_shared_texture_handle *d = &lease->texture;
     uint64_t width = d->width, height = d->height;
-    if (lease->version != 2 || lease->resource_id != display.resource || !lease->worker_epoch || !lease->resource_epoch ||
+    if (lease->version != PERP_BROKER_VERSION || lease->resource_id != display.resource || !lease->worker_epoch || !lease->resource_epoch ||
         !perp_wire1_layout_valid(d) || width != display.width || height != display.height ||
         !width || !height || width > 4096 || height > 4096 || width * height > 8 * 1024 * 1024 ||
         d->dxgi_format != 87 || d->mip_levels != 1 || d->array_size != 1 || d->sample_count != 1 || d->cpu_access ||
@@ -70,6 +80,25 @@ static bool publish(PerpLiveLease *lease) {
     struct stat st;
     if (fstat(lease->memory_fd, &st) || st.st_size < 0 || (uint64_t)st.st_size < bytes || st.st_size > LIVE_MAX_BYTES ||
         (!S_ISREG(st.st_mode) && (st.st_mode & S_IFMT))) return false;
+#if PERP_BROKER_VERSION == 3
+    if (!display.x && !display.y && display.crop_width==width && display.crop_height==height) {
+        int ready=perp_live_scanout_ready_fd(lease);if(ready<0)return false;
+        NativeRead *read=g_new0(NativeRead,1);
+        *read=(NativeRead){.generation=display.generation,.lease=*lease,.external=true};
+        ndt_metadata metadata={.width=width,.height=height,.pitch=d->stride,.format=NDT_BGRA8,.size=d->size};
+        /* The callback may run before publish_ready returns. All its state is
+         * initialized first and retirement is marshalled onto the QEMU thread.
+         * Do not set display.current: a held client frame must allow its
+         * successor to advance into the second bounded publisher slot. */
+        bool accepted=perp_native_display_publish_ready(lease->memory_fd,ready,&metadata,^(bool acknowledged) {
+            read->success=acknowledged;
+            aio_bh_schedule_oneshot(qemu_get_aio_context(),completed,read);
+        });
+        close(ready);
+        if(!accepted) {g_free(read);return false;}
+        external_submitted++;return true;
+    }
+#endif
     id<MTLDevice> device = (id<MTLDevice>)qemu_egl_angle_native_device;
     NSUInteger alignment = [device minimumLinearTextureAlignmentForPixelFormat:MTLPixelFormatBGRA8Unorm];
     if (!device || !alignment || d->stride % alignment) return false;
@@ -159,9 +188,9 @@ void perp_live_qemu_reset(void *owner) {
 }
 char *perp_live_qemu_stats(void) {
     char *renderer = perp_live_scanout_stats(), *publisher = perp_native_display_stats();
-    char *result = g_strdup_printf("{\"copies\":%"PRIu64",\"cancelled\":%"PRIu64",\"mappings_released\":%"PRIu64
+    char *result = g_strdup_printf("{\"copies\":%"PRIu64",\"external_submitted\":%"PRIu64",\"external_acked\":%"PRIu64",\"external_abandoned\":%"PRIu64",\"cancelled\":%"PRIu64",\"mappings_released\":%"PRIu64
         ",\"blocked_flushes\":%"PRIu64",\"failed\":%s,\"active\":%s,\"publisher_can_capture\":%s,\"renderer\":%s,\"publisher\":%s}",
-        copies, cancelled, qatomic_read(&mappings_released), blocked_flushes, display.failed ? "true" : "false", display.current ? "true" : "false",
+        copies,external_submitted,external_acked,external_abandoned,cancelled, qatomic_read(&mappings_released), blocked_flushes, display.failed ? "true" : "false", display.current ? "true" : "false",
         perp_native_display_can_capture() ? "true" : "false", renderer, publisher);
     free(renderer); free(publisher); return result;
 }

@@ -75,6 +75,7 @@ def main():
     parser.add_argument('--renderer', required=True, type=Path)
     parser.add_argument('--backend', required=True, type=Path)
     parser.add_argument('--output', required=True, type=Path)
+    parser.add_argument('--generations', action='store_true', help='Private host v3 immutable generation leases; guest Wire1 unchanged')
     args = parser.parse_args()
     paths = [p.absolute() for p in (args.output, args.renderer, args.backend)]
     for path in paths:
@@ -91,7 +92,7 @@ def main():
         dependencies.update({name: item['sha256'] for name, item in receipt['binaries'].items()})
         require(sha(profile / 'dependencies.json') == receipt['dependencies_sha256'], 'Changed dependency inventory')
         dependencies.update(json.loads((profile / 'dependencies.json').read_text()))
-    inputs = [Path(__file__), ROOT / 'scripts/graphics-live.py', ROOT / 'scripts/graphics-neptune.py',
+    inputs = [Path(__file__), ROOT / 'scripts/graphics-wire1-generations.py', ROOT / 'scripts/graphics-live.py', ROOT / 'scripts/graphics-neptune.py',
               ROOT / 'scripts/graphics-build.py', ROOT / 'scripts/graphics-wire1-rebuild.py']
     for folder in ('neptune-snapshot', 'neptune-live', 'neptune-broker'):
         inputs.extend(p for p in (ROOT / 'experimental' / folder).iterdir() if p.is_file())
@@ -136,12 +137,14 @@ def main():
         '    VTABLE(PFN_ID3D11Texture2D_GetDesc,tex,NPT_VTBL_ID3D11Texture2D_GetDesc)(tex,&actual);\n'
         '    if(actual.Usage || actual.CPUAccessFlags || actual.MipLevels!=1 || actual.ArraySize!=1 || actual.SampleDesc.Count!=1)goto invalid;\n' + anchor)
     path.write_text(text)
+    if args.generations:
+        load('generation_extension', ROOT / 'scripts/graphics-wire1-generations.py').apply(private, ROOT)
     path = source / 'src/meson.build'; text = path.read_text(); anchor = 'neptune_sources = [\n'
     require(text.count(anchor) == 1, 'Neptune Meson anchor changed')
     path.write_text(text.replace(anchor, anchor + "   'perp-sync/snapshot.c',\n   'perp-sync/wire.c',\n   'perp-sync/proxy-broker.c',\n"))
     save(base / 'source-files.json', {str(p.relative_to(source)): sha(p) for p in source.rglob('*') if p.is_file()})
     save(base / 'plan.json', {'renderer': str(renderer), 'backend': str(backend), 'source_pin': shared.PINS['renderer']['pin'],
-        'backend_pin': shared.PINS['backend']['pin'], 'host_transport_version': 2, 'guest_wire_version': 1,
+        'backend_pin': shared.PINS['backend']['pin'], 'host_transport_version': 3 if args.generations else 2, 'guest_wire_version': 1,
         'original_source_files': original, 'max_jobs': 2, 'optimization': 3})
     prefix, build = base / 'prefix', base / 'build'
     angle = COMMON / 'src/WebKit/Source/ThirdParty/ANGLE/include'
