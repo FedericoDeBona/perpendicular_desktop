@@ -269,3 +269,21 @@ For a causal negative, add `--withhold-native-update` and a fresh label. This
 deliberately omits the first green update; the command must exit nonzero while
 waiting for green. Its failed receipt and receiver log are expected evidence,
 not a successful graphics result.
+
+Select the actual app receiver and renderer instead of the independent reader:
+
+```sh
+.tools/build-venv/bin/python scripts/graphics-qemu-probe.py --profile .tools/graphics-rebuild-qemu-native-20261016 --swift-receiver --label swift-native-new
+```
+
+This implies `--native` and compiles the unchanged production
+`NativeDisplayConnection`, `NativeDisplayEndpoint`, `VMDisplayPresentationQueue`
+and `VMMetalRenderer` with a separate Swift command harness. Both Swift and C
+transport target arm64 macOS 14. The same scanout/resize/reconnect sequence
+passes through the real receiver's worker/mailbox, external leases and renderer
+shader, with zero RFB uploads. Diagnostic rendering is offscreen; no MTKView,
+drawable callback or installed application is exercised. Per-held-frame queues
+extend lease retirement deliberately so old source textures can be re-rendered
+after later producer updates and a disconnect. ACK follows completed GPU reads
+and production queue retirement/reset. `--withhold-native-update` also applies
+to this variant and must fail when the omitted green image never arrives.

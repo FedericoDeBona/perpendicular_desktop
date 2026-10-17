@@ -44,6 +44,13 @@ below still belong to their frozen artifacts. Writer synchronization, measured
 Windows presentation/latency and installed 3D integration remain outstanding.
 [Publisher contract and tests](../experimental/cocoa-native-display/README.md).
 
+A further current-host fixture now runs those scanouts through the unchanged
+app Swift receiver, external-lease queue and Metal renderer as well: the same
+1,015,802 pixels passed with 22 GPU reads, zero RFB uploads and no reader frames
+left at exit. Rendering remains offscreen, with the producer fence wait supplied
+by the fixture. This qualifies component pairing, not visible app/Windows use.
+[Swift integration evidence](VERIFICATION.md#actual-qemu--production-swift-receiverrenderer--2026-10-17).
+
 ## Hidden direct-source run
 
 The first combined direct-source/STP candidate launched after correcting a

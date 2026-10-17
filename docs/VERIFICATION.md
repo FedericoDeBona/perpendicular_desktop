@@ -631,3 +631,31 @@ does not establish the missing automatic writer barrier for Windows or
 multiple contexts. It is not a visible presentation test, the app's Swift
 receiver/presenter, latency/FPS measurement, producer allocation/reuse counter,
 or Windows/installed-runtime qualification. Those gates remain open.
+
+
+### Actual QEMU → production Swift receiver/renderer — 2026-10-17
+
+The same native scanout sequence now passes through the unchanged app
+`NativeDisplayConnection` (worker/mailbox and FD import), external texture
+leases, `VMDisplayPresentationQueue` and `VMMetalRenderer`. Only the command
+harness is new. It renders each received texture with the production shader
+into a shared offscreen target, awaits actual GPU completion and checks pixels.
+Held frame queues deliberately defer retirement to allow repeated reads of an
+old source across updates/resize/disconnect; production queue completion/reset
+then drives the real receiver's retirement path. No production source or
+installed app was changed.
+
+Final receipt `.tools/graphics-rebuild-qemu-native-20261016/swift-native-final3/result.json`
+records 1,015,802 exact pixels, 22 GPU reads, 19 frames plus three retained-source
+rechecks, two connections, zero active reader frames and **zero RFB uploads**.
+It covers the same 64×32 → 803×607 → 64×32 and old-blue/new-magenta reconnect
+case. QEMU remained paused/diskless and exited 0. Both Swift and the production
+C transport compile for arm64 macOS 14; the final compile log is clean.
+The withheld-update control fails at the expected green frame with
+`native frame timeout`; its failed receipt/log remain in `swift-native-withheld2`.
+Source hashes bind the actual production files used, not copied replacements.
+
+This closes the current-host receiver/renderer pairing gap for the explicitly
+ordered fixture. It does not exercise MTKView/drawable presentation, the
+ordinary app launch, automatic Windows/multicontext writer synchronization,
+input latency or FPS. The producer fence wait is still supplied by the fixture.

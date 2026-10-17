@@ -35,9 +35,11 @@ def main():
     parser.add_argument('--profile', required=True, type=Path)
     parser.add_argument('--com', action='store_true', help='Also exercise the real Wire1 decoder, shared textures and GPU fences')
     parser.add_argument('--native', action='store_true', help='Also verify real scanout snapshots with a Metal receiver')
+    parser.add_argument('--swift-receiver', action='store_true', help='Use the app production Swift receiver/renderer; implies --native')
     parser.add_argument('--withhold-native-update', action='store_true', help='Negative control: omit the green update; --native must fail')
     parser.add_argument('--label', default=None, help='Fresh receipt name; preserves previous attempts')
     args = parser.parse_args()
+    args.native = args.native or args.swift_receiver
     require(not args.withhold_native_update or args.native, 'Withheld-update control requires --native')
     args.com = args.com or args.native
     base = args.profile.absolute()
@@ -84,13 +86,23 @@ def main():
         transport = ROOT / 'experimental/native-display-transport'
         compiler_env = dict(env, DEVELOPER_DIR='/Applications/Xcode.app/Contents/Developer')
         with (output / 'receiver-compile.log').open('w') as log:
-            subprocess.run(['xcrun', 'clang', '-std=c17', '-Wall', '-Wextra', '-Werror', '-c', str(transport / 'ndt.c'),
+            subprocess.run(['xcrun', 'clang', '-target', 'arm64-apple-macosx14.0', '-std=c17', '-Wall', '-Wextra', '-Werror', '-c', str(transport / 'ndt.c'),
                 '-o', str(output / 'ndt.o')], env=compiler_env, stdout=log, stderr=subprocess.STDOUT, check=True)
-            subprocess.run(['xcrun', 'clang', '-fobjc-arc', '-fblocks', '-Wall', '-Wextra', '-Werror',
-                '-I' + str(transport), str(source), str(output / 'ndt.o'), '-framework', 'Foundation',
-                '-framework', 'Metal', '-o', str(output / 'metal-receiver')], env=compiler_env, stdout=log,
-                stderr=subprocess.STDOUT, check=True)
-        report['receiver_inputs'] = {str(p.relative_to(ROOT)): sha(p) for p in (source, transport / 'ndt.h', transport / 'ndt.c')}
+            if args.swift_receiver:
+                receiver_sources = [ROOT / 'macos/PerpendicularDesktop' / name for name in
+                    ('NativeDisplayEndpoint.swift', 'VMDisplayPresenter.swift', 'NativeDisplayConnection.swift')]
+                receiver_sources.append(ROOT / 'macos/Tests/QEMUNativeReceiverCheck.swift')
+                subprocess.run(['xcrun', 'swiftc', '-O', '-parse-as-library', '-swift-version', '6', '-warnings-as-errors',
+                    '-target', 'arm64-apple-macosx14.0', '-D', 'PERPENDICULAR_NATIVE_DISPLAY', '-import-objc-header',
+                    str(transport / 'ndt.h'), *map(str, receiver_sources), str(output / 'ndt.o'),
+                    '-o', str(output / 'metal-receiver')], env=compiler_env, stdout=log, stderr=subprocess.STDOUT, check=True)
+            else:
+                receiver_sources = [source]
+                subprocess.run(['xcrun', 'clang', '-fobjc-arc', '-fblocks', '-Wall', '-Wextra', '-Werror',
+                    '-I' + str(transport), str(source), str(output / 'ndt.o'), '-framework', 'Foundation',
+                    '-framework', 'Metal', '-o', str(output / 'metal-receiver')], env=compiler_env, stdout=log,
+                    stderr=subprocess.STDOUT, check=True)
+        report['receiver_inputs'] = {str(p.relative_to(ROOT)): sha(p) for p in (*receiver_sources, transport / 'ndt.h', transport / 'ndt.c')}
         report['receiver_sha256'] = sha(output / 'metal-receiver')
     try:
         with tempfile.TemporaryDirectory(prefix='perp-fresh-cap-', dir='/tmp') as temp, (output / 'qemu.log').open('w') as log:
