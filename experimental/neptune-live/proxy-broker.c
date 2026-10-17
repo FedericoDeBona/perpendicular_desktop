@@ -21,8 +21,9 @@ typedef struct LiveWorker {
     uint32_t id;uint64_t epoch;int fd;struct proxy_socket *control;
     bool hello,bad,enabled,revoking;
     uint32_t retired_batch;
-    LiveExport exports[LIVE_MAX_CANDIDATES];
-    LiveExport claims[LIVE_MAX_CANDIDATES];
+    uint32_t capture_resource;
+    LiveExport exports[LIVE_MAX_SOURCES];
+    LiveExport claims[LIVE_MAX_SOURCES];
     _Alignas(8) unsigned char input[248];size_t have,want;int rights[2];unsigned fd_count;
 } LiveWorker;
 typedef struct LiveResource {
@@ -120,29 +121,29 @@ static bool accept_message(LiveWorker *w,const PerpBrokerHeader *h,const void *b
     if(h->kind==PERP_HELLO && h->bytes==sizeof(*h) && !h->fd_count) {w->hello=true;return true;}
     if(h->kind==PERP_EXPORT && h->bytes==sizeof(*h) && !h->fd_count) {
         LiveExport *e=NULL;
-        for(unsigned i=0;i<LIVE_MAX_CANDIDATES;i++) {
+        for(unsigned i=0;i<LIVE_MAX_SOURCES;i++) {
             if(w->exports[i].blob==h->blob_id)return false;
             if(!w->exports[i].blob)e=&w->exports[i];
         }
         if(!e || !h->blob_id || !h->object_id)return false;
         *e=(LiveExport){.blob=h->blob_id,.object=h->object_id};
-        for(unsigned i=0;i<LIVE_MAX_CANDIDATES;i++)if(w->claims[i].blob==h->blob_id)e->resource=w->claims[i].resource;
+        for(unsigned i=0;i<LIVE_MAX_SOURCES;i++)if(w->claims[i].blob==h->blob_id)e->resource=w->claims[i].resource;
         return true;
     }
     if(h->kind==PERP_CLAIM && h->bytes==sizeof(*h) && !h->fd_count && h->status==1) {
         LiveExport *claim=NULL;
-        for(unsigned i=0;i<LIVE_MAX_CANDIDATES;i++) {
+        for(unsigned i=0;i<LIVE_MAX_SOURCES;i++) {
             if(w->claims[i].blob==h->blob_id)return false;
             if(!w->claims[i].blob)claim=&w->claims[i];
         }
         if(!claim || !h->resource_id || !h->blob_id)return false;
         *claim=(LiveExport){.blob=h->blob_id,.resource=h->resource_id};
-        for(unsigned i=0;i<LIVE_MAX_CANDIDATES;i++)if(w->exports[i].blob==h->blob_id)w->exports[i].resource=h->resource_id;
+        for(unsigned i=0;i<LIVE_MAX_SOURCES;i++)if(w->exports[i].blob==h->blob_id)w->exports[i].resource=h->resource_id;
         return true;
     }
     if(h->kind==PERP_ACKED && h->bytes==sizeof(*h) && !h->fd_count)return true;
     if(h->kind==LIVE_REVOKED && h->bytes==sizeof(*h) && !h->fd_count && w->revoking) {
-        w->revoking=w->enabled=false;if(active==w->id)active=0;
+        w->revoking=w->enabled=false;w->capture_resource=0;if(active==w->id)active=0;
         for(unsigned i=0;i<MAX_RESOURCES;i++)if(resources[i].context==w->id)resources[i].granted=false;return true;
     }
     if(h->kind==LIVE_DENIED && h->bytes==sizeof(*h) && !h->fd_count) {
@@ -235,18 +236,20 @@ void perp_live_scanout_pump(void)
     /* A reset may leave a consumer callback retaining an old epoch's fd.
      * Do not allocate a fresh worker's snapshot budget until it retires. */
     if(!active)for(unsigned i=0;i<LIVE_MAX_CANDIDATES;i++)if(frames[i].used)return;
-    unsigned candidates=0;
-    for(unsigned i=0;i<MAX_RESOURCES;i++)if(resources[i].context==desired->id && !resources[i].tainted) {
-        LiveResource *r=&resources[i];LiveExport *e=NULL;
-        for(unsigned j=0;j<LIVE_MAX_CANDIDATES;j++)if(desired->exports[j].blob==r->blob && desired->exports[j].resource==r->id)e=&desired->exports[j];
-        if(!e)continue;if(++candidates>LIVE_MAX_CANDIDATES) {fail_worker(desired,"candidate bound");return;}
-        r->object=e->object;
-        if(!r->granted) {
-            PerpBrokerHeader grant={.kind=LIVE_GRANT,.resource_id=r->id,.resource_epoch=r->epoch,.blob_id=r->blob,.object_id=r->object};
-            if(!send_control(desired,&grant,NULL,0)) {fail_worker(desired,"grant channel");return;}r->granted=true;
-        }
+    LiveExport *entry=NULL;
+    for(unsigned i=0;i<LIVE_MAX_SOURCES;i++)if(desired->exports[i].blob==target->blob &&
+        desired->exports[i].resource==target->id)entry=&desired->exports[i];
+    if(!entry)return;
+    target->object=entry->object;
+    if(desired->capture_resource!=target->id) {
+        PerpBrokerHeader grant={.kind=LIVE_GRANT,.resource_id=target->id,.resource_epoch=target->epoch,
+            .blob_id=target->blob,.object_id=target->object};
+        if(!send_control(desired,&grant,NULL,0)) {fail_worker(desired,"grant channel");return;}
+        /* Keep historical grants valid for frames already queued before the
+         * selection change. The worker replaces only future capture admission. */
+        target->granted=true;desired->capture_resource=target->id;
     }
-    if(target && target->granted && candidates && !desired->enabled) {
+    if(!desired->enabled) {
         PerpBrokerHeader enable={.kind=LIVE_ENABLE};if(!send_control(desired,&enable,NULL,0)) {fail_worker(desired,"enable channel");return;}
         desired->enabled=true;active=desired->id;
     }

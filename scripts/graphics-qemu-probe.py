@@ -42,6 +42,7 @@ def main():
     parser.add_argument('--packaged-runtime', type=Path, help='Verify the app Native3D binaries/libraries after relocation; requires --headless')
     parser.add_argument('--withhold-native-update', action='store_true', help='Negative control: omit the green update; --native must fail')
     parser.add_argument('--withhold-producer-token', action='store_true', help='Negative control: real GPU work finishes but the worker ready token is withheld')
+    parser.add_argument('--source-pressure', action='store_true', help='Keep twelve additional unselected shared sources alive during native presentation')
     parser.add_argument('--label', default=None, help='Fresh receipt name; preserves previous attempts')
     args = parser.parse_args()
     args.native = args.native or args.swift_receiver
@@ -51,6 +52,7 @@ def main():
     require(not args.packaged_runtime or args.headless,'Packaged runtime qualification requires --headless')
     require(not (args.withhold_native_update and args.withhold_producer_token), 'Select one causal negative control')
     args.com = args.com or args.native
+    require(not args.source_pressure or args.sync_qemu, 'Source pressure requires the synchronization path')
     base = args.profile.absolute()
     require(base.parent.resolve() == (ROOT / '.tools').resolve() and not base.is_symlink() and
             re.fullmatch(r'graphics-rebuild-[a-z0-9-]{1,64}', base.name), 'Expected fresh-build profile')
@@ -296,6 +298,21 @@ def main():
                         'actual_decoder_used': True, 'scanout_tested': False, 'Windows_tested': False}
                     report['owned_processes_after_COM'] = owned_processes()
                     if args.native:
+                        if args.source_pressure:
+                            # Real decoded COM exports and virtio blobs, not a
+                            # direct registry fixture. These sources stay alive
+                            # throughout resize, held reads and reconnection.
+                            for index in range(12):
+                                object_id=1000+index; blob_id=1000+index
+                                description=fixture.live.pack('11I',64,32,1,1,87,1,0,0,0x28,0,0x2|0x40000000)
+                                neptune.call(fixture.live.method('ID3D11Device','CreateTexture2D'),10,
+                                    fixture.live.pack('Q',1)+description+fixture.live.pack('QQ',0,object_id))
+                                neptune.call(0x40000,object_id,fixture.live.pack('QII',blob_id,9,8192))
+                                metadata=neptune.t.read(neptune.memory+8192,88)
+                                allocation=struct.unpack_from('<Q',metadata,8)[0]
+                                require(0<allocation<=64*1024*1024,'Additional shared source allocation')
+                                gpu.create_blob(1000+index,blob_id,allocation)
+                            report['unselected_live_sources']=12
                         endpoint = runtime / 'native-display.sock'
                         def sync_stats():
                             return json.loads(q.call('qom-get', {'path': '/machine/peripheral/freshprobe/virtio-backend',
@@ -442,8 +459,12 @@ def main():
                                 require(state['copies']==0 and state['mappings_released']==0 and state['external_submitted']==19+skipped and
                                     state['external_acked']==18+skipped and state['external_abandoned']==1,'Direct lease accounting differs')
                                 require(state['publisher']['backing_allocations']==0 and state['publisher']['mappings']==0 and
-                                    state['renderer']['worker_reuses']>0 and state['renderer']['worker_abandoned']==1,
+                                    0<state['renderer']['worker_allocations']<state['renderer']['worker_retirements'] and
+                                    state['renderer']['worker_abandoned']==1,
                                     'Direct worker leases were not reused/abandoned correctly')
+                                if args.source_pressure:
+                                    require(state['renderer']['received']==19+skipped and state['renderer']['cancelled']==0,
+                                        'Unselected sources consumed GPU snapshots')
                             # A valid anonymous blob has no checked export or
                             # writer identity. Its scanout/flush must be consumed
                             # as a rejection, never resume the unfenced path.

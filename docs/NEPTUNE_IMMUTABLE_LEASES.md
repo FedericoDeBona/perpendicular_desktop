@@ -6,6 +6,52 @@ This is an opt-in private host extension. It preserves the matched renderer
 descriptor. Private broker version **3** is distinct from those guest/native
 versions. Host v2 remains the default build recipe.
 
+## Selected-source capture — 2026-10-17
+
+The current broker separates source identity metadata (256 bounded entries)
+from immutable snapshot storage. It grants capture for the selected scanout
+source instead of copying every exported surface. A new selection replaces
+future worker capture admission while preserving old resource/worker identities
+for already queued frames and exact ACKs. Unselected sources do not consume
+snapshot allocations. The existing 64-MiB producer allocation budget and eight
+retained/cache slots remain unchanged. Source ID reuse and table exhaustion
+still fail closed; this is not an unbounded resource-lifecycle implementation.
+
+The real decoder/virtqueue test now optionally keeps twelve extra shared
+textures alive (`--source-pressure`). Both private and relocated application
+runtimes delivered 19 images with 1,015,802 exact checked pixels, held images
+across resize and disconnect, two connections, zero RFB uploads and no pending
+leases at completion. Only 19 worker snapshots were received, compared with 46
+in the preceding packaged run of the same presentation sequence. No unselected
+snapshot was copied or cancelled. Five allocations served 19 retirements;
+the `worker_reuses` field counts transfers from the retained idle cache only,
+so its zero value does not count reuse of an Export's current allocation.
+Peak producer snapshot storage was 3,928,800 bytes. One disconnected allocation
+was abandoned, and its retained old image remained intact.
+
+Withheld completion still prevents publication even after the actual producer
+GPU fence completes. Withholding the green update still fails its pixel check.
+Passing receipts: `selected-pressure2/result.json` SHA-256
+`372c9a408f469047acf06e85c6d66b546063ece127718b00691c7ea405a1da72`,
+`selected-packaged1/result.json` SHA-256
+`9088e0d643ad0c1f380289d84f4d6055084abf0c739eb7c6a207b2f9f6923e68`,
+under `.tools/graphics-rebuild-qemu-native-20261016/`.
+
+The same VM trial still has black output. The old fifth-export failure no
+longer occurs; the single remaining worker rejection follows unrelated shared
+resource imports into the compositor. Static inspection confirms that the
+current import hook invalidates the entire worker, beyond the proxy's existing
+per-resource denial handshake. Correctly admitting unrelated input imports
+while retaining denial of imported output sources remains unfinished. Multiple
+producer fences/rings and resource lifecycle also remain unqualified. These
+diskless pixel results do not establish Windows presentation or latency.
+
+The VM shutdown again reached an unsupported ISV0 write in the GPEX unassigned
+PCI window. The VM-runtime builder now carries the existing read-only abort
+diagnostic immediately before the retained assertion; raw addresses stay in
+private receipts. No instruction is skipped or new emulation admitted. The
+same VM was restored to its clean 2D checkpoint with the driver staged only.
+
 ## Ownership and synchronization
 
 The actual Context4 Signal override copies all explicitly admitted source

@@ -17,7 +17,7 @@ typedef struct LiveClaim {
     uint64_t blob,epoch,object;
     bool granted,denied;
 } LiveClaim;
-static LiveClaim live_claims[LIVE_MAX_CANDIDATES];
+static LiveClaim live_claims[LIVE_MAX_SOURCES];
 static bool live_emit(PerpBrokerHeader *h,const void *body,size_t bytes,const int *fds,unsigned count);
 static void live_fault_locked(void);
 static LiveClaim *live_claim_blob(uint64_t blob);

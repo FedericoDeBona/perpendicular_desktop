@@ -78,7 +78,9 @@ def main():
         for name in ('backend.h','backend.m'): protected[str(headless / name)]=sha(headless / name)
     input_patch=ROOT / 'experimental/input-backpressure'
     stp=ROOT / 'experimental/hvf-stp-pci-hole'
+    abort_diagnostic=ROOT / 'experimental/hvf-invalid-syndrome/diagnostic.inc.c'
     if args.vm_runtime:
+        protected[str(abort_diagnostic)]=sha(abort_diagnostic)
         for p in (input_patch / 'source-hashes.json',input_patch / 'qemu-10.0.12-backpressure.patch',
                   stp / 'prepare.py',stp / 'emulate.h',stp / 'decode.h'):protected[str(p)]=sha(p)
     def verify():
@@ -158,7 +160,9 @@ def main():
         original=source / 'target/arm/hvf/hvf.c';protected[str(original)]=sha(original)
         hvf=original.read_text();hook=load('stp_carry',stp / 'prepare.py').HOOK
         hvf=replace(hvf,'#include "gdbstub/enums.h"','#include "gdbstub/enums.h"\n#include "perp-stp/emulate.h"')
-        hvf=replace(hvf,'        assert(isv);',hook+'        assert(isv);')
+        # Log the unsupported exit before retaining the original assertion.
+        # This is observation only; it does not emulate or skip the access.
+        hvf=replace(hvf,'        assert(isv);',hook+abort_diagnostic.read_text()+'\n        assert(isv);')
         destination=vm / 'target/arm/hvf/hvf.c';destination.parent.mkdir(parents=True,exist_ok=True);destination.write_text(hvf)
         (vm / 'perp-stp').mkdir()
         for name in ('decode.h','emulate.h'):shutil.copyfile(stp / name,vm / 'perp-stp' / name)

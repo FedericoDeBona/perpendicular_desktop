@@ -48,7 +48,7 @@ def patch_renderer():
         '      perp_live_worker_export(ctx, texture_id, blob_id);\n   }')
     shared.write_text(text)
     snapshot=(FROZEN/'snapshot.c').read_text()
-    snapshot=replace(snapshot,'#define MAX_EXPORTS 8','#define MAX_EXPORTS 4')
+    snapshot=replace(snapshot,'#define MAX_EXPORTS 8','#define MAX_EXPORTS LIVE_MAX_SOURCES')
     snapshot=replace(snapshot,'#include <unistd.h>','#include <unistd.h>\n#include "worker-prefix.inc"')
     snapshot=replace(snapshot,'perp_snapshot_fixture_admit(','perp_snapshot_worker_admit(')
     snapshot=replace(snapshot,'    release((void **)&entry->fence); release(&entry->snapshot);',

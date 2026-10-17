@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: MIT */
 static LiveClaim *live_claim_blob(uint64_t blob)
 {
-    for(unsigned i=0;i<LIVE_MAX_CANDIDATES;i++)if(live_claims[i].blob==blob && blob)return &live_claims[i];return NULL;
+    for(unsigned i=0;i<LIVE_MAX_SOURCES;i++)if(live_claims[i].blob==blob && blob)return &live_claims[i];return NULL;
 }
 static bool live_emit(PerpBrokerHeader *h,const void *body,size_t bytes,const int *fds,unsigned count)
 {
@@ -36,7 +36,7 @@ void perp_live_worker_claim(uint32_t ctx,uint32_t resource,uint64_t blob)
 {
     if(!blob || !live_context || ctx!=live_context->ctx_id)return;
     lock();LiveClaim *claim=live_claim_blob(blob);
-    for(unsigned i=0;i<LIVE_MAX_CANDIDATES && !claim;i++)if(!live_claims[i].blob)claim=&live_claims[i];
+    for(unsigned i=0;i<LIVE_MAX_SOURCES && !claim;i++)if(!live_claims[i].blob)claim=&live_claims[i];
     if(!claim || (claim->resource && claim->resource!=resource))live_fault_locked();
     else {claim->blob=blob;claim->resource=resource;PerpBrokerHeader h={.kind=PERP_CLAIM,.resource_id=resource,.blob_id=blob,.status=1};if(!live_emit(&h,NULL,0,NULL,0))live_fault_locked();}
     unlock();
@@ -45,7 +45,7 @@ void perp_live_worker_resource_destroy(uint32_t ctx,uint32_t resource)
 {
     if(!live_context || ctx!=live_context->ctx_id)return;
     lock();uint64_t blob=0;
-    for(unsigned i=0;i<LIVE_MAX_CANDIDATES;i++)if(live_claims[i].resource==resource) {
+    for(unsigned i=0;i<LIVE_MAX_SOURCES;i++)if(live_claims[i].resource==resource) {
         blob=live_claims[i].blob;live_claims[i].denied=true;live_claims[i].granted=false;
     }
     unlock();if(blob)perp_snapshot_forget_export(live_context,blob);
@@ -80,7 +80,12 @@ bool perp_live_worker_command(uint32_t ctx,const void *bytes,size_t count,const 
         for(unsigned i=0;i<MAX_EXPORTS;i++)if(entries[i].ctx==live_context && entries[i].blob_id==h->blob_id)entry=&entries[i];
         bool good=!live_faulted && claim && !claim->denied && claim->resource==h->resource_id && h->resource_epoch &&
             entry && entry->object_id==h->object_id;
-        if(good) {claim->epoch=h->resource_epoch;claim->object=h->object_id;claim->granted=true;}
+        if(good) {
+            /* Old immutable leases remain ACK-able through their identity. Only
+             * the selected source participates in future GPU copies. */
+            for(unsigned i=0;i<LIVE_MAX_SOURCES;i++)live_claims[i].granted=false;
+            claim->epoch=h->resource_epoch;claim->object=h->object_id;claim->granted=true;
+        }
         unlock();return good;
     }
     if(h->kind==LIVE_ENABLE) {
@@ -119,7 +124,7 @@ bool perp_live_worker_command(uint32_t ctx,const void *bytes,size_t count,const 
             Export *entry=&entries[i];
             if(entry->snapshot) {live_snapshot_bytes-=entry->layout.size;release(&entry->snapshot);memset(&entry->layout,0,sizeof(entry->layout));}
         }
-        for(unsigned i=0;i<LIVE_MAX_CANDIDATES;i++)live_claims[i].granted=false;
+        for(unsigned i=0;i<LIVE_MAX_SOURCES;i++)live_claims[i].granted=false;
         PerpBrokerHeader reply={.kind=LIVE_REVOKED};if(good)good=live_emit(&reply,NULL,0,NULL,0);unlock();return good;
     }
     return false;

@@ -7,6 +7,8 @@ HRESULT perp_snapshot_signal(struct npt_context *ctx,void *writer,ID3D11Fence *f
 {
     lock();Export *chosen[LIVE_MAX_CANDIDATES]={0};unsigned count=0;
     int ready[LIVE_MAX_CANDIDATES]={-1,-1,-1,-1};
+    if(admitted!=ctx || contexts!=1 || invalid_scope || live_faulted || !live_enabled ||
+       atomic_load(&ctx->multi_ring) || !fence || !value) {rejected_scope++;goto no_capture;}
     if(live_context==ctx && fence) {
         if(!live_fence) {live_fence=fence;npt_com_add_ref(fence);}
         /* SetEventOnCompletion on an old/already-satisfied value could signal
@@ -18,18 +20,18 @@ HRESULT perp_snapshot_signal(struct npt_context *ctx,void *writer,ID3D11Fence *f
         }
         live_last_fence_value=value;
     }
-    if(admitted!=ctx || contexts!=1 || invalid_scope || live_faulted || !live_enabled ||
-       atomic_load(&ctx->multi_ring) || !fence || !value) {rejected_scope++;goto no_capture;}
     for(unsigned i=0;i<MAX_EXPORTS;i++) if(entries[i].ctx==ctx) {
         LiveClaim *claim=live_claim_blob(entries[i].blob_id);
-        /* An additional export on another device/writer invalidates this
-         * scope even when it has not yet been selected or granted. */
+        if(!claim || !claim->granted || claim->denied)continue;
+        /* Validate the actual selected source and its writer. Unselected
+         * metadata neither authorizes a read nor consumes snapshot storage. */
         if(!identical(writer,entries[i].writer)) {rejected_owner++;live_fault_locked();goto no_capture;}
         ID3D11Device *fence_owner=NULL;
         VTABLE(PFN_ID3D11DeviceChild_GetDevice,fence,NPT_VTBL_ID3D11DeviceChild_GetDevice)(fence,&fence_owner);
         bool same_owner=fence_owner && identical(fence_owner,entries[i].owner);release((void **)&fence_owner);
         if(!same_owner) {rejected_owner++;live_fault_locked();goto no_capture;}
-        if(claim && claim->granted && !claim->denied)chosen[count++]=&entries[i];
+        if(count>=LIVE_MAX_CANDIDATES) {live_fault_locked();goto no_capture;}
+        chosen[count++]=&entries[i];
     }
     if(!count) {rejected_scope++;goto no_capture;}
     for(unsigned i=0;i<count;i++)if(chosen[i]->busy) {dropped_busy++;goto no_capture;}

@@ -9,6 +9,8 @@
 #include "broker.h"
 enum { LIVE_ATTACH=200,LIVE_GRANT,LIVE_ENABLE,LIVE_REVOKE,LIVE_REVOKED,LIVE_DENY,LIVE_DENIED,LIVE_FAULT };
 #define LIVE_MAX_CANDIDATES 4u
+/* Source identities are metadata; immutable GPU copies have a separate bound. */
+#define LIVE_MAX_SOURCES 256u
 #define LIVE_MAX_BYTES (64u*1024u*1024u)
 #define LIVE_PUBLIC __attribute__((visibility("default")))
 struct proxy_socket;
