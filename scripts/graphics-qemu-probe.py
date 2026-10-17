@@ -43,8 +43,13 @@ def main():
     parser.add_argument('--withhold-native-update', action='store_true', help='Negative control: omit the green update; --native must fail')
     parser.add_argument('--withhold-producer-token', action='store_true', help='Negative control: real GPU work finishes but the worker ready token is withheld')
     parser.add_argument('--source-pressure', action='store_true', help='Keep twelve additional unselected shared sources alive during native presentation')
+    parser.add_argument('--import-input', action='store_true', help='Read a texture from a second renderer worker into the selected output')
+    parser.add_argument('--import-selected-output', action='store_true', help='Negative control: import the selected output while its old image is retained')
+    parser.add_argument('--import-owned-output', action='store_true', help='Negative control: reject an owned output reopen without the proxy denial handshake')
+    parser.add_argument('--reexport-input', action='store_true', help='Negative control: an imported texture reexport must not become an exclusive output')
     parser.add_argument('--label', default=None, help='Fresh receipt name; preserves previous attempts')
     args = parser.parse_args()
+    args.import_input = args.import_input or args.reexport_input
     args.native = args.native or args.swift_receiver
     require(not args.withhold_native_update or args.native, 'Withheld-update control requires --native')
     require(not args.withhold_producer_token or args.sync_qemu, 'Withheld producer token requires automatic synchronization')
@@ -53,6 +58,13 @@ def main():
     require(not (args.withhold_native_update and args.withhold_producer_token), 'Select one causal negative control')
     args.com = args.com or args.native
     require(not args.source_pressure or args.sync_qemu, 'Source pressure requires the synchronization path')
+    require(not (args.import_input or args.import_selected_output or args.import_owned_output) or args.sync_qemu, 'Shared imports require the synchronization path')
+    require(not args.import_owned_output or not (args.import_selected_output or args.withhold_native_update or args.withhold_producer_token),
+        'Select one causal negative control')
+    require(not args.reexport_input or not (args.import_selected_output or args.import_owned_output or args.withhold_native_update or args.withhold_producer_token),
+        'Select one causal negative control')
+    require(not args.import_selected_output or not (args.withhold_native_update or args.withhold_producer_token),
+        'Select one causal negative control')
     base = args.profile.absolute()
     require(base.parent.resolve() == (ROOT / '.tools').resolve() and not base.is_symlink() and
             re.fullmatch(r'graphics-rebuild-[a-z0-9-]{1,64}', base.name), 'Expected fresh-build profile')
@@ -298,6 +310,30 @@ def main():
                         'actual_decoder_used': True, 'scanout_tested': False, 'Windows_tested': False}
                     report['owned_processes_after_COM'] = owned_processes()
                     if args.native:
+                        foreign=None
+                        if args.import_input or args.import_selected_output:
+                            class ScopedGPU:
+                                t=gpu.t;bar=gpu.bar
+                                def send(self,kind,body=b'',context=2):return gpu.send(kind,body,context=context)
+                                def submit(self,data):return self.send(0x207,fixture.live.pack('II',len(data),0)+data)
+                                create_blob=fixture.live.GPU.create_blob
+                                map_blob=fixture.live.GPU.map_blob
+                            foreign=Wire1Neptune(ScopedGPU(),data_resource=409,ring_resource=410,
+                                map_offset=0x7000000,resource_base=500)
+                            foreign.create(64,32)
+                        if args.import_input:
+                            foreign.clear(0,(1,0,0,1),64,32);foreign.signal(1)
+                            deadline=time.monotonic()+10
+                            while struct.unpack_from('<Q',foreign.call(fixture.live.method('ID3D11Fence','GetCompletedValue'),2),8)[0]<1:
+                                require(time.monotonic()<deadline,'Foreign input GPU completion timeout')
+                                time.sleep(.005)
+                            gpu.send(0x202,fixture.live.pack('II',500,0))
+                            body=fixture.live.pack('Q12I',3000,500,64,32,1,1,87,1,0,0x28,0,0x2|0x40000000,0)+foreign.export_metadata[0]
+                            neptune.call(0x40001,10,body)
+                            report['shared_input']={'exporter_context':2,'consumer_context':1,'resource':500,
+                                'imported_object':3000,'producer_completion_wait':'fixture only',
+                                'actual_decoder_import_succeeded':True}
+                            report['owned_processes_after_import']=owned_processes()
                         if args.source_pressure:
                             # Real decoded COM exports and virtio blobs, not a
                             # direct registry fixture. These sources stay alive
@@ -335,7 +371,10 @@ def main():
                                 # worker ACKs before the next fixture commands.
                                 # GetType is not a GPU wait or fence-value poll.
                                 neptune.call(fixture.live.method('ID3D11DeviceContext', 'GetType'), 11)
-                            neptune.clear(index, color, width, height)
+                            if args.import_input and token==2:
+                                neptune.emit(fixture.live.command(fixture.live.method('ID3D11DeviceContext','CopyResource'),
+                                    neptune.writer,fixture.live.pack('QQ',20+index,3000)))
+                            else:neptune.clear(index, color, width, height)
                             neptune.signal(token)
                             if not args.sync_qemu:
                                 end = time.monotonic() + 10
@@ -391,6 +430,52 @@ def main():
                         control('connect')
                         control('frame 0 R 64 32')
                         require(not args.withhold_producer_token, 'Withheld producer token was incorrectly published')
+                        if args.reexport_input:
+                            alias=neptune.query(3000,'ID3D11Texture2D',3004)
+                            neptune.call(0x40000,alias,fixture.live.pack('QII',1200,9,8192))
+                            allocation=struct.unpack_from('<Q',neptune.t.read(neptune.memory+8192,88),8)[0]
+                            require(0<allocation<=64*1024*1024,'Reexported input allocation')
+                            gpu.create_blob(1200,1200,allocation)
+                            foreign.clear(0,(0,1,0,1),64,32);foreign.signal(2)
+                            deadline=time.monotonic()+10
+                            while struct.unpack_from('<Q',foreign.call(fixture.live.method('ID3D11Fence','GetCompletedValue'),2),8)[0]<2:
+                                require(time.monotonic()<deadline,'Foreign reexport producer completion timeout')
+                                time.sleep(.005)
+                            gpu.scanout(1200,64,32);gpu.flush(1200,64,32)
+                            neptune.signal(3)
+                            control('recheck 0 R 64 32')
+                            report['reexported_input_denial']={'actual_reexport_succeeded':True,
+                                'queried_interface_alias':alias,
+                                'new_resource':1200,'foreign_producer_repaint_completed':True,
+                                'retained_red_image_intact':True,'before_rejected_frame':sync_stats()}
+                            control('frame 1 G 64 32')
+                            raise RuntimeError('Reexported input was incorrectly admitted as an exclusive output')
+                        if args.import_owned_output:
+                            body=fixture.live.pack('Q12I',3002,200,64,32,1,1,87,1,0,0x28,0,0x2|0x40000000,0)+neptune.export_metadata[0]
+                            try:neptune.call(0x40001,10,body)
+                            except AssertionError as error:
+                                require(error.args==(('Actual Neptune reply','0x40001','0x40001','0x80070057'),),
+                                    'Unexpected owned import failure: '+str(error))
+                            else:raise RuntimeError('Owned output reopen unexpectedly succeeded')
+                            control('recheck 0 R 64 32')
+                            report['owned_output_denial']={'HRESULT':'E_INVALIDARG','resource':200,
+                                'proxy_denial_bypassed':True,'retained_red_image_intact':True}
+                            control('frame 1 G 64 32')
+                            raise RuntimeError('Output reopened without denial was incorrectly published')
+                        if args.import_selected_output:
+                            gpu.send(0x202,fixture.live.pack('II',200,0),context=2)
+                            body=fixture.live.pack('Q12I',3001,200,64,32,1,1,87,1,0,0x28,0,0x2|0x40000000,0)+neptune.export_metadata[0]
+                            foreign.call(0x40001,10,body)
+                            # The same-context fast path must require the
+                            # completed DENY too, not only a tainted flag.
+                            neptune.call(0x40001,10,body)
+                            paint(0,(0,1,0,1),3)
+                            control('recheck 0 R 64 32')
+                            report['shared_output_denial']={'actual_foreign_import_succeeded':True,
+                                'owned_reopen_after_completed_denial_succeeded':True,
+                                'resource':200,'retained_red_image_intact':True,'before_rejected_frame':sync_stats()}
+                            control('frame 1 G 64 32')
+                            raise RuntimeError('Imported output source was incorrectly published')
                         if not args.withhold_native_update:
                             paint(1, (0, 1, 0, 1), 3)
                         control('frame 1 G 64 32')

@@ -23,10 +23,43 @@ static void live_fault_locked(void)
     if(!live_faulted) {PerpBrokerHeader h={.kind=LIVE_FAULT};(void)live_emit(&h,NULL,0,NULL,0);}
     live_faulted=true;live_enabled=false;
 }
+bool perp_live_worker_import(struct npt_context *ctx,uint32_t resource)
+{
+    lock();bool good=ctx==live_context;
+    /* Incoming textures are inputs, not automatically scanout sources. An
+     * owned export can be reopened only after its exact DENY handshake has
+     * stopped future capture and completed every already queued GPU copy.
+     * Foreign exports are tainted by the VM-global proxy before attachment. */
+    for(unsigned i=0;good && i<LIVE_MAX_SOURCES;i++)if(live_claims[i].resource==resource && resource) {
+        good=live_claims[i].denied && live_claims[i].import_safe;
+        if(!good) {rejected_import++;live_fault_locked();}
+        break;
+    }
+    unlock();return good;
+}
+void perp_live_worker_imported(struct npt_context *ctx,void *texture)
+{
+    lock();void *key=identity(texture);void **slot=NULL;
+    if(ctx!=live_context || !key) {release(&key);live_fault_locked();unlock();return;}
+    for(unsigned i=0;i<LIVE_MAX_SOURCES;i++) {
+        if(live_imported[i]==key) {release(&key);unlock();return;}
+        if(!live_imported[i])slot=&live_imported[i];
+    }
+    if(slot)*slot=key;
+    else {release(&key);live_fault_locked();}
+    unlock();
+}
+bool perp_live_worker_source(struct npt_context *ctx,void *texture)
+{
+    lock();void *key=identity(texture);bool good=ctx==live_context && key && !live_faulted;
+    for(unsigned i=0;good && i<LIVE_MAX_SOURCES;i++)if(live_imported[i]==key)good=false;
+    release(&key);unlock();return good;
+}
 void perp_live_worker_created(struct npt_context *ctx) {live_context=ctx;}
 void perp_live_worker_stopped(struct npt_context *ctx)
 {
     if(live_context!=ctx)return;
+    for(unsigned i=0;i<LIVE_MAX_SOURCES;i++)release(&live_imported[i]);
     release((void **)&live_fence);live_last_fence_value=0;
     if(live_broker>=0)close(live_broker);
     if(live_acks[0]>=0)close(live_acks[0]);if(live_acks[1]>=0)close(live_acks[1]);
@@ -115,6 +148,7 @@ bool perp_live_worker_command(uint32_t ctx,const void *bytes,size_t count,const 
             }
         }
         PerpBrokerHeader reply=*h;reply.kind=LIVE_DENIED;if(good)good=live_emit(&reply,NULL,0,NULL,0);
+        if(good)claim->import_safe=true;
         unlock();return good;
     }
     if(h->kind==LIVE_REVOKE) {

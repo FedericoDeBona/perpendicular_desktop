@@ -133,12 +133,13 @@ class GPU:
 
 
 class Neptune:
-    def __init__(self,gpu):
+    def __init__(self,gpu,data_resource=9,ring_resource=10,map_offset=0,resource_base=200):
         self.gpu=gpu;self.t=gpu.t
+        self.data_resource=data_resource;self.resource_base=resource_base;self.map_offset=map_offset
         gpu.send(0x200,pack('II',9,7)+b'live-wire'+b'\0'*55)
-        gpu.create_blob(9,0,16384);self.memory=gpu.map_blob(9,0)
-        gpu.create_blob(10,0,131072);self.ring=gpu.map_blob(10,0x3000000);self.tail=0;self.vq_sequence=0
-        body=pack('Q8IQ4I',1,10,0,4,8,4096,65536,128,128,1000000,0,0,0,0)
+        gpu.create_blob(data_resource,0,16384);self.memory=gpu.map_blob(data_resource,map_offset)
+        gpu.create_blob(ring_resource,0,131072);self.ring=gpu.map_blob(ring_resource,map_offset+0x3000000);self.tail=0;self.vq_sequence=0
+        body=pack('Q8IQ4I',1,ring_resource,0,4,8,4096,65536,128,128,1000000,0,0,0,0)
         gpu.submit(command(0x10000,body=body))
     def drained(self):
         deadline=time.monotonic()+10
@@ -161,7 +162,7 @@ class Neptune:
         # Do not assume SUBMIT_3D completion means worker dispatch completed.
         self.vq_sequence+=1;edge=pack('QII',1,self.vq_sequence,0)
         self.gpu.submit(command(0x10005,body=edge))
-        self.emit(command(0x10006,body=edge)+command(0,body=pack('4I',9,0,4096,0))+
+        self.emit(command(0x10006,body=edge)+command(0,body=pack('4I',self.data_resource,0,4096,0))+
             command(kind,object_id,body,True))
         deadline=time.monotonic()+10
         while True:
@@ -182,17 +183,18 @@ class Neptune:
         self.call(0x02000000,body=pack('QIQIQIIQQ',0,1,0,0x20,0,0,7,10,11))
         device5=self.query(10,'ID3D11Device5',12);self.writer=self.query(11,'ID3D11DeviceContext4',1)
         self.call(method('ID3D11Device5','CreateFence'),device5,pack('QIQ',0,0,1)+iid('ID3D11Fence')+pack('Q',2))
-        self.originals=[]
+        self.originals=[];self.export_metadata=[]
         for index in range(2):
-            texture=20+index;view=30+index;blob=100+index;resource=200+index
+            texture=20+index;view=30+index;blob=100+index;resource=self.resource_base+index
             description=pack('11I',width,height,1,1,87,1,0,0,0x28,0,0x2|0x40000000)
             self.call(method('ID3D11Device','CreateTexture2D'),10,pack('Q',1)+description+pack('QQ',0,texture))
             self.call(method('ID3D11Device','CreateRenderTargetView'),10,pack('QQQ',texture,0,view))
-            self.call(0x40000,texture,pack('QII',blob,9,8192))
+            self.call(0x40000,texture,pack('QII',blob,self.data_resource,8192))
             metadata=self.t.read(self.memory+8192,88)
+            self.export_metadata.append(metadata)
             allocation=struct.unpack_from('<Q',metadata,8)[0];assert 0<allocation<=64*1024*1024
             self.gpu.create_blob(resource,blob,allocation)
-            address=self.gpu.map_blob(resource,0x1000000*(index+1))
+            address=self.gpu.map_blob(resource,self.map_offset+0x1000000*(index+1))
             offset,pitch=struct.unpack_from('<QQ',metadata,24)
             assert pitch>=width*4 and offset+(height-1)*pitch+width*4<=allocation
             self.originals.append((address+offset,pitch))

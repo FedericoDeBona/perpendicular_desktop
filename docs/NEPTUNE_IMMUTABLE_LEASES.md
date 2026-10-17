@@ -6,6 +6,57 @@ This is an opt-in private host extension. It preserves the matched renderer
 descriptor. Private broker version **3** is distinct from those guest/native
 versions. Host v2 remains the default build recipe.
 
+## Imported inputs and exclusive outputs — 2026-10-17
+
+The worker now admits incoming textures without invalidating every independent
+output in that process. The proxy still taints each attached source before
+another worker can import it. An owned source can be reopened only after its
+exact denial handshake has stopped future copies and completed all queued
+copies, including retained generations. The same-context open fast path cannot
+substitute for that handshake: it returns E_INVALIDARG without it.
+
+Successful imports retain their canonical COM identity in a bounded 256-entry
+worker registry. Reexporting an imported texture, including through a COM
+interface alias, does not make it an exclusively owned capture source. Held
+references prevent pointer reuse from changing this identity. Exhaustion stops
+capture, and references are released at worker teardown. Reclaiming this
+metadata during a long-lived worker remains a lifecycle limitation; the 64-MiB
+snapshot limit does not bound all source/import resource memory.
+
+The actual decoder/virtqueue test can now use two independent renderer workers
+with separate reply/ring memory. `--import-input` waits for the fixture's foreign
+producer, imports its red texture into the display worker, and copies that
+input into the worker's independent output. Both private and relocated app
+runtimes then pass the existing 19-image, 1,015,802-pixel sequence with twelve
+additional sources, held-image checks, resize and reconnect. This explicitly
+waited input fixture does not prove arbitrary Windows interprocess ordering.
+
+Three real-path controls retain the first red image and require the next image
+to time out: `--import-owned-output` rejects reopening without the completed
+denial; `--import-selected-output` completes foreign import and a subsequent
+owned reopen while suppressing new captures of that shared output;
+`--reexport-input` repaints the imported input in its foreign worker and proves
+that a fresh export/resource ID cannot turn it into a capture source. The held
+red pixels remain unchanged in every case. None of these controls is an
+accepted passing presentation run.
+
+Receipts under `.tools/graphics-rebuild-qemu-native-20261016/`:
+
+| Case | Receipt SHA-256 | Outcome |
+| --- | --- | --- |
+| `imports2-positive1` | `01d5eb3794201507e356b3750a55c382a5fa68a6226ba303f71eb7aeab4f41c6` | Pass |
+| `imports2-packaged1` | `b4b264fbf4c2ab85ea2bec3c9089f67e3070408b6f9274390334ae5a947d2470` | Pass |
+| `imports2-owned-negative1` | `fbed7ab102182feab78aa751b43d6cd17cbcdacc94c8e0de48be01037acad3bf` | Expected frame timeout |
+| `imports2-output-negative1` | `56663efb17f3297f835ffbd3a225cc3769cc0788f26ae868a458e4ab242c7057` | Expected frame timeout |
+| `imports2-reexport-negative2` | `00dce42f36bb00fdc57c3039838d01a0a073708d1c66b82389dfbfeac86cc396` | Expected frame timeout, queried COM alias |
+
+Windows still reports its 3D controller at 2048×1152, but native delivery
+remains closed with one worker rejection and no published snapshot. The
+rejection's exact operation is not distinguished by its current generic log.
+Owned-source reopening, multiple fences/rings and shutdown remain unqualified;
+the installed application has not been changed. The same VM was restored to
+the clean 2D checkpoint with the driver staged but inactive after the trial.
+
 ## Selected-source capture — 2026-10-17
 
 The current broker separates source identity metadata (256 bounded entries)

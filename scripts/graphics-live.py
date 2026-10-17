@@ -43,8 +43,12 @@ def patch_renderer():
     context.write_text(text)
     shared=copied/'npt_shared.c';text=shared.read_text()
     text=replace(text,'#include "snapshot.h"','#include "snapshot.h"\n#include "live.h"')
+    text=replace(text,'   perp_snapshot_import(ctx, cmd->res_id);',
+        '   if (!perp_live_worker_import(ctx, cmd->res_id)) return NPT_E_INVALIDARG;')
+    text=replace(text,'   /* The freshly imported texture carries one reference; the object',
+        '   perp_live_worker_imported(ctx, texture);\n\n   /* The freshly imported texture carries one reference; the object')
     text=replace(text,'   if (NPT_SUCCEEDED(hr) && !nt_handle)\n      perp_snapshot_export(ctx, texture_id, blob_id, texture, (const void *)(uintptr_t)handle);',
-        '   if (NPT_SUCCEEDED(hr) && !nt_handle) {\n      perp_snapshot_export(ctx, texture_id, blob_id, texture, (const void *)(uintptr_t)handle);\n'
+        '   if (NPT_SUCCEEDED(hr) && !nt_handle && perp_live_worker_source(ctx, texture)) {\n      perp_snapshot_export(ctx, texture_id, blob_id, texture, (const void *)(uintptr_t)handle);\n'
         '      perp_live_worker_export(ctx, texture_id, blob_id);\n   }')
     shared.write_text(text)
     snapshot=(FROZEN/'snapshot.c').read_text()

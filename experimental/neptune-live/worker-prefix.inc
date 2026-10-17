@@ -15,9 +15,11 @@ static uint32_t live_capture_batch;
 typedef struct LiveClaim {
     uint32_t resource;
     uint64_t blob,epoch,object;
-    bool granted,denied;
+    bool granted,denied,import_safe;
 } LiveClaim;
 static LiveClaim live_claims[LIVE_MAX_SOURCES];
+/* Canonical COM references prevent pointer reuse from laundering an import. */
+static void *live_imported[LIVE_MAX_SOURCES];
 static bool live_emit(PerpBrokerHeader *h,const void *body,size_t bytes,const int *fds,unsigned count);
 static void live_fault_locked(void);
 static LiveClaim *live_claim_blob(uint64_t blob);

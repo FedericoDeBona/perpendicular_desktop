@@ -39,6 +39,9 @@ LIVE_PUBLIC char *perp_live_scanout_stats(void);
 /* Actual server dispatch extension, installed only in the private overlay. */
 bool perp_live_worker_command(uint32_t context,const void *bytes,size_t count,const int *fds,unsigned fd_count);
 void perp_live_worker_claim(uint32_t context,uint32_t resource,uint64_t blob);
+bool perp_live_worker_import(struct npt_context *ctx,uint32_t resource);
+void perp_live_worker_imported(struct npt_context *ctx,void *texture);
+bool perp_live_worker_source(struct npt_context *ctx,void *texture);
 void perp_live_worker_resource_destroy(uint32_t context,uint32_t resource);
 void perp_live_worker_created(struct npt_context *ctx);
 bool perp_live_worker_export(struct npt_context *ctx,uint64_t object,uint64_t blob);
