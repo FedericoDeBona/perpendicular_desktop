@@ -201,7 +201,9 @@ pub fn qemu_arguments(
         args.extend(["-device".into(), "virtio-ramfb,id=display0,addr=0x7".into()]);
     }
     if config.display_adapter == DisplayAdapter::VirtioRamfbGl {
-        args.extend(["-device".into(), "virtio-ramfb-gl,id=display0,addr=0x7,disable-legacy=on,neptune=on,blob=on,hostmem=256M".into()]);
+        // A distinct PCI location prevents Windows from reusing the adaptive
+        // 2D device's DOD binding when switching to the native 3D adapter.
+        args.extend(["-device".into(), "virtio-ramfb-gl,id=display0,addr=0x8,disable-legacy=on,neptune=on,blob=on,hostmem=256M".into()]);
     }
     Ok(args)
 }
@@ -332,7 +334,7 @@ mod tests {
             .windows(2)
             .any(|p| p == ["-accel", "hvf,ipa-granule-size=4096"]));
         assert!(!new.iter().any(|p| p == "ramfb" || p == "cocoa,gl=es"));
-        assert!(new.iter().any(|p| p == "virtio-ramfb-gl,id=display0,addr=0x7,disable-legacy=on,neptune=on,blob=on,hostmem=256M"));
+        assert!(new.iter().any(|p| p == "virtio-ramfb-gl,id=display0,addr=0x8,disable-legacy=on,neptune=on,blob=on,hostmem=256M"));
         assert!(new.iter().any(|p| p == "tpm-tis-device,tpmdev=tpm0"));
         for pair in old
             .windows(2)

@@ -88,6 +88,44 @@ for the new device instance. No renderer worker was seen in those snapshots,
 Cocoa still showed inactive output, and hardware D3D11 remains unverified. This
 test does not identify the cause of the original query-remove failure.
 
+## Native headless application trial — 2026-10-17
+
+The existing Windows 11 VM was checkpointed while stopped, including its disk,
+configuration, firmware variables and TPM. The new filesystem-clone path
+created the checkpoint in 0.111 seconds; read-only QCOW2 check reported zero
+check errors. Windows subsequently reported Valid Authenticode for the unchanged
+release catalog and kernel driver, Secure Boot True, VBS status 0 and the
+existing DOD controller without a device error. The baseline script was blocked
+by the guest execution policy; individual read-only commands collected the
+essential observations without changing that policy.
+
+`pnputil /add-driver` without `/install` accepted the package as `oem12.inf`.
+Cold boot at the existing 2D PCI7 location retained the DOD binding and produced
+black output. The 3D adapter now uses PCI8, leaving adaptive 2D at PCI7. A cold
+boot at that distinct location loaded **Red Hat VirtIO GPU 3D controller** and
+reported 2048×1152 through Guest Tools. QMP independently showed DRIVER_OK,
+VIRGL/BLOB/CONTEXT_INIT, an initialized headless ES3 backend, zero Cocoa windows
+and live renderer contexts. Actual worker logs include D3D11 shared-resource
+exports and imports. This establishes driver initialization and real guest
+graphics traffic, not visible rendering or acceptable performance.
+
+The display remained black: native delivery reported zero received snapshots,
+four rejected worker channels and a closed capture gate. Context 7's first
+failure follows its fifth export; the proxy currently bounds export/claim
+metadata to four entries per worker. This is a concrete candidate for the
+first rejection, not proof that removing that limit alone makes DWM work.
+Shared imports and multiple producer fences still require correct ownership
+and readiness handling. Do not relax those checks merely to display pixels.
+During the subsequent normal shutdown request, native QEMU also aborted at
+`hvf_vcpu_exec`'s `isv` assertion. Its shutdown path is therefore unqualified.
+
+The pre-driver checkpoint was restored in 0.056 seconds, preserving the trial
+state in the engine's recovery Trash directory. This restores the original
+driver, graphics recovery settings, firmware/TPM and 2D configuration together.
+Private trial receipts and logs are retained under
+`research/private/windows-native3d-20261017/`. The installed application remains
+unchanged; native 3D must not be promoted while these failures remain.
+
 ## Exact release identity
 
 The supplied file `/tmp/perpendicular-viogpu3d-release.zip` is 2,117,369 bytes.
