@@ -218,3 +218,39 @@ The publisher, fixtures and packaging helper use the MIT license in this
 directory. The source-pinned build helper is Apache-2.0 as marked.
 The separately patched QEMU source
 retains its upstream GPLv2 license; no Parallels implementation is included.
+
+## Already-ready external backing leases
+
+`perp_native_display_publish_ready` accepts an immutable shared-memory backing
+whose actual producer-ready FD is already signalled. It duplicates the memory
+FD and supplies a new retained per-frame readiness pipe after checking that
+proof. It allocates no Metal/shared-memory backing, performs no mapping and
+encodes no GPU copy. Metadata must satisfy the current zero-offset NDT layout:
+BGRA8, bounded dimensions/pitch, size exactly pitch×height and a page-padded FD
+extent covering the image. A regular file cannot substitute for a ready token.
+
+On acceptance, one of the same two bounded publication slots owns the provider
+retirement callback. Exact consumer ACK invokes it with true. Disconnect,
+reset or cancellation invokes it with false; that is **not permission to reuse
+the backing**. The provider must abandon its allocation or otherwise preserve
+the old reader's immutable storage. Rejected calls invoke no callback. Accepted
+callbacks can run on any thread, including before the call returns; provider
+state must be marshalled to its own owner queue. External storage never enters
+the publisher's owned Metal-backing cache.
+
+The normal publisher runner also builds `test-publisher-external.m`. Real Metal
+clears populate three independent source backings. The separate consumer checks
+8,192 pixels, rejects an unready offer, and retains an unacknowledged green frame
+through disconnect, provider object/FD/map destruction and a new blue frame on
+a second connection. Two ACKs and one abandoned lease release all three provider
+objects; publisher backing allocations/mappings remain zero. A deliberately
+unsafe provider keeps a duplicate of the abandoned backing and rewrites it;
+the old consumer must fail at `external abandoned backing was rewritten`.
+
+This entry point is not yet connected to QEMU's worker snapshots. That bridge
+must retain multiple immutable generations while the app holds its current
+image, bind each callback to the exact worker/resource/snapshot epoch, and
+distinguish reusable ACK retirement from allocation abandonment. Returning the
+existing worker's single snapshot on publication or treating disconnect as its
+ordinary cancel/ACK would allow overwriting the old reader. The validated QEMU
+path still uses two GPU copies until that lifetime protocol is implemented.

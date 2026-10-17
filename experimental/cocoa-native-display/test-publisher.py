@@ -138,7 +138,30 @@ def main():
         flag = subprocess.run([str(region), '--direct-flag'], env=env, text=True, capture_output=True, check=True, timeout=5)
         assert json.loads(flag.stdout)['direct'] == (value == '1')
         opt_in.append({'value': value, 'direct': value == '1'})
-    paths = [SOURCE / name for name in ('publisher.h', 'publisher.m', 'test-publisher.m', 'test-publisher-refresh.m', 'test-publisher-region.m', 'test-publisher.py')]
+    external = OUTPUT / 'publisher-external-check'
+    subprocess.run(['xcrun', 'clang', '-fobjc-arc', '-fblocks', '-std=gnu11', '-Wall', '-Wextra', '-Werror',
+                    '-I' + str(TRANSPORT), '-I' + str(SOURCE), str(SOURCE / 'publisher.m'),
+                    str(SOURCE / 'test-publisher-external.m'), str(obj), '-framework', 'Foundation',
+                    '-framework', 'Metal', '-o', str(external)], check=True)
+    external_result = subprocess.run([str(external)], text=True, capture_output=True, timeout=30)
+    (OUTPUT / 'external.log').write_text(external_result.stdout + external_result.stderr)
+    if external_result.returncode:
+        raise RuntimeError((OUTPUT / 'external.log').read_text())
+    external_rows = [json.loads(line) for line in external_result.stdout.splitlines()]
+    reader, provider = external_rows
+    assert reader['external_consumer'] == provider['external_producer'] == 'pass'
+    assert reader['exact_pixels'] == 8192 and reader['connections'] == 2
+    assert (provider['provider_acked'], provider['provider_abandoned'], provider['provider_released']) == (2, 1, 3)
+    assert provider['stats']['external_submissions'] == 3 and provider['stats']['external_acked'] == 2
+    assert provider['stats']['external_abandoned'] == 1 and provider['stats']['occupied'] == 0
+    assert provider['stats']['backing_allocations'] == provider['stats']['mappings'] == 0
+    assert provider['stats']['allocations'] == provider['stats']['releases'] == 3
+    with tempfile.TemporaryDirectory(prefix='pnext-negative-', dir='/tmp') as runtime:
+        external_negative = subprocess.run([str(external)], text=True, capture_output=True, timeout=30,
+            env=dict(os.environ, PERP_EXTERNAL_UNSAFE_REUSE='1', PERP_EXTERNAL_TEST_RUNTIME=runtime + '/r-XXXXXX'))
+    (OUTPUT / 'external-unsafe-reuse.log').write_text(external_negative.stdout + external_negative.stderr)
+    assert external_negative.returncode != 0 and 'external abandoned backing was rewritten' in external_negative.stderr
+    paths = [SOURCE / name for name in ('publisher.h', 'publisher.m', 'test-publisher.m', 'test-publisher-refresh.m', 'test-publisher-region.m', 'test-publisher-external.m', 'test-publisher.py')]
     paths += [TRANSPORT / name for name in ('ndt.h', 'ndt.c')]
     receipt = {'result': 'pass', 'actual_gpu': True, 'processes': 2, 'guest_or_disks': False,
                'observations': rows,
@@ -146,6 +169,9 @@ def main():
                                         'reuse_without_ack_after_disconnect': unsafe_pool},
                'reconnect_observations': refresh_rows,
                'region_observations': region_rows, 'direct_opt_in': opt_in,
+               'external_ready_lease_observations': external_rows,
+               'external_causal_negative': {'unsafe_provider_reuse': True, 'exit_code': external_negative.returncode,
+                   'failed_at': 'external abandoned backing was rewritten'},
                'crop_causal_negative': {'zero_origin': True, 'exit_code': bad_region.returncode,
                                         'failed_at': 'exact nonzero crop pixel mismatch'},
                'causal_negative': {'accept_signal_removed': True, 'exit_code': negative_result.returncode,

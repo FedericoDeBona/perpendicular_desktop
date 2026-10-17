@@ -739,3 +739,42 @@ visible drawable presentation, pending-GPU shutdown, latency/FPS or the normal
 installed app. The odd-sized blob emits HVF mapping-alignment warnings; paused
 qtest access is not proof of a running guest's CPU mapping. These gates remain
 open before a Windows candidate can replace the ordinary 2D runtime.
+
+
+### Already-ready external publisher lease primitive — 2026-10-17
+
+The independent publisher now has an entry point for an already immutable,
+producer-completed shared backing. It checks the actual ready token and current
+NDT zero-offset/full-row/extent bounds, duplicates the backing FD, and publishes
+through the existing bounded transport with a retained readiness pipe. There
+is no publisher Metal command, shared-memory allocation, mapping or pixel copy.
+Exact ACK and disconnect/reset have distinct callback results; only ACK allows
+provider reuse. Callbacks may run on any thread and accepted calls own exactly
+one retirement; rejected/unready/invalid-layout offers own none.
+
+The new actual-Metal/two-process fixture passed 8,192 pixel checks, three
+accepted external leases and two connections. Two providers retired by exact
+ACK and one by abandonment. The old green FD remains correct after disconnect
+and actual provider object/FD/map destruction, while a fresh blue backing is
+delivered. All three provider objects and publication records are released;
+publisher backing allocations/mappings are zero. The unsafe-provider negative
+rewrites a retained alias of the abandoned backing and fails the old-image
+check at `external abandoned backing was rewritten`. Invalid ready/layout/
+offset/logical-size calls reject before callback ownership.
+
+The full existing publisher suite also passes: 40 frames/20,196,019 pixels,
+reuse/resize/disconnect causal controls, static reconnect, crop/GPU gates and
+cleanup. Source-bound results remain in `.build/checks/native-publisher/result.json`
+and `external{,-unsafe-reuse}.log`. The QEMU overlay builder now copies/protects
+the public header's NDT dependency. A fresh overlay independently passes the
+existing two-copy automatic QEMU→Swift sequence (1,015,802 pixels) at
+`.tools/graphics-rebuild-qemu-native-20261016/publisher-header-compat8/result.json`;
+its build is `.tools/graphics-rebuild-sync-headercheck5-20261017/`.
+
+The new entry point is not active in the QEMU path. The current worker keeps
+one reusable snapshot per export; direct delivery requires retaining separate
+immutable generations until exact consumer ACK and abandoning an allocation
+on disconnect. Simply acknowledging the worker when a frame is published
+would violate the tested old-reader contract. The active private QEMU path
+therefore still makes two GPU copies. No installed application or VM changed,
+and no Windows, visible-presentation or performance improvement is claimed.

@@ -61,7 +61,8 @@ def main():
     sink = ROOT / 'experimental/neptune-live/qemu-native-sync.m'
     qheader = ROOT / 'experimental/neptune-live/qemu-live.h'
     pheader = ROOT / 'experimental/cocoa-native-display/publisher.h'
-    for p in (Path(__file__), qemu / 'build.json', sync / 'build.json', sink, qheader, pheader,
+    nheader = ROOT / 'experimental/native-display-transport/ndt.h'
+    for p in (Path(__file__), qemu / 'build.json', sync / 'build.json', sink, qheader, pheader, nheader,
               qemu / 'build/build.ninja', qemu / 'build/compile_commands.json'):
         protected[str(p)] = sha(p)
     def verify():
@@ -107,6 +108,7 @@ def main():
     shutil.copyfile(sink, copied / sink.name)
     shutil.copyfile(qheader, copied / qheader.name)
     shutil.copyfile(pheader, copied / pheader.name)
+    shutil.copyfile(nheader, copied / nheader.name)
     private = sync / 'src/virglrenderer/src/perp-sync'
     for name in ('live.h', 'wire1-layout.h', 'broker.h'):
         protected[str(private / name)] = sha(private / name)

@@ -3,6 +3,7 @@
 #define PERP_COCOA_NATIVE_PUBLISHER_H
 #import <Metal/Metal.h>
 #include <stdbool.h>
+#include "ndt.h"
 /* Enables ordinary 2D listeners for firmware/input alongside the native
  * Metal stream only when the private, validated publisher is available. */
 bool perp_native_display_enabled(void);
@@ -14,7 +15,7 @@ bool perp_native_display_needs_refresh(void);
 /* Explicit process opt-in, independent of whether a consumer is connected.
  * Direct mode never silently falls back to a Cocoa drawable. */
 bool perp_native_display_direct(void);
-/* Atomic admission hint, not a reservation. Only capture_region reserves. */
+/* Atomic admission hint, not a reservation. Capture/publish reserve a slot. */
 bool perp_native_display_can_capture(void);
 typedef enum {
     PND_CAPTURE_ENCODED,
@@ -33,6 +34,18 @@ typedef enum {
  * to the two active leases; reset/shutdown discard the cache. */
 PNDCaptureResult perp_native_display_capture_region(id<MTLCommandBuffer> command,
     id<MTLTexture> source, MTLOrigin origin, MTLSize size);
+/* Publish an already immutable, GPU-completed shared backing without another
+ * GPU/CPU copy or mapping. The ready FD must prove completion now. On true,
+ * publisher owns a duplicated memory FD and calls retirement exactly once:
+ * true only after exact consumer ACK; false on disconnect/reset/cancellation.
+ * False retirement NEVER permits rewriting the old backing: provider must
+ * abandon that allocation or otherwise keep it immutable for the old reader.
+ * Rejected calls return false without calling retirement. Callback may run on
+ * any thread, even before an accepted call returns; marshal provider state
+ * back to its owner queue. */
+typedef void (^PNDReadyRetirement)(bool acknowledged);
+bool perp_native_display_publish_ready(int memory_fd, int producer_ready_fd,
+    const ndt_metadata *metadata, PNDReadyRetirement retirement);
 /* Compatible full-texture wrapper. Called after the existing console copy has
  * ended encoding, on its SAME command buffer. Does not wait for a consumer or
  * for GPU completion; ignores capture_region's admission result. */

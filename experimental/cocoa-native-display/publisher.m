@@ -18,6 +18,7 @@ static _Atomic uint64_t attempted, dropped, completed, published, acknowledged;
 static _Atomic uint64_t allocations, releases, mappings, unmappings;
 static _Atomic uint64_t backing_allocations, backing_releases, backing_reuses;
 static _Atomic unsigned cached_backings;
+static _Atomic uint64_t external_submissions, external_acked, external_abandoned;
 
 @interface PNDBacking : NSObject
 @property(nonatomic) id<MTLBuffer> buffer;
@@ -90,18 +91,27 @@ static void cache_backing(PNDBacking *backing, uint64_t generation) {
 @property(nonatomic) uint64_t generation;
 @property(nonatomic) ndt_metadata metadata;
 @property(nonatomic) BOOL sent;
+@property(nonatomic) int externalFD;
+@property(nonatomic, copy) PNDReadyRetirement externalRetirement;
+- (int)memoryFD;
 @end
 @implementation PNDCapture
 - (instancetype)init {
-    if ((self = [super init])) { _readyFD = _signalFD = -1; }
+    if ((self = [super init])) { _readyFD = _signalFD = _externalFD = -1; }
     return self;
 }
 - (void)dealloc {
+    if (_externalRetirement) {
+        atomic_fetch_add(&external_abandoned, 1);
+        _externalRetirement(false);
+    }
+    if (_externalFD >= 0) close(_externalFD);
     if (_readyFD >= 0) close(_readyFD);
     if (_signalFD >= 0) close(_signalFD);
     atomic_fetch_sub(&occupied, 1);
     atomic_fetch_add(&releases, 1);
 }
+- (int)memoryFD { return _storage ? _storage.memoryFD : _externalFD; }
 @end
 
 @interface PNDPublisher : NSObject {
@@ -179,7 +189,14 @@ static void cache_backing(PNDBacking *backing, uint64_t generation) {
             ndt_identity identity = capture.metadata.id;
             if (identity.session_hi == event.id.session_hi && identity.session_lo == event.id.session_lo &&
                 identity.epoch == event.id.epoch && identity.frame == event.id.frame) {
-                cache_backing(capture.storage, capture.generation);
+                if (capture.externalRetirement) {
+                    PNDReadyRetirement callback = capture.externalRetirement;
+                    capture.externalRetirement = nil;
+                    atomic_fetch_add(&external_acked, 1);
+                    callback(true);
+                } else {
+                    cache_backing(capture.storage, capture.generation);
+                }
                 [_captures removeObjectIdenticalTo:capture];
                 atomic_fetch_add(&acknowledged, 1);
                 break;
@@ -189,7 +206,7 @@ static void cache_backing(PNDBacking *backing, uint64_t generation) {
     for (PNDCapture *capture in _captures) {
         if (capture.sent) continue;
         ndt_metadata metadata = capture.metadata;
-        rc = ndt_queue_frame(&_connection, &metadata, capture.storage.memoryFD, capture.readyFD);
+        rc = ndt_queue_frame(&_connection, &metadata, [capture memoryFD], capture.readyFD);
         if (rc == NDT_AGAIN) break;
         if (rc != NDT_OK) { [self disconnect]; return; }
         capture.sent = YES;
@@ -326,6 +343,49 @@ bool perp_native_display_direct(void) {
 bool perp_native_display_can_capture(void) {
     return get_publisher() && atomic_load(&active_generation) && atomic_load(&occupied) < NDT_SLOTS;
 }
+
+bool perp_native_display_publish_ready(int memory_fd, int producer_ready_fd,
+    const ndt_metadata *metadata, PNDReadyRetirement retirement) {
+    PNDPublisher *owner = get_publisher();
+    uint64_t generation = atomic_load(&active_generation), extent = 0;
+    if (!owner || !generation || !retirement || !metadata ||
+        ndt_ready(producer_ready_fd) != NDT_OK || ndt_memory_extent(memory_fd, &extent) != NDT_OK ||
+        !metadata->width || !metadata->height || metadata->width > NDT_MAX_DIMENSION || metadata->height > NDT_MAX_DIMENSION ||
+        (uint64_t)metadata->width * metadata->height > NDT_MAX_PIXELS || metadata->format != NDT_BGRA8 ||
+        metadata->pitch < (uint64_t)metadata->width * 4 || metadata->pitch > 65536 || metadata->pitch % 4 ||
+        metadata->offset || metadata->size != (uint64_t)metadata->pitch * metadata->height ||
+        metadata->size > extent || metadata->size > NDT_MAX_EXTENT || extent % (uint64_t)getpagesize())
+        return false;
+    unsigned count = atomic_load(&occupied);
+    do { if (count >= NDT_SLOTS) return false; }
+    while (!atomic_compare_exchange_weak(&occupied, &count, count + 1));
+    PNDCapture *capture = [PNDCapture new]; atomic_fetch_add(&allocations, 1);
+    capture.generation = generation;
+    if (generation != atomic_load(&active_generation)) return false;
+    capture.externalFD = fcntl(memory_fd, F_DUPFD_CLOEXEC, 0);
+    if (capture.externalFD < 0) return false;
+    int ready[2];
+    if (pipe(ready) < 0) return false;
+    capture.readyFD = ready[0]; capture.signalFD = ready[1];
+    for (unsigned i=0; i<2; i++) {
+        int flags = fcntl(ready[i], F_GETFL);
+        if (flags < 0 || fcntl(ready[i], F_SETFL, flags | O_NONBLOCK) < 0 ||
+            fcntl(ready[i], F_SETFD, FD_CLOEXEC) < 0) return false;
+    }
+    /* Preserve proven readiness independently of the upstream event's later
+     * teardown. This new pipe belongs only to this immutable frame lease. */
+    uint8_t token = 1; ssize_t written;
+    do { written = write(capture.signalFD, &token, 1); } while (written < 0 && errno == EINTR);
+    if (written != 1) return false;
+    ndt_metadata frame = *metadata;
+    frame.id = (ndt_identity){0};
+    capture.metadata = frame;
+    capture.externalRetirement = retirement; // No failure path after ownership acceptance.
+    atomic_fetch_add(&external_submissions, 1);
+    atomic_fetch_add(&completed, 1);
+    [owner submit:capture];
+    return true;
+}
 PNDCaptureResult perp_native_display_capture_region(id<MTLCommandBuffer> command,
     id<MTLTexture> output, MTLOrigin origin, MTLSize size) {
     PNDPublisher *owner = get_publisher();
@@ -376,7 +436,7 @@ void perp_native_display_reset(void) { [publisher reset]; }
 void perp_native_display_shutdown(void) { [publisher shutdown]; }
 char *perp_native_display_stats(void) {
     char *result = NULL;
-    asprintf(&result, "{\"attempted\":%llu,\"dropped\":%llu,\"completed\":%llu,\"published\":%llu,\"acknowledged\":%llu,\"occupied\":%u,\"allocations\":%llu,\"releases\":%llu,\"mappings\":%llu,\"unmappings\":%llu,\"backing_allocations\":%llu,\"backing_releases\":%llu,\"backing_reuses\":%llu,\"cached_backings\":%u,\"refresh_pending\":%s}",
+    asprintf(&result, "{\"attempted\":%llu,\"dropped\":%llu,\"completed\":%llu,\"published\":%llu,\"acknowledged\":%llu,\"occupied\":%u,\"allocations\":%llu,\"releases\":%llu,\"mappings\":%llu,\"unmappings\":%llu,\"backing_allocations\":%llu,\"backing_releases\":%llu,\"backing_reuses\":%llu,\"cached_backings\":%u,\"external_submissions\":%llu,\"external_acked\":%llu,\"external_abandoned\":%llu,\"refresh_pending\":%s}",
         (unsigned long long)atomic_load(&attempted), (unsigned long long)atomic_load(&dropped),
         (unsigned long long)atomic_load(&completed), (unsigned long long)atomic_load(&published),
         (unsigned long long)atomic_load(&acknowledged), atomic_load(&occupied),
@@ -384,6 +444,8 @@ char *perp_native_display_stats(void) {
         (unsigned long long)atomic_load(&mappings), (unsigned long long)atomic_load(&unmappings),
         (unsigned long long)atomic_load(&backing_allocations), (unsigned long long)atomic_load(&backing_releases),
         (unsigned long long)atomic_load(&backing_reuses), atomic_load(&cached_backings),
+        (unsigned long long)atomic_load(&external_submissions), (unsigned long long)atomic_load(&external_acked),
+        (unsigned long long)atomic_load(&external_abandoned),
         refresh_pending() ? "true" : "false");
     return result;
 }
