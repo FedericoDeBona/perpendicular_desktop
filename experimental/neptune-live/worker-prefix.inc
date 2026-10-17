@@ -21,5 +21,6 @@ static LiveClaim live_claims[LIVE_MAX_SOURCES];
 /* Canonical COM references prevent pointer reuse from laundering an import. */
 static void *live_imported[LIVE_MAX_SOURCES];
 static bool live_emit(PerpBrokerHeader *h,const void *body,size_t bytes,const int *fds,unsigned count);
-static void live_fault_locked(void);
+static void live_fault_at_locked(const char *function,unsigned line);
+#define live_fault_locked() live_fault_at_locked(__func__,__LINE__)
 static LiveClaim *live_claim_blob(uint64_t blob);

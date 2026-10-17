@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: MIT
  * Replace the single-candidate development Signal hook in a private copy.
- * Capture every explicitly granted candidate of one verified immediate writer,
- * because the later SET_SCANOUT_BLOB may select any of those exact resources. */
+ * Capture the explicitly granted selected source of its verified immediate
+ * writer. Source metadata and retained immutable copies have separate bounds. */
 HRESULT perp_snapshot_signal(struct npt_context *ctx,void *writer,ID3D11Fence *fence,
                               uint64_t value,PFN_ID3D11DeviceContext4_Signal original)
 {

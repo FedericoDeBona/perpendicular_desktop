@@ -44,6 +44,7 @@ def main():
     parser.add_argument('--withhold-producer-token', action='store_true', help='Negative control: real GPU work finishes but the worker ready token is withheld')
     parser.add_argument('--source-pressure', action='store_true', help='Keep twelve additional unselected shared sources alive during native presentation')
     parser.add_argument('--import-input', action='store_true', help='Read a texture from a second renderer worker into the selected output')
+    parser.add_argument('--owned-input', action='store_true', help='Reopen a never-granted owned source as input while an independent output is presented')
     parser.add_argument('--import-selected-output', action='store_true', help='Negative control: import the selected output while its old image is retained')
     parser.add_argument('--import-owned-output', action='store_true', help='Negative control: reject an owned output reopen without the proxy denial handshake')
     parser.add_argument('--reexport-input', action='store_true', help='Negative control: an imported texture reexport must not become an exclusive output')
@@ -58,7 +59,7 @@ def main():
     require(not (args.withhold_native_update and args.withhold_producer_token), 'Select one causal negative control')
     args.com = args.com or args.native
     require(not args.source_pressure or args.sync_qemu, 'Source pressure requires the synchronization path')
-    require(not (args.import_input or args.import_selected_output or args.import_owned_output) or args.sync_qemu, 'Shared imports require the synchronization path')
+    require(not (args.import_input or args.owned_input or args.import_selected_output or args.import_owned_output) or args.sync_qemu, 'Shared imports require the synchronization path')
     require(not args.import_owned_output or not (args.import_selected_output or args.withhold_native_update or args.withhold_producer_token),
         'Select one causal negative control')
     require(not args.reexport_input or not (args.import_selected_output or args.import_owned_output or args.withhold_native_update or args.withhold_producer_token),
@@ -334,6 +335,23 @@ def main():
                                 'imported_object':3000,'producer_completion_wait':'fixture only',
                                 'actual_decoder_import_succeeded':True}
                             report['owned_processes_after_import']=owned_processes()
+                        if args.owned_input:
+                            description=fixture.live.pack('11I',64,32,1,1,87,1,0,0,0x28,0,0x2|0x40000000)
+                            neptune.call(fixture.live.method('ID3D11Device','CreateTexture2D'),10,
+                                fixture.live.pack('Q',1)+description+fixture.live.pack('QQ',0,4000))
+                            neptune.call(fixture.live.method('ID3D11Device','CreateRenderTargetView'),10,
+                                fixture.live.pack('QQQ',4000,0,4001))
+                            neptune.emit(fixture.live.command(fixture.live.method('ID3D11DeviceContext1','ClearView'),
+                                neptune.writer,fixture.live.pack('QQ4fQ4iI',4001,4,1,0,0,1,1,0,0,64,32,1)))
+                            neptune.call(0x40000,4000,fixture.live.pack('QII',4000,9,8192))
+                            metadata=neptune.t.read(neptune.memory+8192,88)
+                            allocation=struct.unpack_from('<Q',metadata,8)[0]
+                            require(0<allocation<=64*1024*1024,'Owned input allocation')
+                            gpu.create_blob(4000,4000,allocation)
+                            body=fixture.live.pack('Q12I',4003,4000,64,32,1,1,87,1,0,0x28,0,0x2|0x40000000,0)+metadata
+                            neptune.call(0x40001,10,body)
+                            report['owned_input']={'resource':4000,'imported_object':4003,
+                                'never_selected_before_import':True,'actual_decoder_import_succeeded':True}
                         if args.source_pressure:
                             # Real decoded COM exports and virtio blobs, not a
                             # direct registry fixture. These sources stay alive
@@ -371,9 +389,9 @@ def main():
                                 # worker ACKs before the next fixture commands.
                                 # GetType is not a GPU wait or fence-value poll.
                                 neptune.call(fixture.live.method('ID3D11DeviceContext', 'GetType'), 11)
-                            if args.import_input and token==2:
+                            if (args.import_input or args.owned_input) and token==2:
                                 neptune.emit(fixture.live.command(fixture.live.method('ID3D11DeviceContext','CopyResource'),
-                                    neptune.writer,fixture.live.pack('QQ',20+index,3000)))
+                                    neptune.writer,fixture.live.pack('QQ',20+index,4003 if args.owned_input else 3000)))
                             else:neptune.clear(index, color, width, height)
                             neptune.signal(token)
                             if not args.sync_qemu:
@@ -451,6 +469,10 @@ def main():
                             control('frame 1 G 64 32')
                             raise RuntimeError('Reexported input was incorrectly admitted as an exclusive output')
                         if args.import_owned_output:
+                            # Selection clears the old claim's granted bit, but
+                            # its earlier epoch and held image still exist.
+                            gpu.scanout(201,64,32);gpu.flush(201,64,32)
+                            neptune.call(fixture.live.method('ID3D11DeviceContext','GetType'),11)
                             body=fixture.live.pack('Q12I',3002,200,64,32,1,1,87,1,0,0x28,0,0x2|0x40000000,0)+neptune.export_metadata[0]
                             try:neptune.call(0x40001,10,body)
                             except AssertionError as error:
@@ -459,6 +481,7 @@ def main():
                             else:raise RuntimeError('Owned output reopen unexpectedly succeeded')
                             control('recheck 0 R 64 32')
                             report['owned_output_denial']={'HRESULT':'E_INVALIDARG','resource':200,
+                                'previously_selected_but_not_current':True,
                                 'proxy_denial_bypassed':True,'retained_red_image_intact':True}
                             control('frame 1 G 64 32')
                             raise RuntimeError('Output reopened without denial was incorrectly published')

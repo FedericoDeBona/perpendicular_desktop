@@ -6,6 +6,40 @@ This is an opt-in private host extension. It preserves the matched renderer
 descriptor. Private broker version **3** is distinct from those guest/native
 versions. Host v2 remains the default build recipe.
 
+## Never-granted owned inputs — 2026-10-17
+
+Precise first-fault logging isolated the previous Windows rejection to
+`perp_live_worker_import`, before capture was enabled. An owned export that has
+never received a capture epoch can now opt out permanently and reopen as an
+input. The exact resource/context/worker/blob notice taints it in the proxy.
+An already in-flight grant is consumed without authorizing any capture. A
+previously granted export still requires completed denial: switching selection
+clears its current grant flag but does not erase its nonzero epoch/history.
+Imported canonical COM identities remain excluded from reexport capture.
+
+The real QEMU decoder and production Swift receiver pass `--owned-input` with
+source pressure: 19 images, 1,015,802 exact pixels, 22 GPU reads, zero RFB uploads,
+resize and retained images across reconnect. The relocated candidate app passes
+the same sequence. The two-worker foreign-input regression also passes.
+`--import-owned-output` now explicitly switches away from a previously captured
+source before reopening it; it still returns E_INVALIDARG and times out without
+rewriting the held image. Queried-interface imported reexports also still time
+out. Receipts under `.tools/graphics-rebuild-qemu-native-20261016/` are
+`owned-input-positive2`, `owned-input-packaged1`,
+`owned-input-foreign-positive1`, `owned-input-history-negative1` and
+`owned-input-alias-negative1` (each `result.json`). The last two are expected
+failures, not successful presentation runs.
+
+In the actual Windows trial the earlier worker rejection disappears (zero
+rejected messages), but no snapshots are delivered. Read-only live statistics
+show selected resource18, active context0, 315 blocked flushes and a failed
+QEMU display gate. The first selection/flush failure still needs isolation;
+this result does not establish that the selected resource itself is tainted.
+Shutdown again reaches the existing ISV0 assertion. Raw logs/statistics are
+preserved privately under `windows-native3d-20261017/owned-input1-*`; the same
+VM was restored to its clean staged-driver 2D checkpoint. The installed app
+remains unchanged and Windows 3D presentation is not qualified.
+
 ## Imported inputs and exclusive outputs — 2026-10-17
 
 The worker now admits incoming textures without invalidating every independent

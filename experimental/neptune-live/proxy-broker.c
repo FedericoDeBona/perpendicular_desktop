@@ -119,6 +119,11 @@ static bool accept_message(LiveWorker *w,const PerpBrokerHeader *h,const void *b
 {
     if(h->magic!=PERP_BROKER_MAGIC || h->version!=1 || h->session!=session || h->worker_epoch!=w->epoch || h->context_id!=w->id || h->fd_count!=w->fd_count)return false;
     if(h->kind==PERP_HELLO && h->bytes==sizeof(*h) && !h->fd_count) {w->hello=true;return true;}
+    if(h->kind==PERP_CLAIM && h->bytes==sizeof(*h) && !h->fd_count && h->status==2) {
+        LiveResource *r=resource(h->resource_id);
+        if(!r || r->context!=w->id || r->worker_epoch!=w->epoch || r->blob!=h->blob_id)return false;
+        r->tainted=true;return true;
+    }
     if(h->kind==PERP_EXPORT && h->bytes==sizeof(*h) && !h->fd_count) {
         LiveExport *e=NULL;
         for(unsigned i=0;i<LIVE_MAX_SOURCES;i++) {
@@ -192,7 +197,10 @@ static void receive_messages(LiveWorker *w)
         }
         if(w->have==w->want) {
             PerpBrokerHeader *h=(void *)w->input;
-            if(!accept_message(w,h,w->input+sizeof(*h))) {fail_worker(w,"identity, ownership, operation or budget");return;}
+            if(!accept_message(w,h,w->input+sizeof(*h))) {
+                fprintf(stderr,"perp-live: rejected message context=%u kind=%u status=%u resource=%u\n",w->id,h->kind,h->status,h->resource_id);
+                fail_worker(w,"identity, ownership, operation or budget");return;
+            }
             close_rights(w->rights,w->fd_count);w->fd_count=0;w->have=0;w->want=sizeof(*h);
         }
     }

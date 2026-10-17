@@ -90,7 +90,7 @@ def apply(private: Path, root: Path):
     path = private / 'proxy-broker.c'; text = path.read_text()
     text = replace(text, '    uint32_t retired_batch;', '    uint32_t retired_batch;\n    PerpLivePoolStats pool;')
     text = replace(text, 'static LiveFrame frames[LIVE_MAX_CANDIDATES];', 'static LiveFrame frames[LIVE_MAX_PENDING];\nstatic PerpLivePoolStats pool;\nstatic uint64_t abandoned;')
-    # Only frame loops grow. Export/claim/source admission remains bounded at 4.
+    # Only frame loops grow; source identity metadata has its own bound.
     import re
     text = re.sub(r'for\(unsigned ([ij])=0;\1<LIVE_MAX_CANDIDATES;\1\+\+\)(?=if\(frames\[)',
                   lambda m: m.group(0).replace('LIVE_MAX_CANDIDATES', 'LIVE_MAX_PENDING'), text)

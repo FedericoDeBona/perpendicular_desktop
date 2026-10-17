@@ -18,21 +18,39 @@ static bool live_emit(PerpBrokerHeader *h,const void *body,size_t bytes,const in
     }
     return sendmsg(live_broker,&message,MSG_DONTWAIT)==(ssize_t)h->bytes;
 }
-static void live_fault_locked(void)
+static void live_fault_at_locked(const char *function,unsigned line)
 {
-    if(!live_faulted) {PerpBrokerHeader h={.kind=LIVE_FAULT};(void)live_emit(&h,NULL,0,NULL,0);}
+    if(!live_faulted) {
+        fprintf(stderr,"perp-live-worker: capture fault context=%u function=%s line=%u enabled=%u invalid_scope=%u contexts=%u multi_ring=%u imports=%llu owners=%llu layouts=%llu\n",
+            live_context?live_context->ctx_id:0,function,line,live_enabled,invalid_scope,contexts,
+            live_context?(unsigned)atomic_load(&live_context->multi_ring):0,
+            (unsigned long long)rejected_import,(unsigned long long)rejected_owner,(unsigned long long)rejected_layout);
+        PerpBrokerHeader h={.kind=LIVE_FAULT,.status=line};(void)live_emit(&h,NULL,0,NULL,0);
+    }
     live_faulted=true;live_enabled=false;
 }
 bool perp_live_worker_import(struct npt_context *ctx,uint32_t resource)
 {
     lock();bool good=ctx==live_context;
-    /* Incoming textures are inputs, not automatically scanout sources. An
-     * owned export can be reopened only after its exact DENY handshake has
-     * stopped future capture and completed every already queued GPU copy.
-     * Foreign exports are tainted by the VM-global proxy before attachment. */
+    /* Incoming textures are inputs, not automatically scanout sources.
+     * Never-granted exports can opt out before any copy exists. Previously
+     * granted exports require completed DENY for all queued copies. Foreign
+     * exports are tainted by the VM-global proxy before attachment. */
     for(unsigned i=0;good && i<LIVE_MAX_SOURCES;i++)if(live_claims[i].resource==resource && resource) {
-        good=live_claims[i].denied && live_claims[i].import_safe;
-        if(!good) {rejected_import++;live_fault_locked();}
+        LiveClaim *claim=&live_claims[i];
+        /* Epoch zero proves this source has NEVER been granted. Selection
+         * clears granted on older sources, so that boolean is insufficient.
+         * No GPU snapshot can exist for a never-granted source. */
+        if(!claim->epoch && !claim->denied) {
+            claim->denied=true;claim->import_safe=true;
+            PerpBrokerHeader taint={.kind=PERP_CLAIM,.resource_id=resource,.blob_id=claim->blob,.status=2};
+            good=live_emit(&taint,NULL,0,NULL,0);
+        } else good=claim->denied && claim->import_safe;
+        if(!good) {
+            fprintf(stderr,"perp-live-worker: owned import denied resource=%u epoch=%llu granted=%u denied=%u import_safe=%u\n",
+                resource,(unsigned long long)claim->epoch,claim->granted,claim->denied,claim->import_safe);
+            rejected_import++;live_fault_locked();
+        }
         break;
     }
     unlock();return good;
@@ -111,8 +129,15 @@ bool perp_live_worker_command(uint32_t ctx,const void *bytes,size_t count,const 
     if(h->kind==LIVE_GRANT) {
         lock();LiveClaim *claim=live_claim_blob(h->blob_id);Export *entry=NULL;
         for(unsigned i=0;i<MAX_EXPORTS;i++)if(entries[i].ctx==live_context && entries[i].blob_id==h->blob_id)entry=&entries[i];
-        bool good=!live_faulted && claim && !claim->denied && claim->resource==h->resource_id && h->resource_epoch &&
+        bool scope=!live_faulted && claim && claim->resource==h->resource_id && h->resource_epoch &&
             entry && entry->object_id==h->object_id;
+        /* A grant may already be in flight when the ring opts out. Consuming
+         * it without granting a read keeps that race closed without killing
+         * unrelated outputs. The proxy will process the ordered taint notice. */
+        if(scope && claim->denied && claim->import_safe && (!claim->epoch || claim->epoch==h->resource_epoch)) {
+            unlock();return true;
+        }
+        bool good=scope && !claim->denied;
         if(good) {
             /* Old immutable leases remain ACK-able through their identity. Only
              * the selected source participates in future GPU copies. */
