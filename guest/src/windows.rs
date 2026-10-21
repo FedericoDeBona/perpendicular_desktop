@@ -3,6 +3,7 @@ mod catalogue;
 mod display;
 mod drivers;
 mod identity;
+mod remote_display;
 mod service;
 mod window_control;
 mod wire;
@@ -15,6 +16,8 @@ use std::path::Path;
 pub struct Configuration {
     pub port: u16,
     pub token: String,
+    #[serde(default, rename = "ownerSid", skip_serializing_if = "Option::is_none")]
+    pub owner_sid: Option<String>,
 }
 
 pub fn run() -> Result<(), String> {

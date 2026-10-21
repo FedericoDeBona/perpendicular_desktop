@@ -11,6 +11,7 @@ import argparse
 
 parser=argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--graphics-driver-dir',type=Path,help='Stage the pinned ARM64 graphics driver in addition to guest tools')
+parser.add_argument('--remote-display-setup',action='store_true',help='Include the optional reversible local RDP setup script')
 arguments=parser.parse_args()
 
 repo=Path(__file__).resolve().parent.parent
@@ -18,6 +19,8 @@ root=Path.home()/'Library/Application Support/Perpendicular Restart'
 configuration=json.loads((root/'machine.json').read_text())
 executable=repo/'guest/target/aarch64-pc-windows-msvc/release/perpendicular-guest.exe'
 sources=[executable,repo/'guest/install.ps1',repo/'guest/install.cmd',repo/'guest/diagnostics.ps1']
+if arguments.remote_display_setup:
+    sources.append(repo/'guest/setup-remote-display.ps1')
 drivers=[]
 if arguments.graphics_driver_dir:
     sources += [repo/'guest/install-graphics.ps1',repo/'guest/install-graphics.cmd',repo/'guest/graphics-driver.json']
@@ -64,3 +67,5 @@ with socket.socket(socket.AF_UNIX) as connection:
 print('Setup CD attached. In the Windows console run D:\\install.cmd and complete installation.')
 if drivers:
     print('For the signed graphics driver, run D:\\install-graphics.cmd. This does not reinstall old guest integrations.')
+if arguments.remote_display_setup:
+    print('For the optional reversible RDP setup, run powershell.exe -NoProfile -ExecutionPolicy Bypass -File D:\\setup-remote-display.ps1 locally. Add -Undo to restore its saved settings.')

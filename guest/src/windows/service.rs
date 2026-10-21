@@ -3,17 +3,25 @@ use std::{
     ffi::OsString,
     path::{Path, PathBuf},
     sync::mpsc,
-    time::Duration,
+    time::{Duration, Instant},
 };
 use windows::{
     Win32::{
-        Foundation::{CloseHandle, HANDLE},
+        Foundation::{CloseHandle, HANDLE, HLOCAL, LocalFree},
+        Security::{
+            Authorization::ConvertSidToStringSidW, GetTokenInformation, TOKEN_USER, TokenUser,
+        },
         System::{
             Environment::{CreateEnvironmentBlock, DestroyEnvironmentBlock},
-            RemoteDesktop::{WTSGetActiveConsoleSessionId, WTSQueryUserToken},
+            RemoteDesktop::{
+                WTSActive, WTSDisconnected, WTSEnumerateSessionsW, WTSFreeMemory,
+                WTSGetActiveConsoleSessionId, WTSQueryUserToken,
+            },
+            SystemInformation::GetSystemDirectoryW,
             Threading::{
                 CREATE_NO_WINDOW, CREATE_UNICODE_ENVIRONMENT, CreateProcessAsUserW,
-                GetExitCodeProcess, PROCESS_INFORMATION, STARTUPINFOW, TerminateProcess,
+                GetCurrentProcess, GetExitCodeProcess, PROCESS_INFORMATION, STARTUPINFOW,
+                TerminateProcess,
             },
         },
     },
@@ -31,6 +39,10 @@ use windows_service::{
 };
 
 const NAME: &str = "PerpendicularRestart";
+enum Control {
+    Stop,
+    ReturnToConsole,
+}
 pub fn directory() -> PathBuf {
     PathBuf::from(std::env::var_os("ProgramData").unwrap_or_else(|| "C:\\ProgramData".into()))
         .join("Perpendicular Restart")
@@ -47,11 +59,12 @@ fn log(message: impl std::fmt::Display) {
 }
 pub fn install(config: &Path) -> Result<(), String> {
     use sha2::{Digest, Sha256};
-    let configuration: Configuration =
+    let mut configuration: Configuration =
         serde_json::from_slice(&std::fs::read(config).map_err(error)?).map_err(error)?;
     if configuration.token.len() != 64 || configuration.port < 1024 {
         return Err("Invalid installation configuration".into());
     }
+    configuration.owner_sid = Some(super::identity::current()?.0);
     let root = directory();
     std::fs::create_dir_all(&root).map_err(error)?;
     let source = std::env::current_exe().map_err(error)?;
@@ -120,10 +133,17 @@ fn entry(_: Vec<OsString>) {
 }
 
 fn supervise() -> Result<(), String> {
-    let (stop, receiver) = mpsc::channel();
+    let configuration: Configuration =
+        serde_json::from_slice(&std::fs::read(directory().join("connection.json")).map_err(error)?)
+            .map_err(error)?;
+    let (control, receiver) = mpsc::channel();
     let status = service_control_handler::register(NAME, move |event| match event {
         ServiceControl::Stop | ServiceControl::Shutdown => {
-            let _ = stop.send(());
+            let _ = control.send(Control::Stop);
+            ServiceControlHandlerResult::NoError
+        }
+        ServiceControl::UserEvent(code) if code.to_raw() == 128 => {
+            let _ = control.send(Control::ReturnToConsole);
             ServiceControlHandlerResult::NoError
         }
         ServiceControl::Interrogate => ServiceControlHandlerResult::NoError,
@@ -148,25 +168,53 @@ fn supervise() -> Result<(), String> {
         ServiceControlAccept::STOP | ServiceControlAccept::SHUTDOWN,
     )?;
     let mut worker: Option<(super::identity::Handle, u32)> = None;
+    let mut selection_error = None;
     log("Service running; waiting for interactive session");
     loop {
-        if receiver.recv_timeout(Duration::from_secs(2)).is_ok() {
-            break;
+        match receiver.recv_timeout(Duration::from_secs(2)) {
+            Ok(Control::Stop) => break,
+            Ok(Control::ReturnToConsole) => {
+                if let Err(error) = return_to_console(configuration.owner_sid.as_deref()) {
+                    log(format!("Console return failed: {error}"));
+                }
+            }
+            Err(_) => {}
         }
+        let session = match active_session(configuration.owner_sid.as_deref()) {
+            Ok(session) => {
+                selection_error = None;
+                session
+            }
+            Err(error) => {
+                if selection_error.as_ref() != Some(&error) {
+                    log(&error);
+                    selection_error = Some(error);
+                }
+                None
+            }
+        };
         unsafe {
-            let session = WTSGetActiveConsoleSessionId();
             if let Some((process, previous)) = &worker {
                 let mut code = 0;
-                let active = GetExitCodeProcess(process.0, &mut code).is_ok() && code == 259;
-                if !active || *previous != session {
+                if let Err(error) = GetExitCodeProcess(process.0, &mut code) {
+                    log(format!("Cannot inspect worker: {error}"));
+                    continue;
+                }
+                let active = code == 259;
+                // A lock, disconnect or ambiguous selection must not kill a healthy
+                // worker. Replace it only after confirming a different owner session.
+                if !active || session.is_some_and(|session| session != *previous) {
                     if active {
-                        let _ = TerminateProcess(process.0, 0);
+                        if let Err(error) = TerminateProcess(process.0, 0) {
+                            log(format!("Cannot replace worker: {error}"));
+                            continue;
+                        }
                     }
                     worker = None;
                 }
             }
-            if worker.is_none() && session != u32::MAX {
-                match start_worker(session) {
+            if let Some(session) = session.filter(|_| worker.is_none()) {
+                match start_worker(session, configuration.owner_sid.as_deref()) {
                     Ok(process) => {
                         worker = Some((process, session));
                         log(format!("Worker started in session {session}"));
@@ -184,11 +232,181 @@ fn supervise() -> Result<(), String> {
     report(ServiceState::Stopped, ServiceControlAccept::empty())
 }
 
-unsafe fn start_worker(session: u32) -> Result<super::identity::Handle, String> {
+fn active_session(owner_sid: Option<&str>) -> Result<Option<u32>, String> {
+    if let Some(owner_sid) = owner_sid {
+        return owner_session(owner_sid, false);
+    }
+    // Compatibility for installations whose configuration predates ownerSid.
     unsafe {
+        let session = WTSGetActiveConsoleSessionId();
+        Ok((session != 0 && session != u32::MAX).then_some(session))
+    }
+}
+
+fn owner_session(owner_sid: &str, include_disconnected: bool) -> Result<Option<u32>, String> {
+    unsafe {
+        let mut sessions = std::ptr::null_mut();
+        let mut count = 0;
+        WTSEnumerateSessionsW(None, 0, 1, &mut sessions, &mut count).map_err(error)?;
+        let candidates = if count == 0 {
+            Vec::new()
+        } else if sessions.is_null() {
+            return Err("Windows returned an invalid session list".into());
+        } else {
+            std::slice::from_raw_parts(sessions, count as usize)
+                .iter()
+                .filter(|session| {
+                    session.SessionId != 0
+                        && session.SessionId != u32::MAX
+                        && (session.State == WTSActive
+                            || (include_disconnected && session.State == WTSDisconnected))
+                })
+                .map(|session| session.SessionId)
+                .collect::<Vec<_>>()
+        };
+        if !sessions.is_null() {
+            WTSFreeMemory(sessions.cast());
+        }
+        let mut selected = None;
+        for session in candidates {
+            let mut token = HANDLE::default();
+            WTSQueryUserToken(session, &mut token).map_err(error)?;
+            let token = super::identity::Handle(token);
+            if token_sid(token.0)? == owner_sid {
+                if selected.is_some() {
+                    return Err("Multiple eligible sessions for the guest owner; waiting".into());
+                }
+                selected = Some(session);
+            }
+        }
+        Ok(selected)
+    }
+}
+
+/// Explicit SCM control 128 only. No password or disconnect-triggered action.
+fn return_to_console(owner_sid: Option<&str>) -> Result<(), String> {
+    use std::os::windows::{ffi::OsStringExt, process::CommandExt};
+    use std::process::{Command, Stdio};
+    let owner_sid = owner_sid.ok_or("Console return requires an installed ownerSid")?;
+    unsafe {
+        if super::identity::sid(GetCurrentProcess())? != "S-1-5-18" {
+            return Err("Console return requires the LocalSystem service".into());
+        }
+    }
+    let session =
+        owner_session(owner_sid, true)?.ok_or("No logged-in session for the guest owner")?;
+    let mut buffer = [0u16; 32768];
+    let length = unsafe { GetSystemDirectoryW(Some(&mut buffer)) } as usize;
+    if length == 0 || length >= buffer.len() {
+        return Err("Windows system directory unavailable".into());
+    }
+    let system = PathBuf::from(OsString::from_wide(&buffer[..length]));
+    let executable = system.join("tscon.exe");
+    if !system.is_absolute() || !executable.is_file() {
+        return Err("Windows system tscon.exe unavailable".into());
+    }
+    unsafe {
+        let console = WTSGetActiveConsoleSessionId();
+        if console != 0 && console != u32::MAX && console != session {
+            let mut token = HANDLE::default();
+            WTSQueryUserToken(console, &mut token).map_err(error)?;
+            let token = super::identity::Handle(token);
+            if token_sid(token.0)? != owner_sid {
+                return Err("Console belongs to another user; refusing to switch".into());
+            }
+        }
+        // Recheck the token immediately before launching the trusted system helper.
         let mut token = HANDLE::default();
         WTSQueryUserToken(session, &mut token).map_err(error)?;
         let token = super::identity::Handle(token);
+        if token_sid(token.0)? != owner_sid {
+            return Err("Session owner changed before console return".into());
+        }
+        if console == session {
+            log(format!("Owner session {session} is already on the console"));
+            return Ok(());
+        }
+    }
+    log(format!(
+        "Explicit console return requested for owner session {session}"
+    ));
+    let mut child = Command::new(executable)
+        .args([session.to_string(), "/dest:console".into()])
+        .current_dir(system)
+        .creation_flags(CREATE_NO_WINDOW.0)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .map_err(error)?;
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        let status = match child.try_wait() {
+            Ok(status) => status,
+            Err(error) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(error.to_string());
+            }
+        };
+        if let Some(status) = status {
+            if !status.success() {
+                return Err(format!("Windows tscon failed ({status})"));
+            }
+            log(format!("Owner session {session} returned to console"));
+            return Ok(());
+        }
+        if Instant::now() >= deadline {
+            child.kill().map_err(error)?;
+            let _ = child.wait();
+            return Err("Windows tscon timed out; only its helper process was stopped".into());
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
+// identity::sid takes a process handle; WTS supplies a token directly.
+fn token_sid(token: HANDLE) -> Result<String, String> {
+    unsafe {
+        let mut size = 0;
+        let _ = GetTokenInformation(token, TokenUser, None, 0, &mut size);
+        if size == 0 || size > 65536 {
+            return Err("Session user identity unavailable".into());
+        }
+        let mut data = vec![0u64; (size as usize).div_ceil(8)];
+        GetTokenInformation(
+            token,
+            TokenUser,
+            Some(data.as_mut_ptr().cast()),
+            size,
+            &mut size,
+        )
+        .map_err(error)?;
+        let user = &*data.as_ptr().cast::<TOKEN_USER>();
+        let mut value = PWSTR::null();
+        ConvertSidToStringSidW(user.User.Sid, &mut value).map_err(error)?;
+        let result = value.to_string().map_err(error);
+        let _ = LocalFree(Some(HLOCAL(value.0.cast())));
+        result
+    }
+}
+
+unsafe fn start_worker(
+    session: u32,
+    owner_sid: Option<&str>,
+) -> Result<super::identity::Handle, String> {
+    unsafe {
+        if session == 0 || session == u32::MAX {
+            return Err("Interactive user session required".into());
+        }
+        let mut token = HANDLE::default();
+        WTSQueryUserToken(session, &mut token).map_err(error)?;
+        let token = super::identity::Handle(token);
+        if let Some(owner_sid) = owner_sid {
+            if token_sid(token.0)? != owner_sid {
+                return Err("Session owner changed before starting the worker".into());
+            }
+        }
         let executable = std::env::current_exe().map_err(error)?;
         let mut line: Vec<u16> = format!(
             "\"{}\" worker \"{}\"",
