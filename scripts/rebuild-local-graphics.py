@@ -224,6 +224,8 @@ def main():
         target.write_text(relocate((source / name).read_text()))
     retirement_patch = REPO / 'graphics/renderer/context-retirement.patch'
     run('retirement-patch', ['patch', '-p1', '--batch', '--forward', '-i', retirement_patch], private)
+    admission_patch = REPO / 'graphics/renderer/context-admission.patch'
+    run('admission-patch', ['patch', '-p1', '--batch', '--forward', '-i', admission_patch], private)
     records = json.loads((renderer / 'build/compile_commands.json').read_text())
     changed = ['src/perp-sync/proxy-broker.c', 'src/proxy/proxy_context.c', 'src/proxy/proxy_client.c',
                'server/render_client.c', 'server/render_worker.c']
@@ -237,6 +239,8 @@ def main():
             command[command.index(flag) + 1] = str(value)
         run('compile-' + name.replace('/', '_'), command, renderer / 'build')
         objects[record['output']] = obj
+        if name == 'src/perp-sync/proxy-broker.c':
+            admission_command = command.copy()
     archive = output / 'libvirgl.a'
     shutil.copy2(renderer / 'build/src/libvirgl.a', archive)
     run('archive-renderer', ['ar', '-r', archive, *[v for k, v in objects.items() if k.startswith('src/')]])
@@ -298,21 +302,31 @@ def main():
     run('compile-retirement-check', ['cc', '-std=gnu11', '-I' + str(private / 'src/perp-sync'),
                                     REPO / 'graphics/renderer/check-retirement.c', '-o', output / 'check-retirement'])
     run('retirement-check', [output / 'check-retirement'])
-    manifest.update(primary_monitor_metadata=1, renderer_control_version=2, context_retirement=1)
+    # Compile the actual broker into one admission check, with its pinned flags.
+    for flag in ['-c', '-o', '-MF', '-MQ']:
+        index = admission_command.index(flag)
+        del admission_command[index:index + 2]
+    admission_command.remove('-MD')
+    run('compile-admission-check', [*admission_command, '-UNDEBUG',
+                                    REPO / 'graphics/renderer/check-admission.c',
+                                    '-o', output / 'check-admission'], renderer / 'build')
+    run('admission-check', [output / 'check-admission'])
+    manifest.update(primary_monitor_metadata=1, renderer_control_version=2,
+                    context_retirement=1, context_admission=1)
     notice = result / 'Notices/Perpendicular'
     notice.mkdir(parents=True, exist_ok=True)
-    for path in [header, monitor_patch, retirement_patch]:
+    for path in [header, monitor_patch, retirement_patch, admission_patch]:
         shutil.copy2(path, notice / path.name)
     receipt = {'schema': 1, 'base_runtime_manifest_sha256': digest(runtime / 'runtime.json'),
                'qemu_reference_pins': QEMU_PINS, 'renderer_reference_pins': RENDERER_PINS,
                'qemu_overlay_pins': OVERLAY_PINS, 'unchanged_qemu_text_sha256': baseline_signature,
                'qemu_link_inputs_verified': len(link_inputs),
-               'patches': {p.name: digest(p) for p in [header, monitor_patch, retirement_patch]},
+               'patches': {p.name: digest(p) for p in [header, monitor_patch, retirement_patch, admission_patch]},
                'compiled_qemu_units': [name for name, _ in units], 'compiled_renderer_units': changed,
                'guest_wire_version': 1, 'host_transport_version': 3, 'native_descriptor_version': 2,
                'renderer_control_version': 2, 'primary_monitor_metadata': 1,
                'VM_started': False, 'runtime_verified': False,
-               'checks': ['pinned source and object identities', 'monitor header', 'context retirement header',
+               'checks': ['pinned source and object identities', 'monitor header', 'context retirement header', 'context admission refusal',
                           'QEMU version', 'signatures', 'runtime file hashes']}
     receipt_file = notice / 'local-graphics.json'
     receipt_file.write_text(json.dumps(receipt, indent=2, sort_keys=True) + '\n')

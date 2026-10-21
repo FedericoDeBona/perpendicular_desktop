@@ -20,7 +20,7 @@
  static uint64_t session,worker_epoch,resource_epoch;
  static uint32_t selected,active;
  static uint64_t received,completed,cancelled,rejected,imports_denied,peak_bytes,max_pending;
-@@ -87,7 +87,10 @@
+@@ -87,5 +87,8 @@
      if(!enabled() || capset!=7)return;
      if(!session)session=((uint64_t)arc4random()<<32)|arc4random();
      LiveWorker *w=NULL;for(unsigned i=0;i<MAX_CONTEXTS;i++)if(!workers[i].id) {w=&workers[i];break;}
@@ -30,8 +30,6 @@
 +        permanently_failed=true;return;
 +    }
      int pair[2];if(socketpair(AF_UNIX,SOCK_STREAM,0,pair)) {permanently_failed=true;return;}
-     if(!perp_live_channel_nonblocking(pair[0]) || !perp_live_channel_nonblocking(pair[1])) {
-         close(pair[0]);close(pair[1]);permanently_failed=true;return;
 @@ -97,10 +100,17 @@
      if(!send_control(w,&attach,&pair[1],1))fail_worker(w,"attach broker channel");
      close(pair[1]);

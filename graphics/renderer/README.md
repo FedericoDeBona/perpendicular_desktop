@@ -16,6 +16,14 @@ Gli hash del vecchio archivio, della libreria e del server sono vincoli esplicit
 
 Questa patch non risolve esaurimento o riuso delle identità delle risorse, import condivisi non supportati, desktop protetto, DPI o più monitor. Le nuove diagnostiche distinguono le cause di rifiuto senza aumentare le capacità delle tabelle.
 
+## Rifiuto prima della creazione del worker
+
+Per la base resize del 19 ottobre, `rebuild-local-graphics.py` applica anche `context-admission.patch`. Il proxy controlla il broker prima di chiedere al server di creare un contesto Neptune: il limite rimane 32. Il rifiuto per capacità, ID non valido o esaurimento degli epoch non modifica i contesti già presenti, i loro grant o le immagini ancora in uso e non chiude definitivamente la cattura. Il controllo e la creazione appartengono allo stesso thread chiamante del proxy.
+
+L'allocazione del contenitore proxy precede la richiesta al server, quindi il suo fallimento non lascia un worker avviato. L'identità del contesto viene assegnata prima dell'inizializzazione: un errore successivo usa l'ID corretto nel percorso di distruzione e conferma già esistente. Anche un fallimento dell'aggancio al broker restituisce un errore di creazione e richiama quel cleanup. Le condizioni di errore non confermate continuano a chiudere la cattura secondo le protezioni esistenti; non vengono dichiarate terminazioni fittizie.
+
+`check-admission.c` compila il broker effettivo con un solo sink per i messaggi di aggancio: riempie 32 slot, verifica che un rifiuto conservi stato ed epoch dei contesti sani e verifica il riuso dopo terminazione confermata. Non avvia processi grafici o Windows. Il candidato isolato del 21 ottobre ha superato questo controllo, compilazione/link dei componenti corrispondenti, firme e hash del runtime; la ricevuta dichiara `runtime_verified: false`. La correzione evita di accettare un nuovo contesto non registrabile. Non risolve né identifica l'eventuale stallo interno del worker in `GET_BLOB` e non certifica WinUI o Creality.
+
 ## Diagnostica facoltativa degli HANDLE condivisi
 
 L'opzione `--shared-handle-diagnostics` aggiunge soltanto un contatore alle sette API DXGI/D3D11 che il renderer già rifiuta: `GetSharedHandle`, i due `CreateSharedHandle`, `OpenSharedResource`, `OpenSharedResource1`, `OpenSharedResourceByName` e `OpenSharedFence`. Non cambia il risultato HRESULT né abilita nuove forme di condivisione. Lo script verifica anche l'hash del sorgente interessato, ricompila una sesta unità C e conserva una ricevuta separata. QEMU, backend DXMT, driver e protocolli rimangono quelli del runtime indicato.

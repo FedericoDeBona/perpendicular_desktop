@@ -1,0 +1,99 @@
+--- a/src/perp-sync/live.h
++++ b/src/perp-sync/live.h
+@@ -22,7 +22,8 @@
+ struct npt_context;
+ /* Actual proxy/renderer lifecycle ingress. All calls occur on its caller
+  * thread; GPU ring callbacks use the separately synchronized worker module. */
+-void perp_live_context_start(uint32_t id,uint32_t capset,struct proxy_socket *socket);
++bool perp_live_context_can_start(uint32_t id,uint32_t capset);
++bool perp_live_context_start(uint32_t id,uint32_t capset,struct proxy_socket *socket);
+ void perp_live_context_stop(uint32_t id,bool producer_stopped);
+ void perp_live_resource_created(uint32_t id,uint32_t context,uint64_t blob,uint64_t bytes);
+ void perp_live_resource_destroy(uint32_t id);
+--- a/src/perp-sync/proxy-broker.c
++++ b/src/perp-sync/proxy-broker.c
+@@ -81,21 +81,30 @@
+     if(w->fd>=0)close(w->fd);w->fd=-1;close_rights(w->rights,w->fd_count);w->fd_count=0;
+     for(unsigned i=0;i<LIVE_MAX_PENDING;i++)if(frames[i].used && frames[i].header.context_id==w->id && !frames[i].leased)retire(&frames[i],false);
+ }
+-void perp_live_context_start(uint32_t id,uint32_t capset,struct proxy_socket *control)
+-{
+-    if(!enabled() || capset!=7)return;
++bool perp_live_context_can_start(uint32_t id,uint32_t capset)
++{
++    if(!enabled() || capset!=7)return true;
++    LiveWorker *w=NULL;for(unsigned i=0;i<MAX_CONTEXTS;i++)if(!workers[i].id) {w=&workers[i];break;}
++    const char *reason=permanently_failed?"capture closed":!id?"zero context ID":worker(id)?"duplicate context ID":!w?"context registry full":worker_epoch==UINT64_MAX?"epoch exhausted":NULL;
++    if(!reason)return true;
++    /* A refused admission owns no producer or grant; keep healthy contexts. */
++    fprintf(stderr,"perp-live: admission refused context %u: %s\n",id,reason);
++    return false;
++}
++bool perp_live_context_start(uint32_t id,uint32_t capset,struct proxy_socket *control)
++{
++    if(!enabled() || capset!=7)return true;
++    if(!perp_live_context_can_start(id,capset))return false;
+     if(!session)session=((uint64_t)arc4random()<<32)|arc4random();
+     LiveWorker *w=NULL;for(unsigned i=0;i<MAX_CONTEXTS;i++)if(!workers[i].id) {w=&workers[i];break;}
+-    if(!w || worker(id) || ++worker_epoch==0) {
+-        fprintf(stderr,"perp-live: cannot track context %u: %s\n",id,!w?"context registry full":worker(id)?"duplicate context ID":"epoch wrap");
+-        permanently_failed=true;return;
+-    }
+-    int pair[2];if(socketpair(AF_UNIX,SOCK_STREAM,0,pair)) {permanently_failed=true;return;}
++    ++worker_epoch;
++    int pair[2];if(socketpair(AF_UNIX,SOCK_STREAM,0,pair)) {permanently_failed=true;return false;}
+     *w=(LiveWorker){.id=id,.epoch=worker_epoch,.fd=pair[0],.control=control,.want=sizeof(PerpBrokerHeader),.rights={-1,-1}};
+-    int flags=fcntl(pair[0],F_GETFL);if(flags<0 || fcntl(pair[0],F_SETFL,flags|O_NONBLOCK)) {close(pair[1]);fail_worker(w,"nonblocking channel");return;}
++    int flags=fcntl(pair[0],F_GETFL);if(flags<0 || fcntl(pair[0],F_SETFL,flags|O_NONBLOCK)) {close(pair[1]);fail_worker(w,"nonblocking channel");return false;}
+     PerpBrokerHeader attach={.kind=LIVE_ATTACH};
+     if(!send_control(w,&attach,&pair[1],1))fail_worker(w,"attach broker channel");
+     close(pair[1]);
++    return !w->bad;
+ }
+ void perp_live_context_stop(uint32_t id,bool producer_stopped)
+ {
+--- a/src/proxy/proxy_context.c
++++ b/src/proxy/proxy_context.c
+@@ -811,20 +811,25 @@
+ 
+    const uint32_t capset_id = ctx_flags & VIRGL_RENDERER_CONTEXT_FLAG_CAPSET_ID_MASK;
+ 
++   /* Broker lifecycle runs on this same caller thread. Refuse before the
++    * server can create a producer, without changing any existing grants. */
++   if (!perp_live_context_can_start(ctx_id, capset_id))
++      return NULL;
++   ctx = calloc(1, sizeof(*ctx));
++   if (!ctx)
++      return NULL;
++
+    int ctx_fd;
+    if (!proxy_client_create_context(client, ctx_id, capset_id, debug_len, debug_name,
+                                     &ctx_fd)) {
+       proxy_log("failed to create a context");
++      free(ctx);
+       return NULL;
+    }
+ 
+-   ctx = calloc(1, sizeof(*ctx));
+-   if (!ctx) {
+-      close(ctx_fd);
+-      return NULL;
+-   }
+-
+    proxy_context_init_base(ctx);
++   /* Destruction can run on initialization failure, before the caller sets it. */
++   ctx->base.ctx_id = ctx_id;
+    ctx->client = client;
+    proxy_socket_init(&ctx->socket, ctx_fd);
+    ctx->capset_id = capset_id;
+@@ -841,6 +846,9 @@
+       return NULL;
+    }
+ 
+-   perp_live_context_start(ctx_id, capset_id, &ctx->socket);
++   if (!perp_live_context_start(ctx_id, capset_id, &ctx->socket)) {
++      proxy_context_destroy(&ctx->base);
++      return NULL;
++   }
+    return &ctx->base;
+ }
