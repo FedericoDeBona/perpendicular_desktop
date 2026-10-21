@@ -13,6 +13,8 @@ struct NativeGraphics {
               value["schema"] as? Int == 1,value["guest_wire_version"] as? Int == 1,
               value["host_transport_version"] as? Int == 3,value["native_descriptor_version"] as? Int == 2,
               value["input_backpressure"] as? Bool == true,
+              [1,2].contains(value["renderer_control_version"] as? Int ?? 1),
+              ((value["renderer_control_version"] as? Int == 2) == (value["context_retirement"] as? Int == 1)),
               let files=value["files"] as? [String:String],files.count<=64,
               ["bin/qemu-system-aarch64","bin/virgl_render_server","lib/libdxmt-native.dylib","lib/libvirglrenderer.1.dylib"].allSatisfy({files[$0] != nil}) else{
             throw Self.failure("The Windows graphics runtime is incomplete or incompatible.")
@@ -31,6 +33,7 @@ struct NativeGraphics {
             "NPT_BACKEND":"dxmt","ANGLE_DEFAULT_PLATFORM":"metal",
             "RENDER_SERVER_EXEC_PATH":root.appendingPathComponent("bin/virgl_render_server").path,
             "PERP_NEPTUNE_SCANOUT_BROKER":"1","PERP_NATIVE_DISPLAY_DIRECT":"1",
+            "PERP_NEPTUNE_CONTEXT_RETIREMENT":manifest["context_retirement"] as? Int == 1 ? "1":"0",
             "PERP_NATIVE_DISPLAY_DIR":directory.path,"PERP_NATIVE_DISPLAY_SESSION":session,
             "PERP_HVF_STP_Q_PCI_HOLE":"1"]
         let flags=["hvf_strh_post2_hole_default_off":"PERP_HVF_STRH_POST_PCI_HOLE",

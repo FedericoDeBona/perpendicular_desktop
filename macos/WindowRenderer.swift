@@ -12,6 +12,7 @@ final class WindowRenderer {
     private let pipeline:any MTLRenderPipelineState
     private var texture:(any MTLTexture)?
     private var external:NativeDisplayFrame?
+    private var nativeCache=false
     private let opaque:Bool
     private var pixels=Data()
     private var size=NSSize.zero
@@ -64,7 +65,7 @@ final class WindowRenderer {
         dirty=true;draw()
     }
     func present(_ pixels:Data,width:Int,height:Int){
-        external=nil
+        external=nil;nativeCache=false
         self.pixels=pixels;size=NSSize(width:width,height:height)
         revision &+= 1;dirty=true;draw()
     }
@@ -73,21 +74,32 @@ final class WindowRenderer {
         external=frame;pixels=Data();size=NSSize(width:frame.texture.width,height:frame.texture.height)
         dirty=true;draw()
     }
-    func clear(){external=nil;pixels=Data();size = .zero;texture=nil;dirty=false}
+    func clear(){external=nil;nativeCache=false;pixels=Data();size = .zero;texture=nil;dirty=false}
     func draw(){
         // Keep only the latest CPU frame and one GPU reader. Reusing a texture
         // waits for that reader's completion, including across resize/retirement.
-        guard dirty,!drawing,(external != nil || !pixels.isEmpty),size.width>0,size.height>0,
+        guard dirty,!drawing,(external != nil || nativeCache || !pixels.isEmpty),size.width>0,size.height>0,
               layer.drawableSize.width>0,layer.drawableSize.height>0 else{return}
         let width=Int(size.width),height=Int(size.height)
         let lease=external
-        if lease == nil && (texture?.width != width || texture?.height != height) {
+        let nativeSurface=lease != nil || nativeCache
+        let storage:MTLStorageMode=nativeSurface ? .private:.shared
+        if texture?.width != width || texture?.height != height || texture?.storageMode != storage {
             let descriptor=MTLTextureDescriptor.texture2DDescriptor(pixelFormat:.bgra8Unorm,width:width,height:height,mipmapped:false)
-            descriptor.storageMode = .shared;descriptor.usage = .shaderRead
+            descriptor.storageMode=storage;descriptor.usage = .shaderRead
             texture=device.makeTexture(descriptor:descriptor);uploaded=0
         }
-        guard let texture=lease?.texture ?? texture,let drawable=layer.nextDrawable(),let command=queue.makeCommandBuffer() else{return}
-        if lease == nil && uploaded != revision {
+        guard let texture,let drawable=layer.nextDrawable(),let command=queue.makeCommandBuffer() else{return}
+        if let lease {
+            // Keep an owned image for expose/resize. Holding the last producer
+            // lease until its successor arrives deadlocks context retirement:
+            // the broker must release that old budget before starting a writer.
+            guard let copy=command.makeBlitCommandEncoder() else{return}
+            copy.copy(from:lease.texture,sourceSlice:0,sourceLevel:0,sourceOrigin:MTLOrigin(x:0,y:0,z:0),
+                      sourceSize:MTLSize(width:width,height:height,depth:1),to:texture,destinationSlice:0,
+                      destinationLevel:0,destinationOrigin:MTLOrigin(x:0,y:0,z:0))
+            copy.endEncoding()
+        }else if !nativeCache && uploaded != revision {
             pixels.withUnsafeBytes {bytes in
                 texture.replace(region:MTLRegionMake2D(0,0,width,height),mipmapLevel:0,withBytes:bytes.baseAddress!,bytesPerRow:width*4)
             }
@@ -107,8 +119,8 @@ final class WindowRenderer {
         encoder.setFragmentBytes(&forceOpaque,length:MemoryLayout<UInt32>.size,index:0)
         encoder.drawPrimitives(type:.triangle,vertexStart:0,vertexCount:6)
         encoder.endEncoding()
+        if lease != nil {nativeCache=true;external=nil}
         drawing=true;dirty=false
-        let nativeSurface=lease != nil
         command.present(drawable)
         command.addCompletedHandler { [weak self,lease] buffer in
             // Retain the producer's immutable frame until this actual GPU read.
@@ -123,7 +135,8 @@ final class WindowRenderer {
                     self.reportedSources.insert(nativeSurface)
                     if ProcessInfo.processInfo.environment["PERPENDICULAR_STATE_TRACE"] == "1" {
                         let value:[String:Any]=["type":"renderer","backend":"metal","device":self.device.name,
-                            "sourceWidth":width,"sourceHeight":height,"source":nativeSurface ? "native-surface":"cpu","gpuCompleted":true]
+                            "sourceWidth":width,"sourceHeight":height,"source":nativeSurface ? "native-surface":"cpu",
+                            "nativeGPUCopy":nativeSurface,"gpuCompleted":true]
                         if let data=try? JSONSerialization.data(withJSONObject:value){try? FileHandle.standardError.write(contentsOf:data+Data([10]))}
                     }
                 }

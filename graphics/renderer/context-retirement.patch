@@ -1,0 +1,275 @@
+--- a/src/perp-sync/live.h
++++ b/src/perp-sync/live.h
+@@ -23,7 +23,7 @@
+ /* Actual proxy/renderer lifecycle ingress. All calls occur on its caller
+  * thread; GPU ring callbacks use the separately synchronized worker module. */
+ void perp_live_context_start(uint32_t id,uint32_t capset,struct proxy_socket *socket);
+-void perp_live_context_stop(uint32_t id);
++void perp_live_context_stop(uint32_t id,bool producer_stopped);
+ void perp_live_resource_created(uint32_t id,uint32_t context,uint64_t blob,uint64_t bytes);
+ void perp_live_resource_destroy(uint32_t id);
+ bool perp_live_before_commands(uint32_t context);
+--- a/src/perp-sync/proxy-broker.c
++++ b/src/perp-sync/proxy-broker.c
+@@ -40,7 +40,7 @@
+ static LiveResource resources[MAX_RESOURCES];
+ static LiveFrame frames[LIVE_MAX_PENDING];
+ static PerpLivePoolStats pool;
+-static uint64_t abandoned;
++static uint64_t abandoned,context_retirements;
+ static uint64_t session,worker_epoch,resource_epoch;
+ static uint32_t selected,active;
+ static uint64_t received,completed,cancelled,rejected,imports_denied,peak_bytes,max_pending;
+@@ -87,7 +87,10 @@
+     if(!enabled() || capset!=7)return;
+     if(!session)session=((uint64_t)arc4random()<<32)|arc4random();
+     LiveWorker *w=NULL;for(unsigned i=0;i<MAX_CONTEXTS;i++)if(!workers[i].id) {w=&workers[i];break;}
+-    if(!w || worker(id) || ++worker_epoch==0) {permanently_failed=true;return;}
++    if(!w || worker(id) || ++worker_epoch==0) {
++        fprintf(stderr,"perp-live: cannot track context %u: %s\n",id,!w?"context registry full":worker(id)?"duplicate context ID":"epoch wrap");
++        permanently_failed=true;return;
++    }
+     int pair[2];if(socketpair(AF_UNIX,SOCK_STREAM,0,pair)) {permanently_failed=true;return;}
+     if(!perp_live_channel_nonblocking(pair[0]) || !perp_live_channel_nonblocking(pair[1])) {
+         close(pair[0]);close(pair[1]);permanently_failed=true;return;
+@@ -97,10 +100,17 @@
+     if(!send_control(w,&attach,&pair[1],1))fail_worker(w,"attach broker channel");
+     close(pair[1]);
+ }
+-void perp_live_context_stop(uint32_t id)
++void perp_live_context_stop(uint32_t id,bool producer_stopped)
+ {
+     LiveWorker *w=worker(id);if(!w)return;
+-    if(active==id) {active=0;permanently_failed=true;}
++    /* The server has reaped this producer before normal retirement. Old
++     * immutable consumer leases keep their descriptors and full epochs; the
++     * existing pending-frame gate blocks a new producer budget until release. */
++    if(!producer_stopped) {
++        fprintf(stderr,"perp-live: context %u retirement unconfirmed; capture closed\n",id);
++        permanently_failed=true;
++    }else context_retirements++;
++    if(active==id)active=0;
+     if(w->fd>=0)close(w->fd);close_rights(w->rights,w->fd_count);
+     for(unsigned i=0;i<LIVE_MAX_PENDING;i++)if(frames[i].used && frames[i].header.context_id==id && !frames[i].leased) {
+         close_rights(frames[i].fds,2);memset(&frames[i],0,sizeof(frames[i]));
+@@ -116,7 +126,12 @@
+ {
+     LiveWorker *w=worker(context);if(!w || !blob)return;
+     LiveResource *r=NULL;for(unsigned i=0;i<MAX_RESOURCES;i++)if(!resources[i].id) {r=&resources[i];break;}
+-    if(!r || resource(id) || !id || !bytes || bytes>LIVE_MAX_BYTES || ++resource_epoch==0) {fail_worker(w,"resource identity/bound");return;}
++    const char *reason=!r?"registry full":resource(id)?"duplicate resource ID":!id?"zero resource ID":!bytes?"empty resource":bytes>LIVE_MAX_BYTES?"oversized resource":NULL;
++    if(reason || ++resource_epoch==0) {
++        unsigned live=0,tainted=0;for(unsigned i=0;i<MAX_RESOURCES;i++)if(resources[i].id) {live++;tainted+=resources[i].tainted;}
++        fprintf(stderr,"perp-live: registration refused reason=%s resource=%u context=%u bytes=%llu live=%u tainted=%u selected=%u active=%u\n",reason?reason:"epoch wrap",id,context,(unsigned long long)bytes,live,tainted,selected,active);
++        fail_worker(w,"resource identity/bound");return;
++    }
+     *r=(LiveResource){.id=id,.context=context,.worker_epoch=w->epoch,.epoch=resource_epoch,.blob=blob,.bytes=bytes};
+ }
+ void perp_live_resource_destroy(uint32_t id)
+@@ -377,7 +392,7 @@
+ 
+ void perp_live_renderer_reset(void)
+ {
+-    for(unsigned i=0;i<MAX_CONTEXTS;i++)if(workers[i].id)perp_live_context_stop(workers[i].id);
++    for(unsigned i=0;i<MAX_CONTEXTS;i++)if(workers[i].id)perp_live_context_stop(workers[i].id,false);
+     for(unsigned i=0;i<LIVE_MAX_PENDING;i++)if(frames[i].used && !frames[i].leased) {close_rights(frames[i].fds,2);memset(&frames[i],0,sizeof(frames[i]));}
+     selected=active=0;permanently_failed=refresh_requested=false;
+ }
+@@ -394,5 +409,7 @@
+     char *result=NULL;asprintf(&result,"%.*s,\"abandoned\":%llu,\"worker_allocations\":%llu,\"worker_reuses\":%llu,\"worker_abandon_requests\":%llu,\"worker_abandoned\":%llu,\"worker_peak_bytes\":%llu,\"worker_peak_retained\":%llu,\"worker_retirements\":%llu}",
+         (int)strlen(base)-1,base,(unsigned long long)abandoned,(unsigned long long)pool.allocations,(unsigned long long)pool.reuses,
+         (unsigned long long)pool.abandon_requests,(unsigned long long)pool.abandoned,(unsigned long long)pool.peak_bytes,(unsigned long long)pool.peak_held,(unsigned long long)pool.retirements);
+-    free(base);return result;
+-}
++    free(base);char *full=NULL;
++    asprintf(&full,"%.*s,\"context_retirements\":%llu}",(int)strlen(result)-1,result,(unsigned long long)context_retirements);
++    free(result);return full;
++}
+--- a/src/proxy/proxy_context.c
++++ b/src/proxy/proxy_context.c
+@@ -5,6 +5,7 @@
+ 
+ #include "proxy_context.h"
+ #include "live.h"
++#include "context-retirement.h"
+ 
+ #include <fcntl.h>
+ #include <poll.h>
+@@ -621,11 +622,11 @@
+ {
+    struct proxy_context *ctx = (struct proxy_context *)base;
+ 
+-   perp_live_context_stop(ctx->base.ctx_id);
+-
+-   /* ask the server process to terminate the context process */
+-   if (!proxy_client_destroy_context(ctx->client, ctx->base.ctx_id))
+-      proxy_log("failed to destroy ctx %d", ctx->base.ctx_id);
++   /* Confirm process exit before releasing the broker's producer budget. */
++   const bool producer_stopped = proxy_client_destroy_context(ctx->client, ctx->base.ctx_id);
++   perp_live_context_stop(ctx->base.ctx_id, producer_stopped && perp_context_retirement_enabled());
++   if (!producer_stopped)
++      proxy_log("failed to confirm destruction of ctx %d", ctx->base.ctx_id);
+ 
+    if (ctx->fence_socket_fd >= 0)
+       close(ctx->fence_socket_fd);
+--- a/src/proxy/proxy_client.c
++++ b/src/proxy/proxy_client.c
+@@ -10,6 +10,8 @@
+ #include "server/render_protocol.h"
+ 
+ #include "proxy_server.h"
++#include "context-retirement.h"
++#include <poll.h>
+ 
+ bool
+ proxy_client_destroy_context(struct proxy_client *client, uint32_t ctx_id)
+@@ -19,7 +21,17 @@
+       .ctx_id = ctx_id,
+    };
+ 
+-   return proxy_socket_send_request(&client->socket, &req, sizeof(req));
++   if (!proxy_socket_send_request(&client->socket, &req, sizeof(req)))
++      return false;
++   if (!perp_context_retirement_enabled())return true;
++   /* The matching server sends this only after actual child reaping. */
++   struct pollfd fd = {client->socket.fd,POLLIN,0};
++   int available;
++   do {available=poll(&fd,1,2000);}while(available<0 && errno==EINTR);
++   if(available!=1 || !(fd.revents&POLLIN))return false;
++   struct perp_context_retired_reply reply={0};
++   return proxy_socket_receive_reply(&client->socket,&reply,sizeof(reply)) &&
++      reply.context_id==ctx_id && reply.stopped==1;
+ }
+ 
+ bool
+--- a/server/render_worker.h
++++ b/server/render_worker.h
+@@ -41,7 +41,7 @@
+                      void *thread_data,
+                      size_t thread_data_size);
+ 
+-void
++bool
+ render_worker_destroy(struct render_worker_jail *jail, struct render_worker *worker);
+ 
+ bool
+--- a/server/render_worker.c
++++ b/server/render_worker.c
+@@ -10,6 +10,7 @@
+ #undef LIST_ENTRY
+ #endif
+ #include "render_worker.h"
++#include "context-retirement.h"
+ 
+ /* One and only one of ENABLE_RENDER_SERVER_WORKER_* must be set.
+  *
+@@ -598,7 +599,7 @@
+    return worker;
+ }
+ 
+-void
++bool
+ render_worker_destroy(struct render_worker_jail *jail, struct render_worker *worker)
+ {
+    assert(render_worker_is_record(worker));
+@@ -613,10 +614,16 @@
+       kill(worker->pid, SIGKILL);
+ #endif
+ 
++   if(perp_context_retirement_enabled() && !worker->reaped) {
++#ifndef ENABLE_RENDER_SERVER_WORKER_THREAD
++      worker->reaped=perp_context_reap(worker->pid);
++#endif
++   }
+    worker->destroyed = true;
+-
++   const bool stopped=worker->reaped;
+    if (worker->reaped)
+       render_worker_jail_remove_worker(jail, worker);
++   return stopped;
+ }
+ 
+ bool
+--- a/server/render_client.c
++++ b/server/render_client.c
+@@ -10,6 +10,7 @@
+ #include "render_context.h"
+ #include "render_server.h"
+ #include "render_worker.h"
++#include "context-retirement.h"
+ #include "virglrenderer.h"
+ #include "virtgpu_drm.h"
+ 
+@@ -57,16 +58,17 @@
+    list_inithead(&client->context_records);
+ }
+ 
+-static void
++static bool
+ render_client_remove_record(struct render_client *client,
+                             struct render_context_record *rec)
+ {
+    struct render_server *srv = client->server;
+ 
+-   render_worker_destroy(srv->worker_jail, rec->worker);
++   const bool stopped=render_worker_destroy(srv->worker_jail, rec->worker);
+ 
+    list_del(&rec->head);
+    free(rec);
++   return stopped;
+ }
+ 
+ static void
+@@ -198,9 +200,11 @@
+ {
+    const uint32_t ctx_id = req->destroy_context.ctx_id;
+    struct render_context_record *rec = render_client_find_record(client, ctx_id);
+-   if (rec)
+-      render_client_remove_record(client, rec);
+-
++   const bool stopped=!rec || render_client_remove_record(client, rec);
++   if(perp_context_retirement_enabled()) {
++      const struct perp_context_retired_reply reply={ctx_id,stopped?1u:0u};
++      return render_socket_send_reply(&client->socket,&reply,sizeof(reply));
++   }
+    return true;
+ }
+ 
+--- /dev/null
++++ b/src/perp-sync/context-retirement.h
+@@ -0,0 +1,35 @@
++/* SPDX-License-Identifier: MIT
++ * Private renderer/server agreement. Guest and scanout wire formats are unchanged.
++ */
++#ifndef PERP_CONTEXT_RETIREMENT_H
++#define PERP_CONTEXT_RETIREMENT_H
++#include <stdbool.h>
++#include <stdint.h>
++#include <stdlib.h>
++#include <string.h>
++#include <errno.h>
++#include <sys/wait.h>
++#include <time.h>
++#include <unistd.h>
++struct perp_context_retired_reply {uint32_t context_id,stopped;};
++static inline bool perp_context_retirement_enabled(void) {
++    const char *value=getenv("PERP_NEPTUNE_CONTEXT_RETIREMENT");
++    return value && !strcmp(value,"1");
++}
++static inline bool perp_context_reap(pid_t pid) {
++    /* Called by the single server owner after its existing worker SIGKILL.
++     * A timeout or unknown child cannot authorize reuse of the GPU budget. */
++    struct timespec start,current;
++    if(clock_gettime(CLOCK_MONOTONIC,&start))return false;
++    for(;;) {
++        siginfo_t info={0};
++        int result=waitid(P_PID,(id_t)pid,&info,WEXITED|WNOHANG);
++        if(!result && info.si_pid==pid)return true;
++        if(result && errno!=EINTR)return false;
++        if(clock_gettime(CLOCK_MONOTONIC,&current))return false;
++        int64_t elapsed=(int64_t)(current.tv_sec-start.tv_sec)*1000000000ll+current.tv_nsec-start.tv_nsec;
++        if(elapsed>=1000000000ll)return false;
++        usleep(1000);
++    }
++}
++#endif
