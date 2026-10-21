@@ -13,6 +13,7 @@ struct MachineConfiguration: Codable {
     let mac: String
     let guestPort: UInt16
     let token: String
+    let graphics:String?
 }
 
 @MainActor
@@ -22,6 +23,9 @@ final class VirtualMachineController {
     let configuration: MachineConfiguration
     private var machine: Process?
     private var tpm: Process?
+    private var desktop:DesktopWindow?
+    private var displayControl:DesktopConnection?
+    private var displayRequest:UUID?
     let controlSocket: String
 
     init(directory: URL, runtime: URL) throws {
@@ -29,6 +33,9 @@ final class VirtualMachineController {
         self.runtime = runtime
         configuration = try JSONDecoder().decode(MachineConfiguration.self,
             from: Data(contentsOf: directory.appendingPathComponent("machine.json")))
+        guard configuration.graphics == nil || ["standard","native3D"].contains(configuration.graphics!) else{
+            throw CocoaError(.coderReadCorrupt,userInfo:[NSLocalizedDescriptionKey:"Unknown Windows graphics configuration."])
+        }
         controlSocket = "/tmp/perpendicular-\(getuid())-\(configuration.id.prefix(8)).sock"
     }
 
@@ -44,16 +51,58 @@ final class VirtualMachineController {
 
     func showDesktop() throws {
         if !isRunning {try start()}
+        if let launch=desktopLaunch() {
+            if desktop == nil {desktop=try DesktopWindow(socket:launch.socket,endpoint:{[weak self] in self?.desktopLaunch()?.native})}
+            desktop?.show();return
+        }
         let path=directory.appendingPathComponent("qemu-system-aarch64.pid")
         guard let text=try? String(contentsOf:path,encoding:.utf8),let pid=Int32(text),
               let application=NSRunningApplication(processIdentifier:pid) else {return}
         application.unhide();application.activate(options:[])
     }
+    func closeDesktop(){desktop?.stop();desktop?.window.close();desktop=nil}
+    func synchronizePrimaryDisplay(){
+        guard configuration.graphics == "native3D",let launch=desktopLaunch(),let host=HostDisplay.current().first else{return}
+        let width=min(4096,Int((host.frame.width*host.scale).rounded()))
+        let height=min(4096,8_388_608/max(1,width),Int((host.frame.height*host.scale).rounded()))
+        let request=UUID();displayRequest=request;displayControl?.stop()
+        let client=DesktopConnection(path:launch.socket,receive:{_,_,_ in},layout:{[weak self] screen in
+            guard let self,self.displayRequest == request,screen.width == width,screen.height == height else{return}
+            self.displayRequest=nil;self.displayControl?.stop();self.displayControl=nil
+        },failed:{[weak self] _ in
+            guard let self,self.displayRequest == request else{return}
+            self.displayRequest=nil;self.displayControl?.stop();self.displayControl=nil
+        })
+        // Configure the monitor after the interactive guest is connected, not
+        // while firmware is choosing its boot framebuffer. Closing the recovery
+        // console must not control the Windows monitor geometry.
+        displayControl=client;client.requestPixels(false)
+        client.setScreens([DesktopScreen(id:0,x:0,y:0,width:width,height:height)]);client.start()
+        Task{@MainActor [weak self] in
+            try? await Task.sleep(for:.seconds(5))
+            guard let self,self.displayRequest == request else{return}
+            self.displayRequest=nil;self.displayControl?.stop();self.displayControl=nil
+        }
+    }
+    private func desktopLaunch()->DesktopLaunch?{
+        guard let bytes=try? Data(contentsOf:directory.appendingPathComponent("desktop-launch.json")),bytes.count<8192,
+              let launch=try? JSONDecoder().decode(DesktopLaunch.self,from:bytes),launch.machineID == configuration.id,
+              let text=try? String(contentsOf:directory.appendingPathComponent("qemu-system-aarch64.pid"),encoding:.utf8),
+              Int32(text) == launch.pid,kill(launch.pid,0) == 0 else{return nil}
+        return launch
+    }
 
     func start() throws {
         guard !isRunning else { return }
+        closeDesktop()
         let vm = directory.appendingPathComponent("Windows")
+        let native=configuration.graphics == "native3D" ? try NativeGraphics(root:runtime.deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("Native3D")):nil
+        let session=UUID().uuidString.replacingOccurrences(of:"-",with:"").lowercased()
+        let displayDirectory=URL(fileURLWithPath:"/tmp/perpendicular-display-\(getuid())-\(session.prefix(8))")
+        try FileManager.default.createDirectory(at:displayDirectory,withIntermediateDirectories:false,attributes:[.posixPermissions:0o700])
+        let desktopSocket=displayDirectory.appendingPathComponent("desktop.sock").path
         let tpmSocket = "/tmp/perpendicular-tpm-\(getuid())-\(configuration.id.prefix(8)).sock"
+        try stopPreviousTPM(socket:tpmSocket,vm:vm)
         try? FileManager.default.removeItem(atPath: controlSocket)
         try? FileManager.default.removeItem(atPath: tpmSocket)
         tpm = try launch("swtpm", ["socket", "--tpm2", "--tpmstate", "dir=\(vm.path)/tpm",
@@ -70,11 +119,12 @@ final class VirtualMachineController {
             String(data: try! JSONSerialization.data(withJSONObject: object), encoding: .utf8)!
         }
         let c = configuration
-        let arguments = [
+        var arguments = [
             "-name", "Perpendicular Windows", "-uuid", c.id,
+            "-L",runtime.deletingLastPathComponent().appendingPathComponent("share/qemu").path,
             "-machine", "virt,gic-version=3,highmem=on,pflash0=code,pflash1=vars",
-            "-accel", "hvf", "-cpu", "host", "-smp", String(c.cpus), "-m", String(c.memoryMiB),
-            "-nodefaults", "-vga", "none", "-device", "ramfb",
+            "-accel", native == nil ? "hvf":"hvf,ipa-granule-size=4096", "-cpu", "host", "-smp", String(c.cpus), "-m", String(c.memoryMiB),
+            "-nodefaults", "-vga", "none",
             "-device", "qemu-xhci,id=xhci", "-device", "usb-kbd,bus=xhci.0",
             "-device", "usb-tablet,bus=xhci.0", "-device", "virtio-rng-pci",
             "-netdev", "user,id=net", "-device", "virtio-net-pci,netdev=net,romfile=,mac=\(c.mac)",
@@ -88,11 +138,24 @@ final class VirtualMachineController {
             "-drive", "if=none,id=bootstrap,media=cdrom,readonly=on",
             "-device", "usb-bot,id=usbcd,bus=xhci.0", "-device", "scsi-cd,drive=bootstrap,bus=usbcd.0",
             "-chardev", "socket,id=tpmchar,path=\(tpmSocket)", "-tpmdev", "emulator,id=tpm,chardev=tpmchar",
-            "-device", "tpm-tis-device,tpmdev=tpm,ppi=off",
-            "-display", "cocoa,show-cursor=on", "-qmp", "unix:\(controlSocket),server=on,wait=off",
+            "-device", native == nil ? "tpm-tis-device,tpmdev=tpm,ppi=off":"tpm-tis-device,tpmdev=tpm",
+            "-display", native == nil ? "none":"egl-headless,gl=es", "-vnc", "unix:\(desktopSocket)",
+            "-qmp", "unix:\(controlSocket),server=on,wait=off",
             "-monitor", "none", "-serial", "file:\(directory.path)/serial.log", "-rtc", "base=localtime"
         ]
-        machine = try launch("qemu-system-aarch64", arguments, log: "qemu.log")
+        if native != nil {
+            // First qualify the reference backend's single scanout. Additional
+            // monitor outputs require their own topology/capture integration.
+            arguments += ["-device","virtio-ramfb-gl,id=display0,addr=0x8,disable-legacy=on,neptune=on,blob=on,hostmem=256M,max_outputs=1,xres=1280,yres=800"]
+        }else{arguments += ["-device","ramfb"]}
+        machine = try launch("qemu-system-aarch64",arguments,log:"qemu.log",executable:native?.executable,
+            environment:native?.environment(directory:displayDirectory,session:session))
+        let endpoint=native.map{_ in NativeDisplayEndpoint(socketPath:displayDirectory.appendingPathComponent("native-display.sock").path,
+            serverPID:machine!.processIdentifier,expectedUID:getuid(),sessionHi:UInt64(session.prefix(16),radix:16)!,sessionLo:UInt64(session.suffix(16),radix:16)!,epoch:1)}
+        let state=DesktopLaunch(machineID:c.id,pid:machine!.processIdentifier,socket:desktopSocket,native:endpoint)
+        let launchFile=directory.appendingPathComponent("desktop-launch.json")
+        try JSONEncoder().encode(state).write(to:launchFile,options:.atomic)
+        try FileManager.default.setAttributes([.posixPermissions:0o600],ofItemAtPath:launchFile.path)
         let companion=tpm
         machine?.terminationHandler={_ in if companion?.isRunning==true{companion?.terminate()}}
         let readyDeadline=Date().addingTimeInterval(4)
@@ -101,15 +164,32 @@ final class VirtualMachineController {
                 if tpm?.isRunning==true{tpm?.terminate()}
                 throw CocoaError(.executableRuntimeMismatch,userInfo:[NSLocalizedDescriptionKey:"Windows could not start. See qemu.log in the machine folder."])
             }
-            if FileManager.default.fileExists(atPath:controlSocket){return}
+            if FileManager.default.fileExists(atPath:controlSocket),
+               (try? MachineControl.execute(socket:controlSocket,operation:"query-uuid")["UUID"] as? String) == c.id {return}
             Thread.sleep(forTimeInterval:0.03)
         }
-        throw CocoaError(.executableNotLoadable,userInfo:[NSLocalizedDescriptionKey:"The Windows console did not become ready."])
+        // A live VM can take longer on its first launch. The guest connection
+        // and desktop retry report readiness; do not label a slow boot failed.
+        guard machine?.isRunning == true else {
+            throw CocoaError(.executableNotLoadable,userInfo:[NSLocalizedDescriptionKey:"Windows stopped while starting."])
+        }
     }
 
-    private func launch(_ name: String, _ arguments: [String], log: String) throws -> Process {
+    private func stopPreviousTPM(socket:String,vm:URL)throws{
+        guard let text=try? String(contentsOf:directory.appendingPathComponent("swtpm.pid"),encoding:.utf8),let pid=Int32(text),kill(pid,0) == 0 else{return}
+        let inspect=Process();inspect.executableURL=URL(fileURLWithPath:"/bin/ps");inspect.arguments=["-p",String(pid),"-o","command="]
+        let pipe=Pipe();inspect.standardOutput=pipe;try inspect.run()
+        let command=String(data:pipe.fileHandleForReading.readDataToEndOfFile(),encoding:.utf8) ?? "";inspect.waitUntilExit()
+        guard command.contains(socket),command.contains(vm.path+"/tpm") else{throw CocoaError(.executableRuntimeMismatch,userInfo:[NSLocalizedDescriptionKey:"The saved TPM process does not belong to this machine."])}
+        kill(pid,SIGTERM)
+        let deadline=Date().addingTimeInterval(3)
+        while kill(pid,0) == 0,Date()<deadline {Thread.sleep(forTimeInterval:0.03)}
+        guard kill(pid,0) != 0 else{throw CocoaError(.executableRuntimeMismatch,userInfo:[NSLocalizedDescriptionKey:"The virtual TPM is still stopping."])}
+    }
+    private func launch(_ name: String, _ arguments: [String], log: String,executable:URL?=nil,environment:[String:String]?=nil) throws -> Process {
         let process = Process()
-        process.executableURL = name=="qemu-system-aarch64" ? runtime.deletingLastPathComponent().appendingPathComponent("Windows Console.app/Contents/MacOS/qemu-system-aarch64") : runtime.appendingPathComponent(name)
+        process.executableURL=executable ?? runtime.appendingPathComponent(name)
+        if let environment {process.environment=ProcessInfo.processInfo.environment.merging(environment){_,new in new}}
         process.arguments = arguments
         let logURL = directory.appendingPathComponent(log)
         if !FileManager.default.fileExists(atPath: logURL.path) {

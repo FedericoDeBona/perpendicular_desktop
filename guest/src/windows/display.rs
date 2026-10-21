@@ -9,7 +9,10 @@ use windows::{
             Dxgi::{DXGI_ADAPTER_DESC1, DXGI_ADAPTER_FLAG_SOFTWARE, IDXGIAdapter1, IDXGIDevice},
             Gdi::*,
         },
-        UI::HiDpi::{GetDpiForMonitor, MDT_EFFECTIVE_DPI},
+        UI::HiDpi::{
+            DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, GetDpiForMonitor, MDT_EFFECTIVE_DPI,
+            SetThreadDpiAwarenessContext,
+        },
     },
     core::{Interface, PCWSTR},
 };
@@ -20,7 +23,7 @@ fn text(value: &[u16]) -> String {
 
 /// Read the real adapter before admitting a graphics upgrade. A successful
 /// hardware-device call is reported separately from capture and presentation.
-fn graphics() -> Value {
+pub fn graphics() -> Value {
     unsafe {
         let mut device = None;
         let mut level = D3D_FEATURE_LEVEL::default();
@@ -61,6 +64,7 @@ fn graphics() -> Value {
 pub fn snapshot() -> Value {
     let mut displays = Vec::new();
     unsafe {
+        SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
         for index in 0..16 {
             let mut device = DISPLAY_DEVICEW {
                 cb: size_of::<DISPLAY_DEVICEW>() as u32,
@@ -122,5 +126,7 @@ pub fn snapshot() -> Value {
                 "dpi":dpi,"modes":modes.into_iter().map(|(w,h)|json!({"width":w,"height":h})).collect::<Vec<_>>()}));
         }
     }
-    json!({"displays":displays,"graphics":graphics()})
+    // Enumerating monitors must not initialize a possibly unhealthy graphics
+    // driver on every connection. The hardware probe is an explicit operation.
+    json!({"displays":displays})
 }

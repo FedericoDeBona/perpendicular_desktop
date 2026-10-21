@@ -86,6 +86,7 @@ for name in ('qemu-img', 'swtpm'):
     copy_binary(prefix / 'bin' / name, runtime / 'bin' / name)
 share = runtime / 'share/qemu'
 share.mkdir(parents=True, exist_ok=True)
+shutil.copytree(prefix / 'share/qemu/keymaps',share / 'keymaps',dirs_exist_ok=True)
 # This machine uses existing enrolled ARM firmware, RAMFB and no PXE boot.
 for name in ('vgabios-ramfb.bin',):
     source = prefix / 'share/qemu' / name

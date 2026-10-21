@@ -22,8 +22,9 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,ObservableObject {
     func applicationDidFinishLaunching(_ notification:Notification){
         do{
             let directory=FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/Perpendicular Restart")
-            let bundled=Bundle.main.resourceURL!.appendingPathComponent("QEMU/bin")
-            let runtime=ProcessInfo.processInfo.environment["PERPENDICULAR_RUNTIME"].map{URL(fileURLWithPath:$0)} ?? bundled
+            let runtime:URL
+            if let override=ProcessInfo.processInfo.environment["PERPENDICULAR_RUNTIME"] {runtime=URL(fileURLWithPath:override)}
+            else {runtime=try RuntimeStore.prepare(contents:Bundle.main.bundleURL.appendingPathComponent("Contents"),directory:directory)}
             machine=try VirtualMachineController(directory:directory,runtime:runtime)
             bridge=try GuestBridge(port:machine.configuration.guestPort,token:machine.configuration.token)
             bridge.onConnection={ [weak self] value in
@@ -72,7 +73,7 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,ObservableObject {
     func applicationShouldHandleReopen(_ sender:NSApplication,hasVisibleWindows flag:Bool)->Bool{showApplications();return false}
     @objc func showApplications(){launcher.makeKeyAndOrderFront(nil);NSApp.activate(ignoringOtherApps:true)}
     @objc func closeCurrentWindow(){(NSApp.keyWindow ?? NSApp.mainWindow)?.performClose(nil)}
-    func applicationWillTerminate(_ notification:Notification){bridge?.command("release")}
+    func applicationWillTerminate(_ notification:Notification){bridge?.command("release");machine?.closeDesktop()}
     @objc func showWindows(){do{try machine.showDesktop()}catch{status=error.localizedDescription}}
     @objc func shutdownWindows(){do{try machine.shutdown()}catch{status=error.localizedDescription}}
     func refresh(){
@@ -123,12 +124,22 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,ObservableObject {
         }
         switch value["type"] as? String{
         case "hello":
+            machine.synchronizePrimaryDisplay()
             if let capabilities=value["capabilities"] as? [String:Any],capabilities["displayInfo"] as? Bool == true {
                 bridge.command("display_info",timeout:.seconds(3)){result in
                     guard ProcessInfo.processInfo.environment["PERPENDICULAR_STATE_TRACE"] == "1",
                           case .success(let reply)=result,let state=reply["value"] as? [String:Any] else{return}
                     let value:[String:Any]=["type":"display_info","guest":state,"host":HostDisplay.current().map(\.description)]
                     if let data=try? JSONSerialization.data(withJSONObject:value,options:[.sortedKeys]){try? FileHandle.standardError.write(contentsOf:data+Data([10]))}
+                }
+            }
+            if ProcessInfo.processInfo.environment["PERPENDICULAR_STATE_TRACE"] == "1",
+               let capabilities=value["capabilities"] as? [String:Any],capabilities["graphicsInfo"] as? Bool == true {
+                bridge.command("graphics_info",timeout:.seconds(3)){result in
+                    guard case .success(let reply)=result else{return}
+                    if let data=try? JSONSerialization.data(withJSONObject:["type":"graphics_info","guest":reply["value"] ?? [:]],options:[.sortedKeys]) {
+                        try? FileHandle.standardError.write(contentsOf:data+Data([10]))
+                    }
                 }
             }
         case "windows":

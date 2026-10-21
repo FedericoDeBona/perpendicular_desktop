@@ -21,6 +21,8 @@ Un servizio Rust avvia e sorveglia il worker nella sessione interattiva dell'ute
 
 I comandi di avvio non vengono ritentati automaticamente. La riconnessione ritrova le finestre per processo, tempo di creazione e sessione; non rilancia le app. L'input usa identità opache della finestra e una generazione della geometria; rilascia tasti e pulsanti alla disconnessione.
 
+Per le app confezionate l'attivazione Shell può riusare una finestra senza restituire un processo o creare un nuovo HWND. Il catalogo conserva l'identità di attivazione e la confronta con l'[AppUserModelID del processo](https://learn.microsoft.com/en-us/windows/win32/api/appmodel/nf-appmodel-getapplicationusermodelid). Restano i controlli su utente e sessione; il titolo non è un'identità affidabile.
+
 ## Confini per gli aggiornamenti
 
 | Componente attuale | Aggiornamento possibile | Contratto da conservare / nuova verifica |
@@ -47,7 +49,7 @@ La sostituzione di un codec o del trasporto non richiede di riscrivere il catalo
 
 `scripts/build-guest.sh` compila il binario Windows ARM64 con Rust e cargo-xwin (SDK Microsoft, CRT statico). `scripts/build-macos.sh` compila Swift 6 e include QEMU, swtpm e la chiusura delle relative librerie da Homebrew. Servono Xcode command line tools, Rust con target `aarch64-pc-windows-msvc`, cargo-xwin e le formule `qemu` e `swtpm`.
 
-Il pacchetto di sviluppo è `.build/Perpendicular.app`, firmato ad hoc; contiene una console QEMU nativa con entitlement Hypervisor, licenze e manifest dei binari. Non include dischi, token, vecchio motore grafico o vecchi agenti. La macchina locale è in `~/Library/Application Support/Perpendicular Restart/`.
+Il pacchetto di sviluppo è `.build/Perpendicular.app`, firmato ad hoc; contiene QEMU con entitlement Hypervisor, licenze e manifest dei binari. Può includere il solo runtime Native3D preparato e verificato come descritto sotto. Non include dischi, token o vecchi agenti. La macchina locale è in `~/Library/Application Support/Perpendicular Restart/`.
 
 Per aggiornare il guest della macchina locale già avviata: compilare il guest, eseguire `python3 scripts/bootstrap-guest.py`, aprire la console Windows ed eseguire `D:\install.cmd`. Il CD con il token resta nella cartella privata della macchina. `SKIP_RUNTIME=1 scripts/build-macos.sh` consente di ricompilare il frontend senza sostituire il runtime già incluso; è il percorso da usare mentre la VM è in esecuzione.
 
@@ -79,10 +81,24 @@ Tre controlli mirati della geometria sono in tests/WindowGeometryChecks.swift e 
 
 Il trasporto resta CPU BGRA: staging/readback Windows, invio TCP e caricamento nella texture Mac. Non è zero-copy e la cattura guest resta WARP. Il ricevitore accumula i blocchi nel medesimo buffer, evitando di ricopiare i blocchi precedenti a ogni lettura. Non sono ancora misurati guadagni di latenza o throughput.
 
-`display_info` legge in Rust monitor attivi, modalità esposte, coordinate, DPI e adapter Direct3D. `HostDisplay` conserva separatamente punti e pixel dei monitor Mac; con `PERPENDICULAR_STATE_TRACE=1` il confronto host/guest e il primo completamento GPU Metal vengono scritti nella diagnostica privata. La lettura non cambia risoluzione, scala o driver. Microsoft Basic Render Driver viene riconosciuto anche tramite gli ID `1414:008C`: può riuscire una richiesta D3D HARDWARE senza che il flag SOFTWARE sia impostato. [Descrizione Microsoft](https://learn.microsoft.com/en-us/windows/win32/direct3ddxgi/d3d10-graphics-programming-guide-dxgi).
+`display_info` legge in Rust monitor attivi, modalità esposte, coordinate e DPI. La creazione del dispositivo Direct3D è separata in `graphics_info`, una prova esplicita fuori dal ciclo dei comandi: un driver lento non deve bloccare catalogo e input, né essere inizializzato a ogni normale collegamento. `HostDisplay` conserva separatamente punti e pixel dei monitor Mac; con `PERPENDICULAR_STATE_TRACE=1` il confronto host/guest, la prova grafica opzionale e il primo completamento GPU Metal vengono scritti nella diagnostica privata. La lettura non cambia risoluzione, scala o driver. Microsoft Basic Render Driver viene riconosciuto anche tramite gli ID `1414:008C`: può riuscire una richiesta D3D HARDWARE senza che il flag SOFTWARE sia impostato. [Descrizione Microsoft](https://learn.microsoft.com/en-us/windows/win32/direct3ddxgi/d3d10-graphics-programming-guide-dxgi).
 
 ## Preparazione del runtime grafico di riferimento
 
 `scripts/prepare-native-graphics.py SOURCE OUTPUT [--qemu ORIGINAL_QEMU]` prepara solo gli artefatti Native3D in una nuova cartella privata. Verifica versioni del protocollo e hash di tutti i file prima della copia e conserva licenze, patch e metadati da `ThirdPartyNotices/Native3D`. L'eventuale QEMU alternativo deve coincidere esattamente con l'hash del manifest: non permette di mescolare build arbitrarie. Non importa la vecchia app, agenti, sharing o configurazioni della VM.
 
-Il runtime preparato non viene ancora selezionato dalla VM e richiederà le risorse QEMU/firmware del pacchetto attraverso `-L`. Prima di sostituire driver o runtime restano da predisporre il rollback offline della VM, l'avvio del backend e il recupero del desktop. La verifica dei file non dimostra da sola accelerazione Windows, cattura per finestra o supporto a più monitor.
+Il runtime preparato viene incluso da `build-macos.sh` quando presente in `.build/Native3D`; è selezionabile nella configurazione privata della macchina con `graphics: "native3D"`. Il profilo standard rimane il percorso di recupero. Il profilo Native3D usa QEMU 10.0.12 con il backend senza finestre, il broker di scanout e il dispositivo ibrido RAMFB/VirtIO GPU. La prima configurazione da qualificare ha una sola uscita; il supporto a più monitor richiede ancora integrazione e verifica. Entrambi i profili ricevono le risorse QEMU attraverso `-L`, comprese le mappe tastiera necessarie a VNC. La verifica dei file e la selezione del profilo non dimostrano accelerazione Windows o cattura accelerata per finestra.
+
+### Desktop integrato e runtime persistenti
+
+`Show Windows` apre una finestra della stessa app, con presentazione Metal e input sul socket RFB privato. Nel profilo standard QEMU gira con `-display none`; il desktop completo resta disponibile senza una seconda app Cocoa. Il socket risiede in una directory privata creata per l'avvio e il relativo stato identifica macchina e processo. La console tenta di riconnettersi mentre è visibile e rilascia l'input quando perde il focus o viene chiusa. Il protocollo implementato è il sottoinsieme necessario di [RFB 3.8](https://github.com/rfbproto/rfbproto/blob/master/rfbproto.rst), con pixel grezzi e notifiche di dimensione.
+
+Quando il backend Native3D produce una superficie valida, `NativeDisplayReader` importa la memoria condivisa nella texture Metal e sospende le richieste di pixel RFB. L'input della console conserva il proprio collegamento. Il trasporto C MIT proviene dal componente selezionato del vecchio progetto: verifica identità, sessione, dimensioni e completamento del produttore. Il frame rimane vivo fino all'ultimo comando GPU che lo legge; solo allora può essere confermato al produttore. Una disconnessione non autorizza a riutilizzare la memoria ancora letta dalla GPU. Questo percorso riguarda il desktop; le singole finestre continuano a usare il trasporto BGRA esistente finché non viene integrato un percorso dedicato.
+
+`RuntimeStore` copia QEMU, librerie, risorse ed eventuale Native3D in `Runtimes/<hash>/` nella cartella privata della macchina, conservando i percorsi relativi. L'identità comprende contenuti, percorsi e collegamenti interni; la copia viene verificata prima della pubblicazione. Le versioni precedenti non vengono sovrascritte né rimosse mentre una VM può usarle. Una pulizia di `.build` o una nuova compilazione non devono eliminare gli eseguibili e le librerie dei processi già avviati.
+
+### Preparazione del guest e ritorno al percorso standard
+
+`scripts/checkpoint-machine.py [--shutdown]` prepara un checkpoint offline APFS di configurazione, disco, EFI e TPM. Richiede che la copia sia spenta regolarmente e verifica l'identità del processo prima di chiederne l'arresto. Non forza spegnimenti, non ripristina automaticamente il disco e non modifica la VM originale.
+
+Il driver ARM64 è fissato in `guest/graphics-driver.json`, dalla [release v0.3](https://github.com/osy/kvm-guest-drivers-windows/releases/tag/v0.3). `bootstrap-guest.py --graphics-driver-dir PATH` aggiunge al CD solo gli undici file corrispondenti agli hash previsti. `install-graphics.cmd` richiede l'elevazione normale; lo script verifica nuovamente i file e la firma attendibile del catalogo, poi usa pnputil. Non disattiva protezioni Windows e non forza riavvii. Conservare il checkpoint prima del cambio di driver e selezionare il profilo solo a VM spenta.

@@ -7,20 +7,23 @@ import QuartzCore
 @MainActor
 final class WindowRenderer {
     let layer=CAMetalLayer()
-    private let device:any MTLDevice
+    let device:any MTLDevice
     private let queue:any MTLCommandQueue
     private let pipeline:any MTLRenderPipelineState
     private var texture:(any MTLTexture)?
+    private var external:NativeDisplayFrame?
+    private let opaque:Bool
     private var pixels=Data()
     private var size=NSSize.zero
     private var revision:UInt64=0
     private var uploaded:UInt64=0
     private var drawing=false
     private var dirty=false
-    private var reported=false
+    private var reportedSources=Set<Bool>()
     var onError:((String)->Void)?
 
-    init() throws {
+    init(opaque:Bool=false) throws {
+        self.opaque=opaque
         guard let device=MTLCreateSystemDefaultDevice(),let queue=device.makeCommandQueue() else {
             throw CocoaError(.featureUnsupported)
         }
@@ -35,9 +38,11 @@ final class WindowRenderer {
             float2 point=points[index];
             return {float4(point*scale,0,1),float2((point.x+1)*0.5,(1-point.y)*0.5)};
         }
-        fragment float4 window_fragment(Vertex in [[stage_in]],texture2d<float> image [[texture(0)]]) {
+        fragment float4 window_fragment(Vertex in [[stage_in]],texture2d<float> image [[texture(0)]],constant uint &opaque [[buffer(0)]]) {
             constexpr sampler sample(filter::linear,address::clamp_to_edge);
-            return image.sample(sample,in.uv);
+            float4 value=image.sample(sample,in.uv);
+            if(opaque) value.a=1;
+            return value;
         }
         """
         let library=try device.makeLibrary(source:source,options:nil)
@@ -59,22 +64,30 @@ final class WindowRenderer {
         dirty=true;draw()
     }
     func present(_ pixels:Data,width:Int,height:Int){
+        external=nil
         self.pixels=pixels;size=NSSize(width:width,height:height)
         revision &+= 1;dirty=true;draw()
     }
+    func present(_ frame:NativeDisplayFrame){
+        guard frame.texture.device.registryID == device.registryID else{onError?("The graphics devices do not match.");return}
+        external=frame;pixels=Data();size=NSSize(width:frame.texture.width,height:frame.texture.height)
+        dirty=true;draw()
+    }
+    func clear(){external=nil;pixels=Data();size = .zero;texture=nil;dirty=false}
     func draw(){
         // Keep only the latest CPU frame and one GPU reader. Reusing a texture
         // waits for that reader's completion, including across resize/retirement.
-        guard dirty,!drawing,!pixels.isEmpty,size.width>0,size.height>0,
+        guard dirty,!drawing,(external != nil || !pixels.isEmpty),size.width>0,size.height>0,
               layer.drawableSize.width>0,layer.drawableSize.height>0 else{return}
         let width=Int(size.width),height=Int(size.height)
-        if texture?.width != width || texture?.height != height {
+        let lease=external
+        if lease == nil && (texture?.width != width || texture?.height != height) {
             let descriptor=MTLTextureDescriptor.texture2DDescriptor(pixelFormat:.bgra8Unorm,width:width,height:height,mipmapped:false)
             descriptor.storageMode = .shared;descriptor.usage = .shaderRead
             texture=device.makeTexture(descriptor:descriptor);uploaded=0
         }
-        guard let texture,let drawable=layer.nextDrawable(),let command=queue.makeCommandBuffer() else{return}
-        if uploaded != revision {
+        guard let texture=lease?.texture ?? texture,let drawable=layer.nextDrawable(),let command=queue.makeCommandBuffer() else{return}
+        if lease == nil && uploaded != revision {
             pixels.withUnsafeBytes {bytes in
                 texture.replace(region:MTLRegionMake2D(0,0,width,height),mipmapLevel:0,withBytes:bytes.baseAddress!,bytesPerRow:width*4)
             }
@@ -90,22 +103,27 @@ final class WindowRenderer {
         encoder.setRenderPipelineState(pipeline)
         encoder.setVertexBytes(&scale,length:MemoryLayout<SIMD2<Float>>.size,index:0)
         encoder.setFragmentTexture(texture,index:0)
+        var forceOpaque:UInt32=opaque ? 1:0
+        encoder.setFragmentBytes(&forceOpaque,length:MemoryLayout<UInt32>.size,index:0)
         encoder.drawPrimitives(type:.triangle,vertexStart:0,vertexCount:6)
         encoder.endEncoding()
         drawing=true;dirty=false
+        let nativeSurface=lease != nil
         command.present(drawable)
-        command.addCompletedHandler { [weak self] buffer in
+        command.addCompletedHandler { [weak self,lease] buffer in
+            // Retain the producer's immutable frame until this actual GPU read.
+            withExtendedLifetime(lease){}
             let failed=buffer.status == .error
             let message=buffer.error?.localizedDescription
             Task{@MainActor [weak self] in
                 guard let self else{return}
                 self.drawing=false
                 if failed {self.onError?(message ?? "The graphics device could not present this window.")}
-                else if !self.reported {
-                    self.reported=true
+                else if !self.reportedSources.contains(nativeSurface) {
+                    self.reportedSources.insert(nativeSurface)
                     if ProcessInfo.processInfo.environment["PERPENDICULAR_STATE_TRACE"] == "1" {
                         let value:[String:Any]=["type":"renderer","backend":"metal","device":self.device.name,
-                            "sourceWidth":width,"sourceHeight":height,"gpuCompleted":true]
+                            "sourceWidth":width,"sourceHeight":height,"source":nativeSurface ? "native-surface":"cpu","gpuCompleted":true]
                         if let data=try? JSONSerialization.data(withJSONObject:value){try? FileHandle.standardError.write(contentsOf:data+Data([10]))}
                     }
                 }

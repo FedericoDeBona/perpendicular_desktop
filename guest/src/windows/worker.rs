@@ -52,6 +52,7 @@ struct Worker {
     serial: u64,
     pressed: HashSet<u16>,
     buttons: HashSet<String>,
+    display_busy: Arc<AtomicBool>,
 }
 
 fn state_path() -> PathBuf {
@@ -95,6 +96,7 @@ pub fn run(path: &Path) -> Result<(), String> {
         serial: 0,
         pressed: HashSet::new(),
         buttons: HashSet::new(),
+        display_busy: Arc::new(AtomicBool::new(false)),
     };
     worker.restore();
     let endpoint: SocketAddr = format!("10.0.2.2:{}", config.port).parse().map_err(error)?;
@@ -131,7 +133,7 @@ impl Worker {
         outbox.control(
             json!({"type":"hello","protocol":1,"token":config.token,"epoch":self.epoch,
             "sid":self.sid,"session":self.session,"version":env!("CARGO_PKG_VERSION"),
-            "capabilities":{"capture":"software","windows":4,"transients":12,"windowRoles":true,"input":true,"catalogue":true,"displayInfo":true}}),
+            "capabilities":{"capture":"software","windows":4,"transients":12,"windowRoles":true,"input":true,"catalogue":true,"displayInfo":true,"graphicsInfo":true}}),
         );
         let (sender, receiver) = mpsc::sync_channel(128);
         let state = outbox.clone();
@@ -161,14 +163,27 @@ impl Worker {
         while outbox.connected.load(Ordering::Acquire) {
             if let Ok(command) = receiver.recv_timeout(Duration::from_millis(10)) {
                 let request = command["request"].clone();
-                if command["operation"] == "diagnostics" {
-                    if diagnostic_busy.swap(true, Ordering::AcqRel) {
+                if command["operation"] == "diagnostics" || command["operation"] == "display_info" || command["operation"] == "graphics_info" {
+                    let graphics_request = command["operation"] == "graphics_info";
+                    let display_request = command["operation"] == "display_info" || graphics_request;
+                    let busy = if display_request {
+                        self.display_busy.clone()
+                    } else {
+                        diagnostic_busy.clone()
+                    };
+                    if busy.swap(true, Ordering::AcqRel) {
                         outbox.control(json!({"type":"reply","request":request,"ok":false,"message":"Diagnostics already running"}));
                     } else {
                         let sender = outbox.clone();
-                        let busy = diagnostic_busy.clone();
                         std::thread::spawn(move || {
-                            sender.control(match diagnostics(){Ok(value)=>json!({"type":"reply","request":request,"ok":true,"result":value}),
+                            let result = if graphics_request {
+                                Ok(display::graphics())
+                            } else if display_request {
+                                Ok(display::snapshot())
+                            } else {
+                                diagnostics()
+                            };
+                            sender.control(match result{Ok(value)=>json!({"type":"reply","request":request,"ok":true,"result":value}),
                                 Err(message)=>json!({"type":"reply","request":request,"ok":false,"message":message})});
                             busy.store(false, Ordering::Release);
                         });
@@ -231,7 +246,6 @@ impl Worker {
             }
         }
         match value["operation"].as_str().ok_or("Missing operation")? {
-            "display_info" => Ok(display::snapshot()),
             "catalogue" => Ok(self.catalogue.refresh()?),
             "launch" => {
                 let app = value["app"].as_str().ok_or("Missing app identity")?;
@@ -413,7 +427,8 @@ impl Worker {
                 .copied()
                 .filter(|raw| {
                     ((launch.pid != 0 && catalogue::process_id(*raw) == launch.pid)
-                        || (!launch.before.contains(raw) && *raw == foreground))
+                        || (!launch.before.contains(raw) && *raw == foreground)
+                        || self.catalogue.matches(&launch.app,*raw))
                         && catalogue::details(*raw, &self.sid, self.session)
                             .is_some_and(|m| !catalogue::transient(&m))
                 })
