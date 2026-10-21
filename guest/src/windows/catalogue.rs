@@ -14,13 +14,13 @@ use windows::{
             Packaging::Appx::GetApplicationUserModelId,
         },
         System::{
-            Com::CoTaskMemFree,
+            Com::{COINIT_APARTMENTTHREADED, CoInitializeEx, CoTaskMemFree, CoUninitialize},
             Threading::{GetProcessId, GetProcessTimes, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION},
         },
         UI::{
             Input::KeyboardAndMouse::IsWindowEnabled,
             Shell::{
-                BHID_EnumItems, IEnumShellItems, IShellItem, IShellItem2, SEE_MASK_IDLIST,
+                BHID_EnumItems, IEnumShellItems, ILGetSize, IShellItem, IShellItem2, SEE_MASK_IDLIST,
                 SEE_MASK_NOASYNC, SEE_MASK_NOCLOSEPROCESS, SHCreateItemFromParsingName,
                 SHELLEXECUTEINFOW, SHGetIDListFromObject, SIGDN_DESKTOPABSOLUTEPARSING,
                 SIGDN_NORMALDISPLAY, ShellExecuteExW,
@@ -39,6 +39,43 @@ use windows::{
 pub struct Catalogue {
     pub items: HashMap<String, IShellItem>,
     identities: HashMap<String, String>,
+}
+
+/// Owned bytes only; Shell COM interfaces stay in the catalogue's apartment.
+pub struct Activation {
+    pidl: Vec<u16>,
+}
+
+impl Activation {
+    pub fn run(self) -> Result<(u32, u64), String> {
+        unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED).ok().map_err(error)?; }
+        let result = self.execute();
+        unsafe { CoUninitialize(); }
+        result
+    }
+
+    fn execute(&self) -> Result<(u32, u64), String> {
+        unsafe {
+            let mut info = SHELLEXECUTEINFOW::default();
+            info.cbSize = size_of::<SHELLEXECUTEINFOW>() as u32;
+            info.fMask = SEE_MASK_IDLIST | SEE_MASK_NOASYNC | SEE_MASK_NOCLOSEPROCESS;
+            info.lpVerb = w!("open");
+            info.lpIDList = self.pidl.as_ptr().cast_mut().cast();
+            info.nShow = 1;
+            ShellExecuteExW(&mut info).map_err(error)?;
+            let process = identity::Handle(info.hProcess);
+            if process.0.is_invalid() { return Ok((0, 0)); }
+            let mut created = FILETIME::default();
+            let mut exited = FILETIME::default();
+            let mut kernel = FILETIME::default();
+            let mut user = FILETIME::default();
+            // Read the identity before closing this exact activation handle.
+            if GetProcessTimes(process.0, &mut created, &mut exited, &mut kernel, &mut user).is_err() {
+                return Ok((0, 0));
+            }
+            Ok((GetProcessId(process.0), ((created.dwHighDateTime as u64) << 32) | created.dwLowDateTime as u64))
+        }
+    }
 }
 
 unsafe fn text(value: PWSTR) -> String {
@@ -161,38 +198,41 @@ impl Catalogue {
         }
     }
 
-    pub fn launch(&self, id: &str) -> Result<(u32, u64), String> {
+    pub fn prepare_launch(&self, id: &str) -> Result<Activation, String> {
         let item = self
             .items
             .get(id)
             .ok_or("Refresh the application list before launching")?;
         unsafe {
             let pidl = SHGetIDListFromObject(item).map_err(error)?;
-            let mut info = SHELLEXECUTEINFOW::default();
-            info.cbSize = size_of::<SHELLEXECUTEINFOW>() as u32;
-            info.fMask = SEE_MASK_IDLIST | SEE_MASK_NOASYNC | SEE_MASK_NOCLOSEPROCESS;
-            info.lpVerb = w!("open");
-            info.lpIDList = pidl.cast();
-            info.nShow = 1;
-            let result = ShellExecuteExW(&mut info).map_err(error);
+            let size = ILGetSize(Some(pidl)) as usize;
+            if !(3..=65_536).contains(&size) {
+                CoTaskMemFree(Some(pidl.cast()));
+                return Err("Invalid application activation identity".into());
+            }
+            // ITEMIDLIST needs two-byte alignment, including odd-length items.
+            let mut owned = vec![0u16; size.div_ceil(2)];
+            std::ptr::copy_nonoverlapping(pidl.cast::<u8>(), owned.as_mut_ptr().cast::<u8>(), size);
             CoTaskMemFree(Some(pidl.cast()));
-            result?;
-            let process = identity::Handle(info.hProcess);
-            if process.0.is_invalid() {
-                return Ok((0, 0));
+            let bytes = std::slice::from_raw_parts(owned.as_ptr().cast::<u8>(), size);
+            let mut offset = 0;
+            loop {
+                let Some(length) = bytes.get(offset..offset + 2) else {
+                    return Err("Invalid application activation identity".into());
+                };
+                let length = u16::from_le_bytes([length[0], length[1]]) as usize;
+                if length == 0 {
+                    if offset == 0 || offset + 2 != size {
+                        return Err("Invalid application activation identity".into());
+                    }
+                    break;
+                }
+                if length < 2 || length > size - offset - 2 {
+                    return Err("Invalid application activation identity".into());
+                }
+                offset += length;
             }
-            let mut created = FILETIME::default();
-            let mut exited = FILETIME::default();
-            let mut kernel = FILETIME::default();
-            let mut user = FILETIME::default();
-            // Keep the activation handle alive while reading its identity:
-            // reopening only the PID could capture an unrelated reused process.
-            if GetProcessTimes(process.0, &mut created, &mut exited, &mut kernel, &mut user).is_err() {
-                // Activation succeeded; packaged apps can still be associated by
-                // their declared app identity when no process identity is usable.
-                return Ok((0, 0));
-            }
-            Ok((GetProcessId(process.0), ((created.dwHighDateTime as u64) << 32) | created.dwLowDateTime as u64))
+            Ok(Activation { pidl: owned })
         }
     }
 }

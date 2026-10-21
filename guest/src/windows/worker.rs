@@ -40,10 +40,16 @@ struct Launch {
     app: String,
     deadline: Instant,
 }
+struct ActivationResult {
+    app: String,
+    nonce: u64,
+    result: Result<(u32, u64), String>,
+}
 struct ApplicationSession {
     processes: Vec<app_process::Process>,
     gap_until: Option<Instant>,
     startup_until: Instant,
+    activation: Option<u64>,
 }
 struct Worker {
     sid: String,
@@ -53,6 +59,9 @@ struct Worker {
     windows: HashMap<String, Window>,
     pending: Vec<Launch>,
     applications: HashMap<String, ApplicationSession>,
+    activation_sender: mpsc::SyncSender<ActivationResult>,
+    activation_results: mpsc::Receiver<ActivationResult>,
+    activation_serial: u64,
     next_process_scan: Instant,
     serial: u64,
     pressed: HashSet<u16>,
@@ -80,6 +89,26 @@ fn log(message: impl std::fmt::Display) {
     }
 }
 
+// SetForegroundWindow notifies a different input queue asynchronously. Wait for
+// that activation notification before checking foreground ownership; an
+// immediate GetForegroundWindow can otherwise report a false focus refusal.
+fn activate_window(hwnd: HWND) -> Result<(), String> {
+    unsafe {
+        let root = GetAncestor(hwnd, GA_ROOT);
+        if GetAncestor(GetForegroundWindow(), GA_ROOT) == root { return Ok(()); }
+        let accepted = SetForegroundWindow(root).as_bool();
+        if accepted {
+            let _ = SendMessageTimeoutW(root, WM_NULL, WPARAM(0), LPARAM(0),
+                SMTO_ABORTIFHUNG | SMTO_BLOCK, 250, None);
+        }
+        if GetAncestor(GetForegroundWindow(), GA_ROOT) == root { Ok(()) }
+        else {
+            log(format!("Activation incomplete accepted={accepted} hwnd={}", root.0 as usize));
+            Err("Windows did not grant this window keyboard focus".into())
+        }
+    }
+}
+
 pub fn run(path: &Path) -> Result<(), String> {
     let config: Configuration =
         serde_json::from_slice(&std::fs::read(path).map_err(error)?).map_err(error)?;
@@ -94,6 +123,7 @@ pub fn run(path: &Path) -> Result<(), String> {
     }
     let (sid, session) = identity::current()?;
     let epoch = unsafe { format!("{:?}", CoCreateGuid().map_err(error)?) };
+    let (activation_sender, activation_results) = mpsc::sync_channel(8);
     let mut worker = Worker {
         sid,
         session,
@@ -102,6 +132,9 @@ pub fn run(path: &Path) -> Result<(), String> {
         windows: HashMap::new(),
         pending: Vec::new(),
         applications: HashMap::new(),
+        activation_sender,
+        activation_results,
+        activation_serial: 0,
         next_process_scan: Instant::now(),
         serial: 0,
         pressed: HashSet::new(),
@@ -172,6 +205,7 @@ impl Worker {
             state.connected.store(false, Ordering::Release);
         });
         self.release();
+        self.finish_activations(&outbox);
         let restored: Vec<_> = self.windows.iter().filter_map(|(id, window)| {
             let details = catalogue::details(window.target.hwnd, &self.sid, self.session)?;
             Some((id.clone(), self.application_surface(details, &window.app)))
@@ -300,7 +334,8 @@ impl Worker {
                             json!({"type":"reply","request":request,"ok":true,"result":value})
                         }
                         Err(message) => {
-                            json!({"type":"reply","request":request,"ok":false,"message":message})
+                            json!({"type":"reply","request":request,"operation":command["operation"],
+                                "window":command["window"],"ok":false,"message":message})
                         }
                     });
                 }
@@ -362,9 +397,10 @@ impl Worker {
                 if let Some(window) = self.windows.values().find(|w| {
                     w.app == app && !catalogue::transient(&w.metadata) && w.target.valid()
                 }) {
+                    let window = self.activation_window(window)?;
                     unsafe {
                         let _ = ShowWindow(HWND(window.target.hwnd as *mut _), SW_RESTORE);
-                        let _ = SetForegroundWindow(HWND(window.target.hwnd as *mut _));
+                        activate_window(HWND(window.target.hwnd as *mut _))?;
                     }
                     outbox.control(json!({"type":"activate","window":window.target.id}));
                     return Ok(json!({"accepted":true,"existing":true}));
@@ -373,7 +409,7 @@ impl Worker {
                     return Ok(json!({"accepted":true,"pending":true}));
                 }
                 if self.applications.get(app).is_some_and(|session| {
-                    session.processes.iter().any(app_process::Process::alive)
+                    session.activation.is_some() || session.processes.iter().any(app_process::Process::alive)
                         || session.gap_until.is_some_and(|until| until > Instant::now())
                 }) {
                     outbox.control(json!({"type":"launch_state","app":app,"state":"waiting"}));
@@ -385,14 +421,20 @@ impl Worker {
                 if !self.applications.contains_key(app) && self.applications.len() >= 8 {
                     return Err("Too many application transitions are still active".into());
                 }
-                let (pid, creation) = self.catalogue.launch(app)?;
+                let activation = self.catalogue.prepare_launch(app)?;
+                self.activation_serial += 1;
+                let nonce = self.activation_serial;
+                let sender = self.activation_sender.clone();
+                let app_id = app.to_string();
+                std::thread::Builder::new().name("app-activation".into()).spawn(move || {
+                    let result = activation.run();
+                    let _ = sender.send(ActivationResult { app: app_id, nonce, result });
+                }).map_err(error)?;
                 let until = Instant::now() + Duration::from_secs(30);
-                let processes: Vec<_> = app_process::Process::open(pid, &self.sid, self.session)
-                    .filter(|process| process.identity.creation == creation)
-                    .into_iter().collect();
-                log(format!("Application launch app={app} pid={pid} creation={creation} verified={}", !processes.is_empty()));
+                log(format!("Application activation started app={app} nonce={nonce}"));
                 self.applications.insert(app.into(), ApplicationSession {
-                    processes, gap_until: Some(until), startup_until: until,
+                    processes: Vec::new(), gap_until: Some(until), startup_until: until,
+                    activation: Some(nonce),
                 });
                 self.next_process_scan = Instant::now();
                 self.pending.push(Launch {
@@ -432,10 +474,16 @@ impl Worker {
                             .collect();
                         self.input(&target, root_hwnd, &related, value)?;
                     }
-                    "activate" => unsafe {
-                        let _ = ShowWindow(HWND(target.hwnd as *mut _), SW_RESTORE);
-                        let _ = SetForegroundWindow(HWND(target.hwnd as *mut _));
-                    },
+                    "activate" => {
+                        let active = self.activation_window(window)?;
+                        unsafe {
+                            let _ = ShowWindow(HWND(active.target.hwnd as *mut _), SW_RESTORE);
+                            activate_window(HWND(active.target.hwnd as *mut _))?;
+                        }
+                        if active.target.id != target.id {
+                            outbox.control(json!({"type":"activate","window":active.target.id}));
+                        }
+                    }
                     "resize" => {
                         self.release();
                         return window_control::resize(&target, value);
@@ -472,6 +520,49 @@ impl Worker {
             .values()
             .filter(|w| !catalogue::transient(&w.metadata))
             .count()
+    }
+
+    fn activation_window<'a>(&'a self, window: &'a Window) -> Result<&'a Window, String> {
+        if !window.target.valid() { return Err("Window retired".into()); }
+        unsafe {
+            let requested = HWND(window.target.hwnd as *mut _);
+            let root_hwnd = GetAncestor(requested, GA_ROOTOWNER);
+            let root = self.windows.values().find(|candidate| candidate.app == window.app
+                && candidate.target.hwnd == root_hwnd.0 as usize && candidate.target.valid()).unwrap_or(window);
+            let root_hwnd = HWND(root.target.hwnd as *mut _);
+            if !IsWindowEnabled(requested).as_bool() || !IsWindowEnabled(root_hwnd).as_bool() {
+                let mut popup = GetLastActivePopup(root_hwnd);
+                let mut active = None;
+                for _ in 0..12 {
+                    if popup.is_invalid() || popup == root_hwnd { break; }
+                    if let Some(candidate) = self.windows.values().find(|candidate| {
+                        candidate.app == window.app && candidate.target.hwnd == popup.0 as usize
+                            && candidate.metadata["role"] == "dialog" && candidate.target.valid()
+                    }) {
+                        if GetAncestor(popup, GA_ROOTOWNER) == root_hwnd
+                            && IsWindowEnabled(popup).as_bool() && IsWindowVisible(popup).as_bool()
+                        {
+                            active = Some(candidate);
+                        }
+                    }
+                    let next = GetLastActivePopup(popup);
+                    if next == popup { break; }
+                    popup = next;
+                }
+                if let Some(active) = active {
+                    if root.target.valid() && active.target.valid()
+                        && IsWindowEnabled(HWND(active.target.hwnd as *mut _)).as_bool()
+                    {
+                        return Ok(active);
+                    }
+                }
+            }
+            if !window.target.valid() { return Err("Window retired".into()); }
+            if !IsWindowEnabled(requested).as_bool() {
+                return Err("This app is waiting for a dialog".into());
+            }
+            Ok(window)
+        }
     }
 
     fn input_root<'a>(&'a self, mut window: &'a Window) -> &'a Window {
@@ -529,13 +620,45 @@ impl Worker {
     fn remember_process(&mut self, app: &str, pid: u32, creation: u64) {
         if !self.applications.contains_key(app) && self.applications.len() >= 8 { return; }
         let session = self.applications.entry(app.into()).or_insert_with(|| ApplicationSession {
-            processes: Vec::new(), gap_until: None, startup_until: Instant::now(),
+            processes: Vec::new(), gap_until: None, startup_until: Instant::now(), activation: None,
         });
         if session.processes.len() >= 16 || session.processes.iter().any(|p| p.identity.pid == pid && p.identity.creation == creation) { return; }
         if let Some(process) = app_process::Process::open(pid, &self.sid, self.session)
             .filter(|p| p.identity.creation == creation) {
             session.processes.push(process);
         }
+    }
+    fn finish_activations(&mut self, outbox: &Outbox) {
+        let mut changed = false;
+        while let Ok(result) = self.activation_results.try_recv() {
+            if !self.applications.get(&result.app).is_some_and(|session| session.activation == Some(result.nonce)) {
+                continue;
+            }
+            changed = true;
+            self.applications.get_mut(&result.app).unwrap().activation = None;
+            match result.result {
+                Ok((pid, creation)) => {
+                    self.remember_process(&result.app, pid, creation);
+                    let has_window = self.windows.values().any(|w| w.app == result.app && !catalogue::transient(&w.metadata));
+                    let session = self.applications.get_mut(&result.app).unwrap();
+                    if !has_window { session.gap_until = Some(Instant::now() + Duration::from_secs(30)); }
+                    log(format!("Application activation completed app={} nonce={} pid={pid} creation={creation} verified={}",
+                        result.app, result.nonce, session.processes.iter().any(|p| p.identity.pid == pid && p.identity.creation == creation)));
+                    self.next_process_scan = Instant::now();
+                }
+                Err(message) => {
+                    log(format!("Application activation failed app={} nonce={} error={message}", result.app, result.nonce));
+                    self.pending.retain(|pending| pending.app != result.app);
+                    let has_window = self.windows.values().any(|w| w.app == result.app);
+                    if !has_window && self.applications[&result.app].processes.is_empty() {
+                        self.applications.remove(&result.app);
+                    }
+                    outbox.control(json!({"type":"launch_error","app":result.app,
+                        "message":format!("Impossibile avviare l’app: {message}")}));
+                }
+            }
+        }
+        if changed { self.save(); }
     }
     fn application_surface(&self, mut metadata: Value, app: &str) -> Value {
         // A frameless loading/main window can carry WS_POPUP without having
@@ -587,7 +710,7 @@ impl Worker {
             }
         }
         let before = self.applications.len();
-        self.applications.retain(|_, session| !session.processes.is_empty()
+        self.applications.retain(|_, session| session.activation.is_some() || !session.processes.is_empty()
             || session.gap_until.is_none_or(|until| until > now));
         changed |= before != self.applications.len();
         if now < self.next_process_scan { return changed; }
@@ -606,6 +729,7 @@ impl Worker {
         changed
     }
     fn observe(&mut self, outbox: &Arc<Outbox>) {
+        self.finish_activations(outbox);
         let visible = catalogue::windows();
         let mut changed = false;
         let retired: Vec<String> = self
@@ -651,7 +775,7 @@ impl Worker {
             if Instant::now() < launch.deadline { self.pending.push(launch); }
             else {
                 let still_running = self.applications.get(&launch.app).is_some_and(|session| {
-                    session.processes.iter().any(app_process::Process::alive)
+                    session.activation.is_some() || session.processes.iter().any(app_process::Process::alive)
                 });
                 log(format!("Application launch wait exceeded app={} stillRunning={still_running}", launch.app));
                 // One bounded diagnostic at failure, omitting window titles and
@@ -812,7 +936,7 @@ impl Worker {
             let startup = value["startupUntil"].as_u64().unwrap_or(unix).saturating_sub(unix).min(30_000);
             self.applications.insert(app.into(), ApplicationSession { processes,
                 gap_until:Some(now+Duration::from_millis(gap.saturating_sub(unix).min(30_000))),
-                startup_until:now+Duration::from_millis(startup) });
+                startup_until:now+Duration::from_millis(startup), activation: None });
         }
         for value in values.into_iter().filter(|value| value["hwnd"].as_u64().is_some()).take(4) {
             let Some(raw) = value["hwnd"].as_u64() else {
@@ -888,10 +1012,9 @@ impl Worker {
             }
             let kind = value["event"].as_str().ok_or("Missing input type")?;
             let foreground = GetAncestor(GetForegroundWindow(), GA_ROOT).0 as usize;
-            let needs_focus =
-                kind == "key" || kind == "text" || (kind == "button" && value["down"] == true);
+            let needs_focus = kind == "key" || kind == "text";
             if needs_focus && !related.contains(&foreground) {
-                let _ = SetForegroundWindow(HWND(root as *mut _));
+                activate_window(HWND(root as *mut _))?;
             }
             if needs_focus
                 && !related.contains(&(GetAncestor(GetForegroundWindow(), GA_ROOT).0 as usize))
@@ -946,6 +1069,44 @@ impl Worker {
                     };
                     if !ClientToScreen(hwnd, &mut point).as_bool() {
                         return Err("Pointer transform unavailable".into());
+                    }
+                    if kind == "button" && value["down"] == true {
+                        if !target.valid() { return Err("Window retired".into()); }
+                        // Let the user's real mouse-down grant activation. A
+                        // foreground refusal must not prevent that first click,
+                        // but an occluding/unregistered window must never get it.
+                        let requested_root = GetAncestor(hwnd, GA_ROOT);
+                        let hits_target = || {
+                            let hit = GetAncestor(WindowFromPoint(point), GA_ROOT);
+                            hit == requested_root && self.windows.values().any(|window| {
+                                window.target.hwnd == hit.0 as usize && window.target.valid()
+                            })
+                        };
+                        if !hits_target() {
+                            SetWindowPos(hwnd, Some(HWND_TOP), 0, 0, 0, 0,
+                                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_ASYNCWINDOWPOS)
+                                .map_err(error)?;
+                        }
+                        if !hits_target() {
+                            log(format!("Click blocked by occlusion hwnd={} x={} y={}", target.hwnd, point.x, point.y));
+                            return Err("The click target is covered. Try again or use Windows.".into());
+                        }
+                        let mut gui = GUITHREADINFO { cbSize: size_of::<GUITHREADINFO>() as u32, ..Default::default() };
+                        GetGUIThreadInfo(0, &mut gui).map_err(error)?;
+                        if !gui.hwndCapture.is_invalid() && GetAncestor(gui.hwndCapture, GA_ROOT) != requested_root {
+                            return Err("Another window is capturing the mouse. Release it in Windows before clicking.".into());
+                        }
+                        let mut current = POINT { x: x + offset_x, y: y + offset_y };
+                        if *target.geometry.lock().unwrap() != (generation, width, height, offset_x, offset_y)
+                            || !ClientToScreen(hwnd, &mut current).as_bool()
+                            || current.x != point.x || current.y != point.y
+                        {
+                            return Err("Window geometry is updating".into());
+                        }
+                        if !target.valid() { return Err("Window retired".into()); }
+                        if !IsWindowEnabled(hwnd).as_bool() {
+                            return Err("This app is waiting for a dialog".into());
+                        }
                     }
                     let dx = ((point.x - GetSystemMetrics(SM_XVIRTUALSCREEN)) as i64 * 65535
                         / GetSystemMetrics(SM_CXVIRTUALSCREEN).max(1) as i64)

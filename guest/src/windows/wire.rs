@@ -60,7 +60,9 @@ impl Outbox {
         pending
             .frames
             .insert(id.to_owned(), Packet { header, bytes });
-        self.wake.notify_one();
+        if !self.split.load(Ordering::Acquire) {
+            self.wake.notify_one();
+        }
         self.frame_wake.notify_one();
     }
     pub fn row_alignment(&self) -> usize { self.row_alignment.load(Ordering::Acquire) }

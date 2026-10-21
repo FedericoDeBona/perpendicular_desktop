@@ -88,6 +88,7 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
     var onClose:(()->Void)?
     var onGeometry:(()->Void)?
     var onPointerExit:(()->Void)?
+    var activateOnFirstShow=true
 
     init(id:String,title:String,role:WindowRole,bridge:GuestBridge){
         self.id=id;self.role=role;self.bridge=bridge
@@ -172,7 +173,9 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
         minimized=nextMinimized
         if sharedDisplay != nil,!geometryActive,!geometryFinishing,!minimized {applySourceFrame()}
         if !hasFrame && !role.transient && visible && !minimized && !window.isVisible {
-            window.makeKeyAndOrderFront(nil);window.makeFirstResponder(content)
+            if activateOnFirstShow {window.makeKeyAndOrderFront(nil)}
+            else {window.orderBack(nil)}
+            window.makeFirstResponder(content)
         }
         if role == .main {
             if minimized && !window.isMiniaturized {window.miniaturize(nil)}

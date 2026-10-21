@@ -393,7 +393,7 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
         pointerExitTask?.cancel()
         pointerExitTask=Task{@MainActor [weak self] in
             try? await Task.sleep(for:.milliseconds(80))
-            guard !Task.isCancelled,let self else{return}
+            guard !Task.isCancelled,let self,self.machine?.desktopIsKey != true else{return}
             let point=NSEvent.mouseLocation
             guard !self.windows.values.contains(where:{$0.window.isVisible && $0.window.frame.contains(point)}) else{return}
             self.bridge.command("input",["window":id,"event":"leave"])
@@ -552,6 +552,7 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
                 if windows[id]==nil{
                     let role=WindowRole(rawValue:item["role"] as? String ?? "dialog") ?? .dialog
                     let controller=ApplicationWindow(id:id,title:title,role:role,bridge:bridge)
+                    controller.activateOnFirstShow=machine?.desktopIsKey != true
                     controller.onError={ [weak self] message in self?.status=message;self?.launcherNotice=message }
                     controller.onClose={ [weak self] in self?.windows.removeValue(forKey:id) }
                     controller.onGeometry={ [weak self] in self?.layoutChildren() }
@@ -568,12 +569,13 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
             guard let id=value["window"] as? String else{return}
             if let window=windows[id]{window.present(packet);if let app=windowApps[id]{finishOpening(app,appeared:true)}}else if earlyFrames.count<16{earlyFrames[id]=packet}
         case "activate":
-            if let id=value["window"] as? String{windows[id]?.window.makeKeyAndOrderFront(nil)}
+            if machine?.desktopIsKey != true,let id=value["window"] as? String {windows[id]?.window.makeKeyAndOrderFront(nil)}
         case "launch_state":
             if value["state"] as? String == "waiting",let id=value["app"] as? String,
                let app=apps.first(where:{$0.id == id}) {beginOpening(app)}
         case "reply":
-            if value["ok"] as? Bool == false,value["message"] as? String == "Windows did not grant this window keyboard focus" {inputFocusFailed()}
+            if value["ok"] as? Bool == false,value["operation"] as? String == "input",
+               value["message"] as? String == "Windows did not grant this window keyboard focus" {inputFocusFailed()}
         case "window_error","launch_error":
             status=value["message"] as? String ?? "This application is unavailable. Use Show Windows."
             launcherNotice=value["message"] as? String ?? "Questa app non è disponibile. Puoi continuare dal desktop Windows."

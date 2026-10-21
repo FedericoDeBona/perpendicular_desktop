@@ -144,6 +144,8 @@ Richiesta esplicita del 21 ottobre 2026, dopo il primo percorso Win32 completo:
 
 Conservare desktop di recupero, VM originale e documenti. Completare incrementi piccoli nell'app reale con commit/push, senza riprendere pulizie Parallels o cambiare driver per tentativi. Le scorciatoie Mac rimangono fuori da questa fase.
 
+Aggiornamento successivo dell’utente: saltare per ora il problema specifico di Creality. Il lavoro attivo prosegue su launcher, fluidità e compatibilità generale; Creality resta rinviato senza richiedere di risolverne adesso OpenGL, configurazione o avvio.
+
 ## Lavoro futuro — scorciatoie Mac
 
 Richiesta dell’utente del 21 ottobre 2026, da non implementare nella fase attuale: introdurre le scorciatoie in stile Mac nelle applicazioni Windows. Consultare l’implementazione della vecchia app Perpendicular soltanto per recuperare il comportamento pertinente, distinguendo scorciatoie, testo composto e appunti. Questa voce non amplia il lavoro attivo su monitor, grafica e geometria.

@@ -53,6 +53,7 @@ final class VirtualMachineController {
     }
     var nativeGraphicsEnabled:Bool {configuration.graphics == "native3D" && configuration.recoveryDisplay != true}
     var virtualDisplayEnabled:Bool {nativeGraphicsEnabled}
+    var desktopIsKey:Bool {desktop?.window.isKeyWindow == true}
 
     func withRecoveryDisplay(_ enabled:Bool)throws->VirtualMachineController {
         try withDisplay(graphics:nil,recovery:enabled)
