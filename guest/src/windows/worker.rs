@@ -13,7 +13,7 @@ use std::{
     path::{Path, PathBuf},
     sync::{
         Arc, Mutex,
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicU8, Ordering},
         mpsc,
     },
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
@@ -495,7 +495,13 @@ impl Worker {
                         return window_control::set_geometry(&target, value);
                     }
                     "hit_test" => return window_control::hit_test(&target, value),
-                    "geometry" => return window_control::state(&target),
+                    "geometry" => {
+                        let mut state = window_control::state(&target)?;
+                        state["capturePhase"] = json!(target.capture_phase_name());
+                        state["captureStopped"] = json!(window.stop.as_ref()
+                            .map(|stop| stop.load(Ordering::Acquire)).unwrap_or(true));
+                        return Ok(state);
+                    }
                     "cancel_interaction" => {
                         self.release();
                         window_control::cancel(HWND(target.hwnd as *mut _));
@@ -899,6 +905,7 @@ impl Worker {
             session: self.session,
             full_frame: metadata["role"] != "dialog",
             hosted,
+            capture_phase: AtomicU8::new(capture::Phase::Starting as u8),
             geometry: Mutex::new((0, 0, 0, 0, 0)),
         });
         let stop = Some(capture::spawn(target.clone(), outbox.clone()));
@@ -1019,6 +1026,7 @@ impl Worker {
                 session: self.session,
                 full_frame: metadata["role"] != "dialog",
                 hosted,
+                capture_phase: AtomicU8::new(capture::Phase::Starting as u8),
                 geometry: Mutex::new((0, 0, 0, 0, 0)),
             });
             self.windows.insert(

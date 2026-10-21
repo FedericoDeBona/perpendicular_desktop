@@ -149,3 +149,17 @@ Aggiornamento successivo dell’utente: saltare per ora il problema specifico di
 ## Lavoro futuro — scorciatoie Mac
 
 Richiesta dell’utente del 21 ottobre 2026, da non implementare nella fase attuale: introdurre le scorciatoie in stile Mac nelle applicazioni Windows. Consultare l’implementazione della vecchia app Perpendicular soltanto per recuperare il comportamento pertinente, distinguendo scorciatoie, testo composto e appunti. Questa voce non amplia il lavoro attivo su monitor, grafica e geometria.
+
+
+## Punto di ripresa — stop richiesto il 22 ottobre 2026
+
+Prova fermata su richiesta dell’utente, modifiche annotate e pubblicate. Il frontend diagnostico è chiuso; la sola VM di sviluppo rimane accesa. VM originale e documenti intatti. Build finale Mac9418153157d9, guest diagnostico e4bc516cf7c7; dettagli e limiti in VERIFICATION.md. Non considerare risolto il blocco intermittente della cattura dopo aggiornamento/riconnessione del bridge.
+
+Alla ripresa, nell’ordine:
+
+1. Riprodurre quel singolo guasto confrontando sequenza frame, capturePhase/captureStopped e desktop reale. L’ultimo aggiornamento del servizio ha ripristinato i frame, quindi non è una correzione dimostrata della causa. Una lettura mapping isolata non basta a diagnosticare Map bloccato.
+2. Rendere lo stato della cattura specifico del singolo run prima di usarlo per il recupero: il Target può essere riutilizzato mentre un vecchio thread termina. Applicare poi un recupero limitato e motivato dalla causa osservata, mantenendo tutte le verifiche d’identità; niente retry infiniti o nuovi contesti per tentativi.
+3. Verificare la coerenza dei timestamp QPC/WGC nella VM prima di usare guestFrameAgeAtSendMilliseconds per conclusioni. Gli altri tempi locali e il conteggio callback sono già visibili in status.frameTimings; il chunk256KiB riduce i passaggi ma non ha un confronto quantitativo di latenza valido. Valutare compressione/delta soltanto se le misure ne motivano il costo.
+4. Dopo la correzione, una breve prova nelle finestre reali: avvio Impostazioni dal launcher, ricerca/testo, resize, popup e riconnessione; riusare le evidenze già valide di Blocco note e icone, senza ripetere matrici estese.
+
+Creality resta rinviato. Scorciatoie Mac rimangono lavoro futuro. Non riprendere pulizie Parallels, UAC, cambi ISO o driver senza una nuova necessità concreta.

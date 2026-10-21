@@ -3,7 +3,7 @@ use serde_json::json;
 use std::{
     sync::{
         Arc, Mutex,
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicU8, Ordering},
         mpsc,
     },
     time::{Duration, Instant},
@@ -36,6 +36,12 @@ use windows::{
     core::{Interface, factory},
 };
 
+#[repr(u8)]
+pub enum Phase {
+    Starting, Validating, Waiting, Reading, Mapping, Publishing,
+    Recreating, Closing, Ended, Error, Invalidated,
+}
+
 pub struct Target {
     pub id: String,
     pub hwnd: usize,
@@ -45,10 +51,21 @@ pub struct Target {
     pub session: u32,
     pub full_frame: bool,
     pub hosted: Option<catalogue::HostedContent>,
+    pub capture_phase: AtomicU8,
     // Generation, dimensions, and image origin relative to the Windows client origin.
     pub geometry: Mutex<(u64, i32, i32, i32, i32)>,
 }
 impl Target {
+    fn set_phase(&self, phase: Phase) {
+        self.capture_phase.store(phase as u8, Ordering::Release);
+    }
+    pub fn capture_phase_name(&self) -> &'static str {
+        match self.capture_phase.load(Ordering::Acquire) {
+            0 => "starting", 1 => "validating", 2 => "waiting", 3 => "reading",
+            4 => "mapping", 5 => "publishing", 6 => "recreating", 7 => "closing",
+            8 => "ended", 9 => "error", 10 => "invalidated", _ => "unknown",
+        }
+    }
     pub fn valid(&self) -> bool {
         identity::owner(HWND(self.hwnd as *mut _), &self.sid, self.session)
             == Some((self.pid, self.creation))
@@ -63,13 +80,18 @@ impl Target {
 pub fn spawn(target: Arc<Target>, outbox: Arc<Outbox>) -> Arc<AtomicBool> {
     let stop = Arc::new(AtomicBool::new(false));
     let flag = stop.clone();
+    target.set_phase(Phase::Starting);
     std::thread::spawn(move || {
         if let Err(message) = unsafe { run(&target, &outbox, &flag) } {
+            target.set_phase(Phase::Error);
             if !flag.load(Ordering::Acquire) && target.valid() {
                 outbox.control(json!({"type":"window_error","window":target.id,"message":message}));
             }
+        } else if target.capture_phase.load(Ordering::Acquire) != Phase::Invalidated as u8 {
+            target.set_phase(Phase::Ended);
         }
         outbox.retire(&target.id);
+        flag.store(true, Ordering::Release);
     });
     stop
 }
@@ -145,14 +167,19 @@ unsafe fn run(target: &Target, outbox: &Outbox, stop: &AtomicBool) -> Result<(),
             let mut staging_size = (0, 0);
             while !stop.load(Ordering::Acquire) && outbox.connected.load(Ordering::Acquire) {
                 let started = Instant::now();
+                target.set_phase(Phase::Validating);
                 if !target.valid() {
+                    target.set_phase(Phase::Invalidated);
                     break;
                 }
                 if IsIconic(HWND(target.hwnd as *mut _)).as_bool() {
+                    target.set_phase(Phase::Waiting);
                     std::thread::sleep(Duration::from_millis(100));
                     continue;
                 }
+                target.set_phase(Phase::Waiting);
                 let _ = ready.recv_timeout(Duration::from_millis(100));
+                target.set_phase(Phase::Reading);
                 let Ok(mut frame) = pool.TryGetNextFrame() else {
                     continue;
                 };
@@ -162,6 +189,7 @@ unsafe fn run(target: &Target, outbox: &Outbox, stop: &AtomicBool) -> Result<(),
                     let Ok(newer) = pool.TryGetNextFrame() else {break};
                     let _ = frame.Close(); frame = newer;
                 }
+                let frame_time_100ns = frame.SystemRelativeTime().ok().map(|time| time.Duration);
                 let current = frame.ContentSize().map_err(error)?;
                 if current.Width <= 0
                     || current.Height <= 0
@@ -177,6 +205,7 @@ unsafe fn run(target: &Target, outbox: &Outbox, stop: &AtomicBool) -> Result<(),
                     size = current;
                     generation += 1;
                     staging = None;
+                    target.set_phase(Phase::Recreating);
                     pool.Recreate(
                         &runtime,
                         DirectXPixelFormat::B8G8R8A8UIntNormalized,
@@ -196,6 +225,7 @@ unsafe fn run(target: &Target, outbox: &Outbox, stop: &AtomicBool) -> Result<(),
                 if desc.Width < current.Width as u32 || desc.Height < current.Height as u32 {
                     frame.Close().map_err(error)?;
                     staging = None;
+                    target.set_phase(Phase::Recreating);
                     pool.Recreate(
                         &runtime,
                         DirectXPixelFormat::B8G8R8A8UIntNormalized,
@@ -247,6 +277,8 @@ unsafe fn run(target: &Target, outbox: &Outbox, stop: &AtomicBool) -> Result<(),
                 }
                 let backing = staging.as_ref().ok_or("Missing readback resource")?;
                 let mut pixels = Vec::<u8>::with_capacity(total);
+                target.set_phase(Phase::Mapping);
+                let readback_started = Instant::now();
                 context.CopyResource(backing, &texture);
                 let mut mapped = D3D11_MAPPED_SUBRESOURCE::default();
                 context
@@ -273,10 +305,13 @@ unsafe fn run(target: &Target, outbox: &Outbox, stop: &AtomicBool) -> Result<(),
                     pixels.set_len(total);
                 }
                 context.Unmap(backing, 0);
+                let readback_milliseconds = readback_started.elapsed().as_secs_f64() * 1000.0;
+                target.set_phase(Phase::Reading);
                 frame.Close().map_err(error)?;
                 if !valid {
                     return Err("Invalid capture stride".into());
                 }
+                target.set_phase(Phase::Publishing);
                 sequence += 1;
                 let bounds = catalogue::frame_bounds(hwnd).ok_or("Window geometry unavailable")?;
                 let mut origin = POINT::default();
@@ -290,13 +325,17 @@ unsafe fn run(target: &Target, outbox: &Outbox, stop: &AtomicBool) -> Result<(),
                 };
                 *target.geometry.lock().unwrap() = (generation, width, height, offset.0, offset.1);
                 outbox.frame(&target.id,json!({"type":"frame","window":target.id,"sequence":sequence,"generation":generation,
-                    "width":width,"height":height,"stride":stride,"bytes":pixels.len(),"capture":"software"}),pixels);
+                    "width":width,"height":height,"stride":stride,"bytes":pixels.len(),"capture":"software",
+                    "guestReadbackMilliseconds":readback_milliseconds}),pixels,frame_time_100ns);
                 if let Some(delay) = Duration::from_millis(16).checked_sub(started.elapsed()) {
                     std::thread::sleep(delay);
                 }
             }
             Ok(())
         })();
+        if target.capture_phase.load(Ordering::Acquire) != Phase::Invalidated as u8 {
+            target.set_phase(Phase::Closing);
+        }
         let _ = session.Close();
         let _ = pool.RemoveFrameArrived(registration);
         let _ = pool.Close();

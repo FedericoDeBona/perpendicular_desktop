@@ -176,7 +176,8 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
                 "windowCount":windows.count,"capabilities":guestCapabilities,
                 "frameChannel":bridge?.separateFrames ?? false,
                 "lastCommandRTTMilliseconds":bridge?.lastRoundTripMilliseconds ?? 0,
-                "frameReceiveMilliseconds":bridge?.frameReceiveMilliseconds ?? 0]],reply:reply);return
+                "frameReceiveMilliseconds":bridge?.frameReceiveMilliseconds ?? 0,
+                "frameTimings":bridge?.lastFrameTimings ?? [:]]],reply:reply);return
         }
         guard connected,let bridge else {
             localResponse(["ok":false,"error":"Windows is not connected."],reply:reply);return

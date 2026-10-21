@@ -104,10 +104,13 @@ final class GuestConnection: @unchecked Sendable {
                         self.connection.cancel();return
                     }
                     let received=ProcessInfo.processInfo.systemUptime
-                    let complete:@Sendable (Data,GuestFrameSurface?)->Void = {[weak self] bytes,surface in
+                    let complete:@Sendable (Data,GuestFrameSurface?,Int)->Void = {[weak self] bytes,surface,callbacks in
                         guard let self else{return}
                         var header=packet.header
-                        header["hostReceiveMilliseconds"]=(ProcessInfo.processInfo.systemUptime-received)*1000
+                        let completed=ProcessInfo.processInfo.systemUptime
+                        header["hostReceiveMilliseconds"]=(completed-received)*1000
+                        header["hostReceivedAt"]=completed
+                        if callbacks>0 {header["hostReadCallbacks"]=Double(callbacks)}
                         self.offer(window,GuestPacket(header:header,pixels:bytes,surface:surface))
                         // This retires only the independent CPU/network copy.
                         // The shared Metal buffer stays immutable through GPU completion.
@@ -117,8 +120,8 @@ final class GuestConnection: @unchecked Sendable {
                         self.readHeader()
                     }
                     if let surface=GuestFrameSurface.allocate(width:width,height:height,stride:stride) {
-                        self.readSurface(surface,offset:0){complete(Data(),surface)}
-                    } else {self.read(stride*height){complete($0,nil)}}
+                        self.readSurface(surface,offset:0,callbacks:0){complete(Data(),surface,$0)}
+                    } else {self.read(stride*height){complete($0,nil,0)}}
                 } else {
                     Task { @MainActor [self] in self.packet(self.id,packet) }
                     // Authentication is decided on the main actor. Do not
@@ -128,15 +131,18 @@ final class GuestConnection: @unchecked Sendable {
             }
         }
     }
-    private func readSurface(_ surface:GuestFrameSurface,offset:Int,completion:@escaping @Sendable ()->Void){
+    private func readSurface(_ surface:GuestFrameSurface,offset:Int,callbacks:Int,completion:@escaping @Sendable (Int)->Void){
         let remaining=surface.byteCount-offset
-        connection.receive(minimumIncompleteLength:min(remaining,65536),maximumLength:min(remaining,65536)){[weak self] data,_,complete,error in
+        // One bounded chunk per callback, copied directly into the final Metal
+        // buffer. Larger pixel reads reduce callbacks without queuing more frames.
+        let chunk=min(remaining,256*1024)
+        connection.receive(minimumIncompleteLength:chunk,maximumLength:chunk){[weak self] data,_,complete,error in
             guard let self else{return}
             guard error == nil,let data,!data.isEmpty,data.count<=remaining else{self.connection.cancel();return}
             data.withUnsafeBytes{if let bytes=$0.baseAddress{surface.contents.advanced(by:offset).copyMemory(from:bytes,byteCount:data.count)}}
             let next=offset+data.count
-            if next == surface.byteCount{completion()}
-            else if !complete{self.readSurface(surface,offset:next,completion:completion)}
+            if next == surface.byteCount{completion(callbacks+1)}
+            else if !complete{self.readSurface(surface,offset:next,callbacks:callbacks+1,completion:completion)}
             else{self.connection.cancel()}
         }
     }
@@ -149,7 +155,13 @@ final class GuestConnection: @unchecked Sendable {
     }
     @MainActor private func drain() {
         lock.lock(); let pending=frames; frames.removeAll(keepingCapacity:true); drainScheduled=false; lock.unlock()
-        for value in pending.values { packet(id,value) }
+        for value in pending.values {
+            var header=value.header
+            if let received=header.removeValue(forKey:"hostReceivedAt") as? Double {
+                header["hostDispatchMilliseconds"]=max(0,(ProcessInfo.processInfo.systemUptime-received)*1000)
+            }
+            packet(id,GuestPacket(header:header,pixels:value.pixels,surface:value.surface))
+        }
     }
 }
 
@@ -169,6 +181,8 @@ final class GuestBridge {
     private var sentAt:[Int:Double]=[:]
     private(set) var lastRoundTripMilliseconds=0.0
     private(set) var frameReceiveMilliseconds=0.0
+    private(set) var lastFrameTimings:[String:Double]=[:]
+    private var nextFrameTrace=0.0
     var separateFrames:Bool {activeFrames != nil}
     var onPacket: ((GuestPacket) -> Void)?
     var onConnection: ((Bool) -> Void)?
@@ -218,6 +232,7 @@ final class GuestBridge {
             }
             if let previous=activeFrames {clients.removeValue(forKey:previous)?.cancel()}
             activeFrames=nil;frameChannel=nil;identity=incomingIdentity
+            lastFrameTimings=[:];frameReceiveMilliseconds=0
             clients[id]?.authorize(frames:false)
             active=id;lastPacket=Date();onConnection?(true)
             if (h["capabilities"] as? [String:Any])?["frameChannel"] as? Bool == true {
@@ -230,11 +245,12 @@ final class GuestBridge {
         }
         if activeFrames == id {
             guard h["type"] as? String == "frame" else{clients[id]?.cancel();return}
-            frameReceiveMilliseconds=h["hostReceiveMilliseconds"] as? Double ?? 0
+            recordFrameTimings(h)
             onPacket?(packet);return
         }
         guard active==id else { return }
         lastPacket=Date()
+        if h["type"] as? String == "frame" {recordFrameTimings(h)}
         if h["type"] as? String == "reply", let request=h["request"] as? Int, let reply=replies.removeValue(forKey:request) {
             if let started=sentAt.removeValue(forKey:request){lastRoundTripMilliseconds=(ProcessInfo.processInfo.systemUptime-started)*1000}
             if h["ok"] as? Bool == true { reply(.success(["value":h["result"] ?? [:]])) }
@@ -242,11 +258,25 @@ final class GuestBridge {
         }
         onPacket?(packet)
     }
+    private func recordFrameTimings(_ header:[String:Any]) {
+        let keys=["guestFrameAgeAtSendMilliseconds","guestReadbackMilliseconds","guestQueueMilliseconds",
+                  "hostReceiveMilliseconds","hostDispatchMilliseconds","hostReadCallbacks"]
+        lastFrameTimings=keys.reduce(into:[:]) {value,key in
+            if let number=header[key] as? Double,number.isFinite,number>=0,number<=60000 {value[key]=number}
+        }
+        frameReceiveMilliseconds=lastFrameTimings["hostReceiveMilliseconds"] ?? 0
+        guard ProcessInfo.processInfo.environment["PERPENDICULAR_STATE_TRACE"] == "1" else{return}
+        let now=ProcessInfo.processInfo.systemUptime
+        guard now>=nextFrameTrace else{return};nextFrameTrace=now+1
+        var value:[String:Any]=["type":"frame_pipeline","timings":lastFrameTimings]
+        for key in ["window","sequence","width","height","bytes"] {value[key]=header[key]}
+        if let data=try? JSONSerialization.data(withJSONObject:value,options:[.sortedKeys]){try? FileHandle.standardError.write(contentsOf:data+Data([10]))}
+    }
     private func disconnected(_ id:UUID) {
         clients.removeValue(forKey:id)
         if activeFrames == id {activeFrames=nil;if let active{clients[active]?.cancel()}}
         guard active==id else { return }
-        active=nil;identity=nil;frameChannel=nil
+        active=nil;identity=nil;frameChannel=nil;lastFrameTimings=[:];frameReceiveMilliseconds=0
         if let frame=activeFrames {activeFrames=nil;clients.removeValue(forKey:frame)?.cancel()}
         let pending=replies;replies.removeAll()
         sentAt.removeAll()
