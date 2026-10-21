@@ -3,7 +3,7 @@ use std::{
     ffi::OsString,
     path::{Path, PathBuf},
     sync::mpsc,
-    time::{Duration, Instant},
+    time::Duration,
 };
 use windows::{
     Win32::{
@@ -14,14 +14,12 @@ use windows::{
         System::{
             Environment::{CreateEnvironmentBlock, DestroyEnvironmentBlock},
             RemoteDesktop::{
-                WTSActive, WTSDisconnected, WTSEnumerateSessionsW, WTSFreeMemory,
-                WTSGetActiveConsoleSessionId, WTSQueryUserToken,
+                WTSActive, WTSEnumerateSessionsW, WTSFreeMemory, WTSGetActiveConsoleSessionId,
+                WTSQueryUserToken,
             },
-            SystemInformation::GetSystemDirectoryW,
             Threading::{
                 CREATE_NO_WINDOW, CREATE_UNICODE_ENVIRONMENT, CreateProcessAsUserW,
-                GetCurrentProcess, GetExitCodeProcess, PROCESS_INFORMATION, STARTUPINFOW,
-                TerminateProcess,
+                GetExitCodeProcess, PROCESS_INFORMATION, STARTUPINFOW, TerminateProcess,
             },
         },
     },
@@ -39,10 +37,6 @@ use windows_service::{
 };
 
 const NAME: &str = "PerpendicularRestart";
-enum Control {
-    Stop,
-    ReturnToConsole,
-}
 pub fn directory() -> PathBuf {
     PathBuf::from(std::env::var_os("ProgramData").unwrap_or_else(|| "C:\\ProgramData".into()))
         .join("Perpendicular Restart")
@@ -136,14 +130,10 @@ fn supervise() -> Result<(), String> {
     let configuration: Configuration =
         serde_json::from_slice(&std::fs::read(directory().join("connection.json")).map_err(error)?)
             .map_err(error)?;
-    let (control, receiver) = mpsc::channel();
+    let (stop, receiver) = mpsc::channel();
     let status = service_control_handler::register(NAME, move |event| match event {
         ServiceControl::Stop | ServiceControl::Shutdown => {
-            let _ = control.send(Control::Stop);
-            ServiceControlHandlerResult::NoError
-        }
-        ServiceControl::UserEvent(code) if code.to_raw() == 128 => {
-            let _ = control.send(Control::ReturnToConsole);
+            let _ = stop.send(());
             ServiceControlHandlerResult::NoError
         }
         ServiceControl::Interrogate => ServiceControlHandlerResult::NoError,
@@ -171,14 +161,8 @@ fn supervise() -> Result<(), String> {
     let mut selection_error = None;
     log("Service running; waiting for interactive session");
     loop {
-        match receiver.recv_timeout(Duration::from_secs(2)) {
-            Ok(Control::Stop) => break,
-            Ok(Control::ReturnToConsole) => {
-                if let Err(error) = return_to_console(configuration.owner_sid.as_deref()) {
-                    log(format!("Console return failed: {error}"));
-                }
-            }
-            Err(_) => {}
+        if receiver.recv_timeout(Duration::from_secs(2)).is_ok() {
+            break;
         }
         let session = match active_session(configuration.owner_sid.as_deref()) {
             Ok(session) => {
@@ -234,7 +218,7 @@ fn supervise() -> Result<(), String> {
 
 fn active_session(owner_sid: Option<&str>) -> Result<Option<u32>, String> {
     if let Some(owner_sid) = owner_sid {
-        return owner_session(owner_sid, false);
+        return owner_session(owner_sid);
     }
     // Compatibility for installations whose configuration predates ownerSid.
     unsafe {
@@ -243,7 +227,7 @@ fn active_session(owner_sid: Option<&str>) -> Result<Option<u32>, String> {
     }
 }
 
-fn owner_session(owner_sid: &str, include_disconnected: bool) -> Result<Option<u32>, String> {
+fn owner_session(owner_sid: &str) -> Result<Option<u32>, String> {
     unsafe {
         let mut sessions = std::ptr::null_mut();
         let mut count = 0;
@@ -258,8 +242,7 @@ fn owner_session(owner_sid: &str, include_disconnected: bool) -> Result<Option<u
                 .filter(|session| {
                     session.SessionId != 0
                         && session.SessionId != u32::MAX
-                        && (session.State == WTSActive
-                            || (include_disconnected && session.State == WTSDisconnected))
+                        && session.State == WTSActive
                 })
                 .map(|session| session.SessionId)
                 .collect::<Vec<_>>()
@@ -274,94 +257,12 @@ fn owner_session(owner_sid: &str, include_disconnected: bool) -> Result<Option<u
             let token = super::identity::Handle(token);
             if token_sid(token.0)? == owner_sid {
                 if selected.is_some() {
-                    return Err("Multiple eligible sessions for the guest owner; waiting".into());
+                    return Err("Multiple active sessions for the guest owner; waiting".into());
                 }
                 selected = Some(session);
             }
         }
         Ok(selected)
-    }
-}
-
-/// Explicit SCM control 128 only. No password or disconnect-triggered action.
-fn return_to_console(owner_sid: Option<&str>) -> Result<(), String> {
-    use std::os::windows::{ffi::OsStringExt, process::CommandExt};
-    use std::process::{Command, Stdio};
-    let owner_sid = owner_sid.ok_or("Console return requires an installed ownerSid")?;
-    unsafe {
-        if super::identity::sid(GetCurrentProcess())? != "S-1-5-18" {
-            return Err("Console return requires the LocalSystem service".into());
-        }
-    }
-    let session =
-        owner_session(owner_sid, true)?.ok_or("No logged-in session for the guest owner")?;
-    let mut buffer = [0u16; 32768];
-    let length = unsafe { GetSystemDirectoryW(Some(&mut buffer)) } as usize;
-    if length == 0 || length >= buffer.len() {
-        return Err("Windows system directory unavailable".into());
-    }
-    let system = PathBuf::from(OsString::from_wide(&buffer[..length]));
-    let executable = system.join("tscon.exe");
-    if !system.is_absolute() || !executable.is_file() {
-        return Err("Windows system tscon.exe unavailable".into());
-    }
-    unsafe {
-        let console = WTSGetActiveConsoleSessionId();
-        if console != 0 && console != u32::MAX && console != session {
-            let mut token = HANDLE::default();
-            WTSQueryUserToken(console, &mut token).map_err(error)?;
-            let token = super::identity::Handle(token);
-            if token_sid(token.0)? != owner_sid {
-                return Err("Console belongs to another user; refusing to switch".into());
-            }
-        }
-        // Recheck the token immediately before launching the trusted system helper.
-        let mut token = HANDLE::default();
-        WTSQueryUserToken(session, &mut token).map_err(error)?;
-        let token = super::identity::Handle(token);
-        if token_sid(token.0)? != owner_sid {
-            return Err("Session owner changed before console return".into());
-        }
-        if console == session {
-            log(format!("Owner session {session} is already on the console"));
-            return Ok(());
-        }
-    }
-    log(format!(
-        "Explicit console return requested for owner session {session}"
-    ));
-    let mut child = Command::new(executable)
-        .args([session.to_string(), "/dest:console".into()])
-        .current_dir(system)
-        .creation_flags(CREATE_NO_WINDOW.0)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-        .map_err(error)?;
-    let deadline = Instant::now() + Duration::from_secs(5);
-    loop {
-        let status = match child.try_wait() {
-            Ok(status) => status,
-            Err(error) => {
-                let _ = child.kill();
-                let _ = child.wait();
-                return Err(error.to_string());
-            }
-        };
-        if let Some(status) = status {
-            if !status.success() {
-                return Err(format!("Windows tscon failed ({status})"));
-            }
-            log(format!("Owner session {session} returned to console"));
-            return Ok(());
-        }
-        if Instant::now() >= deadline {
-            child.kill().map_err(error)?;
-            let _ = child.wait();
-            return Err("Windows tscon timed out; only its helper process was stopped".into());
-        }
-        std::thread::sleep(Duration::from_millis(20));
     }
 }
 

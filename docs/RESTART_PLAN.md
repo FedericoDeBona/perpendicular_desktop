@@ -96,6 +96,8 @@ Usare subito i linguaggi target: Swift/AppKit/Metal sul Mac, Rust per l'integraz
 
 ### Ordine di lavoro e protezione della base
 
+Direzione aggiornata dall’utente: abbandonare RDP, rimuovere la password temporanea e le relative impostazioni e proseguire con il driver/acceleratore locale. Le app aperte nella copia di sviluppo possono essere chiuse durante queste prove; la VM originale e i suoi dati restano intatti. L’autorizzazione riguarda lo stato delle app nella copia, non la cancellazione indiscriminata dei dati.
+
 Indirizzo ribadito dall'utente: il vecchio percorso 2D non è una base approvata o affidabile. Una riuscita storica non supera i problemi osservati di avvio, artefatti e risoluzione dinamica. I suoi runtime recuperati restano esperimenti da confronto; non promuoverli al percorso ordinario. Dare priorità ai vincoli ricavati dall'analisi di Parallels: monitor/topologia/DPI confermati prima dell'integrazione delle finestre, controllo di geometria/input/attivazione con identità e risposte, immagini e accelerazione separabili. Le osservazioni su Parallels sono statiche, non una ricostruzione verificata del protocollo o del funzionamento interno. Ogni backend scelto deve dimostrare questi comportamenti nell'app attuale.
 
 1. Individuare monitor reali, capacità del display guest e componenti grafici riusabili; predisporre un ritorno al percorso funzionante prima di sostituire driver o runtime.

@@ -143,7 +143,7 @@ impl Worker {
         outbox.control(
             json!({"type":"hello","protocol":1,"token":config.token,"epoch":self.epoch,
             "sid":self.sid,"session":self.session,"version":env!("CARGO_PKG_VERSION"),
-            "capabilities":{"capture":"software","windows":4,"transients":12,"windowRoles":true,"input":true,"catalogue":true,"displayInfo":true,"driverInfo":true,"remoteDisplayInfo":true,"graphicsInfo":true,"displayConfigure":true,"displayEvents":self.display_observer.is_some()}}),
+            "capabilities":{"capture":"software","windows":4,"transients":12,"windowRoles":true,"input":true,"catalogue":true,"displayInfo":true,"driverInfo":true,"graphicsInfo":true,"displayConfigure":true,"displayEvents":self.display_observer.is_some()}}),
         );
         let (sender, receiver) = mpsc::sync_channel(128);
         let state = outbox.clone();
@@ -174,7 +174,6 @@ impl Worker {
             if let Ok(command) = receiver.recv_timeout(Duration::from_millis(10)) {
                 let request = command["request"].clone();
                 if command["operation"] == "diagnostics"
-                    || command["operation"] == "rdp_info"
                     || command["operation"] == "driver_info"
                     || command["operation"] == "display_info"
                     || command["operation"] == "graphics_info"
@@ -182,7 +181,6 @@ impl Worker {
                 {
                     let graphics_request = command["operation"] == "graphics_info";
                     let driver_request = command["operation"] == "driver_info";
-                    let remote_display_request = command["operation"] == "rdp_info";
                     let configure_request = command["operation"] == "display_configure";
                     let display_request =
                         command["operation"] == "display_info" || configure_request;
@@ -198,9 +196,7 @@ impl Worker {
                     } else {
                         let sender = outbox.clone();
                         std::thread::spawn(move || {
-                            let result = if remote_display_request {
-                                super::remote_display::rdp_info()
-                            } else if driver_request {
+                            let result = if driver_request {
                                 super::drivers::devices().map(|devices| json!({"devices":devices}))
                             } else if graphics_request {
                                 Ok(display::graphics())
@@ -259,10 +255,6 @@ impl Worker {
     }
 
     fn command(&mut self, value: &Value, outbox: &Arc<Outbox>) -> Result<Value, String> {
-        if value["operation"] == "return_console" {
-            self.release();
-            return super::remote_display::return_console();
-        }
         // Releases never depend on a window, pointer coordinates or capture generation.
         // A resize or a retired popup must not leave an injected button/key held.
         if value["operation"] == "input" && value["down"] == false {

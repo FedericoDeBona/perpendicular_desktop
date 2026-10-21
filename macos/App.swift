@@ -25,8 +25,6 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
     private var displayRevision=0
     private var displayReadable=false
     private var displayConfigurable=false
-    private var remoteDisplayReadable=false
-    private var remoteDisplayRevision=0
     private var displayReadTask:Task<Void,Never>?
     private var sharedDisplay:SharedDisplay?
     private var recoveryItem:NSMenuItem!
@@ -44,7 +42,7 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
             bridge.onConnection={ [weak self] value in
                 guard let self else{return};self.connected=value;self.status=value ? "Windows connected":"Reconnecting to Windows…"
                 if !value {
-                    self.displayEpoch=nil;self.displayReadable=false;self.displayConfigurable=false;self.remoteDisplayReadable=false
+                    self.displayEpoch=nil;self.displayReadable=false;self.displayConfigurable=false
                     self.displaySetupTask?.cancel();self.displaySetupTask=nil
                     self.displaySetupID=UUID()
                     self.displayReadTask?.cancel();self.displayReadTask=nil
@@ -76,10 +74,6 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
         let menu=NSMenu();appItem.submenu=menu
         let applications=NSMenuItem(title:"Applications",action:#selector(showApplications),keyEquivalent:"l");applications.target=self;menu.addItem(applications)
         let show=NSMenuItem(title:"Show Windows",action:#selector(showWindows),keyEquivalent:"");show.target=self;menu.addItem(show)
-        if ProcessInfo.processInfo.environment["PERPENDICULAR_RDP_PROBE"] == "1" {
-            let restore=NSMenuItem(title:"Return to Windows Desktop",action:#selector(returnToDesktop),keyEquivalent:"")
-            restore.target=self;menu.addItem(restore)
-        }
         let displayItem=NSMenuItem(title:"Display",action:nil,keyEquivalent:"")
         let displayMenu=NSMenu();displayItem.submenu=displayMenu;menu.addItem(displayItem)
         for (profile,title) in [("standard","Standard"),("native3D","Experimental 3D")] {
@@ -113,14 +107,6 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
     @objc func closeCurrentWindow(){(NSApp.keyWindow ?? NSApp.mainWindow)?.performClose(nil)}
     func applicationWillTerminate(_ notification:Notification){bridge?.command("release");machine?.closeDesktop()}
     @objc func showWindows(){do{try machine.showDesktop()}catch{status=error.localizedDescription}}
-    @objc private func returnToDesktop(){
-        bridge.command("return_console",timeout:.seconds(5)){[weak self] result in
-            guard let self else{return}
-            if case .failure(let error)=result {self.status=error.localizedDescription;return}
-            self.status="Switching to Windows Desktop…"
-            self.showWindows()
-        }
-    }
     @objc func shutdownWindows(){do{try machine.shutdown()}catch{status=error.localizedDescription}}
     @objc private func toggleRecoveryDisplay(){
         guard let previous=machine,!restarting else{return}
@@ -162,7 +148,6 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
     }
     func refresh(){
         readDisplay()
-        readRemoteDisplay()
         bridge.command("catalogue"){[weak self] result in
             guard let self else{return}
             switch result{
@@ -244,30 +229,6 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
             try? FileHandle.standardError.write(contentsOf:data+Data([10]))
         }
     }
-    private func readRemoteDisplay(){
-        guard ProcessInfo.processInfo.environment["PERPENDICULAR_RDP_PROBE"] == "1",
-              remoteDisplayReadable,let epoch=displayEpoch else{return}
-        remoteDisplayRevision+=1;let revision=remoteDisplayRevision
-        bridge.command("rdp_info",timeout:.seconds(5)){[weak self] result in
-            guard let self,self.connected,self.displayEpoch == epoch,self.remoteDisplayRevision == revision else{return}
-            let root=FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/Perpendicular Restart")
-            let report=root.appendingPathComponent("remote-display-info.json")
-            let failure=root.appendingPathComponent("remote-display-error.txt")
-            do {
-                switch result {
-                case .success(let reply):
-                    let data=try JSONSerialization.data(withJSONObject:["epoch":epoch,"value":reply["value"] ?? [:]],options:[.prettyPrinted,.sortedKeys])
-                    try data.write(to:report,options:.atomic)
-                    try FileManager.default.setAttributes([.posixPermissions:0o600],ofItemAtPath:report.path)
-                    try? FileManager.default.removeItem(at:failure)
-                case .failure(let error):
-                    try? FileManager.default.removeItem(at:report)
-                    try Data(error.localizedDescription.utf8).write(to:failure,options:.atomic)
-                    try FileManager.default.setAttributes([.posixPermissions:0o600],ofItemAtPath:failure.path)
-                }
-            }catch {self.status="The display check could not be saved."}
-        }
-    }
     private func configureDisplay(width:Int,height:Int,epoch:String?,attempt:Int=0){
         displaySetupTask?.cancel()
         displaySetupID=UUID();let setupID=displaySetupID
@@ -313,9 +274,7 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
             let capabilities=value["capabilities"] as? [String:Any] ?? [:]
             displayReadable=capabilities["displayInfo"] as? Bool == true
             displayConfigurable=capabilities["displayConfigure"] as? Bool == true
-            remoteDisplayReadable=capabilities["remoteDisplayInfo"] as? Bool == true
             readDisplay()
-            readRemoteDisplay()
             prepareDisplay()
             if ProcessInfo.processInfo.environment["PERPENDICULAR_STATE_TRACE"] == "1",
                let capabilities=value["capabilities"] as? [String:Any],capabilities["driverInfo"] as? Bool == true {

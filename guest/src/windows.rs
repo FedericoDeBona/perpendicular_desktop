@@ -3,7 +3,6 @@ mod catalogue;
 mod display;
 mod drivers;
 mod identity;
-mod remote_display;
 mod service;
 mod window_control;
 mod wire;
