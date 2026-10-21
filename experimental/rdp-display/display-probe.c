@@ -350,7 +350,10 @@ int main(int argc, char** argv) {
     worker_started = TRUE;
     puts("state=connecting-loopback-nla");
     attempted = TRUE;
-    if (!freerdp_connect(instance)) { puts("state=connection-failed"); goto done; }
+    if (!freerdp_connect(instance)) {
+        printf("state=connection-failed code=0x%08" PRIx32 "\n", freerdp_get_last_error(&p->context));
+        goto done;
+    }
     while (!atomic_load(&p->timed_out) && !freerdp_shall_disconnect_context(&p->context)) {
         if (!send_layout(p)) goto done;
         HANDLE handles[MAXIMUM_WAIT_OBJECTS];

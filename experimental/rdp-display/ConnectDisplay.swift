@@ -206,6 +206,12 @@ private final class ConnectController: NSObject, NSApplicationDelegate, NSWindow
     private func showState(_ line: String) {
         // Never display arbitrary child output, certificate contents or credentials.
         let state = line.split(separator: " ", maxSplits: 1).first.map(String.init) ?? ""
+        let observable:Set<String>=["state=connecting-loopback-nla","state=certificate-pin-verified",
+            "state=certificate-pin-rejected","state=connected-nla-verified","state=display-channel-connected",
+            "state=display-caps","state=layout-sent","state=server-resize","state=connection-failed",
+            "state=credential-retry-rejected","state=request-exceeds-server-caps","state=layout-send-failed",
+            "state=probe-incomplete-no-layout","state=disconnected"]
+        if observable.contains(state) {try? FileHandle.standardError.write(contentsOf:Data((state+"\n").utf8))}
         switch state {
         case "state=connecting-loopback-nla": status.stringValue = "Connessione a Windows…"
         case "state=certificate-pin-verified": status.stringValue = "Identità di Windows verificata."
@@ -234,7 +240,13 @@ private final class ConnectController: NSObject, NSApplicationDelegate, NSWindow
         case "state=credential-retry-rejected", "state=credential-input-rejected":
             failureDetail = "Windows non ha accettato le credenziali. Usa la password, non il PIN."
             status.stringValue = failureDetail!
-        case "state=connection-failed", "state=request-exceeds-server-caps", "state=layout-send-failed",
+        case "state=connection-failed":
+            let code=line.split(separator:" ").first(where:{$0.hasPrefix("code=0x")}).map{String($0.dropFirst(5))}
+            if let code,code.count == 10,UInt32(code.dropFirst(2),radix:16) != nil {
+                try? FileHandle.standardError.write(contentsOf:Data(("rdp-error="+code+"\n").utf8))
+                status.stringValue=failureDetail ?? "Connessione non riuscita (\(code))."
+            }else {status.stringValue=failureDetail ?? "Connessione non riuscita."}
+        case "state=request-exceeds-server-caps", "state=layout-send-failed",
              "state=probe-incomplete-no-layout", "state=server-redirection-rejected":
             status.stringValue = failureDetail ?? "La prova non è stata completata."
         case "state=disconnected": break
