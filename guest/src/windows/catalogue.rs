@@ -9,8 +9,14 @@ use windows::{
             Dwm::{DWMWA_EXTENDED_FRAME_BOUNDS, DwmGetWindowAttribute},
             Gdi::ClientToScreen,
         },
-        Storage::{EnhancedStorage::PKEY_Link_TargetParsingPath, Packaging::Appx::GetApplicationUserModelId},
-        System::{Com::CoTaskMemFree, Threading::{GetProcessId,OpenProcess,PROCESS_QUERY_LIMITED_INFORMATION}},
+        Storage::{
+            EnhancedStorage::PKEY_Link_TargetParsingPath,
+            Packaging::Appx::GetApplicationUserModelId,
+        },
+        System::{
+            Com::CoTaskMemFree,
+            Threading::{GetProcessId, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION},
+        },
         UI::{
             Input::KeyboardAndMouse::IsWindowEnabled,
             Shell::{
@@ -32,7 +38,7 @@ use windows::{
 
 pub struct Catalogue {
     pub items: HashMap<String, IShellItem>,
-    identities: HashMap<String,String>,
+    identities: HashMap<String, String>,
 }
 
 unsafe fn text(value: PWSTR) -> String {
@@ -95,7 +101,7 @@ impl Catalogue {
                 }
                 let id = format!("{:x}", Sha256::digest(parsing.as_bytes()));
                 apps.push(json!({"id":id,"name":name}));
-                identities.insert(id.clone(),parsing);
+                identities.insert(id.clone(), parsing);
                 items.insert(id, item);
             }
             apps.sort_by_key(|a| a["name"].as_str().unwrap_or_default().to_lowercase());
@@ -108,18 +114,36 @@ impl Catalogue {
     /// Shell activation can reuse an existing packaged app without returning a
     /// process handle or creating a new HWND. Match its declared app identity,
     /// never an arbitrary foreground window or a window title.
-    pub fn matches(&self,id:&str,hwnd:usize)->bool {
-        let Some(expected)=self.identities.get(id) else{return false};
+    pub fn matches(&self, id: &str, hwnd: usize) -> bool {
+        let Some(expected) = self.identities.get(id) else {
+            return false;
+        };
         unsafe {
-            let Ok(handle)=OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION,false,process_id(hwnd)) else{return false};
-            let handle=identity::Handle(handle);
-            let mut length=0;
-            let _=GetApplicationUserModelId(handle.0,&mut length,None);
-            if length == 0 || length>32768 {return false}
-            let mut buffer=vec![0u16;length as usize];
-            if GetApplicationUserModelId(handle.0,&mut length,Some(PWSTR(buffer.as_mut_ptr()))).0 != 0 {return false}
-            let actual=String::from_utf16_lossy(&buffer[..buffer.iter().position(|v|*v==0).unwrap_or(buffer.len())]);
-            actual.eq_ignore_ascii_case(expected.strip_prefix("shell:AppsFolder\\").unwrap_or(expected))
+            let Ok(handle) =
+                OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, process_id(hwnd))
+            else {
+                return false;
+            };
+            let handle = identity::Handle(handle);
+            let mut length = 0;
+            let _ = GetApplicationUserModelId(handle.0, &mut length, None);
+            if length == 0 || length > 32768 {
+                return false;
+            }
+            let mut buffer = vec![0u16; length as usize];
+            if GetApplicationUserModelId(handle.0, &mut length, Some(PWSTR(buffer.as_mut_ptr()))).0
+                != 0
+            {
+                return false;
+            }
+            let actual = String::from_utf16_lossy(
+                &buffer[..buffer.iter().position(|v| *v == 0).unwrap_or(buffer.len())],
+            );
+            actual.eq_ignore_ascii_case(
+                expected
+                    .strip_prefix("shell:AppsFolder\\")
+                    .unwrap_or(expected),
+            )
         }
     }
 

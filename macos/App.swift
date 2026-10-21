@@ -18,6 +18,10 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,ObservableObject {
     private var earlyFrames:[String:GuestPacket]=[:]
     private var layoutInProgress=false
     private var pointerExitTask:Task<Void,Never>?
+    private var displaySetupTask:Task<Void,Never>?
+    private var displayEpoch:String?
+    private var recoveryItem:NSMenuItem!
+    private var restarting=false
 
     func applicationDidFinishLaunching(_ notification:Notification){
         do{
@@ -29,6 +33,7 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,ObservableObject {
             bridge=try GuestBridge(port:machine.configuration.guestPort,token:machine.configuration.token)
             bridge.onConnection={ [weak self] value in
                 guard let self else{return};self.connected=value;self.status=value ? "Windows connected":"Reconnecting to Windows…"
+                if !value {self.displayEpoch=nil;self.displaySetupTask?.cancel();self.displaySetupTask=nil}
                 if value{
                     self.refresh()
                     if ProcessInfo.processInfo.environment["PERPENDICULAR_AUDIT"] == "1" {self.bridge.command("diagnostics"){result in
@@ -55,6 +60,9 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,ObservableObject {
         let menu=NSMenu();appItem.submenu=menu
         let applications=NSMenuItem(title:"Applications",action:#selector(showApplications),keyEquivalent:"l");applications.target=self;menu.addItem(applications)
         let show=NSMenuItem(title:"Show Windows",action:#selector(showWindows),keyEquivalent:"");show.target=self;menu.addItem(show)
+        recoveryItem=NSMenuItem(title:"Recovery Display",action:#selector(toggleRecoveryDisplay),keyEquivalent:"")
+        recoveryItem.target=self;recoveryItem.state=machine?.configuration.recoveryDisplay == true ? .on:.off
+        recoveryItem.isEnabled=machine != nil;menu.addItem(recoveryItem)
         let shutdown=NSMenuItem(title:"Shut Down Windows",action:#selector(shutdownWindows),keyEquivalent:"");shutdown.target=self;menu.addItem(shutdown)
         menu.addItem(.separator());menu.addItem(withTitle:"Quit",action:#selector(NSApplication.terminate(_:)),keyEquivalent:"q")
         NSApp.mainMenu=main
@@ -76,6 +84,28 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,ObservableObject {
     func applicationWillTerminate(_ notification:Notification){bridge?.command("release");machine?.closeDesktop()}
     @objc func showWindows(){do{try machine.showDesktop()}catch{status=error.localizedDescription}}
     @objc func shutdownWindows(){do{try machine.shutdown()}catch{status=error.localizedDescription}}
+    @objc private func toggleRecoveryDisplay(){
+        guard let previous=machine,!restarting else{return}
+        let enabled=previous.configuration.recoveryDisplay != true
+        restarting=true;recoveryItem.isEnabled=false;status="Restarting Windows…"
+        Task{@MainActor [weak self] in
+            guard let self else{return}
+            defer {self.restarting=false;self.recoveryItem.isEnabled=true}
+            do {
+                try previous.shutdown()
+                let deadline=Date().addingTimeInterval(60)
+                while previous.isRunning,Date()<deadline {try await Task.sleep(for:.milliseconds(500))}
+                guard !previous.isRunning else {
+                    self.status="Windows has not shut down. Save your work or use Show Windows.";return
+                }
+                previous.closeDesktop()
+                self.machine=try previous.withRecoveryDisplay(enabled)
+                self.recoveryItem.state=enabled ? .on:.off
+                try self.machine.start();try self.machine.showDesktop()
+                self.status="Starting Windows…"
+            }catch {self.status=error.localizedDescription}
+        }
+    }
     func refresh(){
         bridge.command("catalogue"){[weak self] result in
             guard let self else{return}
@@ -114,6 +144,28 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,ObservableObject {
             self.bridge.command("input",["window":id,"event":"leave"])
         }
     }
+    private func configureDisplay(width:Int,height:Int,epoch:String?,attempt:Int=0){
+        displaySetupTask?.cancel()
+        displaySetupTask=Task{@MainActor [weak self] in
+            // The interactive session can connect before the display driver
+            // accepts a mode switch. Retry only a few times during this setup.
+            try? await Task.sleep(for:.seconds([1,3,8][attempt]))
+            guard !Task.isCancelled,let self,self.connected,self.displayEpoch == epoch else{return}
+            self.bridge.command("display_configure",["width":width,"height":height],timeout:.seconds(5)){[weak self] result in
+                guard let self,self.connected,self.displayEpoch == epoch else{return}
+                self.displaySetupTask=nil
+                if case .failure=result {
+                    if attempt<2 {self.configureDisplay(width:width,height:height,epoch:epoch,attempt:attempt+1)}
+                    else {self.status="Windows could not match the Mac display size."}
+                    return
+                }
+                if ProcessInfo.processInfo.environment["PERPENDICULAR_STATE_TRACE"] == "1",case .success(let reply)=result,
+                   let data=try? JSONSerialization.data(withJSONObject:["type":"display_configured","guest":reply["value"] ?? [:]],options:[.sortedKeys]) {
+                    try? FileHandle.standardError.write(contentsOf:data+Data([10]))
+                }
+            }
+        }
+    }
     private func receive(_ packet:GuestPacket){
         let value=packet.header
         if ProcessInfo.processInfo.environment["PERPENDICULAR_STATE_TRACE"] == "1" {
@@ -125,6 +177,14 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,ObservableObject {
         switch value["type"] as? String{
         case "hello":
             machine.synchronizePrimaryDisplay()
+            displayEpoch=value["epoch"] as? String
+            if machine.nativeGraphicsEnabled,
+               let capabilities=value["capabilities"] as? [String:Any],capabilities["displayConfigure"] as? Bool == true,
+               let host=HostDisplay.current().first {
+                let width=min(4096,Int((host.frame.width*host.scale).rounded()))
+                let height=min(4096,8_388_608/max(1,width),Int((host.frame.height*host.scale).rounded()))
+                configureDisplay(width:width,height:height,epoch:displayEpoch)
+            }
             if let capabilities=value["capabilities"] as? [String:Any],capabilities["displayInfo"] as? Bool == true {
                 bridge.command("display_info",timeout:.seconds(3)){result in
                     guard ProcessInfo.processInfo.environment["PERPENDICULAR_STATE_TRACE"] == "1",

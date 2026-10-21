@@ -53,6 +53,7 @@ struct Worker {
     pressed: HashSet<u16>,
     buttons: HashSet<String>,
     display_busy: Arc<AtomicBool>,
+    graphics_busy: Arc<AtomicBool>,
 }
 
 fn state_path() -> PathBuf {
@@ -97,6 +98,7 @@ pub fn run(path: &Path) -> Result<(), String> {
         pressed: HashSet::new(),
         buttons: HashSet::new(),
         display_busy: Arc::new(AtomicBool::new(false)),
+        graphics_busy: Arc::new(AtomicBool::new(false)),
     };
     worker.restore();
     let endpoint: SocketAddr = format!("10.0.2.2:{}", config.port).parse().map_err(error)?;
@@ -133,7 +135,7 @@ impl Worker {
         outbox.control(
             json!({"type":"hello","protocol":1,"token":config.token,"epoch":self.epoch,
             "sid":self.sid,"session":self.session,"version":env!("CARGO_PKG_VERSION"),
-            "capabilities":{"capture":"software","windows":4,"transients":12,"windowRoles":true,"input":true,"catalogue":true,"displayInfo":true,"graphicsInfo":true}}),
+            "capabilities":{"capture":"software","windows":4,"transients":12,"windowRoles":true,"input":true,"catalogue":true,"displayInfo":true,"graphicsInfo":true,"displayConfigure":true}}),
         );
         let (sender, receiver) = mpsc::sync_channel(128);
         let state = outbox.clone();
@@ -163,10 +165,18 @@ impl Worker {
         while outbox.connected.load(Ordering::Acquire) {
             if let Ok(command) = receiver.recv_timeout(Duration::from_millis(10)) {
                 let request = command["request"].clone();
-                if command["operation"] == "diagnostics" || command["operation"] == "display_info" || command["operation"] == "graphics_info" {
+                if command["operation"] == "diagnostics"
+                    || command["operation"] == "display_info"
+                    || command["operation"] == "graphics_info"
+                    || command["operation"] == "display_configure"
+                {
                     let graphics_request = command["operation"] == "graphics_info";
-                    let display_request = command["operation"] == "display_info" || graphics_request;
-                    let busy = if display_request {
+                    let configure_request = command["operation"] == "display_configure";
+                    let display_request =
+                        command["operation"] == "display_info" || configure_request;
+                    let busy = if graphics_request {
+                        self.graphics_busy.clone()
+                    } else if display_request {
                         self.display_busy.clone()
                     } else {
                         diagnostic_busy.clone()
@@ -178,6 +188,8 @@ impl Worker {
                         std::thread::spawn(move || {
                             let result = if graphics_request {
                                 Ok(display::graphics())
+                            } else if configure_request {
+                                display::configure(&command)
                             } else if display_request {
                                 Ok(display::snapshot())
                             } else {
@@ -428,7 +440,7 @@ impl Worker {
                 .filter(|raw| {
                     ((launch.pid != 0 && catalogue::process_id(*raw) == launch.pid)
                         || (!launch.before.contains(raw) && *raw == foreground)
-                        || self.catalogue.matches(&launch.app,*raw))
+                        || self.catalogue.matches(&launch.app, *raw))
                         && catalogue::details(*raw, &self.sid, self.session)
                             .is_some_and(|m| !catalogue::transient(&m))
                 })

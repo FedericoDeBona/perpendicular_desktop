@@ -130,3 +130,69 @@ pub fn snapshot() -> Value {
     // driver on every connection. The hardware probe is an explicit operation.
     json!({"displays":displays})
 }
+
+/// Apply a mode advertised by the current primary display. RFB updates the
+/// virtual monitor's preferred size; Windows still needs an explicit mode set.
+pub fn configure(value: &Value) -> Result<Value, String> {
+    let width = value["width"]
+        .as_u64()
+        .filter(|v| (640..=4096).contains(v))
+        .ok_or("Invalid display width")? as u32;
+    let height = value["height"]
+        .as_u64()
+        .filter(|v| (480..=4096).contains(v))
+        .ok_or("Invalid display height")? as u32;
+    if u64::from(width) * u64::from(height) > 8_388_608 {
+        return Err("Display exceeds the current frame limit".into());
+    }
+    unsafe {
+        SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+        for index in 0..16 {
+            let mut display = DISPLAY_DEVICEW {
+                cb: size_of::<DISPLAY_DEVICEW>() as u32,
+                ..Default::default()
+            };
+            if !EnumDisplayDevicesW(None, index, &mut display, 0).as_bool() {
+                break;
+            }
+            if !display
+                .StateFlags
+                .contains(DISPLAY_DEVICE_PRIMARY_DEVICE | DISPLAY_DEVICE_ATTACHED_TO_DESKTOP)
+            {
+                continue;
+            }
+            let name = PCWSTR(display.DeviceName.as_ptr());
+            let mut mode = DEVMODEW {
+                dmSize: size_of::<DEVMODEW>() as u16,
+                ..Default::default()
+            };
+            if !EnumDisplaySettingsExW(name, ENUM_CURRENT_SETTINGS, &mut mode, EDS_RAWMODE)
+                .as_bool()
+            {
+                return Err("Cannot read the primary display mode".into());
+            }
+            if mode.dmPelsWidth == width && mode.dmPelsHeight == height {
+                return Ok(snapshot());
+            }
+            mode.dmPelsWidth = width;
+            mode.dmPelsHeight = height;
+            mode.dmFields = DM_PELSWIDTH | DM_PELSHEIGHT;
+            let valid = ChangeDisplaySettingsExW(name, Some(&mode), None, CDS_TEST, None);
+            if valid != DISP_CHANGE_SUCCESSFUL {
+                return Err(format!(
+                    "Windows does not support the requested display mode ({})",
+                    valid.0
+                ));
+            }
+            let applied = ChangeDisplaySettingsExW(name, Some(&mode), None, CDS_TYPE(0), None);
+            if applied != DISP_CHANGE_SUCCESSFUL {
+                return Err(format!(
+                    "Windows could not apply the display mode ({})",
+                    applied.0
+                ));
+            }
+            return Ok(snapshot());
+        }
+    }
+    Err("No active primary display".into())
+}

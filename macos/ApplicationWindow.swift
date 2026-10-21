@@ -56,6 +56,12 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
     private var resizeSerial=0
     private var expectedSize:NSSize?
     private var resizeDeadline:Task<Void,Never>?
+    private var liveResizeTimer:Timer?
+    private var liveResizeSize:NSSize?
+    private var liveResizeInFlight=false
+    private var liveResizeFailed=false
+    private var liveResizeSentSize:NSSize?
+    private var nextLiveResizeAt=0.0
     private var pixelScale=1.0
     private var zoomRestore:NSRect?
     var onError:((String)->Void)?
@@ -76,7 +82,10 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
             panel.becomesKeyOnlyIfNeeded=true;panel.isExcludedFromWindowsMenu=true
             window=panel
         }else if role == .main {
-            window=GuestDocumentWindow(contentRect:rect,styleMask:[.borderless,.closable,.miniaturizable,.resizable],backing:.buffered,defer:false)
+            // AppKit's implicit borderless resize tracking competes with the
+            // Windows hit-test gesture. Main windows use our explicit edges;
+            // dialogs retain AppKit's ordinary titled resize frame.
+            window=GuestDocumentWindow(contentRect:rect,styleMask:[.borderless,.closable,.miniaturizable],backing:.buffered,defer:false)
         }else{
             window=NSWindow(contentRect:rect,styleMask:[.titled,.closable,.resizable,.miniaturizable],backing:.buffered,defer:false)
         }
@@ -113,7 +122,7 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
         if let maxWidth=item["maxWidth"] as? Double,let maxHeight=item["maxHeight"] as? Double,maxWidth>=160,maxHeight>=100 {
             window.maxSize=window.frameRect(forContentRect:NSRect(x:0,y:0,width:maxWidth*pixelScale,height:maxHeight*pixelScale)).size
         }
-        if !role.transient {
+        if !role.transient && role != .main {
             if canResize {window.styleMask.insert(.resizable)}else{window.styleMask.remove(.resizable)}
         }
         minimized=nextMinimized
@@ -192,6 +201,14 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
         let top=NSPoint(x:window.frame.minX,y:window.frame.maxY)
         window.setContentSize(NSSize(width:frameSize.width*pixelScale,height:frameSize.height*pixelScale))
         window.setFrameTopLeftPoint(top)
+        // A guest DPI/mode change can grow an existing window downward. Keep a
+        // window that fits the current Mac display reachable after reconciliation.
+        if let area=(window.screen ?? NSScreen.screens.first)?.visibleFrame {
+            var origin=window.frame.origin
+            if window.frame.width<=area.width {origin.x=min(max(origin.x,area.minX),area.maxX-window.frame.width)}
+            if window.frame.height<=area.height {origin.y=min(max(origin.y,area.minY),area.maxY-window.frame.height)}
+            if origin != window.frame.origin {window.setFrameOrigin(origin)}
+        }
     }
     private func leftMouse(_ event:NSEvent,_ value:[String:Any]){
         // Use the position recorded in this event, in global coordinates.
@@ -262,6 +279,7 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
         case .move:window.setFrameOrigin(NSPoint(x:gesture.frame.minX+delta.x,y:gesture.frame.minY+delta.y))
         case .resize(let edges):
             window.setFrame(edges.frame(from:gesture.frame,delta:delta,minimum:window.minSize,maximum:window.maxSize),display:true)
+            if !up {updateLiveResize()}
             if up {commitResize()}
         default:break
         }
@@ -270,15 +288,57 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
     }
     private func beginResize(){
         resizeSerial+=1;resizeDeadline?.cancel();expectedSize=nil
+        liveResizeTimer?.invalidate();liveResizeTimer=nil;liveResizeSize=nil
+        liveResizeInFlight=false;liveResizeFailed=false
+        liveResizeSentSize=resizeTargetSize;nextLiveResizeAt=0
         nativeResizing=true;content.suspendedPointer=true;content.clearModifiers()
         bridge.command("cancel_interaction",["window":id])
+    }
+    private var resizeTargetSize:NSSize {
+        // content.bounds can lag behind a programmatic setFrame during tracking.
+        // Derive the target from the requested window frame, including dialog chrome.
+        let size=window.contentRect(forFrameRect:window.frame).size
+        return NSSize(width:max(160,(size.width/pixelScale).rounded()),height:max(100,(size.height/pixelScale).rounded()))
+    }
+    private func updateLiveResize(){
+        guard nativeResizing,canResize,!role.transient,!liveResizeFailed else{return}
+        let size=resizeTargetSize
+        if size == liveResizeSentSize {
+            liveResizeSize=nil;liveResizeTimer?.invalidate();liveResizeTimer=nil;return
+        }
+        liveResizeSize=size
+        guard !liveResizeInFlight,liveResizeTimer == nil else{return}
+        let serial=resizeSerial
+        let delay=max(0,nextLiveResizeAt-ProcessInfo.processInfo.systemUptime)
+        if delay == 0 {sendLiveResize(serial);return}
+        let timer=Timer(timeInterval:delay,repeats:false){[weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self,self.resizeSerial == serial else{return}
+                self.liveResizeTimer=nil;self.sendLiveResize(serial)
+            }
+        }
+        // AppKit tracks native dialog resizes in an event-tracking run loop.
+        // Common modes keep this coalesced sender active during that gesture.
+        liveResizeTimer=timer;RunLoop.main.add(timer,forMode:.common)
+    }
+    private func sendLiveResize(_ serial:Int){
+        guard resizeSerial == serial,nativeResizing,let size=liveResizeSize else{return}
+        liveResizeSize=nil;liveResizeSentSize=size;liveResizeInFlight=true
+        nextLiveResizeAt=ProcessInfo.processInfo.systemUptime+0.045
+        trace("resize_live_requested")
+        bridge.command("resize",["window":id,"width":Int(size.width),"height":Int(size.height)],timeout:.seconds(1)){[weak self] result in
+            guard let self,self.resizeSerial == serial,self.nativeResizing else{return}
+            self.liveResizeInFlight=false
+            if case .failure=result {self.liveResizeFailed=true;return}
+            if self.liveResizeSize != nil {self.updateLiveResize()}
+        }
     }
     private func commitResize(){
         guard canResize,!role.transient else{nativeResizing=false;content.suspendedPointer=false;return}
         resizeSerial+=1;let serial=resizeSerial
+        liveResizeTimer?.invalidate();liveResizeTimer=nil;liveResizeSize=nil;liveResizeInFlight=false
         nativeResizing=false;expectedSize = .zero;content.suspendedPointer=true
-        let width=max(160,Int((content.bounds.width/pixelScale).rounded()))
-        let height=max(100,Int((content.bounds.height/pixelScale).rounded()))
+        let size=resizeTargetSize,width=Int(size.width),height=Int(size.height)
         trace("resize_requested")
         resizeDeadline?.cancel()
         resizeDeadline=Task{@MainActor [weak self] in
@@ -310,6 +370,7 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
     }
     private func finishResize(){
         resizeDeadline?.cancel();resizeDeadline=nil;expectedSize=nil
+        liveResizeTimer?.invalidate();liveResizeTimer=nil;liveResizeSize=nil;liveResizeInFlight=false
         nativeResizing=false;content.suspendedPointer=false
         applyFrameSize();bridge.command("release");onGeometry?()
         trace("resize_finished")
@@ -332,12 +393,15 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
     func windowDidResignKey(_ notification:Notification){
         if !role.transient {
             gesture=nil;content.clearModifiers();bridge.command("release")
-            if nativeResizing {nativeResizing=false;content.suspendedPointer=false;applyFrameSize()}
+            if nativeResizing {
+                resizeSerial+=1;liveResizeTimer?.invalidate();liveResizeTimer=nil;liveResizeSize=nil;liveResizeInFlight=false
+                nativeResizing=false;content.suspendedPointer=false;applyFrameSize()
+            }
         }
     }
     func windowDidDeminiaturize(_ notification:Notification){bridge.command("activate",["window":id])}
     func windowDidMove(_ notification:Notification){onGeometry?()}
-    func windowDidResize(_ notification:Notification){onGeometry?()}
+    func windowDidResize(_ notification:Notification){updateLiveResize();onGeometry?()}
     func windowWillStartLiveResize(_ notification:Notification){if !role.transient{beginResize()}}
     func windowDidEndLiveResize(_ notification:Notification){if !role.transient{commitResize()}}
     func windowShouldZoom(_ window:NSWindow,toFrame newFrame:NSRect)->Bool{toggleZoom();return false}

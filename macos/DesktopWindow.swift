@@ -119,7 +119,7 @@ final class DesktopWindow:NSObject,NSWindowDelegate {
                 self.surface.source=NSSize(width:width,height:height)
                 self.surface.renderer.present(pixels,width:width,height:height);self.window.title="Windows Desktop"
             },layout:{[weak self] screen in
-                guard let self,self.connectionID == id else{return};self.surface.inputScreen=screen
+                guard let self,self.connectionID == id,!self.nativeActive else{return};self.surface.inputScreen=screen
             },failed:{[weak self] message in
                 guard let self,self.connectionID == id else{return}
                 self.desktop=nil;self.surface.connection=nil
@@ -133,6 +133,7 @@ final class DesktopWindow:NSObject,NSWindowDelegate {
                 guard let self,self.visible,self.readerID == id else{return}
                 self.nativeActive=true;self.desktop?.requestPixels(false)
                 self.surface.source=NSSize(width:frame.texture.width,height:frame.texture.height)
+                self.surface.inputScreen=DesktopScreen(id:0,x:0,y:0,width:frame.texture.width,height:frame.texture.height)
                 self.surface.renderer.present(frame);self.window.title="Windows Desktop"
             },failed:{[weak self] message in
                 guard let self,self.readerID == id else{return}

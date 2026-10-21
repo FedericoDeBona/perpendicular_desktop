@@ -14,6 +14,7 @@ struct MachineConfiguration: Codable {
     let guestPort: UInt16
     let token: String
     let graphics:String?
+    let recoveryDisplay:Bool?
 }
 
 @MainActor
@@ -43,6 +44,19 @@ final class VirtualMachineController {
         if machine?.isRunning == true { return true }
         return (try? MachineControl.execute(socket:controlSocket,operation:"query-uuid")["UUID"] as? String) == configuration.id
     }
+    var nativeGraphicsEnabled:Bool {configuration.graphics == "native3D" && configuration.recoveryDisplay != true}
+
+    func withRecoveryDisplay(_ enabled:Bool)throws->VirtualMachineController {
+        guard !isRunning else {throw CocoaError(.executableRuntimeMismatch,userInfo:[NSLocalizedDescriptionKey:"Windows must finish shutting down before its display can change."])}
+        let file=directory.appendingPathComponent("machine.json")
+        guard var value=try JSONSerialization.jsonObject(with:Data(contentsOf:file)) as? [String:Any],value["id"] as? String == configuration.id else {
+            throw CocoaError(.coderReadCorrupt)
+        }
+        value["recoveryDisplay"]=enabled
+        try JSONSerialization.data(withJSONObject:value,options:[.prettyPrinted,.sortedKeys]).write(to:file,options:.atomic)
+        try FileManager.default.setAttributes([.posixPermissions:0o600],ofItemAtPath:file.path)
+        return try VirtualMachineController(directory:directory,runtime:runtime)
+    }
 
     func shutdown() throws {
         guard isRunning else { return }
@@ -62,7 +76,7 @@ final class VirtualMachineController {
     }
     func closeDesktop(){desktop?.stop();desktop?.window.close();desktop=nil}
     func synchronizePrimaryDisplay(){
-        guard configuration.graphics == "native3D",let launch=desktopLaunch(),let host=HostDisplay.current().first else{return}
+        guard nativeGraphicsEnabled,let launch=desktopLaunch(),let host=HostDisplay.current().first else{return}
         let width=min(4096,Int((host.frame.width*host.scale).rounded()))
         let height=min(4096,8_388_608/max(1,width),Int((host.frame.height*host.scale).rounded()))
         let request=UUID();displayRequest=request;displayControl?.stop()
@@ -96,7 +110,7 @@ final class VirtualMachineController {
         guard !isRunning else { return }
         closeDesktop()
         let vm = directory.appendingPathComponent("Windows")
-        let native=configuration.graphics == "native3D" ? try NativeGraphics(root:runtime.deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("Native3D")):nil
+        let native=nativeGraphicsEnabled ? try NativeGraphics(root:runtime.deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("Native3D")):nil
         let session=UUID().uuidString.replacingOccurrences(of:"-",with:"").lowercased()
         let displayDirectory=URL(fileURLWithPath:"/tmp/perpendicular-display-\(getuid())-\(session.prefix(8))")
         try FileManager.default.createDirectory(at:displayDirectory,withIntermediateDirectories:false,attributes:[.posixPermissions:0o700])
