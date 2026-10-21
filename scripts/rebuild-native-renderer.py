@@ -16,6 +16,7 @@ REPO = Path(__file__).resolve().parent.parent
 ARCHIVE_SHA = 'a77490144ebca838d1d49d73e366eae845a4c88316347a937ee45819fe9e49ae'
 LIBRARY_SHA = '7ae9fe98836432435f1a33239cde19b9c8f59b54f7fbdefa96be17a22d141274'
 SERVER_SHA = 'e74b5fe2a981da00106b030f37cfbd1f62ace4afec7ce50f56e3045515b65160'
+SHARED_HANDLE_SHA = 'b8a9c35e30f84e918148a2efc237e672399a02745527af6f76988acd36a351ca'
 
 
 def digest(path):
@@ -34,6 +35,8 @@ def main():
                         help='Unmodified, hash-matched Native3D runtime')
     parser.add_argument('--output', type=Path, required=True,
                         help='New private output directory')
+    parser.add_argument('--shared-handle-diagnostics', action='store_true',
+                        help='Count seven existing D3D11/DXGI rejections, without argument tracing')
     args = parser.parse_args()
     reference = args.reference.resolve(strict=True)
     runtime = args.runtime.resolve(strict=True)
@@ -76,6 +79,11 @@ def main():
              'server/render_client.c', 'server/render_worker.c', 'server/render_worker.h',
              *['src/perp-sync/' + n for n in ('proxy-broker.c', 'live.h', 'broker.h',
                 'wire.h', 'wire1-layout.h', 'snapshot-storage.h', 'channel.h')]]
+    diagnostic_source = 'src/neptune/npt_overrides_shared_handle.c'
+    if args.shared_handle_diagnostics:
+        if digest(source / diagnostic_source) != SHARED_HANDLE_SHA:
+            raise ValueError('Shared-HANDLE diagnostic source does not match the pinned build')
+        names.append(diagnostic_source)
     inputs = {name: digest(source / name) for name in names}
     for name in names:
         target = copied / name
@@ -85,6 +93,10 @@ def main():
     run(['patch', '-p1', '--forward', '--batch', '-i', patch], copied)
     changed = ['src/perp-sync/proxy-broker.c', 'src/proxy/proxy_context.c',
                'src/proxy/proxy_client.c', 'server/render_client.c', 'server/render_worker.c']
+    diagnostic_patch = REPO / 'graphics/renderer/shared-handle-diagnostics.patch'
+    if args.shared_handle_diagnostics:
+        run(['patch', '-p1', '--forward', '--batch', '-i', diagnostic_patch], copied)
+        changed.append(diagnostic_source)
     objects = {}
     for name in changed:
         record = next(r for r in records if r['file'].endswith('/' + name))
@@ -147,6 +159,18 @@ def main():
     notices.mkdir(exist_ok=True)
     shutil.copy2(patch, notices / patch.name)
     (notices / 'context-retirement.json').write_text(json.dumps(receipt, indent=2) + '\n')
+    if args.shared_handle_diagnostics:
+        manifest['shared_handle_diagnostics'] = 1
+        shutil.copy2(diagnostic_patch, notices / diagnostic_patch.name)
+        diagnostic_receipt = {
+            'source_sha256': SHARED_HANDLE_SHA,
+            'patch_sha256': digest(diagnostic_patch),
+            'base_runtime_manifest_sha256': digest(runtime / 'runtime.json'),
+            'apis': 7, 'log_lines_per_api_per_process_max': 8,
+            'counter_saturation': 128, 'guest_arguments_logged': False,
+            'rejection_behavior_changed': False, 'runtime_verified': False,
+        }
+        (notices / 'shared-handle-diagnostics.json').write_text(json.dumps(diagnostic_receipt, indent=2) + '\n')
     (result / 'runtime.json').write_text(json.dumps(manifest, indent=2) + '\n')
     if any(digest(source / name) != expected for name, expected in inputs.items()):
         raise ValueError('Reference source changed during the build')

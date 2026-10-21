@@ -1,0 +1,101 @@
+--- a/src/neptune/npt_overrides_shared_handle.c
++++ b/src/neptune/npt_overrides_shared_handle.c
+@@ -20,6 +20,42 @@
+  */
+ 
+ #include "npt_overrides.h"
++#include "npt_common.h"
++
++/* Diagnostic-only counters: no handles, pointers, names or guest payloads.
++ * Saturate per API at 128 and emit powers of two: at most eight lines/API
++ * per worker process, even with concurrent command rings. */
++static atomic_uint shared_reject_counts[7];
++static const char *const shared_reject_apis[7] = {
++   "IDXGIResource::GetSharedHandle", "IDXGIResource1::CreateSharedHandle",
++   "ID3D11Fence::CreateSharedHandle", "ID3D11Device::OpenSharedResource",
++   "ID3D11Device1::OpenSharedResource1", "ID3D11Device1::OpenSharedResourceByName",
++   "ID3D11Device5::OpenSharedFence",
++};
++
++static void __attribute__((constructor))
++shared_reject_diagnostics_loaded(void)
++{
++   npt_log("shared-handle diagnostics enabled; API/HRESULT only; counters capped at 128");
++}
++
++static void
++shared_reject_diagnostic(unsigned api, HRESULT result)
++{
++   unsigned count = atomic_load_explicit(&shared_reject_counts[api], memory_order_relaxed);
++   while (count < 128 &&
++          !atomic_compare_exchange_weak_explicit(&shared_reject_counts[api], &count, count + 1,
++                                                 memory_order_relaxed, memory_order_relaxed)) {
++   }
++   if (count >= 128)
++      return;
++   count++;
++   if ((count & (count - 1)) == 0)
++      npt_log("shared-handle reject api=%s hr=0x%08x count=%u%s",
++              shared_reject_apis[api], (unsigned)result, count,
++              count == 128 ? " capped=1" : "");
++}
++
+ 
+ #include "neptune-protocol/npt_protocol_defs.h"
+ #include "neptune-protocol/npt_protocol_host_id3d11device.h"
+@@ -39,6 +75,7 @@
+    if (args->pSharedHandle)
+       *args->pSharedHandle = (HANDLE)0;
+    args->ret = NPT_E_INVALIDARG;
++   shared_reject_diagnostic(0, args->ret);
+    return args->ret;
+ }
+ 
+@@ -51,6 +88,7 @@
+    if (args->pHandle)
+       *args->pHandle = (HANDLE)0;
+    args->ret = NPT_E_INVALIDARG;
++   shared_reject_diagnostic(1, args->ret);
+    return args->ret;
+ }
+ 
+@@ -63,6 +101,7 @@
+    if (args->pHandle)
+       *args->pHandle = (HANDLE)0;
+    args->ret = NPT_E_INVALIDARG;
++   shared_reject_diagnostic(2, args->ret);
+    return args->ret;
+ }
+ 
+@@ -79,6 +118,7 @@
+    if (args->ppResource)
+       *args->ppResource = NULL;
+    args->ret = NPT_E_INVALIDARG;
++   shared_reject_diagnostic(3, args->ret);
+    return args->ret;
+ }
+ 
+@@ -91,6 +131,7 @@
+    if (args->ppResource)
+       *args->ppResource = NULL;
+    args->ret = NPT_E_INVALIDARG;
++   shared_reject_diagnostic(4, args->ret);
+    return args->ret;
+ }
+ 
+@@ -103,6 +144,7 @@
+    if (args->ppResource)
+       *args->ppResource = NULL;
+    args->ret = NPT_E_INVALIDARG;
++   shared_reject_diagnostic(5, args->ret);
+    return args->ret;
+ }
+ 
+@@ -115,6 +157,7 @@
+    if (args->ppFence)
+       *args->ppFence = NULL;
+    args->ret = NPT_E_INVALIDARG;
++   shared_reject_diagnostic(6, args->ret);
+    return args->ret;
+ }
+ 

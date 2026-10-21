@@ -290,7 +290,14 @@ pub fn configure(value: &Value) -> Result<Value, String> {
             {
                 return Err("Cannot read the primary display mode".into());
             }
-            if mode.dmPelsWidth == width && mode.dmPelsHeight == height {
+            let mut saved = DEVMODEW {
+                dmSize: size_of::<DEVMODEW>() as u16,
+                ..Default::default()
+            };
+            let saved_matches = EnumDisplaySettingsExW(
+                name, ENUM_REGISTRY_SETTINGS, &mut saved, EDS_RAWMODE,
+            ).as_bool() && saved.dmPelsWidth == width && saved.dmPelsHeight == height;
+            if mode.dmPelsWidth == width && mode.dmPelsHeight == height && saved_matches {
                 return Ok(snapshot());
             }
             mode.dmPelsWidth = width;
@@ -303,7 +310,10 @@ pub fn configure(value: &Value) -> Result<Value, String> {
                     valid.0
                 ));
             }
-            let applied = ChangeDisplaySettingsExW(name, Some(&mode), None, CDS_TYPE(0), None);
+            // The topology belongs to this user's monitor configuration. Keep
+            // the saved mode consistent so a later desktop reset cannot restore
+            // the old size merely because our change was only dynamic.
+            let applied = ChangeDisplaySettingsExW(name, Some(&mode), None, CDS_UPDATEREGISTRY, None);
             if applied != DISP_CHANGE_SUCCESSFUL {
                 return Err(format!(
                     "Windows could not apply the display mode ({})",

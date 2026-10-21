@@ -143,3 +143,11 @@ La chiave privata `keyboardLayout` sceglie la mappa della tastiera RFB fra quell
 ### Proprietario della sessione
 
 `ownerSid` viene acquisito all’installazione. Il servizio seleziona la sola sessione attiva di quel proprietario e verifica nuovamente il token prima di avviare il worker. Questa supervisione rimane utile al percorso console e viene conservata dopo la rimozione dell’esperimento RDP. Nessun controllo SCM per trasferire la sessione o inventario RDP viene esposto dal guest ordinario.
+
+### Identità del monitor nel percorso locale
+
+`HostDisplay` legge i millimetri fisici tramite CoreGraphics e l’UUID del monitor, validando i valori prima del passaggio al runtime. Il QEMU che dichiara `primary_monitor_metadata=1` riceve i metadati del primario all’avvio, li inserisce nell’EDID e conserva i dati fisici durante le richieste RFB di risoluzione. Il seriale EDID numerico deriva dall’UUID; non è una credenziale né una garanzia di assenza di collisioni. Il preparatore [rebuild-native-monitor.py](../scripts/rebuild-native-monitor.py) ricompila due sole unità C della build corrispondente e conserva renderer/server e versioni del protocollo.
+
+`driver_info` enumera separatamente gli adapter e i monitor presenti tramite SetupAPI. Per i monitor legge l’EDID dal registro del dispositivo, ne controlla lunghezza, intestazione e checksum e riporta soltanto identità e dimensioni fisiche. La query rapida `display_info` rimane indipendente dall’inventario driver. I millimetri annunciati non impongono la preferenza di scala Windows: il frontend ammette la geometria condivisa soltanto quando risoluzione e DPI effettivi coincidono col Mac.
+
+La modalità configurata viene anche salvata nel profilo Windows dell’utente, usando `CDS_UPDATEREGISTRY` dopo `CDS_TEST`. Vengono confrontate modalità corrente e salvata, così una misura già applicata ma non persistente viene comunque registrata. Il precedente flag zero modificava soltanto lo stato dinamico; questo spiega una possibile via di ritorno alla modalità precedente, senza dimostrare da solo la causa di ogni cambio osservato. [Semantica Microsoft](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-changedisplaysettingsexw).

@@ -15,3 +15,19 @@ Gli hash del vecchio archivio, della libreria e del server sono vincoli esplicit
 `check-retirement.c` è un solo controllo mirato dell'header effettivamente compilato: rifiuta un processo figlio ancora vivo e conferma la raccolta del figlio dopo la terminazione. Si compila indicando la directory `build/source/src/perp-sync` dell'output. Non è una prova del driver o della compatibilità delle app Windows.
 
 Questa patch non risolve esaurimento o riuso delle identità delle risorse, import condivisi non supportati, desktop protetto, DPI o più monitor. Le nuove diagnostiche distinguono le cause di rifiuto senza aumentare le capacità delle tabelle.
+
+## Diagnostica facoltativa degli HANDLE condivisi
+
+L'opzione `--shared-handle-diagnostics` aggiunge soltanto un contatore alle sette API DXGI/D3D11 che il renderer già rifiuta: `GetSharedHandle`, i due `CreateSharedHandle`, `OpenSharedResource`, `OpenSharedResource1`, `OpenSharedResourceByName` e `OpenSharedFence`. Non cambia il risultato HRESULT né abilita nuove forme di condivisione. Lo script verifica anche l'hash del sorgente interessato, ricompila una sesta unità C e conserva una ricevuta separata. QEMU, backend DXMT, driver e protocolli rimangono quelli del runtime indicato.
+
+Il renderer emette un messaggio iniziale di abilitazione e registra soltanto nome API, HRESULT e conteggio, con PID e data del logger esistente. Ogni contatore atomico per processo si ferma a 128; vengono scritti soltanto 1, 2, 4, 8, 16, 32, 64 e 128: al massimo otto righe per API e processo. Il valore 128 indica almeno 128 chiamate. Non sono registrati handle, puntatori, nomi di risorse, argomenti o contenuti guest. La diagnostica va usata in un runtime separato per una breve prova mirata, poi rimossa dall'uso ordinario.
+
+```sh
+python3 scripts/rebuild-native-renderer.py --reference <profilo-grafico-corrispondente> --runtime <Native3D-verificato> --output <nuova-cartella-privata> --shared-handle-diagnostics
+```
+
+La build separata del 21 ottobre 2026 ha superato compilazione, firma e verifica dei 27 hash del manifest; rispetto alla base cambiano soltanto renderer e server. Questa verifica non esegue il guest. La prova minima successiva consiste nell'aprire lo stesso documento di Blocco note e il menu una volta, correlando il PID del processo grafico ai contatori e all'eventuale cambio spontaneo di risoluzione. Nessuna chiamata non registrata può essere attribuita a queste API soltanto in base al generico messaggio `Not implemented`.
+
+Nel precedente avvio reale delle 17:36 il testo del documento non appariva e in seguito risoluzione e DPI sono cambiati spontaneamente: il percorso non è considerato stabile. Lo stesso log contiene import/export interni riusciti di texture `A8_UNORM` (formato 65); questi usano il percorso condiviso interno e non dimostrano che le API HANDLE guest siano supportate. L'ispezione dei sorgenti corrispondenti conserva il formato 65 fino a Metal `A8Unorm`, senza un'incoerenza diretta di canale o swizzle individuata. Né l'ipotesi HANDLE né quella A8 costituisce una causa dimostrata del testo assente o del successivo blocco.
+
+Nella prova successiva con questa variante il documento è diventato leggibile, ma la barra menu ha perso i glifi dopo un click su File. Il log non conteneva né il marker iniziale né righe `shared-handle reject`: la diagnostica resta inconclusiva e l’assenza di righe non dimostra assenza di chiamate. Il lavoro è stato fermato su richiesta dell’utente prima di verificare il motivo del marker assente. Nessuna causa grafica viene considerata risolta.

@@ -67,7 +67,11 @@ pub fn install(config: &Path) -> Result<(), String> {
     let version = root.join(format!("0.1.0-{}", &digest[..12]));
     std::fs::create_dir_all(&version).map_err(error)?;
     let executable = version.join("perpendicular-guest.exe");
-    std::fs::write(&executable, bytes).map_err(error)?;
+    // A repeated install can target the currently running version. Windows
+    // locks its executable, so retain a byte-identical file instead of rewriting.
+    if std::fs::read(&executable).ok().as_deref() != Some(bytes.as_slice()) {
+        std::fs::write(&executable, &bytes).map_err(error)?;
+    }
     std::fs::write(
         root.join("connection.json"),
         serde_json::to_vec_pretty(&configuration).map_err(error)?,

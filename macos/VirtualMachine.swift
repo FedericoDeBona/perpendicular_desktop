@@ -141,8 +141,8 @@ final class VirtualMachineController {
         tpm = try launch("swtpm", ["socket", "--tpm2", "--tpmstate", "dir=\(vm.path)/tpm",
             "--ctrl", "type=unixio,path=\(tpmSocket)", "--flags", "not-need-init"], log: "tpm.log")
         // The TPM creates its socket before the VM can attach to it.
-        let deadline = Date().addingTimeInterval(3)
-        while !FileManager.default.fileExists(atPath: tpmSocket), Date() < deadline {
+        let deadline = Date().addingTimeInterval(10)
+        while tpm?.isRunning == true, !FileManager.default.fileExists(atPath: tpmSocket), Date() < deadline {
             Thread.sleep(forTimeInterval: 0.02)
         }
         guard FileManager.default.fileExists(atPath: tpmSocket) else {
@@ -183,7 +183,7 @@ final class VirtualMachineController {
             arguments += ["-device","virtio-ramfb-gl,id=display0,addr=0x8,disable-legacy=on,neptune=on,blob=on,hostmem=256M,max_outputs=1,xres=1280,yres=800"]
         }else{arguments += ["-device","ramfb"]}
         machine = try launch("qemu-system-aarch64",arguments,log:"qemu.log",executable:native?.executable,
-            environment:native?.environment(directory:displayDirectory,session:session))
+            environment:native?.environment(directory:displayDirectory,session:session,primary:HostDisplay.current().first(where:\.primary)))
         let endpoint=nativeGraphicsEnabled ? NativeDisplayEndpoint(socketPath:displayDirectory.appendingPathComponent("native-display.sock").path,
             serverPID:machine!.processIdentifier,expectedUID:getuid(),sessionHi:UInt64(session.prefix(16),radix:16)!,sessionLo:UInt64(session.suffix(16),radix:16)!,epoch:1):nil
         let state=DesktopLaunch(machineID:c.id,pid:machine!.processIdentifier,socket:desktopSocket,native:endpoint)
@@ -223,7 +223,13 @@ final class VirtualMachineController {
     private func launch(_ name: String, _ arguments: [String], log: String,executable:URL?=nil,environment:[String:String]?=nil) throws -> Process {
         let process = Process()
         process.executableURL=executable ?? runtime.appendingPathComponent(name)
-        if let environment {process.environment=ProcessInfo.processInfo.environment.merging(environment){_,new in new}}
+        if let environment {
+            var inherited=ProcessInfo.processInfo.environment
+            for name in ["PERP_PRIMARY_MONITOR_WIDTH_MM","PERP_PRIMARY_MONITOR_HEIGHT_MM","PERP_PRIMARY_MONITOR_ID"] {
+                inherited.removeValue(forKey:name)
+            }
+            process.environment=inherited.merging(environment){_,new in new}
+        }
         process.arguments = arguments
         let logURL = directory.appendingPathComponent(log)
         if !FileManager.default.fileExists(atPath: logURL.path) {

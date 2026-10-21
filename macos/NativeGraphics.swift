@@ -1,5 +1,6 @@
 import Foundation
 import CryptoKit
+import CoreFoundation
 
 struct NativeGraphics {
     let root:URL
@@ -27,7 +28,7 @@ struct NativeGraphics {
         }
         manifest=value
     }
-    func environment(directory:URL,session:String)->[String:String]{
+    func environment(directory:URL,session:String,primary:HostDisplay?=nil)->[String:String]{
         let libraries=root.appendingPathComponent("lib").path
         var values=["DYLD_LIBRARY_PATH":libraries,"DYLD_FALLBACK_LIBRARY_PATH":libraries,
             "NPT_BACKEND":"dxmt","ANGLE_DEFAULT_PLATFORM":"metal",
@@ -36,6 +37,16 @@ struct NativeGraphics {
             "PERP_NEPTUNE_CONTEXT_RETIREMENT":manifest["context_retirement"] as? Int == 1 ? "1":"0",
             "PERP_NATIVE_DISPLAY_DIR":directory.path,"PERP_NATIVE_DISPLAY_SESSION":session,
             "PERP_HVF_STP_Q_PCI_HOLE":"1"]
+        // These describe only the primary monitor at the next boot. A live
+        // geometry change does not imply that the guest refreshed its EDID.
+        if let version=manifest["primary_monitor_metadata"] as? NSNumber,
+           CFGetTypeID(version) != CFBooleanGetTypeID(),version.doubleValue == 1,
+           let primary,primary.primary,let width=primary.physicalWidthMM,
+           let height=primary.physicalHeightMM,let identity=primary.stableID {
+            values["PERP_PRIMARY_MONITOR_WIDTH_MM"]=String(width)
+            values["PERP_PRIMARY_MONITOR_HEIGHT_MM"]=String(height)
+            values["PERP_PRIMARY_MONITOR_ID"]=identity
+        }
         let flags=["hvf_strh_post2_hole_default_off":"PERP_HVF_STRH_POST_PCI_HOLE",
             "hvf_stp_s_hole_default_off":"PERP_HVF_STP_S_PCI_HOLE",
             "hvf_str_q_hole_default_off":"PERP_HVF_STR_Q_PCI_HOLE",
