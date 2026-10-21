@@ -1,8 +1,10 @@
+mod app_process;
 mod capture;
 mod catalogue;
 mod display;
 mod drivers;
 mod execute;
+mod icons;
 mod identity;
 mod service;
 mod window_control;

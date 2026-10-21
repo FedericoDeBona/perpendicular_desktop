@@ -1,5 +1,7 @@
 import AppKit
 import SwiftUI
+import CryptoKit
+import ImageIO
 
 struct WindowsApplication:Identifiable {
     let id:String
@@ -12,6 +14,22 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
     @Published var status="Waiting for Windows…"
     @Published var displayStatus="Waiting for Windows display…"
     @Published var connected=false
+    @Published private(set) var catalogueLoading=false
+    @Published var launcherNotice:String?
+    @Published private(set) var openingApps:Set<String>=[]
+    @Published private(set) var activeApps:Set<String>=[]
+    @Published private(set) var applicationIcons:[String:NSImage]=[:]
+    @Published private(set) var loadingIconID:String?
+    private var launcherEpoch=UUID()
+    private var catalogueRequest=UUID()
+    private var visibleIcons:Set<String>=[]
+    private var iconVisibility:[String:Int]=[:]
+    private var failedIcons:Set<String>=[]
+    private var iconOrder:[String]=[]
+    private var openingTasks:[String:Task<Void,Never>]=[:]
+    private var openingNoticeApp:String?
+    private var windowApps:[String:String]=[:]
+    private var focusWarnedWindows:Set<String>=[]
     private var launcher:NSWindow!
     private var machine:VirtualMachineController!
     private var bridge:GuestBridge!
@@ -44,7 +62,12 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
             bridge=try GuestBridge(port:machine.configuration.guestPort,token:machine.configuration.token)
             bridge.onConnection={ [weak self] value in
                 guard let self else{return};self.connected=value;self.status=value ? "Windows connected":"Reconnecting to Windows…"
+                self.launcherEpoch=UUID();self.catalogueLoading=false;self.loadingIconID=nil;self.failedIcons=[]
+                self.focusWarnedWindows=[]
+                for task in self.openingTasks.values {task.cancel()}
+                self.openingTasks=[:];self.openingApps=[]
                 if !value {
+                    self.activeApps=[]
                     self.guestCapabilities=[:]
                     self.displayEpoch=nil;self.displayReadable=false;self.displayConfigurable=false;self.sharedGeometryCapable=false
                     self.displaySetupTask?.cancel();self.displaySetupTask=nil
@@ -76,9 +99,11 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
                 try? FileHandle.standardError.write(contentsOf:Data(("Local control unavailable: "+error.localizedDescription+"\n").utf8))
             }
             if !machine.isRunning{try machine.start()}
-        }catch{status=error.localizedDescription}
-        launcher=NSWindow(contentRect:NSRect(x:200,y:160,width:560,height:620),styleMask:[.titled,.closable,.resizable,.miniaturizable],backing:.buffered,defer:false)
-        launcher.title="Windows Applications";launcher.isReleasedWhenClosed=false
+        }catch{status=error.localizedDescription;launcherNotice="Windows non può essere avviato. "+error.localizedDescription}
+        launcher=NSWindow(contentRect:NSRect(x:200,y:160,width:800,height:660),styleMask:[.titled,.closable,.resizable,.miniaturizable],backing:.buffered,defer:false)
+        launcher.title="Perpendicular";launcher.isReleasedWhenClosed=false
+        launcher.minSize=NSSize(width:640,height:480)
+        launcher.setFrameAutosaveName("PerpendicularLauncher")
         launcher.contentView=NSHostingView(rootView:Launcher(model:self))
         launcher.center();launcher.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps:true)
@@ -115,10 +140,11 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
     }
     func applicationShouldTerminateAfterLastWindowClosed(_ sender:NSApplication)->Bool{false}
     func applicationShouldHandleReopen(_ sender:NSApplication,hasVisibleWindows flag:Bool)->Bool{showApplications();return false}
-    @objc func showApplications(){launcher.makeKeyAndOrderFront(nil);NSApp.activate(ignoringOtherApps:true)}
+    @objc func showApplications(){launcher.makeKeyAndOrderFront(nil);NSApp.activate(ignoringOtherApps:true);NotificationCenter.default.post(name:.launcherFocusSearch,object:nil)}
     @objc func closeCurrentWindow(){(NSApp.keyWindow ?? NSApp.mainWindow)?.performClose(nil)}
     func applicationWillTerminate(_ notification:Notification){localControl?.stop();bridge?.command("release");machine?.closeDesktop()}
-    @objc func showWindows(){do{try machine.showDesktop()}catch{status=error.localizedDescription}}
+    var desktopAvailable:Bool {machine != nil}
+    @objc func showWindows(){do{guard let machine else{return};try machine.showDesktop()}catch{status=error.localizedDescription;launcherNotice="Non riesco ad aprire il desktop Windows. "+error.localizedDescription}}
     @objc func shutdownWindows(){do{try machine.shutdown()}catch{status=error.localizedDescription}}
 
     private func localResponse(_ value:[String:Any],reply:MacLocalControl.Reply){
@@ -147,7 +173,10 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
         if command == "status" {
             localResponse(["ok":true,"result":["connected":connected,"machineRunning":machine?.isRunning ?? false,
                 "status":status,"displayStatus":displayStatus,"primaryMatchesHost":sharedDisplay != nil,
-                "windowCount":windows.count,"capabilities":guestCapabilities]],reply:reply);return
+                "windowCount":windows.count,"capabilities":guestCapabilities,
+                "frameChannel":bridge?.separateFrames ?? false,
+                "lastCommandRTTMilliseconds":bridge?.lastRoundTripMilliseconds ?? 0,
+                "frameReceiveMilliseconds":bridge?.frameReceiveMilliseconds ?? 0]],reply:reply);return
         }
         guard connected,let bridge else {
             localResponse(["ok":false,"error":"Windows is not connected."],reply:reply);return
@@ -244,25 +273,113 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
         }
     }
     func refresh(){
+        guard connected,!catalogueLoading else{return}
+        catalogueLoading=true;launcherNotice=nil
+        catalogueRequest=UUID();let request=catalogueRequest,epoch=launcherEpoch
         readDisplay()
         bridge.command("catalogue"){[weak self] result in
-            guard let self else{return}
+            guard let self,self.launcherEpoch == epoch,self.catalogueRequest == request else{return}
+            self.catalogueLoading=false
             switch result{
             case .success(let reply):
-                let values=reply["value"] as? [[String:Any]] ?? []
+                guard let values=reply["value"] as? [[String:Any]] else {
+                    self.launcherNotice="L’elenco delle app non è disponibile. Riprova con Aggiorna.";return
+                }
+                var identities:Set<String>=[]
                 self.apps=values.prefix(1024).compactMap{value in
                     guard let id=value["id"] as? String,id.utf8.count==64,let name=value["name"] as? String,name.utf8.count<=512 else{return nil}
+                    guard !name.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty,identities.insert(id).inserted else{return nil}
                     return WindowsApplication(id:id,name:name)
-                }
+                }.sorted{$0.name.localizedStandardCompare($1.name) == .orderedAscending}
+                self.failedIcons=[]
+                self.visibleIcons.formIntersection(identities)
+                self.iconVisibility=self.iconVisibility.filter{identities.contains($0.key)}
+                self.applicationIcons=self.applicationIcons.filter{identities.contains($0.key)}
+                self.iconOrder.removeAll{!identities.contains($0)}
                 self.status="\(self.apps.count) applications"
-            case .failure(let error):self.status=error.localizedDescription
+                self.pumpApplicationIcons()
+            case .failure(let error):self.status=error.localizedDescription;self.launcherNotice="Non riesco ad aggiornare le app. "+error.localizedDescription
             }
         }
     }
     func launch(_ app:WindowsApplication){
+        guard connected,!openingApps.contains(app.id) else{return}
+        launcherNotice=nil;beginOpening(app)
         status="Opening \(app.name)…"
+        let epoch=launcherEpoch
         bridge.command("launch",["app":app.id]){[weak self] result in
-            if case .failure(let error)=result{self?.status=error.localizedDescription}
+            guard let self,self.launcherEpoch == epoch else{return}
+            switch result {
+            case .failure(let error):
+                self.finishOpening(app.id);self.status=error.localizedDescription
+                self.launcherNotice="Non riesco ad aprire \(app.name). "+error.localizedDescription;self.openingNoticeApp=app.id
+            case .success(let reply):
+                if let value=reply["value"] as? [String:Any],value["existing"] as? Bool == true,value["ready"] as? Bool != false {self.finishOpening(app.id,appeared:true)}
+            }
+        }
+    }
+    private func beginOpening(_ app:WindowsApplication){
+        openingApps.insert(app.id);openingTasks.removeValue(forKey:app.id)?.cancel()
+        let epoch=launcherEpoch
+        openingTasks[app.id]=Task{@MainActor [weak self] in
+            try? await Task.sleep(for:.seconds(32))
+            guard !Task.isCancelled,let self,self.launcherEpoch == epoch,self.openingApps.contains(app.id) else{return}
+            self.finishOpening(app.id)
+            self.launcherNotice="La finestra di \(app.name) non è ancora disponibile. Apri Windows per continuare.";self.openingNoticeApp=app.id
+        }
+    }
+    private func finishOpening(_ id:String,appeared:Bool=false){
+        guard openingApps.contains(id) || openingTasks[id] != nil || (appeared && openingNoticeApp == id) else{return}
+        openingTasks.removeValue(forKey:id)?.cancel()
+        if openingApps.contains(id) {openingApps.remove(id)}
+        if appeared,openingNoticeApp == id {launcherNotice=nil;openingNoticeApp=nil}
+    }
+    private func inputFocusFailed(){
+        let message="Windows non ha attivato l’app. Il clic o il testo non è stato inviato."
+        status=message;launcherNotice=message+" Apri Windows, seleziona l’app e torna a questa finestra."
+        guard let controller=windows.values.first(where:{$0.window === NSApp.keyWindow && !$0.role.transient}),
+              controller.window.attachedSheet == nil,focusWarnedWindows.insert(controller.id).inserted else{return}
+        let alert=NSAlert()
+        alert.messageText="L’app non è attiva in Windows"
+        alert.informativeText="Questo input non è stato inviato. Apri il desktop Windows e seleziona l’app, poi torna qui."
+        alert.addButton(withTitle:"Apri Windows");alert.addButton(withTitle:"Chiudi")
+        alert.beginSheetModal(for:controller.window){[weak self] response in
+            if response == .alertFirstButtonReturn {self?.showWindows()}
+        }
+    }
+    func applicationBecameVisible(_ app:WindowsApplication){iconVisibility[app.id,default:0]+=1;visibleIcons.insert(app.id);pumpApplicationIcons()}
+    func applicationBecameHidden(_ app:WindowsApplication){
+        let count=max(0,(iconVisibility[app.id] ?? 0)-1)
+        if count==0 {iconVisibility.removeValue(forKey:app.id);visibleIcons.remove(app.id)}else{iconVisibility[app.id]=count}
+    }
+    private func pumpApplicationIcons(){
+        guard connected,guestCapabilities["appIcon"] == true,loadingIconID == nil,
+              let app=apps.first(where:{visibleIcons.contains($0.id) && applicationIcons[$0.id] == nil && !failedIcons.contains($0.id)}) else{return}
+        let epoch=launcherEpoch;loadingIconID=app.id
+        bridge.command("app_icon",["app":app.id],timeout:.seconds(8)){[weak self] result in
+            guard let self,self.launcherEpoch == epoch,self.loadingIconID == app.id else{return}
+            self.loadingIconID=nil
+            if case .success(let reply)=result,let value=reply["value"] as? [String:Any],
+               value["app"] as? String == app.id,let width=value["width"] as? Int,let height=value["height"] as? Int,
+               (1...128).contains(width),(1...128).contains(height),
+               let encoded=value["pngBase64"] as? String,encoded.utf8.count<=174_764,
+               let data=Data(base64Encoded:encoded),data.count<=131_072,
+               data.starts(with:[137,80,78,71,13,10,26,10]),
+               let expected=value["sha256"] as? String,
+               SHA256.hash(data:data).map({String(format:"%02x",$0)}).joined() == expected.lowercased(),
+               let source=CGImageSourceCreateWithData(data as CFData,[kCGImageSourceShouldCache:false] as CFDictionary),
+               CGImageSourceGetCount(source)==1,
+               let properties=CGImageSourceCopyPropertiesAtIndex(source,0,nil) as? [String:Any],
+               properties[kCGImagePropertyPixelWidth as String] as? Int == width,
+               properties[kCGImagePropertyPixelHeight as String] as? Int == height,
+               let image=CGImageSourceCreateImageAtIndex(source,0,nil) {
+                if self.applicationIcons.count>=64,let evicted=self.iconOrder.first(where:{!self.visibleIcons.contains($0)}) ?? self.iconOrder.first {
+                    self.applicationIcons.removeValue(forKey:evicted);self.iconOrder.removeAll{$0 == evicted}
+                }
+                self.applicationIcons[app.id]=NSImage(cgImage:image,size:NSSize(width:width,height:height))
+                self.iconOrder.append(app.id)
+            }else{self.failedIcons.insert(app.id)}
+            self.pumpApplicationIcons()
         }
     }
     private func layoutChildren(){
@@ -372,7 +489,8 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
             displayEpoch=value["epoch"] as? String
             invalidateDisplay("Checking Windows display…")
             let capabilities=value["capabilities"] as? [String:Any] ?? [:]
-            guestCapabilities=Dictionary(uniqueKeysWithValues:["execute","displayInfo","driverInfo","graphicsInfo","sharedGeometry"].map{($0,capabilities[$0] as? Bool == true)})
+            guestCapabilities=Dictionary(uniqueKeysWithValues:["execute","displayInfo","driverInfo","graphicsInfo","sharedGeometry","appIcon"].map{($0,capabilities[$0] as? Bool == true)})
+            pumpApplicationIcons()
             displayReadable=capabilities["displayInfo"] as? Bool == true
             displayConfigurable=capabilities["displayConfigure"] as? Bool == true
             sharedGeometryCapable=capabilities["sharedGeometry"] as? Bool == true
@@ -419,13 +537,22 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
         case "windows":
             guard let items=value["windows"] as? [[String:Any]],items.count<=16 else{return}
             let current=Set(items.compactMap{$0["id"] as? String})
+            focusWarnedWindows.formIntersection(current)
+            windowApps=items.reduce(into:[:]){result,item in
+                if let id=item["id"] as? String,let app=item["app"] as? String {result[id]=app}
+            }
+            let nextActiveApps:Set<String>=Set(items.compactMap{item in
+                guard item["role"] as? String != "popup",item["role"] as? String != "tooltip" else{return nil}
+                return item["app"] as? String
+            })
+            if nextActiveApps != activeApps {activeApps=nextActiveApps}
             for id in Array(windows.keys) where !current.contains(id){windows.removeValue(forKey:id)?.retire();earlyFrames.removeValue(forKey:id)}
             for item in items{
                 guard let id=item["id"] as? String,let title=item["title"] as? String else{continue}
                 if windows[id]==nil{
                     let role=WindowRole(rawValue:item["role"] as? String ?? "dialog") ?? .dialog
                     let controller=ApplicationWindow(id:id,title:title,role:role,bridge:bridge)
-                    controller.onError={ [weak self] message in self?.status=message }
+                    controller.onError={ [weak self] message in self?.status=message;self?.launcherNotice=message }
                     controller.onClose={ [weak self] in self?.windows.removeValue(forKey:id) }
                     controller.onGeometry={ [weak self] in self?.layoutChildren() }
                     controller.onPointerExit={ [weak self] in self?.pointerExited(id) }
@@ -433,40 +560,26 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
                     windows[id]=controller
                 }
                 windows[id]?.update(item)
-                if let frame=earlyFrames.removeValue(forKey:id){windows[id]?.present(frame)}
+                if let frame=earlyFrames.removeValue(forKey:id){windows[id]?.present(frame);if let app=windowApps[id]{finishOpening(app,appeared:true)}}
             }
             layoutChildren()
-            if !items.isEmpty{status="Windows connected"}
+            if !items.isEmpty,status != "Windows connected" {status="Windows connected"}
         case "frame":
             guard let id=value["window"] as? String else{return}
-            if let window=windows[id]{window.present(packet)}else if earlyFrames.count<16{earlyFrames[id]=packet}
+            if let window=windows[id]{window.present(packet);if let app=windowApps[id]{finishOpening(app,appeared:true)}}else if earlyFrames.count<16{earlyFrames[id]=packet}
         case "activate":
             if let id=value["window"] as? String{windows[id]?.window.makeKeyAndOrderFront(nil)}
-        case "window_error","launch_error":status=value["message"] as? String ?? "This application is unavailable. Use Show Windows."
+        case "launch_state":
+            if value["state"] as? String == "waiting",let id=value["app"] as? String,
+               let app=apps.first(where:{$0.id == id}) {beginOpening(app)}
+        case "reply":
+            if value["ok"] as? Bool == false,value["message"] as? String == "Windows did not grant this window keyboard focus" {inputFocusFailed()}
+        case "window_error","launch_error":
+            status=value["message"] as? String ?? "This application is unavailable. Use Show Windows."
+            launcherNotice=value["message"] as? String ?? "Questa app non è disponibile. Puoi continuare dal desktop Windows."
+            if let app=value["app"] as? String {finishOpening(app);if value["type"] as? String == "launch_error" {openingNoticeApp=app}}
         default:break
         }
-    }
-}
-
-@MainActor
-struct Launcher:View{
-    @ObservedObject var model:ApplicationModel
-    @State private var search=""
-    var body:some View{
-        VStack(spacing:0){
-            HStack{
-                TextField("Search Windows applications",text:$search).textFieldStyle(.roundedBorder)
-                Button(action:model.refresh){Image(systemName:"arrow.clockwise")}.disabled(!model.connected)
-                Button("Show Windows",action:model.showWindows)
-            }.padding(14)
-            List(model.apps.filter{search.isEmpty || $0.name.localizedCaseInsensitiveContains(search)}){app in
-                Button{model.launch(app)}label:{HStack(spacing:12){Image(systemName:"app").font(.system(size:24)).frame(width:32,height:32);Text(app.name);Spacer()}.padding(.vertical,5).contentShape(Rectangle())}
-                    .buttonStyle(.plain).disabled(!model.connected)
-            }
-            Divider()
-            VStack(alignment:.leading,spacing:3){Text(model.status);Text(model.displayStatus)}
-                .font(.caption).foregroundStyle(.secondary).frame(maxWidth:.infinity,alignment:.leading).padding(10)
-        }.frame(minWidth:420,minHeight:360)
     }
 }
 

@@ -4,10 +4,12 @@ use std::{
     sync::{
         Arc, Mutex,
         atomic::{AtomicBool, Ordering},
+        mpsc,
     },
     time::{Duration, Instant},
 };
 use windows::{
+    Foundation::TypedEventHandler,
     Graphics::{
         Capture::{Direct3D11CaptureFramePool, GraphicsCaptureItem, GraphicsCaptureSession},
         DirectX::{Direct3D11::IDirect3DDevice, DirectXPixelFormat},
@@ -124,6 +126,10 @@ unsafe fn run(target: &Target, outbox: &Outbox, stop: &AtomicBool) -> Result<(),
         // Capture each surface independently: popups may extend beyond the document,
         // and real dialogs must not also be baked into the document's pixels.
         let _ = session.SetIncludeSecondaryWindows(false);
+        let (arrived, ready) = mpsc::sync_channel(1);
+        let registration = pool.FrameArrived(&TypedEventHandler::new(move |_,_| {
+            let _ = arrived.try_send(()); Ok(())
+        })).map_err(error)?;
         session.StartCapture().map_err(error)?;
         let result = (|| -> Result<(), String> {
             let mut sequence = 0u64;
@@ -140,10 +146,19 @@ unsafe fn run(target: &Target, outbox: &Outbox, stop: &AtomicBool) -> Result<(),
                     std::thread::sleep(Duration::from_millis(100));
                     continue;
                 }
-                let Ok(frame) = pool.TryGetNextFrame() else {
-                    std::thread::sleep(Duration::from_millis(15));
+                let _ = ready.recv_timeout(Duration::from_millis(100));
+                let Ok(mut frame) = pool.TryGetNextFrame() else {
                     continue;
                 };
+                // The pool has two slots. Prefer its newest available frame,
+                // rather than spending readback and network time on an old one.
+                for _ in 0..2 {
+                    let Ok(newer) = pool.TryGetNextFrame() else {break};
+                    let _ = frame.Close(); frame = newer;
+                }
+                if outbox.frame_waiting(&target.id) {
+                    let _ = frame.Close(); continue;
+                }
                 let current = frame.ContentSize().map_err(error)?;
                 if current.Width <= 0
                     || current.Height <= 0
@@ -220,7 +235,9 @@ unsafe fn run(target: &Target, outbox: &Outbox, stop: &AtomicBool) -> Result<(),
                 context
                     .Map(backing, 0, D3D11_MAP_READ, 0, Some(&mut mapped))
                     .map_err(error)?;
-                let mut pixels = vec![0u8; (width * height * 4) as usize];
+                let alignment = outbox.row_alignment();
+                let stride = (width as usize * 4).div_ceil(alignment) * alignment;
+                let mut pixels = vec![0u8; stride * height as usize];
                 let valid =
                     !mapped.pData.is_null() && mapped.RowPitch as i64 >= i64::from(x + width) * 4;
                 if valid {
@@ -229,7 +246,7 @@ unsafe fn run(target: &Target, outbox: &Outbox, stop: &AtomicBool) -> Result<(),
                             (mapped.pData as *const u8).add(
                                 (row + y as usize) * mapped.RowPitch as usize + x as usize * 4,
                             ),
-                            pixels.as_mut_ptr().add(row * width as usize * 4),
+                            pixels.as_mut_ptr().add(row * stride),
                             width as usize * 4,
                         );
                     }
@@ -252,14 +269,15 @@ unsafe fn run(target: &Target, outbox: &Outbox, stop: &AtomicBool) -> Result<(),
                 };
                 *target.geometry.lock().unwrap() = (generation, width, height, offset.0, offset.1);
                 outbox.frame(&target.id,json!({"type":"frame","window":target.id,"sequence":sequence,"generation":generation,
-                    "width":width,"height":height,"bytes":pixels.len(),"capture":"software"}),pixels);
-                if let Some(delay) = Duration::from_millis(40).checked_sub(started.elapsed()) {
+                    "width":width,"height":height,"stride":stride,"bytes":pixels.len(),"capture":"software"}),pixels);
+                if let Some(delay) = Duration::from_millis(16).checked_sub(started.elapsed()) {
                     std::thread::sleep(delay);
                 }
             }
             Ok(())
         })();
         let _ = session.Close();
+        let _ = pool.RemoveFrameArrived(registration);
         let _ = pool.Close();
         windows::Win32::System::WinRT::RoUninitialize();
         result

@@ -10,16 +10,22 @@ final class ApplicationContent:NSView {
     private(set) var generation:UInt64=0
     private var renderer:WindowRenderer?
     private var latestPixels=Data()
+    private var latestSurface:GuestFrameSurface?
+    private var sourceStride=0
     private(set) var renderFailure:String?
     var currentImage:CGImage? {
+        if let latestSurface {return latestSurface.makeImage()}
         guard source.width>0,source.height>0,let provider=CGDataProvider(data:latestPixels as CFData) else{return nil}
-        return CGImage(width:Int(source.width),height:Int(source.height),bitsPerComponent:8,bitsPerPixel:32,bytesPerRow:Int(source.width)*4,
+        return CGImage(width:Int(source.width),height:Int(source.height),bitsPerComponent:8,bitsPerPixel:32,bytesPerRow:sourceStride,
             space:CGColorSpaceCreateDeviceRGB(),bitmapInfo:[.byteOrder32Little,CGBitmapInfo(rawValue:CGImageAlphaInfo.premultipliedFirst.rawValue)],
             provider:provider,decode:nil,shouldInterpolate:true,intent:.defaultIntent)
     }
     private var source=NSSize.zero
     private var modifiers:Set<Int>=[]
     private var virtualKeys:Set<UInt16>=[]
+    private var pendingText=""
+    private var pendingTextBytes=0
+    private var textFlush:Task<Void,Never>?
     private var scrollRemainder=0.0
     private var tracking:NSTrackingArea?
     override var acceptsFirstResponder:Bool {true}
@@ -59,9 +65,21 @@ final class ApplicationContent:NSView {
     func present(_ packet:GuestPacket){
         guard let width=packet.header["width"] as? Int,let height=packet.header["height"] as? Int,
               let generation=packet.header["generation"] as? UInt64,
-              width>0,height>0,width<=8_388_608/height,packet.pixels.count==width*height*4 else{return}
-        self.generation=generation;source=NSSize(width:width,height:height);latestPixels=packet.pixels
-        if let renderer {renderer.present(packet.pixels,width:width,height:height)}
+              width>0,height>0,width<=8_388_608/height else{return}
+        let stride=packet.header["stride"] as? Int ?? width*4
+        guard stride>=width*4,stride<=34*1024*1024/height else{return}
+        if let surface=packet.surface {
+            guard surface.width==width,surface.height==height,surface.stride==stride,surface.byteCount==stride*height else{return}
+            latestSurface=surface;latestPixels=Data()
+        }else{
+            guard packet.pixels.count==stride*height else{return}
+            latestSurface=nil;latestPixels=packet.pixels
+        }
+        self.generation=generation;source=NSSize(width:width,height:height);sourceStride=stride
+        if let renderer {
+            if let latestSurface {renderer.present(latestSurface)}
+            else {renderer.present(latestPixels,width:width,height:height,stride:stride)}
+        }
         else {CATransaction.begin();CATransaction.setDisableActions(true);layer?.contents=currentImage;CATransaction.commit()}
     }
     private func point(_ event:NSEvent)->[String:Any]?{
@@ -73,19 +91,42 @@ final class ApplicationContent:NSView {
         return ["x":Int(max(0,min(source.width-1,(local.x-origin.x)/scale))),
                 "y":Int(max(0,min(source.height-1,(local.y-origin.y)/scale))),"generation":generation]
     }
+    private func flushText(){
+        textFlush?.cancel();textFlush=nil
+        guard !pendingText.isEmpty else{return}
+        let text=pendingText;pendingText="";pendingTextBytes=0
+        input?(["event":"text","text":text])
+    }
+    private func queueText(_ text:String){
+        // Coalesce only adjacent Unicode text. A short timer bounds ordinary
+        // typing latency; every non-text input flushes synchronously first.
+        for scalar in text.unicodeScalars {
+            let part=String(scalar),count=part.utf8.count
+            if pendingTextBytes+count>1024 {flushText()}
+            pendingText.append(contentsOf:part);pendingTextBytes+=count
+        }
+        guard textFlush == nil,!pendingText.isEmpty else{return}
+        textFlush=Task{@MainActor [weak self] in
+            try? await Task.sleep(for:.milliseconds(8))
+            guard !Task.isCancelled else{return}
+            self?.flushText()
+        }
+    }
+    private func emit(_ value:[String:Any]){flushText();input?(value)}
     private func mouse(_ event:NSEvent,button:String?=nil,down:Bool?=nil){
-        if down == false,let button {input?(["event":"button","button":button,"down":false]);return}
+        if down == false,let button {emit(["event":"button","button":button,"down":false]);return}
         guard !suspendedPointer else{return}
         if button != nil && !transient {window?.makeFirstResponder(self)}
         guard var value=point(event)else{return}
         value["event"]=button == nil ? "pointer":"button"
         if let button,let down{value["button"]=button;value["down"]=down}
-        input?(value)
+        emit(value)
     }
     override func mouseMoved(with event:NSEvent){mouse(event)}
     override func mouseEntered(with event:NSEvent){mouse(event)}
-    override func mouseExited(with event:NSEvent){pointerExited?()}
+    override func mouseExited(with event:NSEvent){flushText();pointerExited?()}
     private func left(_ event:NSEvent,down:Bool?=nil){
+        flushText()
         guard let leftMouse else{mouse(event,button:down == nil ? nil:"left",down:down);return}
         window?.makeFirstResponder(self)
         var value=point(event) ?? [:]
@@ -105,7 +146,7 @@ final class ApplicationContent:NSView {
         scrollRemainder+=Double(event.scrollingDeltaY)*(event.hasPreciseScrollingDeltas ? 3:120)
         let amount=Int(scrollRemainder);scrollRemainder-=Double(amount)
         guard amount != 0 else{return}
-        value["event"]="scroll";value["delta"]=max(-2400,min(2400,amount));input?(value)
+        value["event"]="scroll";value["delta"]=max(-2400,min(2400,amount));emit(value)
     }
     override func flagsChanged(with event:NSEvent){
         synchronizeModifiers(event.modifierFlags)
@@ -115,16 +156,16 @@ final class ApplicationContent:NSView {
         if flags.contains(.shift){current.insert(0x10)}
         if flags.contains(.command)||flags.contains(.control){current.insert(0x11)}
         if flags.contains(.option){current.insert(0x12)}
-        for key in current.subtracting(modifiers){input?(["event":"key","key":key,"down":true])}
-        for key in modifiers.subtracting(current){input?(["event":"key","key":key,"down":false])}
+        for key in current.subtracting(modifiers){emit(["event":"key","key":key,"down":true])}
+        for key in modifiers.subtracting(current){emit(["event":"key","key":key,"down":false])}
         modifiers=current
     }
-    func clearModifiers(){modifiers.removeAll();virtualKeys.removeAll()}
+    func clearModifiers(){flushText();modifiers.removeAll();virtualKeys.removeAll()}
     private func shortcut(_ key:Int){
-        input?(["event":"key","key":0x11,"down":true])
-        input?(["event":"key","key":key,"down":true])
-        input?(["event":"key","key":key,"down":false])
-        input?(["event":"key","key":0x11,"down":false])
+        emit(["event":"key","key":0x11,"down":true])
+        emit(["event":"key","key":key,"down":true])
+        emit(["event":"key","key":key,"down":false])
+        emit(["event":"key","key":0x11,"down":false])
     }
     override func selectAll(_ sender:Any?){shortcut(0x41)}
     @objc func copy(_ sender:Any?){shortcut(0x43)}
@@ -134,12 +175,12 @@ final class ApplicationContent:NSView {
         synchronizeModifiers(event.modifierFlags)
         if !event.modifierFlags.contains(.command),!event.modifierFlags.contains(.control),
            let text=event.characters,!text.isEmpty,text.unicodeScalars.allSatisfy({$0.value>=32 && !($0.value>=0xF700 && $0.value<=0xF8FF)}){
-            input?(["event":"text","text":text]);return
+            queueText(text);return
         }
-        if let key=Self.keys[event.keyCode]{virtualKeys.insert(event.keyCode);input?(["event":"key","key":key,"down":true])}
+        if let key=Self.keys[event.keyCode]{virtualKeys.insert(event.keyCode);emit(["event":"key","key":key,"down":true])}
     }
     override func keyUp(with event:NSEvent){
-        if virtualKeys.remove(event.keyCode) != nil,let key=Self.keys[event.keyCode]{input?(["event":"key","key":key,"down":false])}
+        if virtualKeys.remove(event.keyCode) != nil,let key=Self.keys[event.keyCode]{emit(["event":"key","key":key,"down":false])}
     }
     private static let keys:[UInt16:Int]=[
         0:0x41,1:0x53,2:0x44,3:0x46,4:0x48,5:0x47,6:0x5A,7:0x58,8:0x43,9:0x56,11:0x42,

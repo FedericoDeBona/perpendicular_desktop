@@ -4,6 +4,10 @@ import Network
 struct GuestPacket: @unchecked Sendable {
     let header: [String: Any]
     let pixels: Data
+    let surface:GuestFrameSurface?
+    init(header:[String:Any],pixels:Data=Data(),surface:GuestFrameSurface?=nil){
+        self.header=header;self.pixels=pixels;self.surface=surface
+    }
 }
 
 // Owned by one connection's serial receive queue. Keeping the accumulator in
@@ -24,6 +28,9 @@ final class GuestConnection: @unchecked Sendable {
     private let lock = NSLock()
     private var frames: [String: GuestPacket] = [:]
     private var drainScheduled = false
+    private var frameOnly=false // Owned by the connection queue.
+    private var helloSeen=false
+    private var authorized=false
 
     init(_ connection: NWConnection,
          packet: @escaping @MainActor @Sendable (UUID, GuestPacket) -> Void,
@@ -40,6 +47,12 @@ final class GuestConnection: @unchecked Sendable {
         connection.start(queue: queue)
     }
     func cancel() { connection.cancel() }
+    func authorize(frames:Bool){
+        queue.async{[weak self] in
+            guard let self,!self.authorized else{return}
+            self.authorized=true;self.frameOnly=frames;self.readHeader()
+        }
+    }
     private func finish() {
         guard !closed else { return }; closed = true
         Task { @MainActor [self] in ended(id) }
@@ -75,22 +88,56 @@ final class GuestConnection: @unchecked Sendable {
                 guard let self, let object = try? JSONSerialization.jsonObject(with: bytes) as? [String: Any],
                       let kind = object["type"] as? String else { self?.connection.cancel(); return }
                 let packet = GuestPacket(header:object,pixels:Data())
+                if !self.helloSeen {
+                    guard kind == "hello" else{self.connection.cancel();return}
+                    self.helloSeen=true
+                }else if kind == "hello" {self.connection.cancel();return}
                 if kind == "frame" {
                     guard let width=object["width"] as? Int, let height=object["height"] as? Int,
-                          width>0, height>0, width<=8_388_608/height,
-                          object["bytes"] as? Int == width*height*4,
+                          width>0,height>0,width<=16_384,height<=16_384,width<=8_388_608/height,
                           let window=object["window"] as? String, window.utf8.count<192 else {
                         self.connection.cancel(); return
                     }
-                    self.read(width*height*4) { [weak self] bytes in
-                        guard let self else { return }
-                        self.offer(window,GuestPacket(header:packet.header,pixels:bytes)); self.readHeader()
+                    let stride=object["stride"] as? Int ?? width*4
+                    guard stride>=width*4,stride<=width*4+255,stride<=34*1024*1024/height,
+                          object["bytes"] as? Int == stride*height else {
+                        self.connection.cancel();return
                     }
+                    let received=ProcessInfo.processInfo.systemUptime
+                    let complete:@Sendable (Data,GuestFrameSurface?)->Void = {[weak self] bytes,surface in
+                        guard let self else{return}
+                        var header=packet.header
+                        header["hostReceiveMilliseconds"]=(ProcessInfo.processInfo.systemUptime-received)*1000
+                        self.offer(window,GuestPacket(header:header,pixels:bytes,surface:surface))
+                        // This retires only the independent CPU/network copy.
+                        // The shared Metal buffer stays immutable through GPU completion.
+                        if self.frameOnly {self.connection.send(content:Data([1]),completion:.contentProcessed{[weak self] error in
+                            if error != nil {self?.connection.cancel()}
+                        })}
+                        self.readHeader()
+                    }
+                    if let surface=GuestFrameSurface.allocate(width:width,height:height,stride:stride) {
+                        self.readSurface(surface,offset:0){complete(Data(),surface)}
+                    } else {self.read(stride*height){complete($0,nil)}}
                 } else {
                     Task { @MainActor [self] in self.packet(self.id,packet) }
-                    self.readHeader()
+                    // Authentication is decided on the main actor. Do not
+                    // allocate pixels or acknowledge a peer before it succeeds.
+                    if kind != "hello" {self.readHeader()}
                 }
             }
+        }
+    }
+    private func readSurface(_ surface:GuestFrameSurface,offset:Int,completion:@escaping @Sendable ()->Void){
+        let remaining=surface.byteCount-offset
+        connection.receive(minimumIncompleteLength:min(remaining,65536),maximumLength:min(remaining,65536)){[weak self] data,_,complete,error in
+            guard let self else{return}
+            guard error == nil,let data,!data.isEmpty,data.count<=remaining else{self.connection.cancel();return}
+            data.withUnsafeBytes{if let bytes=$0.baseAddress{surface.contents.advanced(by:offset).copyMemory(from:bytes,byteCount:data.count)}}
+            let next=offset+data.count
+            if next == surface.byteCount{completion()}
+            else if !complete{self.readSurface(surface,offset:next,completion:completion)}
+            else{self.connection.cancel()}
         }
     }
     private func offer(_ window:String,_ value:GuestPacket) {
@@ -112,17 +159,25 @@ final class GuestBridge {
     private let token: String
     private var clients: [UUID:GuestConnection] = [:]
     private var active: UUID?
+    private var activeFrames:UUID?
+    private var identity:String?
+    private var frameChannel:String?
     private var timer: Timer?
     private var lastPacket = Date.distantPast
     private var serial = 0
     private var replies: [Int:(Result<[String:Any],Error>) -> Void] = [:]
+    private var sentAt:[Int:Double]=[:]
+    private(set) var lastRoundTripMilliseconds=0.0
+    private(set) var frameReceiveMilliseconds=0.0
+    var separateFrames:Bool {activeFrames != nil}
     var onPacket: ((GuestPacket) -> Void)?
     var onConnection: ((Bool) -> Void)?
     var connected: Bool { active != nil }
 
     init(port: UInt16, token: String) throws {
         self.token=token
-        let parameters=NWParameters.tcp
+        let tcp=NWProtocolTCP.Options();tcp.noDelay=true
+        let parameters=NWParameters(tls:nil,tcp:tcp)
         parameters.requiredLocalEndpoint = .hostPort(host:"127.0.0.1",port:NWEndpoint.Port(rawValue:port)!)
         listener=try NWListener(using:parameters)
         listener.newConnectionHandler = { [weak self] incoming in
@@ -139,7 +194,7 @@ final class GuestBridge {
         clients[client.id]=client
         Task { @MainActor [weak self] in
             try? await Task.sleep(for:.seconds(5))
-            guard let self, self.active != client.id else { return }
+            guard let self, self.active != client.id,self.activeFrames != client.id else { return }
             self.clients.removeValue(forKey:client.id)?.cancel()
         }
     }
@@ -149,12 +204,39 @@ final class GuestBridge {
             guard h["protocol"] as? Int == 1, h["token"] as? String == token,
                   let session=h["session"] as? Int, session>0, let sid=h["sid"] as? String, sid.hasPrefix("S-1-"),
                   let epoch=h["epoch"] as? String, epoch.utf8.count<=128 else { clients[id]?.cancel(); return }
-            if let previous=active, previous != id { clients.removeValue(forKey:previous)?.cancel() }
+            let incomingIdentity="\(sid)|\(session)|\(epoch)"
+            if h["role"] as? String == "frames" {
+                guard active != nil,identity == incomingIdentity,let frameChannel,h["channel"] as? String == frameChannel,
+                      activeFrames == nil else{clients[id]?.cancel();return}
+                activeFrames=id;clients[id]?.authorize(frames:true);return
+            }
+            guard h["role"] == nil || h["role"] as? String == "control" else{clients[id]?.cancel();return}
+            if let previous=active,previous != id {
+                clients.removeValue(forKey:previous)?.cancel()
+                let pending=replies;replies.removeAll();sentAt.removeAll()
+                for reply in pending.values {reply(.failure(NSError(domain:"Guest",code:2,userInfo:[NSLocalizedDescriptionKey:"Windows reconnected."])))}
+            }
+            if let previous=activeFrames {clients.removeValue(forKey:previous)?.cancel()}
+            activeFrames=nil;frameChannel=nil;identity=incomingIdentity
+            clients[id]?.authorize(frames:false)
             active=id;lastPacket=Date();onConnection?(true)
+            if (h["capabilities"] as? [String:Any])?["frameChannel"] as? Bool == true {
+                let channel=UUID().uuidString.replacingOccurrences(of:"-",with:"").lowercased()
+                frameChannel=channel
+                command("frame_channel",["channel":channel,"rowAlignment":256],timeout:.seconds(5)){[weak self] result in
+                    if case .failure=result,self?.active == id {self?.clients[id]?.cancel()}
+                }
+            }
+        }
+        if activeFrames == id {
+            guard h["type"] as? String == "frame" else{clients[id]?.cancel();return}
+            frameReceiveMilliseconds=h["hostReceiveMilliseconds"] as? Double ?? 0
+            onPacket?(packet);return
         }
         guard active==id else { return }
         lastPacket=Date()
         if h["type"] as? String == "reply", let request=h["request"] as? Int, let reply=replies.removeValue(forKey:request) {
+            if let started=sentAt.removeValue(forKey:request){lastRoundTripMilliseconds=(ProcessInfo.processInfo.systemUptime-started)*1000}
             if h["ok"] as? Bool == true { reply(.success(["value":h["result"] ?? [:]])) }
             else { reply(.failure(NSError(domain:"Guest",code:1,userInfo:[NSLocalizedDescriptionKey:h["message"] as? String ?? "Windows could not complete this request."]))) }
         }
@@ -162,9 +244,12 @@ final class GuestBridge {
     }
     private func disconnected(_ id:UUID) {
         clients.removeValue(forKey:id)
+        if activeFrames == id {activeFrames=nil;if let active{clients[active]?.cancel()}}
         guard active==id else { return }
-        active=nil
+        active=nil;identity=nil;frameChannel=nil
+        if let frame=activeFrames {activeFrames=nil;clients.removeValue(forKey:frame)?.cancel()}
         let pending=replies;replies.removeAll()
+        sentAt.removeAll()
         for reply in pending.values { reply(.failure(NSError(domain:"Guest",code:2,userInfo:[NSLocalizedDescriptionKey:"Windows disconnected."]))) }
         onConnection?(false)
     }
@@ -182,8 +267,10 @@ final class GuestBridge {
         if let completion {
             guard replies.count<32 else { completion(.failure(NSError(domain:"Guest",code:3,userInfo:[NSLocalizedDescriptionKey:"Windows is busy."])));return }
             replies[request]=completion
+            sentAt[request]=ProcessInfo.processInfo.systemUptime
             Task { @MainActor [weak self] in
                 try? await Task.sleep(for:timeout)
+                self?.sentAt.removeValue(forKey:request)
                 self?.replies.removeValue(forKey:request)?(.failure(NSError(domain:"Guest",code:4,userInfo:[NSLocalizedDescriptionKey:"Windows took too long to respond."])))
             }
         }

@@ -56,13 +56,15 @@ with socket.socket(socket.AF_UNIX) as connection:
     connection.connect(address)
     stream=connection.makefile('rwb')
     stream.readline()
-    for command,command_args in [('qmp_capabilities',{}),('blockdev-change-medium',{'device':'bootstrap','filename':str(iso),'format':'raw'})]:
+    for command,command_args in [('qmp_capabilities',{}),('query-uuid',{}),('blockdev-change-medium',{'device':'bootstrap','filename':str(iso),'format':'raw'})]:
         stream.write((json.dumps({'execute':command,'arguments':command_args})+'\n').encode());stream.flush()
         while True:
             result=json.loads(stream.readline())
             if 'error' in result:
                 raise RuntimeError(result['error'])
             if 'return' in result:
+                if command == 'query-uuid' and result['return'].get('UUID') != configuration['id']:
+                    raise RuntimeError('The running VM does not match the development machine.')
                 break
 print('Setup CD attached. In the Windows console run D:\\install.cmd and complete installation.')
 if arguments.remove_legacy:

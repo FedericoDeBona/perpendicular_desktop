@@ -12,15 +12,17 @@ final class WindowRenderer {
     private let pipeline:any MTLRenderPipelineState
     private var texture:(any MTLTexture)?
     private var external:NativeDisplayFrame?
+    private var shared:GuestFrameSurface?
     private var nativeCache=false
     private let opaque:Bool
     private var pixels=Data()
+    private var pixelStride=0
     private var size=NSSize.zero
     private var revision:UInt64=0
     private var uploaded:UInt64=0
     private var drawing=false
     private var dirty=false
-    private var reportedSources=Set<Bool>()
+    private var reportedSources=Set<String>()
     var onError:((String)->Void)?
 
     init(opaque:Bool=false) throws {
@@ -64,44 +66,59 @@ final class WindowRenderer {
         layer.contentsScale=scale;layer.drawableSize=next
         dirty=true;draw()
     }
-    func present(_ pixels:Data,width:Int,height:Int){
-        external=nil;nativeCache=false
-        self.pixels=pixels;size=NSSize(width:width,height:height)
+    func present(_ pixels:Data,width:Int,height:Int,stride:Int?=nil){
+        external=nil;shared=nil;nativeCache=false
+        self.pixels=pixels;pixelStride=stride ?? width*4;size=NSSize(width:width,height:height)
         revision &+= 1;dirty=true;draw()
+    }
+    func present(_ surface:GuestFrameSurface){
+        guard surface.texture.device.registryID == device.registryID else{onError?("The graphics devices do not match.");return}
+        external=nil;nativeCache=false;pixels=Data();texture=nil;shared=surface
+        size=NSSize(width:surface.width,height:surface.height)
+        dirty=true;draw()
     }
     func present(_ frame:NativeDisplayFrame){
         guard frame.texture.device.registryID == device.registryID else{onError?("The graphics devices do not match.");return}
-        external=frame;pixels=Data();size=NSSize(width:frame.texture.width,height:frame.texture.height)
+        external=frame;shared=nil;pixels=Data();size=NSSize(width:frame.texture.width,height:frame.texture.height)
         dirty=true;draw()
     }
-    func clear(){external=nil;nativeCache=false;pixels=Data();size = .zero;texture=nil;dirty=false}
+    func clear(){external=nil;shared=nil;nativeCache=false;pixels=Data();size = .zero;texture=nil;dirty=false}
     func draw(){
         // Keep only the latest CPU frame and one GPU reader. Reusing a texture
         // waits for that reader's completion, including across resize/retirement.
-        guard dirty,!drawing,(external != nil || nativeCache || !pixels.isEmpty),size.width>0,size.height>0,
+        guard dirty,!drawing,(shared != nil || external != nil || nativeCache || !pixels.isEmpty),size.width>0,size.height>0,
               layer.drawableSize.width>0,layer.drawableSize.height>0 else{return}
         let width=Int(size.width),height=Int(size.height)
         let lease=external
+        let frameSurface=shared
         let nativeSurface=lease != nil || nativeCache
-        let storage:MTLStorageMode=nativeSurface ? .private:.shared
-        if texture?.width != width || texture?.height != height || texture?.storageMode != storage {
-            let descriptor=MTLTextureDescriptor.texture2DDescriptor(pixelFormat:.bgra8Unorm,width:width,height:height,mipmapped:false)
-            descriptor.storageMode=storage;descriptor.usage = .shaderRead
-            texture=device.makeTexture(descriptor:descriptor);uploaded=0
+        let sourceKind=nativeSurface ? "native-surface":frameSurface != nil ? "shared-buffer":"cpu"
+        let sampledTexture:any MTLTexture
+        if let frameSurface {
+            sampledTexture=frameSurface.texture
+        }else{
+            let storage:MTLStorageMode=nativeSurface ? .private:.shared
+            if texture?.width != width || texture?.height != height || texture?.storageMode != storage {
+                let descriptor=MTLTextureDescriptor.texture2DDescriptor(pixelFormat:.bgra8Unorm,width:width,height:height,mipmapped:false)
+                descriptor.storageMode=storage;descriptor.usage = .shaderRead
+                texture=device.makeTexture(descriptor:descriptor);uploaded=0
+            }
+            guard let texture else{return}
+            sampledTexture=texture
         }
-        guard let texture,let drawable=layer.nextDrawable(),let command=queue.makeCommandBuffer() else{return}
+        guard let drawable=layer.nextDrawable(),let command=queue.makeCommandBuffer() else{return}
         if let lease {
             // Keep an owned image for expose/resize. Holding the last producer
             // lease until its successor arrives deadlocks context retirement:
             // the broker must release that old budget before starting a writer.
             guard let copy=command.makeBlitCommandEncoder() else{return}
             copy.copy(from:lease.texture,sourceSlice:0,sourceLevel:0,sourceOrigin:MTLOrigin(x:0,y:0,z:0),
-                      sourceSize:MTLSize(width:width,height:height,depth:1),to:texture,destinationSlice:0,
+                      sourceSize:MTLSize(width:width,height:height,depth:1),to:sampledTexture,destinationSlice:0,
                       destinationLevel:0,destinationOrigin:MTLOrigin(x:0,y:0,z:0))
             copy.endEncoding()
-        }else if !nativeCache && uploaded != revision {
+        }else if frameSurface == nil && !nativeCache && uploaded != revision {
             pixels.withUnsafeBytes {bytes in
-                texture.replace(region:MTLRegionMake2D(0,0,width,height),mipmapLevel:0,withBytes:bytes.baseAddress!,bytesPerRow:width*4)
+                sampledTexture.replace(region:MTLRegionMake2D(0,0,width,height),mipmapLevel:0,withBytes:bytes.baseAddress!,bytesPerRow:pixelStride)
             }
             uploaded=revision
         }
@@ -114,7 +131,7 @@ final class WindowRenderer {
         var scale=SIMD2<Float>(Float(size.width*fit/layer.drawableSize.width),Float(size.height*fit/layer.drawableSize.height))
         encoder.setRenderPipelineState(pipeline)
         encoder.setVertexBytes(&scale,length:MemoryLayout<SIMD2<Float>>.size,index:0)
-        encoder.setFragmentTexture(texture,index:0)
+        encoder.setFragmentTexture(sampledTexture,index:0)
         var forceOpaque:UInt32=opaque ? 1:0
         encoder.setFragmentBytes(&forceOpaque,length:MemoryLayout<UInt32>.size,index:0)
         encoder.drawPrimitives(type:.triangle,vertexStart:0,vertexCount:6)
@@ -122,21 +139,22 @@ final class WindowRenderer {
         if lease != nil {nativeCache=true;external=nil}
         drawing=true;dirty=false
         command.present(drawable)
-        command.addCompletedHandler { [weak self,lease] buffer in
+        command.addCompletedHandler { [weak self,lease,frameSurface] buffer in
             // The producer image has been copied into our own texture and every
             // GPU read is complete. Do not wait for Metal to release this block.
             lease?.finishReading()
+            withExtendedLifetime(frameSurface){}
             let failed=buffer.status == .error
             let message=buffer.error?.localizedDescription
             Task{@MainActor [weak self] in
                 guard let self else{return}
                 self.drawing=false
                 if failed {self.onError?(message ?? "The graphics device could not present this window.")}
-                else if !self.reportedSources.contains(nativeSurface) {
-                    self.reportedSources.insert(nativeSurface)
+                else if !self.reportedSources.contains(sourceKind) {
+                    self.reportedSources.insert(sourceKind)
                     if ProcessInfo.processInfo.environment["PERPENDICULAR_STATE_TRACE"] == "1" {
                         let value:[String:Any]=["type":"renderer","backend":"metal","device":self.device.name,
-                            "sourceWidth":width,"sourceHeight":height,"source":nativeSurface ? "native-surface":"cpu",
+                            "sourceWidth":width,"sourceHeight":height,"source":sourceKind,
                             "nativeGPUCopy":nativeSurface,"gpuCompleted":true]
                         if let data=try? JSONSerialization.data(withJSONObject:value){try? FileHandle.standardError.write(contentsOf:data+Data([10]))}
                     }

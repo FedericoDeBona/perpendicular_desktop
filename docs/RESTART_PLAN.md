@@ -134,6 +134,16 @@ Una normale app Windows si apre nella propria finestra Mac; drag e resize rimang
 
 Nel resoconto finale indicare cosa è utilizzabile, quali brevi prove lo confermano e quali limiti restano. Una build riuscita, un comando accettato o una superficie visualizzata una volta non sostituiscono il risultato completo. Finché manca una parte essenziale, l'obiettivo rimane aperto.
 
+## Obiettivo successivo — fluidità, compatibilità e launcher
+
+Richiesta esplicita del 21 ottobre 2026, dopo il primo percorso Win32 completo:
+
+1. Migliorare click, testo, scroll e fluidità delle immagini. Consultare selettivamente il vecchio progetto, misurare i colli di bottiglia concreti e ridurre copie/attese GPU dove il percorso reale lo consente. Distinguere la rimozione di un upload Mac dal vero zero-copy Windows–Mac.
+2. Ampliare le app supportate a WinUI e Creality Print, comprese splash/loading window e transizione alla finestra principale. Verificare separatamente scoperta/identità delle finestre, rendering guest e cattura. Una riuscita Win32 non certifica WinUI o OpenGL.
+3. Rifare il launcher Swift con interfaccia moderna e usabile, ricerca immediata, stati di apertura effettivi e icone Windows reali per i software.
+
+Conservare desktop di recupero, VM originale e documenti. Completare incrementi piccoli nell'app reale con commit/push, senza riprendere pulizie Parallels o cambiare driver per tentativi. Le scorciatoie Mac rimangono fuori da questa fase.
+
 ## Lavoro futuro — scorciatoie Mac
 
 Richiesta dell’utente del 21 ottobre 2026, da non implementare nella fase attuale: introdurre le scorciatoie in stile Mac nelle applicazioni Windows. Consultare l’implementazione della vecchia app Perpendicular soltanto per recuperare il comportamento pertinente, distinguendo scorciatoie, testo composto e appunti. Questa voce non amplia il lavoro attivo su monitor, grafica e geometria.

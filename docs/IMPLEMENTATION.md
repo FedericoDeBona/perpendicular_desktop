@@ -21,6 +21,8 @@ Un servizio Rust avvia e sorveglia il worker nella sessione interattiva dell'ute
 
 I comandi di avvio non vengono ritentati automaticamente. La riconnessione ritrova le finestre per processo, tempo di creazione e sessione; non rilancia le app. L'input usa identità opache della finestra e una generazione della geometria; rilascia tasti e pulsanti alla disconnessione.
 
+Il guest conserva ora l'identità dell'app anche fra la chiusura di uno splash e la comparsa della finestra principale: fino a otto app, sedici processi per app, attesa iniziale e intervallo senza HWND limitati a trenta secondi. Ogni processo e discendente deve essere vivo e corrispondere a PID, tempo di creazione, SID e sessione; un PID riutilizzato o il solo titolo non autorizzano l'associazione. Una finestra senza proprietario con stile `WS_POPUP` può diventare principale soltanto per un'app già riconosciuta, escludendo i menu standard. `launch_state` distingue attesa e finestra associata; il frontend conclude l'apertura all'arrivo del primo frame, con un limite di trentadue secondi. Questo non certifica che il contenuto WinUI sia disegnato correttamente.
+
 Per le app confezionate l'attivazione Shell può riusare una finestra senza restituire un processo o creare un nuovo HWND. Il catalogo conserva l'identità di attivazione e la confronta con l'[AppUserModelID del processo](https://learn.microsoft.com/en-us/windows/win32/api/appmodel/nf-appmodel-getapplicationusermodelid). Restano i controlli su utente e sessione; il titolo non è un'identità affidabile.
 
 ## Confini per gli aggiornamenti
@@ -39,11 +41,17 @@ La sostituzione di un codec o del trasporto non richiede di riscrivere il catalo
 ## Limiti della base
 
 - Massimo quattro finestre principali/dialoghi e dodici superfici temporanee, 8.388.608 pixel per frame e frequenza limitata; pixel non compressi, nessuna prestazione generale dichiarata. Il limite è sufficiente per una superficie 3840×2160, ma non prova che il driver guest offra quella modalità.
-- Catalogo AppsFolder senza icone specifiche e senza cache persistente. L'associazione iniziale delle app confezionate è semplice e può fallire esplicitamente.
+- Catalogo AppsFolder con icone Shell caricate separatamente e cache Mac limitata in memoria. Associazione e transizioni delle app confezionate possono ancora fallire esplicitamente; non è verificata la compatibilità generale dei toolkit.
 - Tastiera normale e scorciatoie principali; IME, compatibilità con altri tipi di popup, accessibilità remota, audio, appunti e condivisione file richiedono lavoro dedicato. Le app elevate e il desktop protetto si gestiscono dalla console Windows.
 - Il testo già composto sul Mac viene consegnato come messaggi UTF-16 al controllo Windows che possiede il focus, con un tempo massimo per la risposta. Mouse, tasti speciali e scorciatoie usano SendInput. Le prove con soli pacchetti Unicode e con traduzione attraverso il layout hanno riprodotto caratteri, maiuscole e lettere errati in Blocco note, anche introducendo una pausa; questo giustifica la separazione. I controlli che richiedono esclusivamente input hardware/Raw Input non sono coperti dalla prima verifica.
 - Il collegamento è locale con token e non usa TLS. Non è progettato per esporre il listener su LAN/Internet o per isolare utenti ostili nella stessa VM.
 - La configurazione della macchina e il bootstrap sono ancora strumenti di sviluppo; non esiste ancora una procedura guidata per distribuire il prodotto ad altri utenti.
+
+## Launcher e icone Windows
+
+`Launcher.swift` offre ricerca focalizzata, Invio per aprire il primo risultato, Cmd-F, griglia o elenco e accesso al desktop Windows. Collegamento, apertura e messaggi di errore hanno stati distinti; un comando accettato non viene presentato come contenuto pronto. Un rifiuto esplicito del focus viene mostrato nel launcher e, al primo episodio per finestra, in un avviso con accesso al desktop. Non viene forzata l'attivazione oltre le normali API Windows.
+
+Il catalogo contiene solo i metadati. `app_icon(app)` risolve un'identità già presente nel catalogo e ottiene l'icona originale da `IShellItemImageFactory` con `ICONONLY`, senza anteprime o icone software inventate. Risposta PNG fino a 128×128 e 128 KiB, con dimensioni e SHA-256. Il Mac verifica questi limiti e richiede soltanto le icone delle app mostrate, una alla volta, conservandone al massimo sessantaquattro. Durante attesa o errore resta un segnaposto neutro; la cache non è persistente. Compilazione e controlli del formato non sostituiscono la prova visiva delle singole app.
 
 ## Build locale
 
@@ -91,9 +99,11 @@ Tre controlli mirati della geometria sono in tests/WindowGeometryChecks.swift e 
 
 ## Presentazione Metal e rilevamento dei monitor
 
-`WindowRenderer.swift` presenta ogni superficie tramite CAMetalLayer. La texture BGRA viene riutilizzata soltanto dopo il completamento del lettore GPU; durante l'attesa rimane unicamente il frame CPU più recente. Ridimensionamento e cambi di scala aggiornano il drawable usando i pixel di backing del monitor Mac. La creazione di CGImage avviene soltanto per diagnostica o recupero in caso di indisponibilità di Metal, non per ogni frame del percorso ordinario. Un errore Metal viene riportato al frontend.
+`WindowRenderer.swift` presenta ogni superficie tramite CAMetalLayer. Il ricevitore può copiare i blocchi TCP direttamente in un `GuestFrameSurface`: buffer Metal `.storageModeShared` con texture lineare BGRA sugli stessi byte, righe allineate a 256 byte e allocazione massima di 32 MiB. Il buffer è immutabile dopo la pubblicazione e rimane vivo fino al completamento GPU; il renderer conserva soltanto il frame più recente in attesa. Questo percorso elimina il successivo accumulo `Data` dell'immagine e l'upload `texture.replace`. Se allocazione o allineamento non sono disponibili rimane il percorso `Data` con upload della texture. Ridimensionamento e scala aggiornano il drawable in pixel di backing; CGImage serve a diagnostica o fallback CPU.
 
-Il trasporto resta CPU BGRA: staging/readback Windows, invio TCP e caricamento nella texture Mac. Non è zero-copy e la cattura guest resta WARP. Il ricevitore accumula i blocchi nel medesimo buffer, evitando di ricopiare i blocchi precedenti a ogni lettura. Non sono ancora misurati guadagni di latenza o throughput.
+Controllo e pixel possono usare due connessioni TCP allo stesso listener. Il canale opzionale `frameChannel` è legato al controllo tramite token, nonce, SID, sessione ed epoch; entrambe le estremità disabilitano Nagle. Sul canale pixel rimane un frame inviato in attesa di riscontro e l'ultimo frame accodato per finestra. Il riscontro Mac conferma ricezione/copia, non il completamento GPU. I peer senza questa capacità mantengono il flusso combinato. `control_guest.py status` espone canale separato, ultimo RTT di un comando con risposta e durata della ricezione del payload: non misurano l'intera latenza visiva.
+
+La cattura WGC usa ancora un dispositivo WARP, staging/readback e copia delle righe nel guest, BGRA non compresso su TCP e copia dei blocchi ricevuti sul Mac. Il buffer condiviso riguarda CPU/GPU del Mac: non è una superficie condivisa guest/host né zero-copy end-to-end. La cattura preferisce il frame WGC più recente ed evita un nuovo readback mentre la stessa finestra ne ha uno in coda; l'intervallo minimo di 16 ms non garantisce 60 fps. Il percorso scanout Native3D del desktop rimane distinto dalla cattura delle singole finestre. Le modifiche tecniche a trasporto, buffer e associazione dei processi non costituiscono una prova end-to-end superata per WinUI o Creality; prove effettive e limiti sono in [VERIFICATION.md](VERIFICATION.md).
 
 `display_info` legge in Rust monitor attivi, modalità esposte, coordinate e DPI. La creazione del dispositivo Direct3D è separata in `graphics_info`, una prova esplicita fuori dal ciclo dei comandi: un driver lento non deve bloccare catalogo e input, né essere inizializzato a ogni normale collegamento. `HostDisplay` conserva separatamente punti e pixel dei monitor Mac; con `PERPENDICULAR_STATE_TRACE=1` il confronto host/guest, la prova grafica opzionale e il primo completamento GPU Metal vengono scritti nella diagnostica privata. La lettura non cambia risoluzione, scala o driver. Microsoft Basic Render Driver viene riconosciuto anche tramite gli ID `1414:008C`: può riuscire una richiesta D3D HARDWARE senza che il flag SOFTWARE sia impostato. [Descrizione Microsoft](https://learn.microsoft.com/en-us/windows/win32/direct3ddxgi/d3d10-graphics-programming-guide-dxgi).
 
@@ -141,7 +151,7 @@ L'alternativa IddCx è un driver C++ UMDF per monitor virtuali indipendente dal 
 
 ### Stato effettivo del display
 
-`display_info` riporta anche l'area di lavoro del monitor in pixel Windows. Il frontend legge lo stato dopo il collegamento, all'aggiornamento manuale e al cambiamento degli schermi Mac o Windows. Le risposte appartenenti a un'altra connessione o a una richiesta superata non pubblicano il vecchio stato. La UI mostra risoluzione e scala realmente lette, indipendentemente dalla diagnostica.
+`display_info` riporta anche l'area di lavoro del monitor in pixel Windows. Il frontend legge lo stato dopo il collegamento, all'aggiornamento manuale e al cambiamento degli schermi Mac o Windows. Le risposte appartenenti a un'altra connessione o a una richiesta superata non pubblicano il vecchio stato. Risoluzione, scala e confronto effettivo rimangono nel modello e nei comandi locali di diagnostica; il launcher mostra lo stato delle app e del collegamento.
 
 `SharedDisplay` ammette la corrispondenza del solo monitor primario quando risoluzione e DPI effettivi coincidono esattamente con backing e scala Mac. Converte rettangoli nei due versi, con origini esplicite e inversione Y, e abilita la geometria condivisa soltanto con la capacità guest corrispondente. Il display RAMFB a 800×600/96 DPI non soddisfa il contratto del Mac attuale. Il primario 2880×1800/192 DPI, drag e resize di una finestra Win32 sono stati verificati nell'app; il supporto completo a più monitor rimane da implementare e verificare.
 

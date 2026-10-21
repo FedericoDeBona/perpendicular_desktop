@@ -5,7 +5,7 @@ use std::{
     net::TcpStream,
     sync::{
         Arc, Condvar, Mutex,
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicUsize, Ordering},
     },
     time::Duration,
 };
@@ -23,6 +23,9 @@ struct Pending {
 pub struct Outbox {
     pending: Mutex<Pending>,
     wake: Condvar,
+    frame_wake: Condvar,
+    split: AtomicBool,
+    row_alignment: AtomicUsize,
     pub connected: AtomicBool,
 }
 
@@ -31,6 +34,9 @@ impl Outbox {
         Arc::new(Self {
             pending: Mutex::new(Pending::default()),
             wake: Condvar::new(),
+            frame_wake: Condvar::new(),
+            split: AtomicBool::new(false),
+            row_alignment: AtomicUsize::new(4),
             connected: AtomicBool::new(true),
         })
     }
@@ -55,6 +61,38 @@ impl Outbox {
             .frames
             .insert(id.to_owned(), Packet { header, bytes });
         self.wake.notify_one();
+        self.frame_wake.notify_one();
+    }
+    pub fn row_alignment(&self) -> usize { self.row_alignment.load(Ordering::Acquire) }
+    pub fn frame_waiting(&self, id: &str) -> bool {self.pending.lock().unwrap().frames.contains_key(id)}
+    /// Enabled only after the host requests the optional authenticated pixel
+    /// connection. Older hosts keep the original combined stream.
+    pub fn start_frames(self: Arc<Self>, mut stream: TcpStream, hello: Value) -> Result<(), String> {
+        stream.set_nodelay(true).map_err(super::error)?;
+        stream.set_write_timeout(Some(Duration::from_secs(3))).map_err(super::error)?;
+        stream.set_read_timeout(Some(Duration::from_secs(5))).map_err(super::error)?;
+        send(&mut stream, &Packet { header:hello, bytes:Vec::new() }).map_err(super::error)?;
+        self.row_alignment.store(256, Ordering::Release);
+        self.split.store(true, Ordering::Release);
+        self.wake.notify_one();
+        while self.connected.load(Ordering::Acquire) {
+            let packet = {
+                let mut pending = self.pending.lock().unwrap();
+                if pending.order.is_empty() {
+                    pending = self.frame_wake.wait_timeout(pending, Duration::from_secs(2)).unwrap().0;
+                }
+                pending.order.pop_front().and_then(|id| pending.frames.remove(&id))
+            };
+            if let Some(packet) = packet {
+                let mut receipt = [0u8;1];
+                if send(&mut stream, &packet).is_err() || stream.read_exact(&mut receipt).is_err() || receipt[0] != 1 {
+                    self.connected.store(false, Ordering::Release);
+                }
+            }
+        }
+        let _ = stream.shutdown(std::net::Shutdown::Both);
+        self.wake.notify_one();
+        Ok(())
     }
     pub fn retire(&self, id: &str) {
         let mut pending = self.pending.lock().unwrap();
@@ -66,7 +104,7 @@ impl Outbox {
         while self.connected.load(Ordering::Acquire) {
             let packet = {
                 let mut pending = self.pending.lock().unwrap();
-                if pending.controls.is_empty() && pending.order.is_empty() {
+                if pending.controls.is_empty() && (pending.order.is_empty() || self.split.load(Ordering::Acquire)) {
                     pending = self
                         .wake
                         .wait_timeout(pending, Duration::from_secs(2))
@@ -75,7 +113,8 @@ impl Outbox {
                 }
                 if let Some(value) = pending.controls.pop_front() {
                     value
-                } else if let Some(id) = pending.order.pop_front() {
+                } else if !self.split.load(Ordering::Acquire) && !pending.order.is_empty() {
+                    let id = pending.order.pop_front().unwrap();
                     match pending.frames.remove(&id) {
                         Some(p) => p,
                         None => continue,

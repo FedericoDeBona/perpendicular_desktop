@@ -1,5 +1,5 @@
 use super::{
-    Configuration,
+    Configuration, app_process,
     capture::{self, Target},
     catalogue::{self, Catalogue},
     display, error, execute, identity, window_control,
@@ -16,7 +16,7 @@ use std::{
         atomic::{AtomicBool, Ordering},
         mpsc,
     },
-    time::{Duration, Instant},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 use windows::Win32::{
     Foundation::{HWND, LPARAM, POINT, WPARAM},
@@ -38,9 +38,12 @@ struct Window {
 }
 struct Launch {
     app: String,
-    pid: u32,
-    before: HashSet<usize>,
     deadline: Instant,
+}
+struct ApplicationSession {
+    processes: Vec<app_process::Process>,
+    gap_until: Option<Instant>,
+    startup_until: Instant,
 }
 struct Worker {
     sid: String,
@@ -49,6 +52,8 @@ struct Worker {
     catalogue: Catalogue,
     windows: HashMap<String, Window>,
     pending: Vec<Launch>,
+    applications: HashMap<String, ApplicationSession>,
+    next_process_scan: Instant,
     serial: u64,
     pressed: HashSet<u16>,
     buttons: HashSet<String>,
@@ -96,6 +101,8 @@ pub fn run(path: &Path) -> Result<(), String> {
         catalogue: Catalogue::new(),
         windows: HashMap::new(),
         pending: Vec::new(),
+        applications: HashMap::new(),
+        next_process_scan: Instant::now(),
         serial: 0,
         pressed: HashSet::new(),
         buttons: HashSet::new(),
@@ -145,7 +152,7 @@ impl Worker {
         outbox.control(
             json!({"type":"hello","protocol":1,"token":config.token,"epoch":self.epoch,
             "sid":self.sid,"session":self.session,"version":env!("CARGO_PKG_VERSION"),
-            "capabilities":{"capture":"software","windows":4,"transients":12,"windowRoles":true,"input":true,"catalogue":true,"displayInfo":true,"driverInfo":true,"graphicsInfo":true,"displayConfigure":true,"sharedGeometry":true,"execute":true,"executeTimeoutSeconds":60,"executeOutputBytes":65536,"displayEvents":self.display_observer.is_some()}}),
+            "capabilities":{"capture":"software","windows":4,"transients":12,"windowRoles":true,"input":true,"catalogue":true,"appIcon":true,"frameChannel":true,"displayInfo":true,"driverInfo":true,"graphicsInfo":true,"displayConfigure":true,"sharedGeometry":true,"execute":true,"executeTimeoutSeconds":60,"executeOutputBytes":65536,"displayEvents":self.display_observer.is_some()}}),
         );
         let (sender, receiver) = mpsc::sync_channel(128);
         let state = outbox.clone();
@@ -153,7 +160,9 @@ impl Worker {
             while state.connected.load(Ordering::Acquire) {
                 match wire::read(&mut stream) {
                     Ok(value) => {
-                        if sender.try_send(value).is_err() {
+                        // A burst of typing must wait for the bounded consumer,
+                        // not sever the session and discard already committed text.
+                        if sender.send(value).is_err() {
                             break;
                         }
                     }
@@ -163,18 +172,69 @@ impl Worker {
             state.connected.store(false, Ordering::Release);
         });
         self.release();
+        let restored: Vec<_> = self.windows.iter().filter_map(|(id, window)| {
+            let details = catalogue::details(window.target.hwnd, &self.sid, self.session)?;
+            Some((id.clone(), self.application_surface(details, &window.app)))
+        }).collect();
+        for (id, metadata) in restored {
+            if let Some(window) = self.windows.get_mut(&id) { window.metadata = metadata; }
+        }
         for window in self.windows.values_mut() {
-            if let Some(details) = catalogue::details(window.target.hwnd, &self.sid, self.session) {
-                window.metadata = details;
-            }
             window.stop = Some(capture::spawn(window.target.clone(), outbox.clone()));
         }
         self.snapshot(&outbox);
         let mut poll = Instant::now();
         let diagnostic_busy = Arc::new(AtomicBool::new(false));
+        let icon_busy = Arc::new(AtomicBool::new(false));
+        let mut frame_channel_started = false;
         while outbox.connected.load(Ordering::Acquire) {
             if let Ok(command) = receiver.recv_timeout(Duration::from_millis(10)) {
                 let request = command["request"].clone();
+                if command["operation"] == "frame_channel" {
+                    let channel = command["channel"].as_str().filter(|s| s.len() == 32 && s.bytes().all(|b| b.is_ascii_hexdigit()));
+                    if frame_channel_started || channel.is_none() || command["rowAlignment"] != 256 {
+                        outbox.control(json!({"type":"reply","request":request,"ok":false,"message":"Invalid or duplicate frame channel"}));
+                        continue;
+                    }
+                    frame_channel_started = true;
+                    let channel = channel.unwrap().to_owned();
+                    let endpoint: SocketAddr = format!("10.0.2.2:{}", config.port).parse().map_err(error)?;
+                    let hello = json!({"type":"hello","role":"frames","protocol":1,"token":config.token,
+                        "sid":self.sid,"session":self.session,"epoch":self.epoch,"channel":channel});
+                    let sender = outbox.clone();
+                    std::thread::spawn(move || {
+                        let result = TcpStream::connect_timeout(&endpoint, Duration::from_secs(2));
+                        match result {
+                            Ok(stream) => {
+                                sender.control(json!({"type":"reply","request":request,"ok":true,"result":{"accepted":true}}));
+                                if sender.clone().start_frames(stream, hello).is_err() {sender.connected.store(false, Ordering::Release);}
+                            }
+                            Err(_) => {sender.connected.store(false, Ordering::Release);}
+                        }
+                    });
+                    continue;
+                }
+                if command["operation"] == "app_icon" {
+                    let app = command["app"].as_str().unwrap_or("");
+                    let source = self.catalogue.icon_source(app);
+                    if source.is_err() || icon_busy.swap(true, Ordering::AcqRel) {
+                        outbox.control(json!({"type":"reply","request":request,"ok":false,"message":"Application icon unavailable or busy"}));
+                    } else {
+                        let app = app.to_owned();
+                        let parsing = source.unwrap();
+                        let sender = outbox.clone();
+                        let busy = icon_busy.clone();
+                        std::thread::spawn(move || {
+                            let result = super::icons::extract(&app, &parsing);
+                            sender.control(match result {
+                                Ok(value) => json!({"type":"reply","request":request,"ok":true,"result":value}),
+                                Err(message) => json!({"type":"reply","request":request,"ok":false,"message":message}),
+                            });
+                            busy.store(false, Ordering::Release);
+                        });
+                    }
+                    continue;
+                }
                 if command["operation"] == "execute" {
                     if self.execution_busy.swap(true, Ordering::AcqRel) {
                         outbox.control(json!({"type":"reply","request":request,"ok":false,"message":"A command is already running"}));
@@ -312,17 +372,35 @@ impl Worker {
                 if self.pending.iter().any(|p| p.app == app) {
                     return Ok(json!({"accepted":true,"pending":true}));
                 }
+                if self.applications.get(app).is_some_and(|session| {
+                    session.processes.iter().any(app_process::Process::alive)
+                        || session.gap_until.is_some_and(|until| until > Instant::now())
+                }) {
+                    outbox.control(json!({"type":"launch_state","app":app,"state":"waiting"}));
+                    return Ok(json!({"accepted":true,"existing":true,"ready":false}));
+                }
                 if self.document_count() >= 4 {
                     return Err("Close an application before opening another".into());
                 }
-                let before = catalogue::windows().into_iter().collect();
-                let pid = self.catalogue.launch(app)?;
+                if !self.applications.contains_key(app) && self.applications.len() >= 8 {
+                    return Err("Too many application transitions are still active".into());
+                }
+                let (pid, creation) = self.catalogue.launch(app)?;
+                let until = Instant::now() + Duration::from_secs(30);
+                let processes: Vec<_> = app_process::Process::open(pid, &self.sid, self.session)
+                    .filter(|process| process.identity.creation == creation)
+                    .into_iter().collect();
+                log(format!("Application launch app={app} pid={pid} creation={creation} verified={}", !processes.is_empty()));
+                self.applications.insert(app.into(), ApplicationSession {
+                    processes, gap_until: Some(until), startup_until: until,
+                });
+                self.next_process_scan = Instant::now();
                 self.pending.push(Launch {
                     app: app.into(),
-                    pid,
-                    before,
-                    deadline: Instant::now() + Duration::from_secs(10),
+                    deadline: until,
                 });
+                self.save();
+                outbox.control(json!({"type":"launch_state","app":app,"state":"waiting"}));
                 Ok(json!({"accepted":true,"ready":false}))
             }
             "snapshot" => {
@@ -448,9 +526,87 @@ impl Worker {
             .map(|w| w.target.id.clone())
     }
 
+    fn remember_process(&mut self, app: &str, pid: u32, creation: u64) {
+        if !self.applications.contains_key(app) && self.applications.len() >= 8 { return; }
+        let session = self.applications.entry(app.into()).or_insert_with(|| ApplicationSession {
+            processes: Vec::new(), gap_until: None, startup_until: Instant::now(),
+        });
+        if session.processes.len() >= 16 || session.processes.iter().any(|p| p.identity.pid == pid && p.identity.creation == creation) { return; }
+        if let Some(process) = app_process::Process::open(pid, &self.sid, self.session)
+            .filter(|p| p.identity.creation == creation) {
+            session.processes.push(process);
+        }
+    }
+    fn application_surface(&self, mut metadata: Value, app: &str) -> Value {
+        // A frameless loading/main window can carry WS_POPUP without having
+        // any owner. Only an already authenticated app may promote it, and
+        // ordinary menus and popups belonging to a document stay transient.
+        if metadata["role"] == "popup" && metadata["class"] != "#32768"
+            && metadata["owner"].as_u64() == Some(0)
+            && (self.windows.values().any(|w| w.app == app
+                && w.metadata["hwnd"] == metadata["hwnd"] && w.metadata["role"] == "main")
+                || (!self.windows.values().any(|w| w.metadata["hwnd"] == metadata["hwnd"])
+                    && !self.windows.values().any(|w| w.app == app && !catalogue::transient(&w.metadata))))
+        {
+            metadata["role"] = json!("main");
+        }
+        metadata
+    }
+    fn application_for(&self, metadata: &Value) -> Option<String> {
+        let pid = metadata["pid"].as_u64()? as u32;
+        let creation = metadata["creation"].as_str()?.parse::<u64>().ok()?;
+        let owner = metadata["owner"].as_u64().unwrap_or(0) as usize;
+        if let Some(parent) = self.windows.values().find(|w| w.target.hwnd == owner && w.target.valid()) {
+            return Some(parent.app.clone());
+        }
+        if let Some(app) = self.applications.keys().find(|app| self.catalogue.matches(app,
+            metadata["hwnd"].as_u64().unwrap_or(0) as usize)) { return Some(app.clone()); }
+        let mut candidates = self.applications.iter().filter(|(_, session)| {
+            session.processes.iter().any(|p| p.identity.pid == pid && p.identity.creation == creation)
+        });
+        let (app, _) = candidates.next()?;
+        candidates.next().is_none().then(|| app.clone())
+    }
+    fn refresh_applications(&mut self, outbox: &Outbox) -> bool {
+        let now = Instant::now();
+        let visible_apps: HashSet<String> = self.windows.values().filter(|w| !catalogue::transient(&w.metadata))
+            .map(|w| w.app.clone()).collect();
+        let mut changed = false;
+        for (app, session) in &mut self.applications {
+            let before = session.processes.len();
+            session.processes.retain(app_process::Process::alive);
+            changed |= before != session.processes.len();
+            if visible_apps.contains(app) {
+                changed |= session.gap_until.take().is_some();
+            } else if session.gap_until.is_none() || (before != 0 && session.processes.is_empty()) {
+                session.gap_until = Some(now + Duration::from_secs(30)); changed = true;
+                log(format!("Application window gap app={app} processes={}", session.processes.len()));
+                if session.startup_until > now {
+                    outbox.control(json!({"type":"launch_state","app":app,"state":"waiting"}));
+                }
+            }
+        }
+        let before = self.applications.len();
+        self.applications.retain(|_, session| !session.processes.is_empty()
+            || session.gap_until.is_none_or(|until| until > now));
+        changed |= before != self.applications.len();
+        if now < self.next_process_scan { return changed; }
+        self.next_process_scan = now + Duration::from_millis(250);
+        let table = app_process::snapshot();
+        for (app, session) in &mut self.applications {
+            if let Some(table) = &table {
+                let children = app_process::descendants(table, &session.processes, &self.sid, self.session,
+                    16usize.saturating_sub(session.processes.len()));
+                for child in &children {
+                    log(format!("Application descendant app={app} pid={} creation={}", child.identity.pid, child.identity.creation));
+                }
+                changed |= !children.is_empty(); session.processes.extend(children);
+            }
+        }
+        changed
+    }
     fn observe(&mut self, outbox: &Arc<Outbox>) {
         let visible = catalogue::windows();
-        let foreground = catalogue::foreground();
         let mut changed = false;
         let retired: Vec<String> = self
             .windows
@@ -467,6 +623,8 @@ impl Worker {
             .collect();
         for id in retired {
             if let Some(mut window) = self.windows.remove(&id) {
+                log(format!("Application window retired app={} hwnd={} pid={} creation={} class={} role={}", window.app, window.target.hwnd,
+                    window.target.pid, window.target.creation, window.metadata["class"], window.metadata["role"]));
                 if let Some(stop) = window.stop.take() {
                     stop.store(true, Ordering::Release);
                 }
@@ -474,42 +632,7 @@ impl Worker {
                 changed = true;
             }
         }
-        let mut pending = std::mem::take(&mut self.pending);
-        for launch in pending.drain(..) {
-            let candidates: Vec<usize> = visible
-                .iter()
-                .copied()
-                .filter(|raw| {
-                    ((launch.pid != 0 && catalogue::process_id(*raw) == launch.pid)
-                        || (!launch.before.contains(raw) && *raw == foreground)
-                        || self.catalogue.matches(&launch.app, *raw))
-                        && catalogue::details(*raw, &self.sid, self.session)
-                            .is_some_and(|m| !catalogue::transient(&m))
-                })
-                .collect();
-            let selected = candidates
-                .iter()
-                .find(|raw| **raw == foreground)
-                .copied()
-                .or_else(|| {
-                    if candidates.len() == 1 {
-                        candidates.first().copied()
-                    } else {
-                        None
-                    }
-                });
-            if let Some(raw) = selected {
-                if self.add(raw, launch.app.clone(), outbox) {
-                    changed = true;
-                    continue;
-                }
-            }
-            if Instant::now() < launch.deadline {
-                self.pending.push(launch);
-            } else {
-                outbox.control(json!({"type":"launch_error","app":launch.app,"message":"The app opened but its window could not be associated. Use Show Windows."}));
-            }
-        }
+        changed |= self.refresh_applications(outbox);
         let known: HashSet<usize> = self.windows.values().map(|w| w.target.hwnd).collect();
         // Owners precede their transient children even though EnumWindows is front-to-back.
         for raw in visible.iter().rev().copied() {
@@ -517,22 +640,43 @@ impl Worker {
                 continue;
             }
             if let Some(details) = catalogue::details(raw, &self.sid, self.session) {
-                let pid = details["pid"].as_u64().unwrap_or(0) as u32;
-                let owner = details["owner"].as_u64().unwrap_or(0) as usize;
-                let app = self
-                    .windows
-                    .values()
-                    .find(|w| w.target.pid == pid || w.target.hwnd == owner)
-                    .map(|w| w.app.clone());
-                if let Some(app) = app {
+                if let Some(app) = self.application_for(&details) {
                     changed |= self.add(raw, app, outbox);
                 }
             }
         }
-        for window in self.windows.values_mut() {
-            if let Some(mut details) =
-                catalogue::details(window.target.hwnd, &self.sid, self.session)
-            {
+        let pending = std::mem::take(&mut self.pending);
+        for launch in pending {
+            if self.windows.values().any(|w| w.app == launch.app && !catalogue::transient(&w.metadata)) { continue; }
+            if Instant::now() < launch.deadline { self.pending.push(launch); }
+            else {
+                let still_running = self.applications.get(&launch.app).is_some_and(|session| {
+                    session.processes.iter().any(app_process::Process::alive)
+                });
+                log(format!("Application launch wait exceeded app={} stillRunning={still_running}", launch.app));
+                // One bounded diagnostic at failure, omitting window titles and
+                // paths. It also exposes a successor we could not authenticate.
+                for raw in visible.iter().take(64) {
+                    if let Some(details) = catalogue::details(*raw, &self.sid, self.session) {
+                        log(format!("Launch candidate hwnd={raw} pid={} creation={} class={} role={} owner={} style={} exStyle={}",
+                            details["pid"], details["creation"], details["class"], details["role"],
+                            details["owner"], details["style"], details["exStyle"]));
+                    }
+                }
+                let message = if still_running {
+                    "L’app è ancora in avvio. La finestra apparirà appena disponibile; puoi aprire Windows per seguirla."
+                } else {
+                    "L’app non ha ancora mostrato una finestra riconoscibile. Puoi continuare dal desktop Windows."
+                };
+                outbox.control(json!({"type":"launch_error","app":launch.app,"message":message}));
+            }
+        }
+        let updated: Vec<_> = self.windows.iter().filter_map(|(id, window)| {
+            let details = catalogue::details(window.target.hwnd, &self.sid, self.session)?;
+            Some((id.clone(), self.application_surface(details, &window.app)))
+        }).collect();
+        for (id, mut details) in updated {
+            if let Some(window) = self.windows.get_mut(&id) {
                 details["z"] = json!(
                     visible
                         .iter()
@@ -558,6 +702,7 @@ impl Worker {
         let Some(metadata) = catalogue::details(raw, &self.sid, self.session) else {
             return false;
         };
+        let metadata = self.application_surface(metadata, &app);
         let transient = catalogue::transient(&metadata);
         if !transient && self.document_count() >= 4 {
             return false;
@@ -580,6 +725,11 @@ impl Worker {
         else {
             return false;
         };
+        let first_document = !transient && !self.windows.values().any(|w| w.app == app && !catalogue::transient(&w.metadata));
+        self.remember_process(&app, pid, creation);
+        if !transient {
+            if let Some(session) = self.applications.get_mut(&app) { session.gap_until = None; }
+        }
         self.serial += 1;
         let id = format!("{}:{}", self.epoch, self.serial);
         let target = Arc::new(Target {
@@ -593,6 +743,11 @@ impl Worker {
             geometry: Mutex::new((0, 0, 0, 0, 0)),
         });
         let stop = Some(capture::spawn(target.clone(), outbox.clone()));
+        log(format!("Application window app={app} hwnd={raw} pid={pid} creation={creation} class={} role={} owner={} style={} exStyle={}",
+            metadata["class"], metadata["role"], metadata["owner"], metadata["style"], metadata["exStyle"]));
+        if first_document {
+            outbox.control(json!({"type":"launch_state","app":app,"state":"window_available","window":id}));
+        }
         self.windows.insert(
             id,
             Window {
@@ -616,7 +771,16 @@ impl Worker {
         outbox.control(json!({"type":"windows","windows":windows,"epoch":self.epoch}));
     }
     fn save(&self) {
-        let values:Vec<Value>=self.windows.values().filter(|w| !catalogue::transient(&w.metadata)).map(|w|json!({"hwnd":w.target.hwnd,"pid":w.target.pid,"creation":w.target.creation.to_string(),"app":w.app})).collect();
+        let mut values:Vec<Value>=self.windows.values().filter(|w| !catalogue::transient(&w.metadata)).map(|w|json!({"hwnd":w.target.hwnd,"pid":w.target.pid,"creation":w.target.creation.to_string(),"app":w.app})).collect();
+        let now = Instant::now();
+        let unix = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis() as u64;
+        for (app, session) in &self.applications {
+            let remaining = |until:Instant| until.saturating_duration_since(now).as_millis().min(30_000) as u64;
+            values.push(json!({"type":"application","app":app,
+                "gapUntil":session.gap_until.map(|until| unix+remaining(until)),
+                "startupUntil":unix+remaining(session.startup_until),
+                "processes":session.processes.iter().map(|p| json!({"pid":p.identity.pid,"creation":p.identity.creation.to_string()})).collect::<Vec<_>>()}));
+        }
         let path = state_path();
         let _ = std::fs::create_dir_all(path.parent().unwrap());
         if let Ok(bytes) = serde_json::to_vec(&values) {
@@ -630,7 +794,27 @@ impl Worker {
         else {
             return;
         };
-        for value in values.into_iter().take(4) {
+        let now = Instant::now();
+        let unix = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis() as u64;
+        for value in values.iter().filter(|value| value["type"] == "application").take(8) {
+            let Some(app) = value["app"].as_str().filter(|v| v.len() == 64) else { continue; };
+            let gap = value["gapUntil"].as_u64().unwrap_or(unix+30_000);
+            let mut processes = Vec::new();
+            if let Some(saved) = value["processes"].as_array() {
+                for candidate in saved.iter().take(16) {
+                    let Some(pid) = candidate["pid"].as_u64().and_then(|p| u32::try_from(p).ok()) else { continue; };
+                    let Some(creation) = candidate["creation"].as_str().and_then(|s| s.parse::<u64>().ok()) else { continue; };
+                    if let Some(process) = app_process::Process::open(pid, &self.sid, self.session)
+                        .filter(|p| p.identity.creation == creation) { processes.push(process); }
+                }
+            }
+            if processes.is_empty() { continue; }
+            let startup = value["startupUntil"].as_u64().unwrap_or(unix).saturating_sub(unix).min(30_000);
+            self.applications.insert(app.into(), ApplicationSession { processes,
+                gap_until:Some(now+Duration::from_millis(gap.saturating_sub(unix).min(30_000))),
+                startup_until:now+Duration::from_millis(startup) });
+        }
+        for value in values.into_iter().filter(|value| value["hwnd"].as_u64().is_some()).take(4) {
             let Some(raw) = value["hwnd"].as_u64() else {
                 continue;
             };
@@ -645,12 +829,18 @@ impl Worker {
             {
                 continue;
             }
+            let app = value["app"].as_str().unwrap_or_default().to_string();
             let Some(metadata) = catalogue::details(raw as usize, &self.sid, self.session) else {
                 continue;
             };
+            let metadata = self.application_surface(metadata, &app);
             if catalogue::transient(&metadata) {
                 continue;
             }
+            let pid = value["pid"].as_u64().unwrap_or(0) as u32;
+            let creation = value["creation"].as_str().unwrap_or_default().parse().unwrap_or(0);
+            self.remember_process(&app, pid, creation);
+            if let Some(session) = self.applications.get_mut(&app) { session.gap_until = None; }
             self.serial += 1;
             let id = format!("{}:{}", self.epoch, self.serial);
             let target = Arc::new(Target {
@@ -667,7 +857,7 @@ impl Worker {
                 id,
                 Window {
                     target,
-                    app: value["app"].as_str().unwrap_or_default().into(),
+                    app,
                     metadata,
                     parent: None,
                     stop: None,

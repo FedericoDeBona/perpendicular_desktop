@@ -4,7 +4,7 @@ use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use windows::{
     Win32::{
-        Foundation::{HWND, LPARAM, POINT, RECT},
+        Foundation::{FILETIME, HWND, LPARAM, POINT, RECT},
         Graphics::{
             Dwm::{DWMWA_EXTENDED_FRAME_BOUNDS, DwmGetWindowAttribute},
             Gdi::ClientToScreen,
@@ -15,7 +15,7 @@ use windows::{
         },
         System::{
             Com::CoTaskMemFree,
-            Threading::{GetProcessId, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION},
+            Threading::{GetProcessId, GetProcessTimes, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION},
         },
         UI::{
             Input::KeyboardAndMouse::IsWindowEnabled,
@@ -56,6 +56,13 @@ impl Catalogue {
             identities: HashMap::new(),
         }
     }
+
+    /// Only this string crosses into an icon worker's COM apartment.
+    pub fn icon_source(&self, id: &str) -> Result<String, String> {
+        self.identities.get(id).cloned()
+            .ok_or_else(|| "Refresh the application list before requesting its icon".into())
+    }
+
     pub fn refresh(&mut self) -> Result<Value, String> {
         unsafe {
             let folder: IShellItem =
@@ -154,7 +161,7 @@ impl Catalogue {
         }
     }
 
-    pub fn launch(&self, id: &str) -> Result<u32, String> {
+    pub fn launch(&self, id: &str) -> Result<(u32, u64), String> {
         let item = self
             .items
             .get(id)
@@ -171,11 +178,21 @@ impl Catalogue {
             CoTaskMemFree(Some(pidl.cast()));
             result?;
             let process = identity::Handle(info.hProcess);
-            Ok(if process.0.is_invalid() {
-                0
-            } else {
-                GetProcessId(process.0)
-            })
+            if process.0.is_invalid() {
+                return Ok((0, 0));
+            }
+            let mut created = FILETIME::default();
+            let mut exited = FILETIME::default();
+            let mut kernel = FILETIME::default();
+            let mut user = FILETIME::default();
+            // Keep the activation handle alive while reading its identity:
+            // reopening only the PID could capture an unrelated reused process.
+            if GetProcessTimes(process.0, &mut created, &mut exited, &mut kernel, &mut user).is_err() {
+                // Activation succeeded; packaged apps can still be associated by
+                // their declared app identity when no process identity is usable.
+                return Ok((0, 0));
+            }
+            Ok((GetProcessId(process.0), ((created.dwHighDateTime as u64) << 32) | created.dwLowDateTime as u64))
         }
     }
 }
