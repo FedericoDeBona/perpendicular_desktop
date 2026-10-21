@@ -83,7 +83,7 @@ final class GuestConnection: @unchecked Sendable {
     }
     private func offer(_ window:String,_ value:GuestPacket) {
         lock.lock()
-        if frames.count >= 4, frames[window] == nil { lock.unlock(); connection.cancel(); return }
+        if frames.count >= 16, frames[window] == nil { lock.unlock(); connection.cancel(); return }
         frames[window]=value
         let wake = !drainScheduled; drainScheduled=true; lock.unlock()
         if wake { Task { @MainActor [self] in drain() } }
@@ -161,7 +161,7 @@ final class GuestBridge {
         if Date().timeIntervalSince(lastPacket)>8 { clients[id]?.cancel(); return }
         clients[id]?.send(["operation":"heartbeat"])
     }
-    func command(_ operation:String,_ values:[String:Any]=[:], completion:((Result<[String:Any],Error>)->Void)?=nil) {
+    func command(_ operation:String,_ values:[String:Any]=[:], timeout:Duration = .seconds(12), completion:((Result<[String:Any],Error>)->Void)?=nil) {
         guard let id=active, let client=clients[id] else {
             completion?(.failure(NSError(domain:"Guest",code:2,userInfo:[NSLocalizedDescriptionKey:"Windows is not connected."])));return
         }
@@ -171,7 +171,7 @@ final class GuestBridge {
             guard replies.count<32 else { completion(.failure(NSError(domain:"Guest",code:3,userInfo:[NSLocalizedDescriptionKey:"Windows is busy."])));return }
             replies[request]=completion
             Task { @MainActor [weak self] in
-                try? await Task.sleep(for:.seconds(12))
+                try? await Task.sleep(for:timeout)
                 self?.replies.removeValue(forKey:request)?(.failure(NSError(domain:"Guest",code:4,userInfo:[NSLocalizedDescriptionKey:"Windows took too long to respond."])))
             }
         }

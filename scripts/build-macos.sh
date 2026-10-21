@@ -8,7 +8,7 @@ mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources/Guest"
 cp macos/Info.plist "$app/Contents/Info.plist"
 xcrun swiftc -swift-version 6 -O -parse-as-library -target arm64-apple-macosx14.0 \
     macos/VirtualMachine.swift macos/MachineControl.swift macos/GuestBridge.swift \
-    macos/ApplicationContent.swift macos/ApplicationWindow.swift macos/App.swift \
+    macos/WindowGeometry.swift macos/ApplicationContent.swift macos/ApplicationWindow.swift macos/App.swift \
     -o "$app/Contents/MacOS/Perpendicular"
 cp "$guest" guest/install.ps1 guest/install.cmd "$app/Contents/Resources/Guest/"
 if [[ "${SKIP_RUNTIME:-0}" != 1 ]]; then

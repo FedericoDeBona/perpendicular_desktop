@@ -131,6 +131,7 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,ObservableObject {
                 if windows[id]==nil{
                     let role=WindowRole(rawValue:item["role"] as? String ?? "dialog") ?? .dialog
                     let controller=ApplicationWindow(id:id,title:title,role:role,bridge:bridge)
+                    controller.onError={ [weak self] message in self?.status=message }
                     controller.onClose={ [weak self] in self?.windows.removeValue(forKey:id) }
                     controller.onGeometry={ [weak self] in self?.layoutChildren() }
                     controller.onPointerExit={ [weak self] in self?.pointerExited(id) }

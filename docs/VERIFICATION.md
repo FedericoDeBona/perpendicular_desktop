@@ -25,7 +25,7 @@ I rapporti hanno data e momento di boot: non considerare un file precedente come
 - Il primo runtime di sviluppo non aveva il backend Cocoa; quello finale proviene da Homebrew e include una console Mac separata. Durante il confezionamento sono stati corretti un ROM di rete cercato inutilmente e l'entitlement Hypervisor della console.
 - I primi percorsi di invio del testo hanno prodotto caratteri ripetuti, maiuscole errate e lettere mancanti. L'introduzione di pause non è bastata. Il percorso finale consegna il testo composto al controllo con focus; le scorciatoie rimangono eventi di tastiera.
 - La relazione tra finestra e dialogo viene applicata dopo aver creato tutte le finestre, per non dipendere dall'ordine degli eventi.
-- Il ridimensionamento tramite trascinamento non è stato confermato dall'automazione Mac. Il collegamento alla richiesta Windows è implementato, ma resta da riverificare nell'uso manuale; il limite del desktop guest RAMFB iniziale è 800×600 e può incidere sull'input fuori schermo.
+- Nella prima versione il ridimensionamento tramite trascinamento non era stato confermato dall'automazione Mac. La verifica del percorso aggiornato è riportata sotto; il limite del desktop guest RAMFB rimane 800×600.
 - IME, app che richiedono Raw Input, finestre elevate, compatibilità generale con altri popup, icone specifiche, appunti e file condivisi non rientrano nella prima compatibilità verificata.
 
 Le immagini grezze usate per controllare l'isolamento delle finestre restano nella cartella privata della macchina, in `QA/`, e non vengono generate nell'avvio normale.
@@ -47,3 +47,19 @@ Build guest finale di questo aggiornamento: SHA-256 `d53c4c8932963b0ee85ae17d2ab
 Nel pacchetto finale, aperto normalmente senza diagnostica, sono stati nuovamente osservati menu Edge, popup Traduci e anteprima della scheda come pannelli separati senza barra Mac; spostando il cursore sul documento l'anteprima scompare. IncludeSecondaryWindows è disattivato. Il documento Blocco note è tornato visibile dopo il ripristino dal menu Window.
 
 Resta da affinare il passaggio del focus fra applicazioni: durante la verifica un'attivazione immediata è stata rifiutata da Windows e alcuni primi click hanno soltanto attivato la finestra; la prova dei popup è stata completata con l'app interessata attiva. Questo aggiornamento non certifica l'affidabilità generale di quel passaggio.
+
+## Aggiornamento: drag locale, resize e rilascio dell'input
+
+Verifica nella stessa VM, su Foto nella pagina Impostazioni, senza modificare immagini o preferenze:
+
+- Il drag della parte libera della barra Windows sposta il contenitore Mac da `(160,111)` a `(260,51)`, esattamente di `(+100,-60)` punti. Il rettangolo Windows resta `(149,36,532,509)`: il movimento locale non trascina più la finestra sorgente nel desktop guest.
+- Due resize dal bordo hanno prodotto nuove immagini e geometrie coerenti. Una richiesta `532×476` è stata corretta da Foto a `532×509`, rispettando il minimo dell'app. Il resize successivo a `582×520` è stato accettato; Windows ha portato la sorgente a `y=32` per mantenerla nell'area disponibile.
+- Dopo ciascun resize, il click apre il selettore del tema e Esc lo richiude. Il tema rimane invariato. Non è stato necessario riavviare o riconnettere per recuperare l'input.
+- Il pulsante Windows di ingrandimento applica `800×552`, quindi ripristina `582×520`. Entrambe le operazioni terminano con un'immagine della misura confermata. Il desktop resta `800×600`, con 48 pixel occupati dalla barra delle applicazioni.
+- L'aggiornamento del servizio cambia l'epoch e recupera Foto già aperta. Il frontend ricompilato la ritrova anche dopo il proprio riavvio.
+- Il pacchetto finale è stato riaperto normalmente, senza variabili diagnostiche, e mostra Foto con la dimensione ripristinata.
+- Tre controlli della geometria Swift verificano limiti minimo/massimo e conservazione dell'angolo opposto. Build Rust e Swift e verifica della firma del pacchetto completate; guest incluso SHA-256 `c9bfb56c588bb94719a3863aeb4a3207602a70f7c052f0327fbaabafbbbecd3a`.
+
+Errori emersi nelle iterazioni di questa modifica: un rilascio destro incondizionato apriva menu anche senza pressione precedente; ora viene rilasciato solo un pulsante registrato o realmente premuto. La classe di menu classici `#32768` veniva riconosciuta come dialogo per il suo stile modale; ora ha precedenza la classificazione popup. Le coordinate relative alla finestra producevano spostamenti eccessivi durante il drag, mentre la posizione corrente del mouse perdeva campioni già accodati: il percorso finale usa le coordinate globali registrate nell'evento.
+
+Queste prove confermano il percorso su Foto, non tutte le applicazioni o configurazioni di monitor. Non sono state ripetute in questo aggiornamento tutte le prove popup di Edge e Blocco note. Rimangono esclusi aumento della risoluzione guest, monitor virtuale, nuovi driver e accelerazione 3D. Un timeout di resize sblocca comunque l'input e ripristina la misura dell'ultima immagine disponibile.

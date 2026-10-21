@@ -2,6 +2,7 @@ mod capture;
 mod catalogue;
 mod identity;
 mod service;
+mod window_control;
 mod wire;
 mod worker;
 

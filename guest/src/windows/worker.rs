@@ -2,7 +2,7 @@ use super::{
     Configuration,
     capture::{self, Target},
     catalogue::{self, Catalogue},
-    error, identity,
+    error, identity, window_control,
     wire::{self, Outbox},
 };
 use serde_json::{Value, json};
@@ -19,7 +19,7 @@ use std::{
     time::{Duration, Instant},
 };
 use windows::Win32::{
-    Foundation::{HWND, LPARAM, POINT, RECT, WPARAM},
+    Foundation::{HWND, LPARAM, POINT, WPARAM},
     Graphics::Gdi::ClientToScreen,
     System::Com::{COINIT_APARTMENTTHREADED, CoCreateGuid, CoInitializeEx},
     UI::{
@@ -148,7 +148,11 @@ impl Worker {
             }
             state.connected.store(false, Ordering::Release);
         });
+        self.release();
         for window in self.windows.values_mut() {
+            if let Some(details) = catalogue::details(window.target.hwnd, &self.sid, self.session) {
+                window.metadata = details;
+            }
             window.stop = Some(capture::spawn(window.target.clone(), outbox.clone()));
         }
         self.snapshot(&outbox);
@@ -205,6 +209,27 @@ impl Worker {
     }
 
     fn command(&mut self, value: &Value, outbox: &Arc<Outbox>) -> Result<Value, String> {
+        // Releases never depend on a window, pointer coordinates or capture generation.
+        // A resize or a retired popup must not leave an injected button/key held.
+        if value["operation"] == "input" && value["down"] == false {
+            match value["event"].as_str() {
+                Some("button") => {
+                    let button = value["button"].as_str().ok_or("Missing button")?;
+                    self.release_button(button)?;
+                    return Ok(json!({"accepted":true}));
+                }
+                Some("key") => {
+                    let key = value["key"]
+                        .as_u64()
+                        .filter(|v| *v > 0 && *v <= 255)
+                        .ok_or("Invalid key")? as u16;
+                    send(keyboard(key, true))?;
+                    self.pressed.remove(&key);
+                    return Ok(json!({"accepted":true}));
+                }
+                _ => {}
+            }
+        }
         match value["operation"].as_str().ok_or("Missing operation")? {
             "catalogue" => Ok(self.catalogue.refresh()?),
             "launch" => {
@@ -243,7 +268,8 @@ impl Worker {
                 self.release();
                 Ok(json!({}))
             }
-            "input" | "activate" | "resize" | "close" => {
+            "input" | "activate" | "resize" | "close" | "hit_test" | "geometry"
+            | "cancel_interaction" => {
                 let id = value["window"].as_str().ok_or("Missing window identity")?;
                 let window = self.windows.get(id).ok_or("Window retired")?;
                 if !window.target.valid() {
@@ -267,33 +293,16 @@ impl Worker {
                         let _ = ShowWindow(HWND(target.hwnd as *mut _), SW_RESTORE);
                         let _ = SetForegroundWindow(HWND(target.hwnd as *mut _));
                     },
-                    "resize" => unsafe {
-                        let width = value["width"]
-                            .as_i64()
-                            .filter(|v| (160..=2048).contains(v))
-                            .ok_or("Invalid window width")?
-                            as i32;
-                        let height = value["height"]
-                            .as_i64()
-                            .filter(|v| (100..=2048).contains(v))
-                            .ok_or("Invalid window height")?
-                            as i32;
-                        let hwnd = HWND(target.hwnd as *mut _);
-                        let mut bounds = RECT::default();
-                        let mut client = RECT::default();
-                        GetWindowRect(hwnd, &mut bounds).map_err(error)?;
-                        GetClientRect(hwnd, &mut client).map_err(error)?;
-                        SetWindowPos(
-                            hwnd,
-                            None,
-                            0,
-                            0,
-                            width + bounds.right - bounds.left - client.right,
-                            height + bounds.bottom - bounds.top - client.bottom,
-                            SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE,
-                        )
-                        .map_err(error)?;
-                    },
+                    "resize" => {
+                        self.release();
+                        return window_control::resize(&target, value);
+                    }
+                    "hit_test" => return window_control::hit_test(&target, value),
+                    "geometry" => return window_control::state(&target),
+                    "cancel_interaction" => {
+                        self.release();
+                        window_control::cancel(HWND(target.hwnd as *mut _));
+                    }
                     "close" => unsafe {
                         PostMessageW(
                             Some(HWND(target.hwnd as *mut _)),
@@ -531,7 +540,8 @@ impl Worker {
             json!({"id":w.target.id,"app":w.app,"title":w.metadata["title"],"width":w.metadata["width"],"height":w.metadata["height"],
                 "parent":w.parent,"role":w.metadata["role"],"x":w.metadata["x"],"y":w.metadata["y"],
                 "z":w.metadata["z"],"visible":w.metadata["visible"],"minimized":w.metadata["minimized"],
-                "class":w.metadata["class"],"style":w.metadata["style"],"exStyle":w.metadata["exStyle"]})
+                "class":w.metadata["class"],"style":w.metadata["style"],"exStyle":w.metadata["exStyle"],
+                "maxWidth":w.metadata["maxWidth"],"maxHeight":w.metadata["maxHeight"],"resizable":w.metadata["resizable"]})
         }).collect();
         outbox.control(json!({"type":"windows","windows":windows,"epoch":self.epoch}));
     }
@@ -696,11 +706,6 @@ impl Worker {
                             ("right", false) => MOUSEEVENTF_RIGHTUP,
                             _ => return Err("Unsupported button".into()),
                         };
-                        if down {
-                            self.buttons.insert(button.into());
-                        } else {
-                            self.buttons.remove(button);
-                        }
                     }
                     if kind == "scroll" {
                         flags |= MOUSEEVENTF_WHEEL;
@@ -719,6 +724,10 @@ impl Worker {
                             },
                         },
                     })?;
+                    if kind == "button" {
+                        self.buttons
+                            .insert(value["button"].as_str().unwrap_or("left").into());
+                    }
                 }
                 "text" => {
                     let text = value["text"]
@@ -776,21 +785,31 @@ impl Worker {
         for key in self.pressed.drain() {
             let _ = send(keyboard(key, true));
         }
-        for button in self.buttons.drain() {
-            let _ = send(INPUT {
+        for button in ["left", "right"] {
+            let _ = self.release_button(button);
+        }
+    }
+    fn release_button(&mut self, button: &str) -> Result<(), String> {
+        let (key, flag) = match button {
+            "left" => (VK_LBUTTON, MOUSEEVENTF_LEFTUP),
+            "right" => (VK_RBUTTON, MOUSEEVENTF_RIGHTUP),
+            _ => return Err("Unsupported button".into()),
+        };
+        // A stray right-up on the caption opens its system menu. Only release a
+        // tracked press or a button actually held (including after worker restart).
+        if self.buttons.contains(button) || unsafe { GetAsyncKeyState(key.0 as i32) } < 0 {
+            send(INPUT {
                 r#type: INPUT_MOUSE,
                 Anonymous: INPUT_0 {
                     mi: MOUSEINPUT {
-                        dwFlags: if button == "left" {
-                            MOUSEEVENTF_LEFTUP
-                        } else {
-                            MOUSEEVENTF_RIGHTUP
-                        },
+                        dwFlags: flag,
                         ..Default::default()
                     },
                 },
-            });
+            })?;
         }
+        self.buttons.remove(button);
+        Ok(())
     }
 }
 fn keyboard(key: u16, up: bool) -> INPUT {

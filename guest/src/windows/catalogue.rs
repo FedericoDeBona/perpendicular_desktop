@@ -1,4 +1,4 @@
-use super::{error, identity};
+use super::{error, identity, window_control};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
@@ -169,17 +169,20 @@ pub fn details(raw: usize, sid: &str, session: u32) -> Option<Value> {
         let ex_style = GetWindowLongPtrW(hwnd, GWL_EXSTYLE) as u32;
         let caption = style & WS_CAPTION.0 == WS_CAPTION.0;
         // WS_POPUP alone also describes real dialogs. Preserve those as documents.
-        let role = if class.eq_ignore_ascii_case("tooltips_class32") {
+        let role = if class == "#32768" {
+            "popup"
+        } else if class.eq_ignore_ascii_case("tooltips_class32")
+            || class == "MicrosoftWindowsTooltip"
+        {
             "tooltip"
         } else if class == "#32770"
             || ex_style & WS_EX_DLGMODALFRAME.0 != 0
             || (owner != 0 && !IsWindowEnabled(HWND(owner as *mut _)).as_bool())
         {
             "dialog"
-        } else if class == "#32768"
-            || (!caption
-                && style & WS_THICKFRAME.0 == 0
-                && (style & WS_POPUP.0 != 0 || ex_style & WS_EX_TOOLWINDOW.0 != 0))
+        } else if !caption
+            && style & WS_THICKFRAME.0 == 0
+            && (style & WS_POPUP.0 != 0 || ex_style & WS_EX_TOOLWINDOW.0 != 0)
         {
             "popup"
         } else if owner != 0 && caption {
@@ -188,6 +191,7 @@ pub fn details(raw: usize, sid: &str, session: u32) -> Option<Value> {
             "main"
         };
         let mut rect = frame_bounds(hwnd)?;
+        let (max_width, max_height) = window_control::limits(hwnd, role != "dialog");
         if role == "dialog" {
             let mut origin = POINT::default();
             if !ClientToScreen(hwnd, &mut origin).as_bool() {
@@ -205,6 +209,7 @@ pub fn details(raw: usize, sid: &str, session: u32) -> Option<Value> {
             "width":rect.right-rect.left,"height":rect.bottom-rect.top,
             "x":rect.left,"y":rect.top,"role":role,"class":class,
             "style":style,"exStyle":ex_style,"visible":IsWindowVisible(hwnd).as_bool(),
+            "maxWidth":max_width,"maxHeight":max_height,"resizable":style & WS_THICKFRAME.0 != 0,
             "minimized":IsIconic(hwnd).as_bool()}))
     }
 }

@@ -5,6 +5,8 @@ final class ApplicationContent:NSView {
     var input:(([String:Any])->Void)?
     var pointerExited:(()->Void)?
     var transient=false
+    var suspendedPointer=false
+    var leftMouse:((NSEvent,[String:Any])->Void)?
     private(set) var generation:UInt64=0
     private(set) var currentImage:CGImage?
     private var source=NSSize.zero
@@ -14,6 +16,7 @@ final class ApplicationContent:NSView {
     private var tracking:NSTrackingArea?
     override var acceptsFirstResponder:Bool {true}
     override var isFlipped:Bool {true}
+    override var mouseDownCanMoveWindow:Bool {false}
     override func acceptsFirstMouse(for event:NSEvent?)->Bool {true}
     var imageRect:NSRect {
         guard source.width>0,source.height>0 else{return .zero}
@@ -56,6 +59,8 @@ final class ApplicationContent:NSView {
                 "y":Int(max(0,min(source.height-1,(local.y-origin.y)/scale))),"generation":generation]
     }
     private func mouse(_ event:NSEvent,button:String?=nil,down:Bool?=nil){
+        if down == false,let button {input?(["event":"button","button":button,"down":false]);return}
+        guard !suspendedPointer else{return}
         if button != nil && !transient {window?.makeFirstResponder(self)}
         guard var value=point(event)else{return}
         value["event"]=button == nil ? "pointer":"button"
@@ -65,13 +70,22 @@ final class ApplicationContent:NSView {
     override func mouseMoved(with event:NSEvent){mouse(event)}
     override func mouseEntered(with event:NSEvent){mouse(event)}
     override func mouseExited(with event:NSEvent){pointerExited?()}
-    override func mouseDragged(with event:NSEvent){mouse(event)}
+    private func left(_ event:NSEvent,down:Bool?=nil){
+        guard let leftMouse else{mouse(event,button:down == nil ? nil:"left",down:down);return}
+        window?.makeFirstResponder(self)
+        var value=point(event) ?? [:]
+        value["event"]=down == nil ? "pointer":"button"
+        if let down {value["button"]="left";value["down"]=down}
+        leftMouse(event,value)
+    }
+    override func mouseDragged(with event:NSEvent){left(event)}
     override func rightMouseDragged(with event:NSEvent){mouse(event)}
-    override func mouseDown(with event:NSEvent){mouse(event,button:"left",down:true)}
-    override func mouseUp(with event:NSEvent){mouse(event,button:"left",down:false)}
+    override func mouseDown(with event:NSEvent){left(event,down:true)}
+    override func mouseUp(with event:NSEvent){left(event,down:false)}
     override func rightMouseDown(with event:NSEvent){mouse(event,button:"right",down:true)}
     override func rightMouseUp(with event:NSEvent){mouse(event,button:"right",down:false)}
     override func scrollWheel(with event:NSEvent){
+        guard !suspendedPointer else{return}
         guard var value=point(event)else{return}
         scrollRemainder+=Double(event.scrollingDeltaY)*(event.hasPreciseScrollingDeltas ? 3:120)
         let amount=Int(scrollRemainder);scrollRemainder-=Double(amount)
