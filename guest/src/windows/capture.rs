@@ -44,6 +44,7 @@ pub struct Target {
     pub sid: String,
     pub session: u32,
     pub full_frame: bool,
+    pub hosted: Option<catalogue::HostedContent>,
     // Generation, dimensions, and image origin relative to the Windows client origin.
     pub geometry: Mutex<(u64, i32, i32, i32, i32)>,
 }
@@ -51,6 +52,11 @@ impl Target {
     pub fn valid(&self) -> bool {
         identity::owner(HWND(self.hwnd as *mut _), &self.sid, self.session)
             == Some((self.pid, self.creation))
+            && match &self.hosted {
+                Some(content) => content.valid(self.hwnd, &self.sid, self.session),
+                None => catalogue::window_class(self.hwnd) != "ApplicationFrameWindow"
+                    && catalogue::host_frame(self.hwnd, &self.sid, self.session).is_none(),
+            }
     }
 }
 
@@ -59,7 +65,7 @@ pub fn spawn(target: Arc<Target>, outbox: Arc<Outbox>) -> Arc<AtomicBool> {
     let flag = stop.clone();
     std::thread::spawn(move || {
         if let Err(message) = unsafe { run(&target, &outbox, &flag) } {
-            if !flag.load(Ordering::Acquire) {
+            if !flag.load(Ordering::Acquire) && target.valid() {
                 outbox.control(json!({"type":"window_error","window":target.id,"message":message}));
             }
         }
@@ -155,9 +161,6 @@ unsafe fn run(target: &Target, outbox: &Outbox, stop: &AtomicBool) -> Result<(),
                 for _ in 0..2 {
                     let Ok(newer) = pool.TryGetNextFrame() else {break};
                     let _ = frame.Close(); frame = newer;
-                }
-                if outbox.frame_waiting(&target.id) {
-                    let _ = frame.Close(); continue;
                 }
                 let current = frame.ContentSize().map_err(error)?;
                 if current.Width <= 0

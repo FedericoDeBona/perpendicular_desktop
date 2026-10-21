@@ -91,7 +91,7 @@ final class ApplicationContent:NSView {
         return ["x":Int(max(0,min(source.width-1,(local.x-origin.x)/scale))),
                 "y":Int(max(0,min(source.height-1,(local.y-origin.y)/scale))),"generation":generation]
     }
-    private func flushText(){
+    func flushText(){
         textFlush?.cancel();textFlush=nil
         guard !pendingText.isEmpty else{return}
         let text=pendingText;pendingText="";pendingTextBytes=0

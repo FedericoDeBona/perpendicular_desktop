@@ -155,6 +155,7 @@ pub fn set_geometry(target: &Target, value: &Value) -> Result<Value, String> {
 
 pub fn hit_test(target: &Target, value: &Value) -> Result<Value, String> {
     unsafe {
+        if !target.valid() { return Err("Window retired".into()); }
         let (generation, width, height, offset_x, offset_y) = *target.geometry.lock().unwrap();
         if value["generation"].as_u64() != Some(generation) {
             return Err("Window geometry is updating".into());
@@ -175,10 +176,31 @@ pub fn hit_test(target: &Target, value: &Value) -> Result<Value, String> {
         if !ClientToScreen(hwnd, &mut point).as_bool() {
             return Err("Pointer transform unavailable".into());
         }
+        let mut receiver = hwnd;
+        if let Some(content) = &target.hosted {
+            let child = HWND(content.hwnd as *mut _);
+            let mut client = RECT::default();
+            GetClientRect(child, &mut client).map_err(error)?;
+            if client.right <= client.left || client.bottom <= client.top {
+                return Err("Window geometry unavailable".into());
+            }
+            let mut origin = POINT { x: client.left, y: client.top };
+            if !ClientToScreen(child, &mut origin).as_bool() {
+                return Err("Pointer transform unavailable".into());
+            }
+            // WinUI controls can occupy the frame host's caption region.
+            // Only the authenticated child decides its own client-area hit.
+            if point.x >= origin.x && point.x < origin.x + client.right - client.left
+                && point.y >= origin.y && point.y < origin.y + client.bottom - client.top
+            {
+                receiver = child;
+            }
+        }
+        if !target.valid() { return Err("Window retired".into()); }
         let coordinates = (point.x as u16 as u32) | ((point.y as u16 as u32) << 16);
         let mut hit = 0usize;
         if SendMessageTimeoutW(
-            hwnd,
+            receiver,
             WM_NCHITTEST,
             WPARAM(0),
             LPARAM(coordinates as isize),
@@ -190,6 +212,7 @@ pub fn hit_test(target: &Target, value: &Value) -> Result<Value, String> {
         {
             return Err("Window did not respond".into());
         }
+        if !target.valid() { return Err("Window retired".into()); }
         Ok(json!({"hit":hit as i32}))
     }
 }

@@ -66,7 +66,6 @@ impl Outbox {
         self.frame_wake.notify_one();
     }
     pub fn row_alignment(&self) -> usize { self.row_alignment.load(Ordering::Acquire) }
-    pub fn frame_waiting(&self, id: &str) -> bool {self.pending.lock().unwrap().frames.contains_key(id)}
     /// Enabled only after the host requests the optional authenticated pixel
     /// connection. Older hosts keep the original combined stream.
     pub fn start_frames(self: Arc<Self>, mut stream: TcpStream, hello: Value) -> Result<(), String> {

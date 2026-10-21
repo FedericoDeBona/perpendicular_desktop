@@ -19,7 +19,24 @@ private final class GuestPopupPanel:NSPanel {
     override var canBecomeMain:Bool {false}
 }
 
-private enum MouseMode {case pending,move,resize(ResizeEdges),remote,discard}
+private enum MouseMode {case pending,move,resize(ResizeEdges),remote,zoom,discard}
+private enum WindowInput {
+    case input([String:Any])
+    case leftMouse(NSEvent,[String:Any])
+    var textBytes:Int {
+        if case .input(let value)=self {return (value["text"] as? String)?.utf8.count ?? 0}
+        return 0
+    }
+    func replacesPointer(_ previous:WindowInput)->Bool {
+        switch (self,previous) {
+        case let (.input(value),.input(old)):
+            return value["event"] as? String == "pointer" && old["event"] as? String == "pointer"
+        case let (.leftMouse(event,_),.leftMouse(old,_)):
+            return event.type == .leftMouseDragged && old.type == .leftMouseDragged
+        default:return false
+        }
+    }
+}
 @MainActor
 private final class MouseGesture {
     let identity=UUID()
@@ -28,8 +45,6 @@ private final class MouseGesture {
     let down:[String:Any]
     let clicks:Int
     var mode:MouseMode = .pending
-    var latest:(NSPoint,[String:Any])?
-    var up:(NSPoint,[String:Any])?
     init(point:NSPoint,frame:NSRect,down:[String:Any],clicks:Int){
         origin=point;self.frame=frame;self.down=down;self.clicks=clicks
     }
@@ -51,6 +66,11 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
     private var visible=true
     private var placedDialog=false
     private var gesture:MouseGesture?
+    private var inputBlocked=false
+    private var deferredInput:[WindowInput]=[]
+    private var deferredTextBytes=0
+    private var drainingInput=false
+    private var discardingInput=false
     private var canResize=true
     private var nativeResizing=false
     private var resizeSerial=0
@@ -120,10 +140,9 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
         if !role.transient {window.minSize=window.frameRect(forContentRect:NSRect(x:0,y:0,width:160,height:100)).size}
         content.transient=role.transient
         content.input={ [weak self] event in
-            guard let self else{return}
-            var value=event;value["window"]=self.id;self.bridge.command("input",value)
+            self?.receive(.input(event))
         }
-        if role == .main {content.leftMouse={ [weak self] event,value in self?.leftMouse(event,value) }}
+        if role == .main {content.leftMouse={ [weak self] event,value in self?.receive(.leftMouse(event,value)) }}
         content.pointerExited={ [weak self] in self?.onPointerExit?() }
         (window as? GuestDocumentWindow)?.closeRequested={ [weak self] in self?.requestClose() }
         if role == .main {NSApp.addWindowsItem(window,title:title,filename:false)}
@@ -139,7 +158,9 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
             nativeResizing=false;liveResizeInFlight=false;expectedSize=nil
             content.suspendedPointer=false;bridge.command("release")
         }
-        gesture=nil;zoomRestore=nil;sharedDisplay=display
+        if inputBlocked || !deferredInput.isEmpty {cancelInput("The display changed before the pending input could be sent.")}
+        else {gesture=nil}
+        zoomRestore=nil;sharedDisplay=display
         pixelScale=display.map{Double($0.pixelScale)} ?? fallbackPixelScale
         applySizeLimits()
         if display != nil {applySourceFrame()}else if hasFrame{applyFrameSize()}
@@ -244,10 +265,46 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
         return false
     }
     func windowWillClose(_ notification:Notification){
+        if !role.transient {cancelInput()}
         cancelSharedGeometry()
         if role == .main {NSApp.removeWindowsItem(window)}
-        if !role.transient {content.clearModifiers();bridge.command("release")}
         onClose?()
+    }
+    private func receive(_ value:WindowInput){
+        guard !discardingInput else{return}
+        if inputBlocked || drainingInput {
+            if let previous=deferredInput.last,value.replacesPointer(previous) {
+                deferredInput[deferredInput.count-1]=value;return
+            }
+            guard deferredInput.count<128,value.textBytes<=32*1024-deferredTextBytes else{
+                cancelInput("The click took too long. The pending input was not sent.");return
+            }
+            deferredInput.append(value);deferredTextBytes+=value.textBytes
+        }else {deliver(value)}
+    }
+    private func deliver(_ value:WindowInput){
+        switch value {
+        case .input(let packet):send(packet)
+        case .leftMouse(let event,let packet):leftMouse(event,packet)
+        }
+    }
+    private func drainInput(){
+        guard !drainingInput else{return}
+        drainingInput=true
+        defer{drainingInput=false}
+        while !inputBlocked,!deferredInput.isEmpty {
+            let value=deferredInput.removeFirst();deferredTextBytes-=value.textBytes
+            deliver(value)
+        }
+    }
+    private func cancelInput(_ message:String?=nil){
+        let interrupted=inputBlocked || !deferredInput.isEmpty
+        // clearModifiers also flushes composed text. Cancellation must discard
+        // that tail rather than deliver it to the control preceding the click.
+        discardingInput=interrupted;content.clearModifiers();discardingInput=false
+        gesture=nil;inputBlocked=false;deferredInput.removeAll();deferredTextBytes=0
+        bridge.command("release")
+        if interrupted,let message {onError?(message)}
     }
     private func send(_ value:[String:Any]){
         var packet=value;packet["window"]=id;bridge.command("input",packet)
@@ -299,13 +356,14 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
             }
             if !edges.isEmpty {resolve(next,.resize(edges));return}
             var query=value;query["window"]=id
+            inputBlocked=true
             bridge.command("hit_test",query,timeout:.milliseconds(400)){ [weak self,weak next] result in
                 guard let self,let next,self.gesture === next else{return}
                 guard case .success(let reply)=result,let payload=reply["value"] as? [String:Any],let hit=payload["hit"] as? Int else{
-                    self.resolve(next,.discard);self.bridge.command("release");return
+                    self.cancelInput("Windows could not determine where you clicked. The pending input was not sent.");return
                 }
                 if hit == 2 {self.resolve(next,.move)}
-                else if hit == 9 {self.resolve(next,.discard);self.toggleZoom()}
+                else if hit == 9 {self.resolve(next,.zoom)}
                 else {
                     let edges=ResizeEdges(hit:hit)
                     self.resolve(next,self.canResize && !edges.isEmpty ? .resize(edges):.remote)
@@ -313,19 +371,19 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
             }
         case .leftMouseDragged:
             guard let gesture else{return}
-            gesture.latest=(point,value)
-            if case .pending=gesture.mode {return}
             perform(gesture,point:point,value:value,up:false)
         case .leftMouseUp:
             guard let gesture else{send(["event":"button","button":"left","down":false]);return}
-            gesture.up=(point,value)
-            if case .pending=gesture.mode {return}
             perform(gesture,point:point,value:value,up:true)
         default:break
         }
     }
     private func resolve(_ gesture:MouseGesture,_ mode:MouseMode){
         guard self.gesture === gesture else{return}
+        if inputBlocked {
+            content.flushText()
+            guard self.gesture === gesture else{return}
+        }
         gesture.mode=mode
         switch mode {
         case .remote:send(gesture.down)
@@ -334,10 +392,13 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
             else {bridge.command("cancel_interaction",["window":id]);content.clearModifiers()}
             if gesture.clicks == 2 {gesture.mode = .discard;toggleZoom()}
         case .resize:beginResize()
+        case .zoom:gesture.mode = .discard;toggleZoom()
         default:break
         }
-        if let sample=gesture.latest {perform(gesture,point:sample.0,value:sample.1,up:false)}
-        if let sample=gesture.up {perform(gesture,point:sample.0,value:sample.1,up:true)}
+        // Geometry setup can flush composed text, so keep it behind the same
+        // gate until the down has been classified. A later down starts a new
+        // hit-test and pauses this FIFO without replacing the preceding click.
+        inputBlocked=false;drainInput()
     }
     private func perform(_ gesture:MouseGesture,point:NSPoint,value:[String:Any],up:Bool){
         let delta=NSPoint(x:point.x-gesture.origin.x,y:point.y-gesture.origin.y)
@@ -551,7 +612,10 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
     }
     private func finishSharedGeometry(error:String?=nil){
         guard geometryInteraction != nil else{return}
-        if error != nil {gesture=nil}
+        if error != nil {
+            if inputBlocked || !deferredInput.isEmpty {cancelInput()}
+            else {gesture=nil}
+        }
         else if let geometryConfirmed {sourceRect=geometryConfirmed}
         cancelSharedGeometry()
         applySourceFrame();bridge.command("release");onGeometry?()
@@ -575,6 +639,7 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
     private func trace(_ event:String){
         guard ProcessInfo.processInfo.environment["PERPENDICULAR_STATE_TRACE"] == "1" else{return}
         let value:[String:Any]=["type":event,"window":id,
+            "nativeResizing":nativeResizing,"expectedSize":expectedSize != nil,"inputBlocked":inputBlocked,
             "mac":[window.frame.minX,window.frame.minY,window.frame.width,window.frame.height],
             "guest":[sourceRect.minX,sourceRect.minY,sourceRect.width,sourceRect.height]]
         if let data=try? JSONSerialization.data(withJSONObject:value,options:[.sortedKeys]){try? FileHandle.standardError.write(contentsOf:data+Data([10]))}
@@ -594,7 +659,7 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
     func windowDidBecomeKey(_ notification:Notification){if !role.transient{bridge.command("activate",["window":id])}}
     func windowDidResignKey(_ notification:Notification){
         if !role.transient {
-            gesture=nil;content.clearModifiers();bridge.command("release")
+            cancelInput("The window lost focus before the pending input could be sent.")
             if geometryInteraction != nil {finishSharedGeometry()}
             if nativeResizing {
                 resizeSerial+=1;liveResizeTimer?.invalidate();liveResizeTimer=nil;liveResizeSize=nil;liveResizeInFlight=false

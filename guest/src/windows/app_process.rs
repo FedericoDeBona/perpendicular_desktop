@@ -9,8 +9,8 @@ use windows::Win32::{
         },
         RemoteDesktop::ProcessIdToSessionId,
         Threading::{
-            GetProcessTimes, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SYNCHRONIZE,
-            WaitForSingleObject,
+            GetProcessTimes, OpenProcess, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SYNCHRONIZE,
+            QueryFullProcessImageNameW, WaitForSingleObject,
         },
     },
 };
@@ -42,6 +42,15 @@ impl Process {
                 .ok()?,
             );
             if identity::sid(handle.0).ok()?.as_str() != sid {
+                return None;
+            }
+            // A shared frame host must never authorize all of its app windows.
+            let mut image = vec![0u16; 32768];
+            let mut length = image.len() as u32;
+            if QueryFullProcessImageNameW(handle.0, PROCESS_NAME_WIN32, windows::core::PWSTR(image.as_mut_ptr()), &mut length).is_ok()
+                && String::from_utf16_lossy(&image[..length as usize]).rsplit('\\').next()
+                    .is_some_and(|name| name.eq_ignore_ascii_case("ApplicationFrameHost.exe"))
+            {
                 return None;
             }
             let (mut creation, mut exit, mut kernel, mut user) = (

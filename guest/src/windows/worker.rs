@@ -65,6 +65,7 @@ struct Worker {
     next_process_scan: Instant,
     serial: u64,
     pressed: HashSet<u16>,
+    pending_unicode: Option<u16>,
     buttons: HashSet<String>,
     display_busy: Arc<AtomicBool>,
     graphics_busy: Arc<AtomicBool>,
@@ -138,6 +139,7 @@ pub fn run(path: &Path) -> Result<(), String> {
         next_process_scan: Instant::now(),
         serial: 0,
         pressed: HashSet::new(),
+        pending_unicode: None,
         buttons: HashSet::new(),
         display_busy: Arc::new(AtomicBool::new(false)),
         graphics_busy: Arc::new(AtomicBool::new(false)),
@@ -678,6 +680,14 @@ impl Worker {
     fn application_for(&self, metadata: &Value) -> Option<String> {
         let pid = metadata["pid"].as_u64()? as u32;
         let creation = metadata["creation"].as_str()?.parse::<u64>().ok()?;
+        if metadata["class"] == "ApplicationFrameWindow" {
+            let raw = metadata["hwnd"].as_u64()? as usize;
+            let mut matches = self.applications.keys().filter(|app| {
+                self.catalogue.hosted_content(app, raw, &self.sid, self.session).is_some()
+            });
+            let app = matches.next()?;
+            return matches.next().is_none().then(|| app.clone());
+        }
         let owner = metadata["owner"].as_u64().unwrap_or(0) as usize;
         if let Some(parent) = self.windows.values().find(|w| w.target.hwnd == owner && w.target.valid()) {
             return Some(parent.app.clone());
@@ -746,21 +756,14 @@ impl Worker {
             .map(|(id, _)| id.clone())
             .collect();
         for id in retired {
-            if let Some(mut window) = self.windows.remove(&id) {
-                log(format!("Application window retired app={} hwnd={} pid={} creation={} class={} role={}", window.app, window.target.hwnd,
-                    window.target.pid, window.target.creation, window.metadata["class"], window.metadata["role"]));
-                if let Some(stop) = window.stop.take() {
-                    stop.store(true, Ordering::Release);
-                }
-                outbox.retire(&id);
-                changed = true;
-            }
+            changed |= self.retire_window(&id, outbox);
         }
         changed |= self.refresh_applications(outbox);
         let known: HashSet<usize> = self.windows.values().map(|w| w.target.hwnd).collect();
         // Owners precede their transient children even though EnumWindows is front-to-back.
         for raw in visible.iter().rev().copied() {
-            if known.contains(&raw) || self.windows.len() >= 16 {
+            if known.contains(&raw) || (self.windows.len() >= 16
+                && catalogue::window_class(raw) != "ApplicationFrameWindow") {
                 continue;
             }
             if let Some(details) = catalogue::details(raw, &self.sid, self.session) {
@@ -819,17 +822,43 @@ impl Worker {
         }
     }
 
+    fn retire_window(&mut self, id: &str, outbox: &Outbox) -> bool {
+        let Some(mut window) = self.windows.remove(id) else { return false; };
+        log(format!("Application window retired app={} hwnd={} pid={} creation={} class={} role={}", window.app, window.target.hwnd,
+            window.target.pid, window.target.creation, window.metadata["class"], window.metadata["role"]));
+        if let Some(stop) = window.stop.take() { stop.store(true, Ordering::Release); }
+        outbox.retire(id);
+        true
+    }
+
     fn add(&mut self, raw: usize, app: String, outbox: &Arc<Outbox>) -> bool {
-        if self.windows.values().any(|w| w.target.hwnd == raw) || self.windows.len() >= 16 {
-            return false;
-        }
+        let raw = catalogue::host_frame(raw, &self.sid, self.session).unwrap_or(raw);
         let Some(metadata) = catalogue::details(raw, &self.sid, self.session) else {
             return false;
         };
+        if metadata["cloaked"] == true { return false; }
+        let hosted = if metadata["class"] == "ApplicationFrameWindow" {
+            let Some(content) = self.catalogue.hosted_content(&app, raw, &self.sid, self.session) else { return false; };
+            Some(content)
+        } else { None };
+        let mut changed = false;
+        if let Some(content) = &hosted {
+            // Reparenting can happen after observe's initial retirement pass.
+            // Retire only this exact old CoreWindow before counting documents.
+            let old: Vec<_> = self.windows.iter().filter(|(_, window)| {
+                window.target.hwnd == content.hwnd && window.target.hosted.is_none()
+                    && ((window.target.pid == content.pid && window.target.creation == content.creation)
+                        || !window.target.valid())
+            }).map(|(id, _)| id.clone()).collect();
+            for id in old { changed |= self.retire_window(&id, outbox); }
+        }
+        if self.windows.values().any(|w| w.target.hwnd == raw) || self.windows.len() >= 16 {
+            return changed;
+        }
         let metadata = self.application_surface(metadata, &app);
         let transient = catalogue::transient(&metadata);
         if !transient && self.document_count() >= 4 {
-            return false;
+            return changed;
         }
         if transient
             && self
@@ -839,18 +868,23 @@ impl Worker {
                 .count()
                 >= 12
         {
-            return false;
+            return changed;
         }
         let parent = self.parent_for(&metadata, &app);
         if transient && parent.is_none() {
-            return false;
+            return changed;
         }
         let Some((pid, creation)) = identity::owner(HWND(raw as *mut _), &self.sid, self.session)
         else {
-            return false;
+            return changed;
         };
         let first_document = !transient && !self.windows.values().any(|w| w.app == app && !catalogue::transient(&w.metadata));
-        self.remember_process(&app, pid, creation);
+        if let Some(content) = &hosted {
+            self.remember_process(&app, content.pid, content.creation);
+            log(format!("Application frame identity app={app} frame={raw} hostPid={pid} child={} pid={} creation={} appId={}",
+                content.hwnd, content.pid, content.creation, content.app_id));
+        }
+        else { self.remember_process(&app, pid, creation); }
         if !transient {
             if let Some(session) = self.applications.get_mut(&app) { session.gap_until = None; }
         }
@@ -864,6 +898,7 @@ impl Worker {
             sid: self.sid.clone(),
             session: self.session,
             full_frame: metadata["role"] != "dialog",
+            hosted,
             geometry: Mutex::new((0, 0, 0, 0, 0)),
         });
         let stop = Some(capture::spawn(target.clone(), outbox.clone()));
@@ -895,7 +930,7 @@ impl Worker {
         outbox.control(json!({"type":"windows","windows":windows,"epoch":self.epoch}));
     }
     fn save(&self) {
-        let mut values:Vec<Value>=self.windows.values().filter(|w| !catalogue::transient(&w.metadata)).map(|w|json!({"hwnd":w.target.hwnd,"pid":w.target.pid,"creation":w.target.creation.to_string(),"app":w.app})).collect();
+        let mut values:Vec<Value>=self.windows.values().filter(|w| !catalogue::transient(&w.metadata)).map(|w|json!({"hwnd":w.target.hwnd,"pid":w.target.pid,"creation":w.target.creation.to_string(),"app":w.app,"hosted":w.target.hosted})).collect();
         let now = Instant::now();
         let unix = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis() as u64;
         for (app, session) in &self.applications {
@@ -957,13 +992,21 @@ impl Worker {
             let Some(metadata) = catalogue::details(raw as usize, &self.sid, self.session) else {
                 continue;
             };
+            if metadata["cloaked"] == true || catalogue::host_frame(raw as usize, &self.sid, self.session).is_some() { continue; }
+            let hosted = if metadata["class"] == "ApplicationFrameWindow" {
+                let Ok(content) = serde_json::from_value::<catalogue::HostedContent>(value["hosted"].clone()) else { continue; };
+                if !content.valid(raw as usize, &self.sid, self.session) || !content.matches_app()
+                    || !self.catalogue.matches(&app, content.hwnd) { continue; }
+                Some(content)
+            } else { None };
             let metadata = self.application_surface(metadata, &app);
             if catalogue::transient(&metadata) {
                 continue;
             }
             let pid = value["pid"].as_u64().unwrap_or(0) as u32;
             let creation = value["creation"].as_str().unwrap_or_default().parse().unwrap_or(0);
-            self.remember_process(&app, pid, creation);
+            if let Some(content) = &hosted { self.remember_process(&app, content.pid, content.creation); }
+            else { self.remember_process(&app, pid, creation); }
             if let Some(session) = self.applications.get_mut(&app) { session.gap_until = None; }
             self.serial += 1;
             let id = format!("{}:{}", self.epoch, self.serial);
@@ -975,6 +1018,7 @@ impl Worker {
                 sid: self.sid.clone(),
                 session: self.session,
                 full_frame: metadata["role"] != "dialog",
+                hosted,
                 geometry: Mutex::new((0, 0, 0, 0, 0)),
             });
             self.windows.insert(
@@ -1086,6 +1130,13 @@ impl Worker {
                             SetWindowPos(hwnd, Some(HWND_TOP), 0, 0, 0, 0,
                                 SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_ASYNCWINDOWPOS)
                                 .map_err(error)?;
+                            // The target thread applies the raise asynchronously.
+                            // Give this first click a bounded chance to reach its
+                            // own window, without waiting on a hung UI thread.
+                            let deadline = Instant::now() + Duration::from_millis(60);
+                            while !hits_target() && Instant::now() < deadline {
+                                std::thread::sleep(Duration::from_millis(4));
+                            }
                         }
                         if !hits_target() {
                             log(format!("Click blocked by occlusion hwnd={} x={} y={}", target.hwnd, point.x, point.y));
@@ -1163,6 +1214,33 @@ impl Worker {
                     {
                         return Err("This window has no focused text control".into());
                     }
+                    if target.hosted.is_some() {
+                        if !target.valid() { return Err("Window retired".into()); }
+                        if let Some(unit) = self.pending_unicode {
+                            send(unicode_key(unit, true))?;
+                            self.pending_unicode = None;
+                        }
+                        let units: Vec<u16> = text.encode_utf16().collect();
+                        let inputs: Vec<INPUT> = units.iter().flat_map(|unit| {
+                            [unicode_key(*unit, false), unicode_key(*unit, true)]
+                        }).collect();
+                        if inputs.is_empty() { return Ok(()); }
+                        // Hosted WinUI needs VK_PACKET in its normal input
+                        // queue. Keep this separate from the Win32 WM_CHAR path.
+                        let sent = SendInput(&inputs, size_of::<INPUT>() as i32) as usize;
+                        if sent != inputs.len() {
+                            // SendInput inserts in order. Only an odd accepted
+                            // prefix can leave a Unicode key-down unmatched.
+                            if sent % 2 != 0 {
+                                let unit = units[sent / 2];
+                                self.pending_unicode = Some(unit);
+                                if send(unicode_key(unit, true)).is_ok() { self.pending_unicode = None; }
+                            }
+                            log(format!("Unicode input incomplete accepted={sent} total={} releasePending={}", inputs.len(), self.pending_unicode.is_some()));
+                            return Err("Windows did not accept all of the text. The text was not retried.".into());
+                        }
+                        return Ok(());
+                    }
                     // Text is already committed by macOS. Deliver UTF-16 character messages to
                     // the focused control; virtual-key injection remains reserved for shortcuts.
                     for unit in text.encode_utf16() {
@@ -1206,6 +1284,9 @@ impl Worker {
         for key in self.pressed.drain() {
             let _ = send(keyboard(key, true));
         }
+        if let Some(unit) = self.pending_unicode {
+            if send(unicode_key(unit, true)).is_ok() { self.pending_unicode = None; }
+        }
         for button in ["left", "right"] {
             let _ = self.release_button(button);
         }
@@ -1244,6 +1325,19 @@ fn keyboard(key: u16, up: bool) -> INPUT {
                 } else {
                     KEYBD_EVENT_FLAGS(0)
                 },
+                ..Default::default()
+            },
+        },
+    }
+}
+fn unicode_key(unit: u16, up: bool) -> INPUT {
+    INPUT {
+        r#type: INPUT_KEYBOARD,
+        Anonymous: INPUT_0 {
+            ki: KEYBDINPUT {
+                wVk: VIRTUAL_KEY(0),
+                wScan: unit,
+                dwFlags: KEYEVENTF_UNICODE | if up { KEYEVENTF_KEYUP } else { KEYBD_EVENT_FLAGS(0) },
                 ..Default::default()
             },
         },

@@ -6,7 +6,7 @@ use windows::{
     Win32::{
         Foundation::{FILETIME, HWND, LPARAM, POINT, RECT},
         Graphics::{
-            Dwm::{DWMWA_EXTENDED_FRAME_BOUNDS, DwmGetWindowAttribute},
+            Dwm::{DWMWA_CLOAKED, DWMWA_EXTENDED_FRAME_BOUNDS, DwmGetWindowAttribute},
             Gdi::ClientToScreen,
         },
         Storage::{
@@ -26,7 +26,7 @@ use windows::{
                 SIGDN_NORMALDISPLAY, ShellExecuteExW,
             },
             WindowsAndMessaging::{
-                EnumWindows, GW_OWNER, GWL_EXSTYLE, GWL_STYLE, GetClassNameW, GetClientRect,
+                EnumChildWindows, EnumWindows, GA_ROOT, GW_OWNER, GWL_EXSTYLE, GWL_STYLE, GetAncestor, GetClassNameW, GetClientRect,
                 GetForegroundWindow, GetWindow, GetWindowLongPtrW, GetWindowRect, GetWindowTextW,
                 GetWindowThreadProcessId, IsIconic, IsWindowVisible, WS_CAPTION,
                 WS_EX_DLGMODALFRAME, WS_EX_TOOLWINDOW, WS_POPUP, WS_THICKFRAME,
@@ -39,6 +39,62 @@ use windows::{
 pub struct Catalogue {
     pub items: HashMap<String, IShellItem>,
     identities: HashMap<String, String>,
+}
+
+/// The process owning an ApplicationFrameWindow is shared. Its app identity
+/// comes only from this authenticated CoreWindow child, never the host PID.
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
+pub struct HostedContent {
+    pub hwnd: usize,
+    pub pid: u32,
+    pub creation: u64,
+    pub app_id: String,
+}
+impl HostedContent {
+    pub fn valid(&self, frame: usize, sid: &str, session: u32) -> bool {
+        identity::owner(HWND(self.hwnd as *mut _), sid, session) == Some((self.pid, self.creation))
+            && window_class(self.hwnd) == "Windows.UI.Core.CoreWindow"
+            && window_class(frame) == "ApplicationFrameWindow"
+            && unsafe { GetAncestor(HWND(self.hwnd as *mut _), GA_ROOT).0 as usize == frame }
+    }
+    pub fn matches_app(&self) -> bool {
+        !self.app_id.is_empty() && self.app_id.len() <= 32768
+            && process_app_id(self.hwnd).is_some_and(|actual| actual.eq_ignore_ascii_case(&self.app_id))
+    }
+}
+
+pub fn window_class(raw: usize) -> String {
+    let mut class = [0u16; 256];
+    let count = unsafe { GetClassNameW(HWND(raw as *mut _), &mut class) }.max(0) as usize;
+    String::from_utf16_lossy(&class[..count])
+}
+
+/// Only a real parent chain can promote a CoreWindow to its visible frame.
+pub fn host_frame(raw: usize, sid: &str, session: u32) -> Option<usize> {
+    if window_class(raw) != "Windows.UI.Core.CoreWindow" { return None; }
+    let root = unsafe { GetAncestor(HWND(raw as *mut _), GA_ROOT).0 as usize };
+    if root == 0 || root == raw || window_class(root) != "ApplicationFrameWindow" { return None; }
+    identity::owner(HWND(raw as *mut _), sid, session)?;
+    identity::owner(HWND(root as *mut _), sid, session)?;
+    Some(root)
+}
+
+fn process_app_id(raw: usize) -> Option<String> {
+    unsafe {
+        let handle = identity::Handle(OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, process_id(raw)).ok()?);
+        let mut length = 0;
+        let _ = GetApplicationUserModelId(handle.0, &mut length, None);
+        if length == 0 || length > 32768 { return None; }
+        let mut buffer = vec![0u16; length as usize];
+        if GetApplicationUserModelId(handle.0, &mut length, Some(PWSTR(buffer.as_mut_ptr()))).0 != 0 { return None; }
+        Some(String::from_utf16_lossy(&buffer[..buffer.iter().position(|v| *v == 0).unwrap_or(buffer.len())]))
+    }
+}
+
+unsafe extern "system" fn collect_children(hwnd: HWND, context: LPARAM) -> windows::core::BOOL {
+    let children = unsafe { &mut *(context.0 as *mut Vec<usize>) };
+    children.push(hwnd.0 as usize);
+    (children.len() < 64).into()
 }
 
 /// Owned bytes only; Shell COM interfaces stay in the catalogue's apartment.
@@ -169,33 +225,27 @@ impl Catalogue {
         let Some(expected) = self.identities.get(id) else {
             return false;
         };
-        unsafe {
-            let Ok(handle) =
-                OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, process_id(hwnd))
-            else {
-                return false;
-            };
-            let handle = identity::Handle(handle);
-            let mut length = 0;
-            let _ = GetApplicationUserModelId(handle.0, &mut length, None);
-            if length == 0 || length > 32768 {
-                return false;
-            }
-            let mut buffer = vec![0u16; length as usize];
-            if GetApplicationUserModelId(handle.0, &mut length, Some(PWSTR(buffer.as_mut_ptr()))).0
-                != 0
-            {
-                return false;
-            }
-            let actual = String::from_utf16_lossy(
-                &buffer[..buffer.iter().position(|v| *v == 0).unwrap_or(buffer.len())],
-            );
-            actual.eq_ignore_ascii_case(
-                expected
-                    .strip_prefix("shell:AppsFolder\\")
-                    .unwrap_or(expected),
-            )
+        process_app_id(hwnd).is_some_and(|actual| actual.eq_ignore_ascii_case(
+            expected.strip_prefix("shell:AppsFolder\\").unwrap_or(expected)))
+    }
+
+    pub fn hosted_content(&self, app: &str, frame: usize, sid: &str, session: u32) -> Option<HostedContent> {
+        if window_class(frame) != "ApplicationFrameWindow" { return None; }
+        identity::owner(HWND(frame as *mut _), sid, session)?;
+        let expected = self.identities.get(app)?;
+        let expected = expected.strip_prefix("shell:AppsFolder\\").unwrap_or(expected);
+        let mut children = Vec::new();
+        unsafe { let _ = EnumChildWindows(Some(HWND(frame as *mut _)), Some(collect_children),
+            LPARAM((&mut children as *mut Vec<usize>) as isize)); }
+        for hwnd in children {
+            if window_class(hwnd) != "Windows.UI.Core.CoreWindow" { continue; }
+            if !unsafe { IsWindowVisible(HWND(hwnd as *mut _)).as_bool() } { continue; }
+            let Some((pid, creation)) = identity::owner(HWND(hwnd as *mut _), sid, session) else { continue; };
+            let Some(actual) = process_app_id(hwnd).filter(|actual| actual.eq_ignore_ascii_case(expected)) else { continue; };
+            let content = HostedContent { hwnd, pid, creation, app_id: actual };
+            if content.valid(frame, sid, session) { return Some(content); }
         }
+        None
     }
 
     pub fn prepare_launch(&self, id: &str) -> Result<Activation, String> {
@@ -265,6 +315,8 @@ pub fn details(raw: usize, sid: &str, session: u32) -> Option<Value> {
     let hwnd = HWND(raw as *mut _);
     let (pid, creation) = identity::owner(hwnd, sid, session)?;
     unsafe {
+        let mut cloaked = 0u32;
+        let _ = DwmGetWindowAttribute(hwnd, DWMWA_CLOAKED, (&mut cloaked as *mut u32).cast(), size_of::<u32>() as u32);
         let mut client = windows::Win32::Foundation::RECT::default();
         GetClientRect(hwnd, &mut client).ok()?;
         if client.right <= 0 || client.bottom <= 0 {
@@ -319,7 +371,8 @@ pub fn details(raw: usize, sid: &str, session: u32) -> Option<Value> {
             "title":String::from_utf16_lossy(&title[..count]),"owner":owner,
             "width":rect.right-rect.left,"height":rect.bottom-rect.top,
             "x":rect.left,"y":rect.top,"role":role,"class":class,
-            "style":style,"exStyle":ex_style,"visible":IsWindowVisible(hwnd).as_bool(),
+            "style":style,"exStyle":ex_style,"cloaked":cloaked != 0,
+            "visible":IsWindowVisible(hwnd).as_bool() && cloaked == 0,
             "maxWidth":max_width,"maxHeight":max_height,"resizable":style & WS_THICKFRAME.0 != 0,
             "minimized":IsIconic(hwnd).as_bool()}))
     }
