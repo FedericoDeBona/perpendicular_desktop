@@ -10,7 +10,7 @@ use windows::{
             Gdi::ClientToScreen,
         },
         Storage::{
-            EnhancedStorage::PKEY_Link_TargetParsingPath,
+            EnhancedStorage::{PKEY_Link_Arguments, PKEY_Link_TargetParsingPath},
             Packaging::Appx::GetApplicationUserModelId,
         },
         System::{
@@ -87,6 +87,13 @@ impl Catalogue {
                 }
                 // Exclude host-forwarding aliases and unavailable local links.
                 if let Ok(properties) = item.cast::<IShellItem2>() {
+                    // Converted VMs can retain rundll32 shortcuts whose target
+                    // exists locally but whose arguments delegate to the Mac.
+                    if let Ok(arguments) = properties.GetString(&PKEY_Link_Arguments) {
+                        if text(arguments).to_ascii_lowercase().contains("sharedhostapps.dll") {
+                            continue;
+                        }
+                    }
                     if let Ok(target) = properties.GetString(&PKEY_Link_TargetParsingPath) {
                         let path = text(target);
                         let normalized = path.to_lowercase();

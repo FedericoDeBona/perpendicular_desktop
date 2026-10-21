@@ -11,6 +11,7 @@ import argparse
 
 parser=argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--graphics-driver-dir',type=Path,help='Stage the pinned ARM64 graphics driver in addition to guest tools')
+parser.add_argument('--remove-legacy',action='store_true',help='Stage the explicit one-time removal of previous Perpendicular agents and sharing')
 arguments=parser.parse_args()
 
 repo=Path(__file__).resolve().parent.parent
@@ -18,6 +19,8 @@ root=Path.home()/'Library/Application Support/Perpendicular Restart'
 configuration=json.loads((root/'machine.json').read_text())
 executable=repo/'guest/target/aarch64-pc-windows-msvc/release/perpendicular-guest.exe'
 sources=[executable,repo/'guest/install.ps1',repo/'guest/install.cmd',repo/'guest/diagnostics.ps1']
+if arguments.remove_legacy:
+    sources += [repo/'guest/remove-legacy.ps1',repo/'guest/remove-legacy.cmd',repo/'guest/inspect-legacy.ps1']
 drivers=[]
 if arguments.graphics_driver_dir:
     sources += [repo/'guest/install-graphics.ps1',repo/'guest/install-graphics.cmd',repo/'guest/graphics-driver.json']
@@ -62,5 +65,7 @@ with socket.socket(socket.AF_UNIX) as connection:
             if 'return' in result:
                 break
 print('Setup CD attached. In the Windows console run D:\\install.cmd and complete installation.')
+if arguments.remove_legacy:
+    print('For the explicitly requested legacy-agent/sharing cleanup and bridge install, run D:\\remove-legacy.cmd instead.')
 if drivers:
     print('For the signed graphics driver, run D:\\install-graphics.cmd. This does not reinstall old guest integrations.')

@@ -31,6 +31,9 @@ final class DesktopConnection:@unchecked Sendable {
     // while Windows accepts input; recovery must not keep showing that image.
     private var lastReadAt=ProcessInfo.processInfo.systemUptime
     private var lastRefreshAt=0.0
+    // Only the serial writer touches this clock. QEMU delays ordinary RFB key
+    // transitions by 10 ms and drops events, including releases, on queue overflow.
+    private var lastKeyWrite=0.0
     private let receive:@MainActor @Sendable (Data,Int,Int)->Void
     private let layout:@MainActor @Sendable (DesktopScreen)->Void
     private let failed:@MainActor @Sendable (String)->Void
@@ -77,7 +80,16 @@ final class DesktopConnection:@unchecked Sendable {
     }
     private func send(_ bytes:[UInt8]){
         state.lock();let connected=ready && !stopped;state.unlock()
-        if connected {writes.async{[self] in do{try write(Data(bytes))}catch{stop()}}}
+        if connected {writes.async{[self] in
+            do {
+                if bytes.first == 4 {
+                    let delay=lastKeyWrite+0.010-ProcessInfo.processInfo.systemUptime
+                    if delay>0 {Thread.sleep(forTimeInterval:delay)}
+                }
+                try write(Data(bytes))
+                if bytes.first == 4 {lastKeyWrite=ProcessInfo.processInfo.systemUptime}
+            }catch{stop()}
+        }}
     }
     private var isStopped:Bool {state.lock();defer{state.unlock()};return stopped}
     private func failure(_ text:String)->NSError {NSError(domain:"Desktop",code:1,userInfo:[NSLocalizedDescriptionKey:text])}
