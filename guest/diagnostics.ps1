@@ -12,4 +12,7 @@ if (Test-Path $runKey) { $startup = @((Get-ItemProperty $runKey).PSObject.Proper
 $cleanup = Get-Content -Raw -LiteralPath (Join-Path $env:ProgramData 'Perpendicular Restart\cleanup.json') | ConvertFrom-Json
 $folders = @((Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\User Shell Folders').PSObject.Properties | Where-Object { $_.Value -is [string] -and ($_.Value -like 'M:\*' -or $_.Value -like '\\10.0.2.2\*') } | Select-Object Name)
 $drivers = @(Get-ChildItem 'HKLM:\SYSTEM\CurrentControlSet\Services' | Where-Object { $_.PSChildName -match '(perpendicular|viogpu)' } | ForEach-Object { Get-ItemProperty $_.PSPath } | Where-Object { $_.Type -eq 1 -or $_.Type -eq 2 } | Select-Object PSChildName, Start, ImagePath)
-@{ legacyTasks=$tasks; legacyProcesses=$processes; legacyServices=$services; legacyShares=$shares; legacyStartup=$startup; legacyFolders=$folders; graphicsDrivers=$drivers; oldAgentDirectoryExists=(Test-Path (Join-Path $legacy 'Guest Agent')); cleanup=$cleanup; bootTime=(Get-CimInstance Win32_OperatingSystem).LastBootUpTime.ToUniversalTime().ToString('o') } | ConvertTo-Json -Depth 8 -Compress
+$uac = Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System' | Select-Object EnableLUA,ConsentPromptBehaviorAdmin,PromptOnSecureDesktop
+@{ legacyTasks=$tasks; legacyProcesses=$processes; legacyServices=$services; legacyShares=$shares; legacyStartup=$startup; legacyFolders=$folders; graphicsDrivers=$drivers
+   uac=$uac
+   oldAgentDirectoryExists=(Test-Path (Join-Path $legacy 'Guest Agent')); cleanup=$cleanup; bootTime=(Get-CimInstance Win32_OperatingSystem).LastBootUpTime.ToUniversalTime().ToString('o') } | ConvertTo-Json -Depth 8 -Compress

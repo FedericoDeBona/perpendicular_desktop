@@ -15,6 +15,7 @@ struct MachineConfiguration: Codable {
     let token: String
     let graphics:String?
     let recoveryDisplay:Bool?
+    let keyboardLayout:String?
 }
 
 @MainActor
@@ -34,8 +35,14 @@ final class VirtualMachineController {
         self.runtime = runtime
         configuration = try JSONDecoder().decode(MachineConfiguration.self,
             from: Data(contentsOf: directory.appendingPathComponent("machine.json")))
-        guard configuration.graphics == nil || ["standard","native3D"].contains(configuration.graphics!) else{
+        guard configuration.graphics == nil || ["standard","virtio2D","native3D"].contains(configuration.graphics!) else{
             throw CocoaError(.coderReadCorrupt,userInfo:[NSLocalizedDescriptionKey:"Unknown Windows graphics configuration."])
+        }
+        if let layout=configuration.keyboardLayout {
+            guard !layout.isEmpty,layout.utf8.count<=32,layout.utf8.allSatisfy({(97...122).contains($0) || (48...57).contains($0) || $0 == 45 || $0 == 95}),
+                  FileManager.default.fileExists(atPath:runtime.deletingLastPathComponent().appendingPathComponent("share/qemu/keymaps/\(layout)").path) else {
+                throw CocoaError(.coderReadCorrupt,userInfo:[NSLocalizedDescriptionKey:"Unsupported Windows console keyboard layout."])
+            }
         }
         controlSocket = "/tmp/perpendicular-\(getuid())-\(configuration.id.prefix(8)).sock"
     }
@@ -45,14 +52,22 @@ final class VirtualMachineController {
         return (try? MachineControl.execute(socket:controlSocket,operation:"query-uuid")["UUID"] as? String) == configuration.id
     }
     var nativeGraphicsEnabled:Bool {configuration.graphics == "native3D" && configuration.recoveryDisplay != true}
+    var virtualDisplayEnabled:Bool {nativeGraphicsEnabled}
 
     func withRecoveryDisplay(_ enabled:Bool)throws->VirtualMachineController {
+        try withDisplay(graphics:nil,recovery:enabled)
+    }
+    func withDisplay(graphics:String?,recovery:Bool)throws->VirtualMachineController {
         guard !isRunning else {throw CocoaError(.executableRuntimeMismatch,userInfo:[NSLocalizedDescriptionKey:"Windows must finish shutting down before its display can change."])}
         let file=directory.appendingPathComponent("machine.json")
         guard var value=try JSONSerialization.jsonObject(with:Data(contentsOf:file)) as? [String:Any],value["id"] as? String == configuration.id else {
             throw CocoaError(.coderReadCorrupt)
         }
-        value["recoveryDisplay"]=enabled
+        if let graphics {
+            guard ["standard","native3D"].contains(graphics) else{throw CocoaError(.coderReadCorrupt)}
+            value["graphics"]=graphics
+        }
+        value["recoveryDisplay"]=recovery
         try JSONSerialization.data(withJSONObject:value,options:[.prettyPrinted,.sortedKeys]).write(to:file,options:.atomic)
         try FileManager.default.setAttributes([.posixPermissions:0o600],ofItemAtPath:file.path)
         return try VirtualMachineController(directory:directory,runtime:runtime)
@@ -76,7 +91,7 @@ final class VirtualMachineController {
     }
     func closeDesktop(){desktop?.stop();desktop?.window.close();desktop=nil}
     func synchronizePrimaryDisplay(){
-        guard nativeGraphicsEnabled,let launch=desktopLaunch(),let host=HostDisplay.current().first else{return}
+        guard virtualDisplayEnabled,let launch=desktopLaunch(),let host=HostDisplay.current().first else{return}
         let width=min(4096,Int((host.frame.width*host.scale).rounded()))
         let height=min(4096,8_388_608/max(1,width),Int((host.frame.height*host.scale).rounded()))
         let request=UUID();displayRequest=request;displayControl?.stop()
@@ -110,7 +125,11 @@ final class VirtualMachineController {
         guard !isRunning else { return }
         closeDesktop()
         let vm = directory.appendingPathComponent("Windows")
-        let native=nativeGraphicsEnabled ? try NativeGraphics(root:runtime.deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("Native3D")):nil
+        guard configuration.graphics != "virtio2D" || configuration.recoveryDisplay == true else {
+            throw CocoaError(.executableRuntimeMismatch,userInfo:[NSLocalizedDescriptionKey:"The reference 2D experiment is not an available display backend. Choose Standard or Recovery Display."])
+        }
+        let resources=runtime.deletingLastPathComponent().deletingLastPathComponent()
+        let native=nativeGraphicsEnabled ? try NativeGraphics(root:resources.appendingPathComponent("Native3D")):nil
         let session=UUID().uuidString.replacingOccurrences(of:"-",with:"").lowercased()
         let displayDirectory=URL(fileURLWithPath:"/tmp/perpendicular-display-\(getuid())-\(session.prefix(8))")
         try FileManager.default.createDirectory(at:displayDirectory,withIntermediateDirectories:false,attributes:[.posixPermissions:0o700])
@@ -136,6 +155,7 @@ final class VirtualMachineController {
         var arguments = [
             "-name", "Perpendicular Windows", "-uuid", c.id,
             "-L",runtime.deletingLastPathComponent().appendingPathComponent("share/qemu").path,
+            "-k",c.keyboardLayout ?? "en-us",
             "-machine", "virt,gic-version=3,highmem=on,pflash0=code,pflash1=vars",
             "-accel", native == nil ? "hvf":"hvf,ipa-granule-size=4096", "-cpu", "host", "-smp", String(c.cpus), "-m", String(c.memoryMiB),
             "-nodefaults", "-vga", "none",
@@ -153,19 +173,19 @@ final class VirtualMachineController {
             "-device", "usb-bot,id=usbcd,bus=xhci.0", "-device", "scsi-cd,drive=bootstrap,bus=usbcd.0",
             "-chardev", "socket,id=tpmchar,path=\(tpmSocket)", "-tpmdev", "emulator,id=tpm,chardev=tpmchar",
             "-device", native == nil ? "tpm-tis-device,tpmdev=tpm,ppi=off":"tpm-tis-device,tpmdev=tpm",
-            "-display", native == nil ? "none":"egl-headless,gl=es", "-vnc", "unix:\(desktopSocket)",
+            "-display", nativeGraphicsEnabled ? "egl-headless,gl=es":"none", "-vnc", "unix:\(desktopSocket)",
             "-qmp", "unix:\(controlSocket),server=on,wait=off",
             "-monitor", "none", "-serial", "file:\(directory.path)/serial.log", "-rtc", "base=localtime"
         ]
-        if native != nil {
+        if nativeGraphicsEnabled {
             // First qualify the reference backend's single scanout. Additional
             // monitor outputs require their own topology/capture integration.
             arguments += ["-device","virtio-ramfb-gl,id=display0,addr=0x8,disable-legacy=on,neptune=on,blob=on,hostmem=256M,max_outputs=1,xres=1280,yres=800"]
         }else{arguments += ["-device","ramfb"]}
         machine = try launch("qemu-system-aarch64",arguments,log:"qemu.log",executable:native?.executable,
             environment:native?.environment(directory:displayDirectory,session:session))
-        let endpoint=native.map{_ in NativeDisplayEndpoint(socketPath:displayDirectory.appendingPathComponent("native-display.sock").path,
-            serverPID:machine!.processIdentifier,expectedUID:getuid(),sessionHi:UInt64(session.prefix(16),radix:16)!,sessionLo:UInt64(session.suffix(16),radix:16)!,epoch:1)}
+        let endpoint=nativeGraphicsEnabled ? NativeDisplayEndpoint(socketPath:displayDirectory.appendingPathComponent("native-display.sock").path,
+            serverPID:machine!.processIdentifier,expectedUID:getuid(),sessionHi:UInt64(session.prefix(16),radix:16)!,sessionLo:UInt64(session.suffix(16),radix:16)!,epoch:1):nil
         let state=DesktopLaunch(machineID:c.id,pid:machine!.processIdentifier,socket:desktopSocket,native:endpoint)
         let launchFile=directory.appendingPathComponent("desktop-launch.json")
         try JSONEncoder().encode(state).write(to:launchFile,options:.atomic)

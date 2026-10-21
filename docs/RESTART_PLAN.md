@@ -96,6 +96,8 @@ Usare subito i linguaggi target: Swift/AppKit/Metal sul Mac, Rust per l'integraz
 
 ### Ordine di lavoro e protezione della base
 
+Indirizzo ribadito dall'utente: il vecchio percorso 2D non è una base approvata o affidabile. Una riuscita storica non supera i problemi osservati di avvio, artefatti e risoluzione dinamica. I suoi runtime recuperati restano esperimenti da confronto; non promuoverli al percorso ordinario. Dare priorità ai vincoli ricavati dall'analisi di Parallels: monitor/topologia/DPI confermati prima dell'integrazione delle finestre, controllo di geometria/input/attivazione con identità e risposte, immagini e accelerazione separabili. Le osservazioni su Parallels sono statiche, non una ricostruzione verificata del protocollo o del funzionamento interno. Ogni backend scelto deve dimostrare questi comportamenti nell'app attuale.
+
 1. Individuare monitor reali, capacità del display guest e componenti grafici riusabili; predisporre un ritorno al percorso funzionante prima di sostituire driver o runtime.
 2. Rendere operativo lo schermo virtuale adeguato e sincronizzare drag, resize e scala fra Mac e Windows, completando una prima app utilizzabile.
 3. Integrare la presentazione Metal e il percorso 3D compatibile, verificando separatamente rendering guest e trasporto delle singole finestre. L'ordine di questi due componenti può seguire le dipendenze effettive emerse dal primo passaggio.

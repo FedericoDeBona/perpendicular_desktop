@@ -54,6 +54,7 @@ struct Worker {
     buttons: HashSet<String>,
     display_busy: Arc<AtomicBool>,
     graphics_busy: Arc<AtomicBool>,
+    display_observer: Option<display::Observer>,
 }
 
 fn state_path() -> PathBuf {
@@ -99,6 +100,13 @@ pub fn run(path: &Path) -> Result<(), String> {
         buttons: HashSet::new(),
         display_busy: Arc::new(AtomicBool::new(false)),
         graphics_busy: Arc::new(AtomicBool::new(false)),
+        display_observer: match display::Observer::new() {
+            Ok(observer) => Some(observer),
+            Err(error) => {
+                log(format!("Display change notifications unavailable: {error}"));
+                None
+            }
+        },
     };
     worker.restore();
     let endpoint: SocketAddr = format!("10.0.2.2:{}", config.port).parse().map_err(error)?;
@@ -135,7 +143,7 @@ impl Worker {
         outbox.control(
             json!({"type":"hello","protocol":1,"token":config.token,"epoch":self.epoch,
             "sid":self.sid,"session":self.session,"version":env!("CARGO_PKG_VERSION"),
-            "capabilities":{"capture":"software","windows":4,"transients":12,"windowRoles":true,"input":true,"catalogue":true,"displayInfo":true,"graphicsInfo":true,"displayConfigure":true}}),
+            "capabilities":{"capture":"software","windows":4,"transients":12,"windowRoles":true,"input":true,"catalogue":true,"displayInfo":true,"driverInfo":true,"graphicsInfo":true,"displayConfigure":true,"displayEvents":self.display_observer.is_some()}}),
         );
         let (sender, receiver) = mpsc::sync_channel(128);
         let state = outbox.clone();
@@ -166,11 +174,13 @@ impl Worker {
             if let Ok(command) = receiver.recv_timeout(Duration::from_millis(10)) {
                 let request = command["request"].clone();
                 if command["operation"] == "diagnostics"
+                    || command["operation"] == "driver_info"
                     || command["operation"] == "display_info"
                     || command["operation"] == "graphics_info"
                     || command["operation"] == "display_configure"
                 {
                     let graphics_request = command["operation"] == "graphics_info";
+                    let driver_request = command["operation"] == "driver_info";
                     let configure_request = command["operation"] == "display_configure";
                     let display_request =
                         command["operation"] == "display_info" || configure_request;
@@ -186,7 +196,9 @@ impl Worker {
                     } else {
                         let sender = outbox.clone();
                         std::thread::spawn(move || {
-                            let result = if graphics_request {
+                            let result = if driver_request {
+                                super::drivers::devices().map(|devices| json!({"devices":devices}))
+                            } else if graphics_request {
                                 Ok(display::graphics())
                             } else if configure_request {
                                 display::configure(&command)
@@ -220,6 +232,13 @@ impl Worker {
                     let _ = TranslateMessage(&message);
                     DispatchMessageW(&message);
                 }
+            }
+            if self
+                .display_observer
+                .as_ref()
+                .is_some_and(|observer| observer.take_changed())
+            {
+                outbox.control(json!({"type":"display_changed","epoch":self.epoch}));
             }
             if poll.elapsed() >= Duration::from_millis(75) {
                 self.observe(&outbox);
@@ -865,35 +884,71 @@ fn send(input: INPUT) -> Result<(), String> {
 }
 
 fn diagnostics() -> Result<Value, String> {
+    use std::io::Read;
     use std::os::windows::process::CommandExt;
     use std::process::{Command, Stdio};
     let mut child = Command::new("powershell.exe")
-        .args(["-NoProfile", "-NonInteractive", "-Command", "-"])
+        .args([
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            include_str!("../../diagnostics.ps1"),
+        ])
         .creation_flags(0x08000000)
-        .stdin(Stdio::piped())
+        .stdin(Stdio::null())
         .stdout(Stdio::piped())
-        .stderr(Stdio::null())
+        .stderr(Stdio::piped())
         .spawn()
         .map_err(error)?;
-    child
-        .stdin
+    // Drain both pipes while PowerShell is running. A report larger than the
+    // Windows pipe buffer must not block the child before the timeout check.
+    let stdout = child.stdout.take().ok_or("Missing diagnostics output")?;
+    let stderr = child
+        .stderr
         .take()
-        .ok_or("Missing diagnostics input")?
-        .write_all(include_bytes!("../../diagnostics.ps1"))
-        .map_err(error)?;
-    let deadline = Instant::now() + Duration::from_secs(6);
+        .ok_or("Missing diagnostics error output")?;
+    fn read_output(stream: impl Read) -> std::io::Result<Vec<u8>> {
+        let mut bytes = Vec::new();
+        stream.take(131_073).read_to_end(&mut bytes)?;
+        Ok(bytes)
+    }
+    let output_reader = std::thread::spawn(move || read_output(stdout));
+    let error_reader = std::thread::spawn(move || read_output(stderr));
+    let deadline = Instant::now() + Duration::from_secs(30);
     while child.try_wait().map_err(error)?.is_none() {
         if Instant::now() >= deadline {
             let _ = child.kill();
             let _ = child.wait();
+            let _ = output_reader.join();
+            let _ = error_reader.join();
             return Err("Diagnostics timed out".into());
         }
         std::thread::sleep(Duration::from_millis(20));
     }
-    let output = child.wait_with_output().map_err(error)?;
-    if !output.status.success() {
-        return Err("Windows diagnostics unavailable".into());
+    let status = child.wait().map_err(error)?;
+    let output = output_reader
+        .join()
+        .map_err(|_| "Diagnostics reader failed")?
+        .map_err(error)?;
+    let errors = error_reader
+        .join()
+        .map_err(|_| "Diagnostics error reader failed")?
+        .map_err(error)?;
+    if output.len() > 131_072 || errors.len() > 131_072 {
+        return Err("Windows diagnostics exceeded the report limit".into());
     }
-    let text = String::from_utf8_lossy(&output.stdout);
-    serde_json::from_str(text.trim_start_matches('\u{feff}').trim()).map_err(error)
+    if !status.success() || output.is_empty() {
+        return Err(format!(
+            "Windows diagnostics unavailable: {}",
+            String::from_utf8_lossy(&errors)
+                .chars()
+                .take(1200)
+                .collect::<String>()
+        ));
+    }
+    let text = String::from_utf8_lossy(&output);
+    let mut report: Value =
+        serde_json::from_str(text.trim_start_matches('\u{feff}').trim()).map_err(error)?;
+    report["displayDevices"] = json!(super::drivers::devices()?);
+    Ok(report)
 }

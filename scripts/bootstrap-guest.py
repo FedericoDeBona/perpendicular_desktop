@@ -53,8 +53,8 @@ with socket.socket(socket.AF_UNIX) as connection:
     connection.connect(address)
     stream=connection.makefile('rwb')
     stream.readline()
-    for command,arguments in [('qmp_capabilities',{}),('blockdev-change-medium',{'device':'bootstrap','filename':str(iso),'format':'raw'})]:
-        stream.write((json.dumps({'execute':command,'arguments':arguments})+'\n').encode());stream.flush()
+    for command,command_args in [('qmp_capabilities',{}),('blockdev-change-medium',{'device':'bootstrap','filename':str(iso),'format':'raw'})]:
+        stream.write((json.dumps({'execute':command,'arguments':command_args})+'\n').encode());stream.flush()
         while True:
             result=json.loads(stream.readline())
             if 'error' in result:

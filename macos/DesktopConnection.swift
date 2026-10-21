@@ -27,6 +27,10 @@ final class DesktopConnection:@unchecked Sendable {
     private var framebufferWidth=800
     private var framebufferHeight=600
     private var pixels=Data()
+    // Read-queue state. RAMFB can stop satisfying incremental requests even
+    // while Windows accepts input; recovery must not keep showing that image.
+    private var lastReadAt=ProcessInfo.processInfo.systemUptime
+    private var lastRefreshAt=0.0
     private let receive:@MainActor @Sendable (Data,Int,Int)->Void
     private let layout:@MainActor @Sendable (DesktopScreen)->Void
     private let failed:@MainActor @Sendable (String)->Void
@@ -89,9 +93,20 @@ final class DesktopConnection:@unchecked Sendable {
                 let result=poll(&descriptor,1,200)
                 if result<0 && errno == EINTR {continue}
                 guard result>=0 else{throw failure("The desktop disconnected.")}
-                if result == 0 {continue}
+                if result == 0 {
+                    state.lock();let expectingPixels=ready && updates;state.unlock()
+                    let now=ProcessInfo.processInfo.systemUptime
+                    if expectingPixels {
+                        if now-lastReadAt>8 {throw failure("The desktop stopped updating. Reconnecting…")}
+                        if count == 1,offset == 0,now-lastReadAt>2,now-lastRefreshAt>2 {
+                            lastRefreshAt=now;try request(incremental:false)
+                        }
+                    }
+                    continue
+                }
                 let received=recv(fd,buffer.baseAddress!.advanced(by:offset),min(count-offset,65536),0)
-                guard received>0 else{throw failure("The desktop disconnected.")};offset+=received
+                guard received>0 else{throw failure("The desktop disconnected.")}
+                lastReadAt=ProcessInfo.processInfo.systemUptime;offset+=received
             }
         }
         return bytes

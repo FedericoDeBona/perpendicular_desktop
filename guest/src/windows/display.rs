@@ -1,21 +1,130 @@
 use serde_json::{Value, json};
-use std::collections::BTreeSet;
+use std::{
+    cell::Cell,
+    collections::BTreeSet,
+    time::{Duration, Instant},
+};
 use windows::{
     Win32::{
-        Foundation::{HMODULE, POINT},
+        Foundation::{HINSTANCE, HMODULE, HWND, LPARAM, LRESULT, POINT, WPARAM},
         Graphics::{
             Direct3D::{D3D_DRIVER_TYPE_HARDWARE, D3D_FEATURE_LEVEL},
             Direct3D11::*,
             Dxgi::{DXGI_ADAPTER_DESC1, DXGI_ADAPTER_FLAG_SOFTWARE, IDXGIAdapter1, IDXGIDevice},
             Gdi::*,
         },
-        UI::HiDpi::{
-            DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, GetDpiForMonitor, MDT_EFFECTIVE_DPI,
-            SetThreadDpiAwarenessContext,
+        System::LibraryLoader::GetModuleHandleW,
+        UI::{
+            HiDpi::{
+                DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, GetDpiForMonitor, MDT_EFFECTIVE_DPI,
+                SetThreadDpiAwarenessContext,
+            },
+            WindowsAndMessaging::*,
         },
     },
-    core::{Interface, PCWSTR},
+    core::{Interface, PCWSTR, w},
 };
+
+/// Owned by the worker thread, whose message pump dispatches display broadcasts.
+/// A hidden top-level window receives these broadcasts; a message-only window would not.
+pub struct Observer {
+    hwnd: HWND,
+    instance: HINSTANCE,
+    changed: Box<Cell<Option<Instant>>>,
+}
+
+impl Observer {
+    pub fn new() -> Result<Self, String> {
+        unsafe {
+            let instance = HINSTANCE(GetModuleHandleW(None).map_err(|e| e.to_string())?.0);
+            let class = WNDCLASSW {
+                lpfnWndProc: Some(display_window_proc),
+                hInstance: instance,
+                lpszClassName: w!("PerpendicularDisplayObserver"),
+                ..Default::default()
+            };
+            if RegisterClassW(&class) == 0 {
+                return Err(windows::core::Error::from_thread().to_string());
+            }
+            let changed = Box::new(Cell::new(None));
+            let hwnd = match CreateWindowExW(
+                WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
+                class.lpszClassName,
+                w!(""),
+                WS_POPUP,
+                0,
+                0,
+                0,
+                0,
+                None,
+                None,
+                Some(instance),
+                Some((&*changed as *const Cell<Option<Instant>>).cast()),
+            ) {
+                Ok(hwnd) => hwnd,
+                Err(error) => {
+                    let _ = UnregisterClassW(class.lpszClassName, Some(instance));
+                    return Err(error.to_string());
+                }
+            };
+            Ok(Self {
+                hwnd,
+                instance,
+                changed,
+            })
+        }
+    }
+
+    /// Coalesce a burst of broadcasts without querying adapters or display modes.
+    pub fn take_changed(&self) -> bool {
+        if self
+            .changed
+            .get()
+            .is_some_and(|time| time.elapsed() >= Duration::from_millis(200))
+        {
+            self.changed.set(None);
+            true
+        } else {
+            false
+        }
+    }
+}
+
+impl Drop for Observer {
+    fn drop(&mut self) {
+        unsafe {
+            let _ = DestroyWindow(self.hwnd);
+            let _ = UnregisterClassW(w!("PerpendicularDisplayObserver"), Some(self.instance));
+        }
+    }
+}
+
+unsafe extern "system" fn display_window_proc(
+    hwnd: HWND,
+    message: u32,
+    wparam: WPARAM,
+    lparam: LPARAM,
+) -> LRESULT {
+    unsafe {
+        match message {
+            WM_NCCREATE => {
+                let create = &*(lparam.0 as *const CREATESTRUCTW);
+                SetWindowLongPtrW(hwnd, GWLP_USERDATA, create.lpCreateParams as isize);
+            }
+            WM_DISPLAYCHANGE | WM_SETTINGCHANGE => {
+                let state = GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *const Cell<Option<Instant>>;
+                if let Some(changed) = state.as_ref() {
+                    changed.set(Some(Instant::now()));
+                }
+            }
+            WM_NCDESTROY => {
+                SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0);
+            }
+            _ => {}
+        }
+        DefWindowProcW(hwnd, message, wparam, lparam)
+    }
+}
 
 fn text(value: &[u16]) -> String {
     String::from_utf16_lossy(&value[..value.iter().position(|v| *v == 0).unwrap_or(value.len())])
@@ -102,6 +211,15 @@ pub fn snapshot() -> Value {
             let dpi = GetDpiForMonitor(monitor, MDT_EFFECTIVE_DPI, &mut dpi_x, &mut dpi_y)
                 .ok()
                 .map(|_| dpi_x);
+            let mut info = MONITORINFO {
+                cbSize: size_of::<MONITORINFO>() as u32,
+                ..Default::default()
+            };
+            let work_area = GetMonitorInfoW(monitor, &mut info).as_bool().then(|| {
+                json!({"x":info.rcWork.left,"y":info.rcWork.top,
+                    "width":info.rcWork.right-info.rcWork.left,
+                    "height":info.rcWork.bottom-info.rcWork.top})
+            });
             let mut modes = BTreeSet::new();
             for mode_index in 0..512 {
                 let mut mode = DEVMODEW {
@@ -123,7 +241,8 @@ pub fn snapshot() -> Value {
             displays.push(json!({"device":text(&device.DeviceName),"adapter":text(&device.DeviceString),
                 "primary":device.StateFlags.contains(DISPLAY_DEVICE_PRIMARY_DEVICE),
                 "x":position.x,"y":position.y,"width":current.dmPelsWidth,"height":current.dmPelsHeight,
-                "dpi":dpi,"modes":modes.into_iter().map(|(w,h)|json!({"width":w,"height":h})).collect::<Vec<_>>()}));
+                "dpi":dpi,"workArea":work_area,
+                "modes":modes.into_iter().map(|(w,h)|json!({"width":w,"height":h})).collect::<Vec<_>>()}));
         }
     }
     // Enumerating monitors must not initialize a possibly unhealthy graphics
