@@ -1268,7 +1268,10 @@ impl Worker {
                     send(keyboard(key, !down))?;
                     if down {
                         self.pressed.insert(key);
-                        if ![0x10, 0x11, 0x12].contains(&key) {
+                        // Hosted text and virtual keys both use the ordered
+                        // SendInput queue. Keep the legacy Win32 pacing only:
+                        // its synchronous WM_CHAR path is a separate mechanism.
+                        if target.hosted.is_none() && ![0x10, 0x11, 0x12].contains(&key) {
                             std::thread::sleep(Duration::from_millis(16));
                         }
                     } else {

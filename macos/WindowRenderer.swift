@@ -2,6 +2,23 @@ import AppKit
 import Metal
 import QuartzCore
 
+// CAMetalLayer is not Sendable. This bridge transfers only its blocking
+// nextDrawable call to one serial queue. WindowRenderer keeps drawing=true
+// from acquisition through GPU completion, so it never changes layer
+// configuration while acquisition is pending. No view or frame state crosses
+// this boundary; the returned drawable is consumed on the MainActor.
+private final class DrawableAccess:@unchecked Sendable {
+    private let layer:CAMetalLayer
+    private let work=DispatchQueue(label:"perpendicular.drawable.acquire",qos:.userInteractive)
+    init(_ layer:CAMetalLayer){self.layer=layer}
+    func request(_ completed:@escaping @MainActor @Sendable ((any CAMetalDrawable)?)->Void){
+        work.async { [self] in
+            let drawable=autoreleasepool{layer.nextDrawable()}
+            Task { @MainActor in completed(drawable) }
+        }
+    }
+}
+
 /// Presents one window. The transport still supplies CPU BGRA pixels; this
 /// renderer does not turn that transport into a shared guest/host GPU surface.
 @MainActor
@@ -22,6 +39,10 @@ final class WindowRenderer {
     private var uploaded:UInt64=0
     private var drawing=false
     private var dirty=false
+    private var changes:UInt64=0
+    private var targetDrawableSize=CGSize.zero
+    private var targetScale=1.0
+    private lazy var drawableAccess=DrawableAccess(layer)
     private var reportedSources=Set<String>()
     var onError:((String)->Void)?
 
@@ -62,33 +83,60 @@ final class WindowRenderer {
     }
     func resize(_ bounds:NSSize,scale:Double){
         let next=CGSize(width:max(1,(bounds.width*scale).rounded()),height:max(1,(bounds.height*scale).rounded()))
-        guard layer.drawableSize != next || layer.contentsScale != scale else{return}
-        layer.contentsScale=scale;layer.drawableSize=next
+        guard targetDrawableSize != next || targetScale != scale else{return}
+        targetDrawableSize=next;targetScale=scale
+        changes &+= 1
         dirty=true;draw()
     }
     func present(_ pixels:Data,width:Int,height:Int,stride:Int?=nil){
         external=nil;shared=nil;nativeCache=false
         self.pixels=pixels;pixelStride=stride ?? width*4;size=NSSize(width:width,height:height)
-        revision &+= 1;dirty=true;draw()
+        revision &+= 1;changes &+= 1;dirty=true;draw()
     }
     func present(_ surface:GuestFrameSurface){
         guard surface.texture.device.registryID == device.registryID else{onError?("The graphics devices do not match.");return}
         external=nil;nativeCache=false;pixels=Data();texture=nil;shared=surface
         size=NSSize(width:surface.width,height:surface.height)
+        changes &+= 1
         dirty=true;draw()
     }
     func present(_ frame:NativeDisplayFrame){
         guard frame.texture.device.registryID == device.registryID else{onError?("The graphics devices do not match.");return}
         external=frame;shared=nil;pixels=Data();size=NSSize(width:frame.texture.width,height:frame.texture.height)
+        changes &+= 1
         dirty=true;draw()
     }
-    func clear(){external=nil;shared=nil;nativeCache=false;pixels=Data();size = .zero;texture=nil;dirty=false}
+    func clear(){changes &+= 1;external=nil;shared=nil;nativeCache=false;pixels=Data();size = .zero;texture=nil;dirty=false}
     func draw(){
-        // Keep only the latest CPU frame and one GPU reader. Reusing a texture
-        // waits for that reader's completion, including across resize/retirement.
+        // Acquisition and GPU work share one slot. New arrivals only replace
+        // the latest source while nextDrawable waits away from the main actor.
         guard dirty,!drawing,(shared != nil || external != nil || nativeCache || !pixels.isEmpty),size.width>0,size.height>0,
-              layer.drawableSize.width>0,layer.drawableSize.height>0 else{return}
+              targetDrawableSize.width>0,targetDrawableSize.height>0 else{return}
+        if layer.contentsScale != targetScale {layer.contentsScale=targetScale}
+        if layer.drawableSize != targetDrawableSize {layer.drawableSize=targetDrawableSize}
+        drawing=true
+        let requestedChange=changes
+        drawableAccess.request { [weak self] drawable in
+            guard let self else{return}
+            guard let drawable else{
+                self.drawing=false
+                // An event arriving during the wait would have retried after
+                // the old synchronous call. Retry only that newer state.
+                if self.dirty,self.changes != requestedChange {self.draw()}
+                return
+            }
+            self.render(drawable)
+        }
+    }
+    private func render(_ drawable:any CAMetalDrawable){
+        var submitted=false
+        defer{if !submitted {drawing=false}}
+        // clear/resize/new frames can run during acquisition. Select the source
+        // here, retaining only the image actually submitted to this GPU command.
+        guard dirty,(shared != nil || external != nil || nativeCache || !pixels.isEmpty),size.width>0,size.height>0,
+              targetDrawableSize.width>0,targetDrawableSize.height>0 else{return}
         let width=Int(size.width),height=Int(size.height)
+        let drawableSize=CGSize(width:drawable.texture.width,height:drawable.texture.height)
         let lease=external
         let frameSurface=shared
         let nativeSurface=lease != nil || nativeCache
@@ -106,7 +154,7 @@ final class WindowRenderer {
             guard let texture else{return}
             sampledTexture=texture
         }
-        guard let drawable=layer.nextDrawable(),let command=queue.makeCommandBuffer() else{return}
+        guard let command=queue.makeCommandBuffer() else{return}
         if let lease {
             // Keep an owned image for expose/resize. Holding the last producer
             // lease until its successor arrives deadlocks context retirement:
@@ -127,8 +175,8 @@ final class WindowRenderer {
         pass.colorAttachments[0].loadAction = .clear;pass.colorAttachments[0].storeAction = .store
         pass.colorAttachments[0].clearColor=MTLClearColorMake(0,0,0,0)
         guard let encoder=command.makeRenderCommandEncoder(descriptor:pass) else{return}
-        let fit=min(layer.drawableSize.width/size.width,layer.drawableSize.height/size.height)
-        var scale=SIMD2<Float>(Float(size.width*fit/layer.drawableSize.width),Float(size.height*fit/layer.drawableSize.height))
+        let fit=min(drawableSize.width/size.width,drawableSize.height/size.height)
+        var scale=SIMD2<Float>(Float(size.width*fit/drawableSize.width),Float(size.height*fit/drawableSize.height))
         encoder.setRenderPipelineState(pipeline)
         encoder.setVertexBytes(&scale,length:MemoryLayout<SIMD2<Float>>.size,index:0)
         encoder.setFragmentTexture(sampledTexture,index:0)
@@ -137,7 +185,7 @@ final class WindowRenderer {
         encoder.drawPrimitives(type:.triangle,vertexStart:0,vertexCount:6)
         encoder.endEncoding()
         if lease != nil {nativeCache=true;external=nil}
-        drawing=true;dirty=false
+        dirty=drawableSize != targetDrawableSize || layer.contentsScale != targetScale
         command.present(drawable)
         command.addCompletedHandler { [weak self,lease,frameSurface] buffer in
             // The producer image has been copied into our own texture and every
@@ -162,6 +210,6 @@ final class WindowRenderer {
                 if self.dirty {self.draw()}
             }
         }
-        command.commit()
+        submitted=true;command.commit()
     }
 }
