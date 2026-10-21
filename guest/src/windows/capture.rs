@@ -147,7 +147,7 @@ unsafe fn run(target: &Target, outbox: &Outbox, stop: &AtomicBool) -> Result<(),
                 let current = frame.ContentSize().map_err(error)?;
                 if current.Width <= 0
                     || current.Height <= 0
-                    || i64::from(current.Width) * i64::from(current.Height) > 4_194_304
+                    || i64::from(current.Width) * i64::from(current.Height) > 8_388_608
                 {
                     let _ = frame.Close();
                     return Err("Window exceeds the initial capture limit".into());

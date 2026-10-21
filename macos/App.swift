@@ -122,6 +122,15 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,ObservableObject {
             }
         }
         switch value["type"] as? String{
+        case "hello":
+            if let capabilities=value["capabilities"] as? [String:Any],capabilities["displayInfo"] as? Bool == true {
+                bridge.command("display_info",timeout:.seconds(3)){result in
+                    guard ProcessInfo.processInfo.environment["PERPENDICULAR_STATE_TRACE"] == "1",
+                          case .success(let reply)=result,let state=reply["value"] as? [String:Any] else{return}
+                    let value:[String:Any]=["type":"display_info","guest":state,"host":HostDisplay.current().map(\.description)]
+                    if let data=try? JSONSerialization.data(withJSONObject:value,options:[.sortedKeys]){try? FileHandle.standardError.write(contentsOf:data+Data([10]))}
+                }
+            }
         case "windows":
             guard let items=value["windows"] as? [[String:Any]],items.count<=16 else{return}
             let current=Set(items.compactMap{$0["id"] as? String})

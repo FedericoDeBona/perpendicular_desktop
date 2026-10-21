@@ -2,7 +2,7 @@
 
 ## Strumenti scelti
 
-- Swift e AppKit sul Mac: finestre, input e processi della VM attraverso le API native, senza un motore intermedio separato.
+- Swift, AppKit e Metal sul Mac: finestre, input, presentazione delle immagini e processi della VM attraverso le API native, senza un motore intermedio separato.
 - Rust ARM64 su Windows: un componente compilato per le API Win32, l'integrazione della sessione e la cattura delle finestre. Lo stesso linguaggio viene usato fin dal primo componente eseguibile.
 - QEMU con Hypervisor.framework, inizialmente con display standard e senza accelerazione 3D del guest. Il runtime è una dipendenza esterna; non viene importata l'applicazione del progetto precedente.
 - Una copia APFS indipendente della VM già installata evita di ripetere l'installazione dell'ISO. Le modifiche alle integrazioni vengono applicate alla copia.
@@ -13,7 +13,7 @@ Completare un percorso minimo con una finestra, input e riconnessione prima di a
 
 ## Percorso scelto
 
-La prima finestra funziona con Windows Graphics Capture, creata per un singolo HWND. Il dispositivo D3D11 usa esplicitamente WARP, quindi il percorso iniziale non richiede accelerazione 3D della VM. Si inviano soltanto i pixel dell'area client e le finestre secondarie riconosciute. Sul Mac AppKit presenta i contenuti e gestisce le finestre native.
+La prima finestra funziona con Windows Graphics Capture, creata per un singolo HWND. Il dispositivo D3D11 usa esplicitamente WARP, quindi il percorso iniziale non richiede accelerazione 3D della VM. Si inviano i pixel della superficie della finestra e delle finestre secondarie riconosciute. Sul Mac AppKit gestisce le finestre native e Metal presenta i contenuti.
 
 Questo è il percorso iniziale verificato su questa macchina; RemoteApp/RAIL/RDPEGFX rimangono alternative da provare su entrambe le estremità. Non è stata verificata una loro incompatibilità con Windows ARM. Fonti: [CreateForWindow](https://learn.microsoft.com/en-us/windows/win32/api/windows.graphics.capture.interop/nf-windows-graphics-capture-interop-igraphicscaptureiteminterop-createforwindow), [D3D11CreateDevice](https://learn.microsoft.com/en-us/windows/win32/api/d3d11/nf-d3d11-d3d11createdevice).
 
@@ -36,7 +36,7 @@ La sostituzione di un codec o del trasporto non richiede di riscrivere il catalo
 
 ## Limiti della base
 
-- Massimo quattro finestre principali/dialoghi e dodici superfici temporanee, circa quattro milioni di pixel per frame e frequenza limitata; pixel non compressi, nessuna prestazione generale dichiarata.
+- Massimo quattro finestre principali/dialoghi e dodici superfici temporanee, 8.388.608 pixel per frame e frequenza limitata; pixel non compressi, nessuna prestazione generale dichiarata. Il limite è sufficiente per una superficie 3840×2160, ma non prova che il driver guest offra quella modalità.
 - Catalogo AppsFolder senza icone specifiche e senza cache persistente. L'associazione iniziale delle app confezionate è semplice e può fallire esplicitamente.
 - Tastiera normale e scorciatoie principali; IME, compatibilità con altri tipi di popup, accessibilità remota, audio, appunti e condivisione file richiedono lavoro dedicato. Le app elevate e il desktop protetto si gestiscono dalla console Windows.
 - Il testo già composto sul Mac viene consegnato come messaggi UTF-16 al controllo Windows che possiede il focus, con un tempo massimo per la risposta. Mouse, tasti speciali e scorciatoie usano SendInput. Le prove con soli pacchetti Unicode e con traduzione attraverso il layout hanno riprodotto caratteri, maiuscole e lettere errati in Blocco note, anche introducendo una pausa; questo giustifica la separazione. I controlli che richiedono esclusivamente input hardware/Raw Input non sono coperti dalla prima verifica.
@@ -72,3 +72,17 @@ Il resize mostra un'anteprima locale e invia una richiesta esplicita soltanto al
 I rilasci di mouse e tastiera vengono processati prima di verificare identità della finestra e generazione dell'immagine, senza spostare il puntatore su coordinate obsolete. L'annullamento di un'interazione rilascia l'input e invia WM_CANCELMODE alla finestra interessata. Le superfici temporanee restano ancorate relativamente al contenuto; il loro proprietario non segue più i movimenti del guest sul desktop Mac.
 
 Tre controlli mirati della geometria sono in tests/WindowGeometryChecks.swift e si compilano insieme a macos/WindowGeometry.swift con swiftc. Le prove interattive e i limiti osservati restano in VERIFICATION.md.
+
+## Presentazione Metal e rilevamento dei monitor
+
+`WindowRenderer.swift` presenta ogni superficie tramite CAMetalLayer. La texture BGRA viene riutilizzata soltanto dopo il completamento del lettore GPU; durante l'attesa rimane unicamente il frame CPU più recente. Ridimensionamento e cambi di scala aggiornano il drawable usando i pixel di backing del monitor Mac. La creazione di CGImage avviene soltanto per diagnostica o recupero in caso di indisponibilità di Metal, non per ogni frame del percorso ordinario. Un errore Metal viene riportato al frontend.
+
+Il trasporto resta CPU BGRA: staging/readback Windows, invio TCP e caricamento nella texture Mac. Non è zero-copy e la cattura guest resta WARP. Il ricevitore accumula i blocchi nel medesimo buffer, evitando di ricopiare i blocchi precedenti a ogni lettura. Non sono ancora misurati guadagni di latenza o throughput.
+
+`display_info` legge in Rust monitor attivi, modalità esposte, coordinate, DPI e adapter Direct3D. `HostDisplay` conserva separatamente punti e pixel dei monitor Mac; con `PERPENDICULAR_STATE_TRACE=1` il confronto host/guest e il primo completamento GPU Metal vengono scritti nella diagnostica privata. La lettura non cambia risoluzione, scala o driver. Microsoft Basic Render Driver viene riconosciuto anche tramite gli ID `1414:008C`: può riuscire una richiesta D3D HARDWARE senza che il flag SOFTWARE sia impostato. [Descrizione Microsoft](https://learn.microsoft.com/en-us/windows/win32/direct3ddxgi/d3d10-graphics-programming-guide-dxgi).
+
+## Preparazione del runtime grafico di riferimento
+
+`scripts/prepare-native-graphics.py SOURCE OUTPUT [--qemu ORIGINAL_QEMU]` prepara solo gli artefatti Native3D in una nuova cartella privata. Verifica versioni del protocollo e hash di tutti i file prima della copia e conserva licenze, patch e metadati da `ThirdPartyNotices/Native3D`. L'eventuale QEMU alternativo deve coincidere esattamente con l'hash del manifest: non permette di mescolare build arbitrarie. Non importa la vecchia app, agenti, sharing o configurazioni della VM.
+
+Il runtime preparato non viene ancora selezionato dalla VM e richiederà le risorse QEMU/firmware del pacchetto attraverso `-L`. Prima di sostituire driver o runtime restano da predisporre il rollback offline della VM, l'avvio del backend e il recupero del desktop. La verifica dei file non dimostra da sola accelerazione Windows, cattura per finestra o supporto a più monitor.

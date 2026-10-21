@@ -6,6 +6,14 @@ struct GuestPacket: @unchecked Sendable {
     let pixels: Data
 }
 
+// Owned by one connection's serial receive queue. Keeping the accumulator in
+// this reference avoids copying all preceding chunks on every recursive read.
+private final class GuestReadBuffer:@unchecked Sendable {
+    let count:Int
+    var bytes=Data()
+    init(_ count:Int){self.count=count;bytes.reserveCapacity(count)}
+}
+
 final class GuestConnection: @unchecked Sendable {
     let id = UUID()
     private let connection: NWConnection
@@ -44,13 +52,17 @@ final class GuestConnection: @unchecked Sendable {
             if error != nil { self?.connection.cancel() }
         })
     }
-    private func read(_ count: Int, collected: Data = Data(), completion: @escaping @Sendable (Data) -> Void) {
-        connection.receive(minimumIncompleteLength: min(count,65536), maximumLength: min(count,65536)) { [weak self] data, _, complete, error in
+    private func read(_ count:Int,completion:@escaping @Sendable (Data)->Void){
+        read(GuestReadBuffer(count),completion:completion)
+    }
+    private func read(_ buffer:GuestReadBuffer,completion:@escaping @Sendable (Data)->Void){
+        let remaining=buffer.count-buffer.bytes.count
+        connection.receive(minimumIncompleteLength:min(remaining,65536),maximumLength:min(remaining,65536)) { [weak self] data, _, complete, error in
             guard let self else { return }
-            guard error == nil, let data, !data.isEmpty else { self.connection.cancel(); return }
-            var bytes = collected; bytes.append(data)
-            if data.count == count { completion(bytes) }
-            else if !complete { self.read(count-data.count,collected:bytes,completion:completion) }
+            guard error == nil,let data,!data.isEmpty,data.count<=remaining else { self.connection.cancel(); return }
+            buffer.bytes.append(data)
+            if buffer.bytes.count == buffer.count {completion(buffer.bytes)}
+            else if !complete {self.read(buffer,completion:completion)}
             else { self.connection.cancel() }
         }
     }
@@ -65,7 +77,7 @@ final class GuestConnection: @unchecked Sendable {
                 let packet = GuestPacket(header:object,pixels:Data())
                 if kind == "frame" {
                     guard let width=object["width"] as? Int, let height=object["height"] as? Int,
-                          width>0, height>0, width<=4_194_304/height,
+                          width>0, height>0, width<=8_388_608/height,
                           object["bytes"] as? Int == width*height*4,
                           let window=object["window"] as? String, window.utf8.count<192 else {
                         self.connection.cancel(); return

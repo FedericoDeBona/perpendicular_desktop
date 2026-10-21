@@ -2,7 +2,7 @@ use super::{
     Configuration,
     capture::{self, Target},
     catalogue::{self, Catalogue},
-    error, identity, window_control,
+    display, error, identity, window_control,
     wire::{self, Outbox},
 };
 use serde_json::{Value, json};
@@ -131,7 +131,7 @@ impl Worker {
         outbox.control(
             json!({"type":"hello","protocol":1,"token":config.token,"epoch":self.epoch,
             "sid":self.sid,"session":self.session,"version":env!("CARGO_PKG_VERSION"),
-            "capabilities":{"capture":"software","windows":4,"transients":12,"windowRoles":true,"input":true,"catalogue":true}}),
+            "capabilities":{"capture":"software","windows":4,"transients":12,"windowRoles":true,"input":true,"catalogue":true,"displayInfo":true}}),
         );
         let (sender, receiver) = mpsc::sync_channel(128);
         let state = outbox.clone();
@@ -231,6 +231,7 @@ impl Worker {
             }
         }
         match value["operation"].as_str().ok_or("Missing operation")? {
+            "display_info" => Ok(display::snapshot()),
             "catalogue" => Ok(self.catalogue.refresh()?),
             "launch" => {
                 let app = value["app"].as_str().ok_or("Missing app identity")?;

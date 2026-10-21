@@ -1,5 +1,6 @@
 mod capture;
 mod catalogue;
+mod display;
 mod identity;
 mod service;
 mod window_control;

@@ -8,7 +8,15 @@ final class ApplicationContent:NSView {
     var suspendedPointer=false
     var leftMouse:((NSEvent,[String:Any])->Void)?
     private(set) var generation:UInt64=0
-    private(set) var currentImage:CGImage?
+    private var renderer:WindowRenderer?
+    private var latestPixels=Data()
+    private(set) var renderFailure:String?
+    var currentImage:CGImage? {
+        guard source.width>0,source.height>0,let provider=CGDataProvider(data:latestPixels as CFData) else{return nil}
+        return CGImage(width:Int(source.width),height:Int(source.height),bitsPerComponent:8,bitsPerPixel:32,bytesPerRow:Int(source.width)*4,
+            space:CGColorSpaceCreateDeviceRGB(),bitmapInfo:[.byteOrder32Little,CGBitmapInfo(rawValue:CGImageAlphaInfo.premultipliedFirst.rawValue)],
+            provider:provider,decode:nil,shouldInterpolate:true,intent:.defaultIntent)
+    }
     private var source=NSSize.zero
     private var modifiers:Set<Int>=[]
     private var virtualKeys:Set<UInt16>=[]
@@ -28,11 +36,21 @@ final class ApplicationContent:NSView {
 
     override init(frame:NSRect) {
         super.init(frame:frame);wantsLayer=true
-        layer?.backgroundColor=NSColor.clear.cgColor
-        layer?.contentsGravity = .resizeAspect
-        layer?.minificationFilter = .linear;layer?.magnificationFilter = .linear
+        do {
+            let renderer=try WindowRenderer();self.renderer=renderer;layer=renderer.layer
+            renderer.onError={ [weak self] message in self?.renderFailure=message }
+        }catch {
+            renderFailure="Metal is unavailable: \(error.localizedDescription)"
+            layer?.backgroundColor=NSColor.clear.cgColor;layer?.contentsGravity = .resizeAspect
+            layer?.minificationFilter = .linear;layer?.magnificationFilter = .linear
+        }
+        updateRendererSize()
     }
     required init?(coder:NSCoder){fatalError("init(coder:) has not been implemented")}
+    override func setFrameSize(_ newSize:NSSize){super.setFrameSize(newSize);updateRendererSize()}
+    override func viewDidMoveToWindow(){super.viewDidMoveToWindow();updateRendererSize()}
+    override func viewDidChangeBackingProperties(){super.viewDidChangeBackingProperties();updateRendererSize()}
+    private func updateRendererSize(){renderer?.resize(bounds.size,scale:Double(window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 1))}
     override func updateTrackingAreas(){
         if let tracking{removeTrackingArea(tracking)}
         let area=NSTrackingArea(rect:.zero,options:[.mouseMoved,.mouseEnteredAndExited,.activeAlways,.inVisibleRect],owner:self)
@@ -41,13 +59,10 @@ final class ApplicationContent:NSView {
     func present(_ packet:GuestPacket){
         guard let width=packet.header["width"] as? Int,let height=packet.header["height"] as? Int,
               let generation=packet.header["generation"] as? UInt64,
-              width>0,height>0,width<=4_194_304/height,packet.pixels.count==width*height*4,
-              let provider=CGDataProvider(data:packet.pixels as CFData),
-              let image=CGImage(width:width,height:height,bitsPerComponent:8,bitsPerPixel:32,bytesPerRow:width*4,
-                space:CGColorSpaceCreateDeviceRGB(),bitmapInfo:[.byteOrder32Little,CGBitmapInfo(rawValue:CGImageAlphaInfo.premultipliedFirst.rawValue)],
-                provider:provider,decode:nil,shouldInterpolate:true,intent:.defaultIntent)else{return}
-        self.generation=generation;source=NSSize(width:width,height:height);currentImage=image
-        CATransaction.begin();CATransaction.setDisableActions(true);layer?.contents=image;CATransaction.commit()
+              width>0,height>0,width<=8_388_608/height,packet.pixels.count==width*height*4 else{return}
+        self.generation=generation;source=NSSize(width:width,height:height);latestPixels=packet.pixels
+        if let renderer {renderer.present(packet.pixels,width:width,height:height)}
+        else {CATransaction.begin();CATransaction.setDisableActions(true);layer?.contents=currentImage;CATransaction.commit()}
     }
     private func point(_ event:NSEvent)->[String:Any]?{
         guard source.width>0,source.height>0 else{return nil}

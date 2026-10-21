@@ -157,6 +157,7 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
         if first {pixelScale=min(1,min(1100/Double(width),800/Double(height)))}
         let changed=nextSize != frameSize
         frameSize=nextSize;content.present(packet)
+        if let failure=content.renderFailure {onError?(failure)}
         if let expectedSize,expectedSize == nextSize {finishResize()}
         else if changed && !role.transient && !nativeResizing && self.expectedSize == nil {applyFrameSize()}
         onGeometry?()
