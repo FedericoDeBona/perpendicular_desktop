@@ -10,7 +10,7 @@
  * http://www.apache.org/licenses/LICENSE-2.0
  * Distributed WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND.
  *
- * Invocation: display-probe PORT WIDTH HEIGHT SCALE
+ * Invocation: display-probe PORT WIDTH HEIGHT SCALE [--allow-empty-password]
  * stdin must be a pipe containing three newline-terminated UTF-8 records:
  * username, password, then exactly 64 hexadecimal SHA256 certificate digits.
  * Feed that pipe from an in-memory credential source, never shell arguments,
@@ -37,6 +37,7 @@
 #include <freerdp/client/channels.h>
 #include <freerdp/client/cmdline.h>
 #include <freerdp/client/disp.h>
+#include <freerdp/channels/drdynvc.h>
 #include <freerdp/event.h>
 #include <freerdp/freerdp.h>
 #include <freerdp/gdi/gdi.h>
@@ -49,6 +50,7 @@ typedef struct {
     UINT32 port, width, height, scale;
     BYTE pin[32];
     BOOL pin_ready, pinned, gdi_ready, subscribed;
+    BOOL allow_empty_password, empty_password_submitted;
     pthread_mutex_t lock;
     DispClientContext* disp;
     UINT32 max_monitors, area_a, area_b;
@@ -67,7 +69,17 @@ static BOOL deny_redirect(freerdp* instance) {
 
 static BOOL deny_auth_retry(freerdp* instance, char** username, char** password,
                             char** domain, rdp_auth_reason reason) {
-    (void)instance; (void)username; (void)password; (void)domain; (void)reason;
+    Probe* p = state(instance);
+    (void)domain;
+    /* FreeRDP asks once even when an explicitly supplied password is empty.
+       Allow exactly that initial NLA submission, without changing server policy. */
+    if (p->allow_empty_password && !p->empty_password_submitted && p->pinned &&
+        reason == AUTH_NLA && username && *username && **username &&
+        password && *password && !**password) {
+        p->empty_password_submitted = TRUE;
+        puts("state=empty-password-submitted-once");
+        return TRUE;
+    }
     puts("state=credential-retry-rejected");
     return FALSE;
 }
@@ -138,6 +150,7 @@ static BOOL pre_connect(freerdp* instance) {
         return FALSE;
     }
     p->subscribed = TRUE;
+    puts("state=client-preconnect-ready");
     return TRUE;
 }
 
@@ -171,7 +184,22 @@ static void post_disconnect(freerdp* instance) {
 }
 
 static BOOL load_channels(freerdp* instance) {
-    return freerdp_client_load_addins(instance->context->channels, instance->context->settings);
+    /* Load only the display DVC, with no default audio/device channels. */
+    const char* args[] = { DISP_DVC_CHANNEL_NAME };
+    rdpSettings* settings = instance->context->settings;
+    if (!freerdp_dynamic_channel_collection_find(settings, DISP_DVC_CHANNEL_NAME) &&
+        !freerdp_client_add_dynamic_channel(settings, 1, args)) return FALSE;
+    if (!freerdp_settings_set_bool(settings, FreeRDP_SupportDynamicChannels, TRUE)) return FALSE;
+    PVIRTUALCHANNELENTRY entry = freerdp_channels_load_static_addin_entry(
+        DRDYNVC_SVC_CHANNEL_NAME, NULL, NULL,
+        FREERDP_ADDIN_CHANNEL_STATIC | FREERDP_ADDIN_CHANNEL_ENTRYEX);
+    if (!entry) { puts("state=display-channel-entry-missing"); return FALSE; }
+    UINT rc = freerdp_channels_client_load_ex(instance->context->channels, settings,
+        WINPR_FUNC_PTR_CAST(entry, PVIRTUALCHANNELENTRYEX), settings);
+    BOOL ok = rc == CHANNEL_RC_OK;
+    if (!ok) printf("state=display-channel-load-failed code=0x%08" PRIx32 "\n", rc);
+    puts(ok ? "state=client-channels-ready" : "state=client-channels-failed");
+    return ok;
 }
 
 static BOOL configure(freerdp* instance) {
@@ -249,7 +277,7 @@ static void* deadline_worker(void* arg) {
     return NULL;
 }
 
-static BOOL pipe_line(char* out, size_t size, UINT64 deadline) {
+static BOOL pipe_line(char* out, size_t size, UINT64 deadline, BOOL allow_empty) {
     size_t used = 0;
     while (used+1 < size) {
         UINT64 now = GetTickCount64();
@@ -262,7 +290,7 @@ static BOOL pipe_line(char* out, size_t size, UINT64 deadline) {
         ssize_t n = read(STDIN_FILENO, &ch, 1);
         if (n < 0 && errno == EINTR) continue;
         if (n != 1 || !ch || ch == '\r') return FALSE;
-        if (ch == '\n') { out[used] = 0; return used != 0; }
+        if (ch == '\n') { out[used] = 0; return used != 0 || allow_empty; }
         out[used++] = (char)ch;
     }
     return FALSE;
@@ -278,8 +306,9 @@ static BOOL read_secrets(Probe* p) {
         puts("state=stdin-pipe-required"); goto done;
     }
     UINT64 deadline = GetTickCount64()+5000;
-    if (!pipe_line(user, sizeof(user), deadline) || !pipe_line(password, sizeof(password), deadline) ||
-        !pipe_line(hex, sizeof(hex), deadline) || strlen(hex) != 64) goto done;
+    if (!pipe_line(user, sizeof(user), deadline, FALSE) ||
+        !pipe_line(password, sizeof(password), deadline, p->allow_empty_password) ||
+        !pipe_line(hex, sizeof(hex), deadline, FALSE) || strlen(hex) != 64) goto done;
     for (size_t i=0; i<32; i++) {
         int digits[2];
         for (int j=0; j<2; j++) {
@@ -316,11 +345,12 @@ static BOOL number(const char* s, UINT32 min, UINT32 max, UINT32* out) {
 
 int main(int argc, char** argv) {
     const BOOL self_check = argc == 2 && !strcmp(argv[1], "--self-check");
+    const BOOL allow_empty = argc == 6 && !strcmp(argv[5], "--allow-empty-password");
     UINT32 port=13389, width=1920, height=1080, scale=200;
-    if (!self_check && (argc != 5 || !number(argv[1], 1, 65535, &port) ||
+    if (!self_check && ((argc != 5 && !allow_empty) || !number(argv[1], 1, 65535, &port) ||
         !number(argv[2], 200, 8192, &width) || width%2 ||
         !number(argv[3], 200, 8192, &height) || !number(argv[4], 100, 500, &scale))) {
-        fputs("Usage: display-probe --self-check | PORT WIDTH HEIGHT SCALE\n", stderr); return 2;
+        fputs("Usage: display-probe --self-check | PORT WIDTH HEIGHT SCALE [--allow-empty-password]\n", stderr); return 2;
     }
     struct rlimit no_core = {0, 0};
     if (setrlimit(RLIMIT_CORE, &no_core)) return 2;
@@ -334,6 +364,7 @@ int main(int argc, char** argv) {
     if (!freerdp_context_new(instance)) { freerdp_free(instance); return 1; }
     Probe* p = state(instance);
     p->port=port; p->width=width; p->height=height; p->scale=scale;
+    p->allow_empty_password=allow_empty;
     atomic_init(&p->timed_out, false);
     if (pthread_mutex_init(&p->lock, NULL)) { freerdp_context_free(instance); freerdp_free(instance); return 1; }
     int result = 1;
