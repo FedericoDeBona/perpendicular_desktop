@@ -123,8 +123,9 @@ final class WindowRenderer {
         drawing=true;dirty=false
         command.present(drawable)
         command.addCompletedHandler { [weak self,lease] buffer in
-            // Retain the producer's immutable frame until this actual GPU read.
-            withExtendedLifetime(lease){}
+            // The producer image has been copied into our own texture and every
+            // GPU read is complete. Do not wait for Metal to release this block.
+            lease?.finishReading()
             let failed=buffer.status == .error
             let message=buffer.error?.localizedDescription
             Task{@MainActor [weak self] in

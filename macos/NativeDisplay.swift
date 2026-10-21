@@ -12,15 +12,22 @@ struct NativeDisplayEndpoint:Codable,Sendable {
 }
 
 /// The mapping and producer identity outlive every Metal command that reads it.
-/// Dropping the final reference, not disconnecting the socket, retires a frame.
+/// Complete the read explicitly; an undrawn frame also retires when dropped.
 final class NativeDisplayFrame:@unchecked Sendable {
     let texture:any MTLTexture
     private let backing:any MTLBuffer
-    private let retired:@Sendable ()->Void
+    private let retirementLock=NSLock()
+    private var retirement:(@Sendable ()->Void)?
     init(texture:any MTLTexture,backing:any MTLBuffer,retired:@escaping @Sendable ()->Void){
-        self.texture=texture;self.backing=backing;self.retired=retired
+        self.texture=texture;self.backing=backing;self.retirement=retired
     }
-    deinit {retired()}
+    /// Call only after the last GPU read. Metal may retain a completed command's
+    /// handler, so object deallocation is not a timely producer acknowledgement.
+    func finishReading(){
+        retirementLock.lock();let callback=retirement;retirement=nil;retirementLock.unlock()
+        callback?()
+    }
+    deinit {finishReading()}
 }
 
 /// One queue, one connection lifetime and at most two outstanding frames.
