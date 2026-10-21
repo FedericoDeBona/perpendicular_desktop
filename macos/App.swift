@@ -15,6 +15,8 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
     private var launcher:NSWindow!
     private var machine:VirtualMachineController!
     private var bridge:GuestBridge!
+    private var localControl:MacLocalControl?
+    private var guestCapabilities:[String:Bool]=[:]
     private var windows:[String:ApplicationWindow]=[:]
     private var earlyFrames:[String:GuestPacket]=[:]
     private var layoutInProgress=false
@@ -25,6 +27,7 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
     private var displayRevision=0
     private var displayReadable=false
     private var displayConfigurable=false
+    private var sharedGeometryCapable=false
     private var displayReadTask:Task<Void,Never>?
     private var sharedDisplay:SharedDisplay?
     private var recoveryItem:NSMenuItem!
@@ -42,7 +45,8 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
             bridge.onConnection={ [weak self] value in
                 guard let self else{return};self.connected=value;self.status=value ? "Windows connected":"Reconnecting to Windows…"
                 if !value {
-                    self.displayEpoch=nil;self.displayReadable=false;self.displayConfigurable=false
+                    self.guestCapabilities=[:]
+                    self.displayEpoch=nil;self.displayReadable=false;self.displayConfigurable=false;self.sharedGeometryCapable=false
                     self.displaySetupTask?.cancel();self.displaySetupTask=nil
                     self.displaySetupID=UUID()
                     self.displayReadTask?.cancel();self.displayReadTask=nil
@@ -63,6 +67,14 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
                 }
             }
             bridge.onPacket={ [weak self] packet in self?.receive(packet) }
+            do {
+                localControl=try MacLocalControl(directory:directory.appendingPathComponent("Control")){[weak self] data,reply in
+                    guard let self else{return}
+                    self.localControlRequest(data,reply:reply)
+                }
+            }catch{
+                try? FileHandle.standardError.write(contentsOf:Data(("Local control unavailable: "+error.localizedDescription+"\n").utf8))
+            }
             if !machine.isRunning{try machine.start()}
         }catch{status=error.localizedDescription}
         launcher=NSWindow(contentRect:NSRect(x:200,y:160,width:560,height:620),styleMask:[.titled,.closable,.resizable,.miniaturizable],backing:.buffered,defer:false)
@@ -105,9 +117,94 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
     func applicationShouldHandleReopen(_ sender:NSApplication,hasVisibleWindows flag:Bool)->Bool{showApplications();return false}
     @objc func showApplications(){launcher.makeKeyAndOrderFront(nil);NSApp.activate(ignoringOtherApps:true)}
     @objc func closeCurrentWindow(){(NSApp.keyWindow ?? NSApp.mainWindow)?.performClose(nil)}
-    func applicationWillTerminate(_ notification:Notification){bridge?.command("release");machine?.closeDesktop()}
+    func applicationWillTerminate(_ notification:Notification){localControl?.stop();bridge?.command("release");machine?.closeDesktop()}
     @objc func showWindows(){do{try machine.showDesktop()}catch{status=error.localizedDescription}}
     @objc func shutdownWindows(){do{try machine.shutdown()}catch{status=error.localizedDescription}}
+
+    private func localResponse(_ value:[String:Any],reply:MacLocalControl.Reply){
+        let data=(try? JSONSerialization.data(withJSONObject:value,options:[.sortedKeys])) ?? Data("{\"ok\":false,\"error\":\"Response could not be encoded.\"}".utf8)
+        reply(data)
+    }
+    private func localBridgeResponse(_ result:Result<[String:Any],Error>,reply:MacLocalControl.Reply){
+        switch result {
+        case .success(let value):localResponse(["ok":true,"result":value["value"] ?? [:]],reply:reply)
+        case .failure(let error):localResponse(["ok":false,"error":error.localizedDescription],reply:reply)
+        }
+    }
+    private func localControlRequest(_ data:Data,reply:@escaping MacLocalControl.Reply){
+        guard let request=try? JSONSerialization.jsonObject(with:data) as? [String:Any],
+              let command=request["command"] as? String else {
+            localResponse(["ok":false,"error":"Expected a JSON command."],reply:reply);return
+        }
+        let allowed:Set<String>=["status","execute","display_info","driver_info","graphics_info","geometry_snapshot"]
+        guard allowed.contains(command) else {
+            localResponse(["ok":false,"error":"This local command is not supported."],reply:reply);return
+        }
+        let fields:Set<String>=command == "execute" ? ["command","executable","args","timeoutSeconds"]:["command"]
+        guard Set(request.keys).isSubset(of:fields) else {
+            localResponse(["ok":false,"error":"Unexpected command fields."],reply:reply);return
+        }
+        if command == "status" {
+            localResponse(["ok":true,"result":["connected":connected,"machineRunning":machine?.isRunning ?? false,
+                "status":status,"displayStatus":displayStatus,"primaryMatchesHost":sharedDisplay != nil,
+                "windowCount":windows.count,"capabilities":guestCapabilities]],reply:reply);return
+        }
+        guard connected,let bridge else {
+            localResponse(["ok":false,"error":"Windows is not connected."],reply:reply);return
+        }
+        if command == "execute" {
+            guard guestCapabilities["execute"] == true else {
+                localResponse(["ok":false,"error":"The connected guest does not support execute."],reply:reply);return
+            }
+            let seconds=request["timeoutSeconds"] as? Int ?? 15
+            guard let executable=request["executable"] as? String,!executable.isEmpty,!executable.contains("\0"),
+                  let args=request["args"] as? [String],args.allSatisfy({!$0.contains("\0")}),
+                  (1...60).contains(seconds) else {
+                localResponse(["ok":false,"error":"Expected executable, string args and timeoutSeconds from 1 to 60."],reply:reply);return
+            }
+            let values:[String:Any]=["executable":executable,"args":args,"timeoutSeconds":seconds]
+            guard let encoded=try? JSONSerialization.data(withJSONObject:values),encoded.count<=15_000 else {
+                localResponse(["ok":false,"error":"Execute arguments exceed the guest protocol limit."],reply:reply);return
+            }
+            bridge.command("execute",values,timeout:.seconds(seconds+5)){[weak self] result in
+                self?.localBridgeResponse(result,reply:reply)
+            }
+            return
+        }
+        if command == "geometry_snapshot" {
+            localGeometrySnapshot(Array(windows.keys.sorted())[...],rows:[],epoch:displayEpoch,reply:reply);return
+        }
+        let capabilities=["display_info":"displayInfo","driver_info":"driverInfo","graphics_info":"graphicsInfo"]
+        guard let capability=capabilities[command],guestCapabilities[capability] == true else {
+            localResponse(["ok":false,"error":"The connected guest does not support this query."],reply:reply);return
+        }
+        bridge.command(command,timeout:.seconds(command == "driver_info" ? 35:6)){[weak self] result in
+            self?.localBridgeResponse(result,reply:reply)
+        }
+    }
+    private func localGeometrySnapshot(_ ids:ArraySlice<String>,rows:[[String:Any]],epoch:String?,reply:@escaping MacLocalControl.Reply){
+        guard connected,displayEpoch == epoch else {
+            localResponse(["ok":false,"error":"Windows reconnected while reading geometry."],reply:reply);return
+        }
+        guard let id=ids.first else {
+            localResponse(["ok":true,"result":["windows":rows,"primaryMatchesHost":sharedDisplay != nil]],reply:reply);return
+        }
+        guard let controller=windows[id] else {
+            localGeometrySnapshot(ids.dropFirst(),rows:rows,epoch:epoch,reply:reply);return
+        }
+        let frame=controller.window.frame
+        let row:[String:Any]=["id":id,"title":controller.window.title,"role":controller.role.rawValue,
+            "macFramePoints":["x":frame.minX,"y":frame.minY,"width":frame.width,"height":frame.height]]
+        bridge.command("geometry",["window":id],timeout:.seconds(2)){[weak self] result in
+            guard let self else{return}
+            var item=row
+            switch result {
+            case .success(let value):item["guest"]=value["value"] ?? [:]
+            case .failure(let error):item["error"]=error.localizedDescription
+            }
+            self.localGeometrySnapshot(ids.dropFirst(),rows:rows+[item],epoch:epoch,reply:reply)
+        }
+    }
     @objc private func toggleRecoveryDisplay(){
         guard let previous=machine,!restarting else{return}
         let enabled=previous.configuration.recoveryDisplay != true
@@ -187,6 +284,7 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
     }
     private func invalidateDisplay(_ message:String){
         displayRevision+=1;sharedDisplay=nil;displayStatus=message
+        for window in windows.values {window.setSharedDisplay(nil)}
     }
     @objc private func hostDisplaysChanged(){
         displaySetupTask?.cancel();displaySetupTask=nil
@@ -209,15 +307,17 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
         bridge.command("display_info",timeout:.seconds(5)){[weak self] result in
             guard let self,self.connected,self.displayEpoch == epoch,self.displayRevision == revision else{return}
             guard case .success(let reply)=result,let snapshot=reply["value"] as? [String:Any] else{
-                self.sharedDisplay=nil;self.displayStatus="Windows display could not be checked.";return
+                self.invalidateDisplay("Windows display could not be checked.");return
             }
             self.acceptDisplay(snapshot)
         }
     }
     private func acceptDisplay(_ snapshot:[String:Any]){
         let host=HostDisplay.current()
-        sharedDisplay=host.first(where:\.primary).flatMap{SharedDisplay.primary(host:$0,snapshot:snapshot)}
-        if sharedDisplay != nil {displayStatus="Primary Windows display matches this Mac."}
+        let confirmed=host.first(where:\.primary).flatMap{SharedDisplay.primary(host:$0,snapshot:snapshot)}
+        sharedDisplay=sharedGeometryCapable ? confirmed:nil
+        for window in windows.values {window.setSharedDisplay(sharedDisplay)}
+        if confirmed != nil {displayStatus="Primary Windows display matches this Mac."}
         else if let primary=(snapshot["displays"] as? [[String:Any]])?.first(where:{$0["primary"] as? Bool == true}),
                 let width=primary["width"] as? Int,let height=primary["height"] as? Int,
                 let dpi=primary["dpi"] as? Int {
@@ -272,25 +372,38 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
             displayEpoch=value["epoch"] as? String
             invalidateDisplay("Checking Windows display…")
             let capabilities=value["capabilities"] as? [String:Any] ?? [:]
+            guestCapabilities=Dictionary(uniqueKeysWithValues:["execute","displayInfo","driverInfo","graphicsInfo","sharedGeometry"].map{($0,capabilities[$0] as? Bool == true)})
             displayReadable=capabilities["displayInfo"] as? Bool == true
             displayConfigurable=capabilities["displayConfigure"] as? Bool == true
+            sharedGeometryCapable=capabilities["sharedGeometry"] as? Bool == true
             readDisplay()
             prepareDisplay()
-            if ProcessInfo.processInfo.environment["PERPENDICULAR_STATE_TRACE"] == "1",
-               let capabilities=value["capabilities"] as? [String:Any],capabilities["driverInfo"] as? Bool == true {
-                bridge.command("driver_info",timeout:.seconds(30)){result in
-                    guard case .success(let reply)=result else{return}
-                    if let data=try? JSONSerialization.data(withJSONObject:["type":"driver_info","guest":reply["value"] ?? [:]],options:[.sortedKeys]) {
-                        try? FileHandle.standardError.write(contentsOf:data+Data([10]))
+            if ProcessInfo.processInfo.environment["PERPENDICULAR_STATE_TRACE"] == "1" {
+                let epoch=displayEpoch
+                if capabilities["driverInfo"] as? Bool == true {
+                    bridge.command("driver_info",timeout:.seconds(30)){[weak self] result in
+                        guard let self,self.connected,self.displayEpoch == epoch,
+                              case .success(let reply)=result else{return}
+                        if let data=try? JSONSerialization.data(withJSONObject:["type":"driver_info","guest":reply["value"] ?? [:]],options:[.sortedKeys]) {
+                            try? FileHandle.standardError.write(contentsOf:data+Data([10]))
+                        }
+                        // Older guests serialize both diagnostic operations.
+                        guard capabilities["graphicsInfo"] as? Bool == true else{return}
+                        self.bridge.command("graphics_info",timeout:.seconds(3)){[weak self] result in
+                            guard let self,self.connected,self.displayEpoch == epoch,
+                                  case .success(let reply)=result else{return}
+                            if let data=try? JSONSerialization.data(withJSONObject:["type":"graphics_info","guest":reply["value"] ?? [:]],options:[.sortedKeys]) {
+                                try? FileHandle.standardError.write(contentsOf:data+Data([10]))
+                            }
+                        }
                     }
-                }
-            }
-            if ProcessInfo.processInfo.environment["PERPENDICULAR_STATE_TRACE"] == "1",
-               let capabilities=value["capabilities"] as? [String:Any],capabilities["graphicsInfo"] as? Bool == true {
-                bridge.command("graphics_info",timeout:.seconds(3)){result in
-                    guard case .success(let reply)=result else{return}
-                    if let data=try? JSONSerialization.data(withJSONObject:["type":"graphics_info","guest":reply["value"] ?? [:]],options:[.sortedKeys]) {
-                        try? FileHandle.standardError.write(contentsOf:data+Data([10]))
+                }else if capabilities["graphicsInfo"] as? Bool == true {
+                    bridge.command("graphics_info",timeout:.seconds(3)){[weak self] result in
+                        guard let self,self.connected,self.displayEpoch == epoch,
+                              case .success(let reply)=result else{return}
+                        if let data=try? JSONSerialization.data(withJSONObject:["type":"graphics_info","guest":reply["value"] ?? [:]],options:[.sortedKeys]) {
+                            try? FileHandle.standardError.write(contentsOf:data+Data([10]))
+                        }
                     }
                 }
             }
@@ -316,6 +429,7 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
                     controller.onClose={ [weak self] in self?.windows.removeValue(forKey:id) }
                     controller.onGeometry={ [weak self] in self?.layoutChildren() }
                     controller.onPointerExit={ [weak self] in self?.pointerExited(id) }
+                    controller.setSharedDisplay(sharedDisplay)
                     windows[id]=controller
                 }
                 windows[id]?.update(item)

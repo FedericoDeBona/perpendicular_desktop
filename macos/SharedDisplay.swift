@@ -3,7 +3,7 @@ import CoreFoundation
 
 /// A confirmed mapping of the primary guest monitor to the primary Mac display.
 /// Windows rectangles use a top-left origin; AppKit rectangles use a bottom-left origin.
-struct SharedDisplay {
+struct SharedDisplay:Equatable {
     let pixelScale: CGFloat // Mac points per guest pixel.
     let guestFrame: NSRect
     let hostFrame: NSRect

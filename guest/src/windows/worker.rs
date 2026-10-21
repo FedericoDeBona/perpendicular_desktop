@@ -2,7 +2,7 @@ use super::{
     Configuration,
     capture::{self, Target},
     catalogue::{self, Catalogue},
-    display, error, identity, window_control,
+    display, error, execute, identity, window_control,
     wire::{self, Outbox},
 };
 use serde_json::{Value, json};
@@ -54,6 +54,7 @@ struct Worker {
     buttons: HashSet<String>,
     display_busy: Arc<AtomicBool>,
     graphics_busy: Arc<AtomicBool>,
+    execution_busy: Arc<AtomicBool>,
     display_observer: Option<display::Observer>,
 }
 
@@ -100,6 +101,7 @@ pub fn run(path: &Path) -> Result<(), String> {
         buttons: HashSet::new(),
         display_busy: Arc::new(AtomicBool::new(false)),
         graphics_busy: Arc::new(AtomicBool::new(false)),
+        execution_busy: Arc::new(AtomicBool::new(false)),
         display_observer: match display::Observer::new() {
             Ok(observer) => Some(observer),
             Err(error) => {
@@ -143,7 +145,7 @@ impl Worker {
         outbox.control(
             json!({"type":"hello","protocol":1,"token":config.token,"epoch":self.epoch,
             "sid":self.sid,"session":self.session,"version":env!("CARGO_PKG_VERSION"),
-            "capabilities":{"capture":"software","windows":4,"transients":12,"windowRoles":true,"input":true,"catalogue":true,"displayInfo":true,"driverInfo":true,"graphicsInfo":true,"displayConfigure":true,"displayEvents":self.display_observer.is_some()}}),
+            "capabilities":{"capture":"software","windows":4,"transients":12,"windowRoles":true,"input":true,"catalogue":true,"displayInfo":true,"driverInfo":true,"graphicsInfo":true,"displayConfigure":true,"sharedGeometry":true,"execute":true,"executeTimeoutSeconds":60,"executeOutputBytes":65536,"displayEvents":self.display_observer.is_some()}}),
         );
         let (sender, receiver) = mpsc::sync_channel(128);
         let state = outbox.clone();
@@ -173,6 +175,23 @@ impl Worker {
         while outbox.connected.load(Ordering::Acquire) {
             if let Ok(command) = receiver.recv_timeout(Duration::from_millis(10)) {
                 let request = command["request"].clone();
+                if command["operation"] == "execute" {
+                    if self.execution_busy.swap(true, Ordering::AcqRel) {
+                        outbox.control(json!({"type":"reply","request":request,"ok":false,"message":"A command is already running"}));
+                    } else {
+                        let sender = outbox.clone();
+                        let busy = self.execution_busy.clone();
+                        std::thread::spawn(move || {
+                            let result = execute::run(&command);
+                            busy.store(false, Ordering::Release);
+                            sender.control(match result {
+                                Ok(value) => json!({"type":"reply","request":request,"ok":true,"result":value}),
+                                Err(message) => json!({"type":"reply","request":request,"ok":false,"message":message}),
+                            });
+                        });
+                    }
+                    continue;
+                }
                 if command["operation"] == "diagnostics"
                     || command["operation"] == "driver_info"
                     || command["operation"] == "display_info"
@@ -314,7 +333,7 @@ impl Worker {
                 self.release();
                 Ok(json!({}))
             }
-            "input" | "activate" | "resize" | "close" | "hit_test" | "geometry"
+            "input" | "activate" | "resize" | "close" | "hit_test" | "geometry" | "set_geometry"
             | "cancel_interaction" => {
                 let id = value["window"].as_str().ok_or("Missing window identity")?;
                 let window = self.windows.get(id).ok_or("Window retired")?;
@@ -342,6 +361,10 @@ impl Worker {
                     "resize" => {
                         self.release();
                         return window_control::resize(&target, value);
+                    }
+                    "set_geometry" => {
+                        self.release();
+                        return window_control::set_geometry(&target, value);
                     }
                     "hit_test" => return window_control::hit_test(&target, value),
                     "geometry" => return window_control::state(&target),

@@ -57,6 +57,14 @@ Il firmware e lo stato TPM della copia vengono mantenuti compatibili con l'insta
 
 La diagnostica di pulizia è una funzione di sviluppo opzionale (`PERPENDICULAR_AUDIT=1` all'avvio del frontend). Non viene eseguita nel normale collegamento. Il worker la esegue separatamente dai comandi delle finestre, con un limite di tempo e una sola richiesta attiva: un controllo amministrativo lento non deve bloccare l'input. Il rapporto include il momento di boot; controllarne sempre data e freschezza. Un errore viene scritto in `guest-diagnostics-error.txt`.
 
+## Comandi diretti di manutenzione
+
+Con Perpendicular aperto, `scripts/control_guest.py status` legge il collegamento e `scripts/control_guest.py execute 'C:\Windows\System32\cmd.exe' -- /c ver` esegue un comando nella sessione Windows collegata. Per PowerShell si passa il percorso assoluto dell'eseguibile e gli argomenti; non occorre aprire la console. Il risultato JSON distingue codice di uscita, timeout, output ed errori. Sono disponibili anche `display_info`, `driver_info`, `graphics_info` e `geometry_snapshot`.
+
+Il controllo Mac usa un socket Unix nella cartella privata della VM (directory 0700, socket 0600, verifica dell'UID del chiamante). Riusa il bridge autenticato: nessun token nel client e nessuna nuova porta TCP. Il processo parte con il token del worker interattivo, senza elevazione automatica; il servizio SYSTEM non esegue questi comandi. Una sola esecuzione alla volta, output totale limitato a 64 KiB e timeout da 1 a 60 secondi. Un Job Object chiude i discendenti al termine o all'interruzione del worker. Il timeout limita il processo avviato; la chiamata Windows di creazione resta sincrona. I percorsi UNC/device sono rifiutati, ma una lettera di unità potrebbe comunque essere mappata in rete.
+
+La disconnessione non ritenta il comando e non ne garantisce la cancellazione immediata: l'esecuzione termina entro il proprio limite dopo l'avvio. Non usare questo canale per avviare processi che devono restare aperti dopo la richiesta. Le impostazioni UAC restano una scelta manuale dell'utente e non vengono modificate dall'installer.
+
 ## Finestre principali, dialoghi e superfici temporanee
 
 Il guest descrive ruolo (`main`, `dialog`, `popup`, `tooltip`), proprietario associato, rettangolo in coordinate Windows, ordine, visibilità e riduzione. Classe, stili e relazione con il proprietario distinguono i popup senza cornice dai dialoghi; `WS_POPUP` da solo non è sufficiente. I popup Chromium senza proprietario esplicito vengono associati alla finestra attiva dello stesso processo oppure alla più vicina. È una classificazione pratica, verificata con Blocco note e Edge, non una garanzia per qualsiasi toolkit.
@@ -65,7 +73,11 @@ Le finestre principali usano una finestra AppKit senza barra e la cattura comple
 
 Il mouse usa l'origine della superficie catturata, compresa la parte non client. Il passaggio del cursore non forza l'attivazione di una finestra Windows; click e tastiera mantengono il focus nella famiglia associata, consentendo ai popup di ricevere input attraverso la finestra Mac principale. Le superfici temporanee nascoste vengono ritirate e non vengono salvate fra le finestre da ripristinare. L'osservazione è attualmente a intervalli di 75 ms. La riduzione nel guest aggiorna la rappresentazione Mac, mentre la posizione principale resta locale; il menu Window mantiene esplicitamente le finestre principali senza barra.
 
-## Drag locale e resize controllato
+## Geometria condivisa e percorso di recupero
+
+Quando `sharedGeometry` è disponibile e il display primario corrisponde al Mac, posizione e dimensione condividono la trasformazione di `SharedDisplay`. `set_geometry` riceve un identificatore del gesto e un seriale, valida il rettangolo e restituisce la geometria attesa dopo i limiti dell'area di lavoro. Il contenitore Mac segue immediatamente il gesto; gli aggiornamenti Windows hanno un intervallo minimo di 45 ms, una richiesta in corso e soltanto l'ultima misura in attesa. Al termine il frontend attende che rettangolo effettivo e dimensione del frame coincidano con la richiesta accettata, entro tre secondi. Risposte obsolete, cambio display e disconnessione invalidano il gesto e rilasciano l'input. Un timeout riconcilia l'ultima geometria effettiva e segnala il limite.
+
+I dialoghi conservano il bordo Mac e un fondo opaco, mentre finestre principali e superfici temporanee conservano la trasparenza. I popup rimangono ancorati al proprietario. Il percorso seguente rimane disponibile quando il display non consente una corrispondenza condivisa.
 
 La posizione Mac è indipendente dalla posizione della finestra Windows. Il guest risponde a una richiesta breve WM_NCHITTEST per distinguere barra, schede, controlli e bordi; il frontend esegue localmente il movimento della finestra Mac. Durante l'attesa conserva l'ultimo movimento e il rilascio, così anche un click rapido non lascia il gesto sospeso. I pulsanti e il contenuto dell'app continuano a ricevere input Windows.
 
@@ -131,7 +143,7 @@ L'alternativa IddCx è un driver C++ UMDF per monitor virtuali indipendente dal 
 
 `display_info` riporta anche l'area di lavoro del monitor in pixel Windows. Il frontend legge lo stato dopo il collegamento, all'aggiornamento manuale e al cambiamento degli schermi Mac o Windows. Le risposte appartenenti a un'altra connessione o a una richiesta superata non pubblicano il vecchio stato. La UI mostra risoluzione e scala realmente lette, indipendentemente dalla diagnostica.
 
-`SharedDisplay` ammette la corrispondenza del solo monitor primario quando risoluzione e DPI effettivi coincidono esattamente con backing e scala Mac. Converte rettangoli nei due versi, con origini esplicite e inversione Y. È un contratto verificato matematicamente, non una prova di monitor dinamici: non abilita ancora la sincronizzazione delle posizioni. Il display RAMFB a 800×600/96 DPI non soddisfa il contratto del Mac attuale. Il supporto completo a più monitor rimane da implementare e verificare.
+`SharedDisplay` ammette la corrispondenza del solo monitor primario quando risoluzione e DPI effettivi coincidono esattamente con backing e scala Mac. Converte rettangoli nei due versi, con origini esplicite e inversione Y, e abilita la geometria condivisa soltanto con la capacità guest corrispondente. Il display RAMFB a 800×600/96 DPI non soddisfa il contratto del Mac attuale. Il primario 2880×1800/192 DPI, drag e resize di una finestra Win32 sono stati verificati nell'app; il supporto completo a più monitor rimane da implementare e verificare.
 
 Su richiesta esplicita dell'utente, la sola copia Windows di sviluppo è stata impostata manualmente su UAC «Non notificare mai». È una preferenza una tantum della VM, non un comportamento dell'installer o del guest tool. Non viene impostato `EnableLUA=0`: [Microsoft distingue](https://learn.microsoft.com/en-us/windows/win32/secauthz/user-account-control) l'eliminazione delle notifiche dalla disattivazione completa di UAC. Gli installer continuano a chiedere a Windows l'elevazione con `RunAs`; con questa preferenza l'amministratore non riceve il popup.
 

@@ -10,7 +10,7 @@ xcrun clang -O2 -target arm64-apple-macosx14.0 -c macos/NativeTransport/ndt.c -o
 xcrun swiftc -swift-version 6 -O -parse-as-library -target arm64-apple-macosx14.0 \
     -import-objc-header macos/NativeTransport/ndt.h .build/native-transport.o \
     macos/RuntimeStore.swift macos/NativeGraphics.swift macos/NativeDisplay.swift macos/DesktopConnection.swift macos/DesktopWindow.swift \
-    macos/VirtualMachine.swift macos/MachineControl.swift macos/GuestBridge.swift macos/DisplayTopology.swift macos/SharedDisplay.swift \
+    macos/VirtualMachine.swift macos/MachineControl.swift macos/GuestBridge.swift macos/MacLocalControl.swift macos/DisplayTopology.swift macos/SharedDisplay.swift \
     macos/WindowGeometry.swift macos/WindowRenderer.swift macos/ApplicationContent.swift macos/ApplicationWindow.swift macos/App.swift \
     -o "$app/Contents/MacOS/Perpendicular"
 cp "$guest" guest/install.ps1 guest/install.cmd "$app/Contents/Resources/Guest/"

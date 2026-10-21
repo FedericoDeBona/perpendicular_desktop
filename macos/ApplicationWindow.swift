@@ -63,6 +63,24 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
     private var liveResizeSentSize:NSSize?
     private var nextLiveResizeAt=0.0
     private var pixelScale=1.0
+    private var fallbackPixelScale=1.0
+    private var sharedDisplay:SharedDisplay?
+    private var applyingSourceGeometry=false
+    private var maximumPixels=NSSize(width:4096,height:4096)
+    private var geometryInteraction:String?
+    private var geometrySerial=0
+    private var geometryActive=false
+    private var geometryFinishing=false
+    private var geometryInFlight=false
+    private var geometryPending:NSRect?
+    private var geometrySent:NSRect?
+    private var geometryExpected:NSRect?
+    private var geometryConfirmed:NSRect?
+    private var geometryNextSend=0.0
+    private var geometryTimer:Timer?
+    private var geometryDeadline:Task<Void,Never>?
+    private var geometryRead:Task<Void,Never>?
+    private var nativeMoveTimer:Timer?
     private var zoomRestore:NSRect?
     var onError:((String)->Void)?
     var parentID:String?
@@ -91,7 +109,11 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
         }
         super.init()
         window.title=title;window.contentView=content;window.delegate=self;window.isReleasedWhenClosed=false
-        window.isOpaque=false;window.backgroundColor = .clear
+        // Dialogs use native Mac chrome, which needs a solid backing rather
+        // than showing the owner's pixels through the title bar.
+        window.isOpaque = role == .dialog
+        window.backgroundColor = role == .dialog ? .windowBackgroundColor:.clear
+        if role == .dialog {window.titlebarAppearsTransparent=false}
         window.hasShadow = !role.transient;window.acceptsMouseMovedEvents=true
         window.isMovable = !role.transient
         if !role.transient {window.minSize=window.frameRect(forContentRect:NSRect(x:0,y:0,width:160,height:100)).size}
@@ -105,6 +127,29 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
         (window as? GuestDocumentWindow)?.closeRequested={ [weak self] in self?.requestClose() }
         if role == .main {NSApp.addWindowsItem(window,title:title,filename:false)}
     }
+    /// Only a display snapshot confirmed by the frontend can enable shared
+    /// placement. Removing that snapshot invalidates every outstanding gesture.
+    func setSharedDisplay(_ display:SharedDisplay?){
+        guard sharedDisplay != display else{return}
+        cancelSharedGeometry()
+        if nativeResizing || expectedSize != nil {
+            resizeSerial+=1;resizeDeadline?.cancel();resizeDeadline=nil
+            liveResizeTimer?.invalidate();liveResizeTimer=nil;liveResizeSize=nil
+            nativeResizing=false;liveResizeInFlight=false;expectedSize=nil
+            content.suspendedPointer=false;bridge.command("release")
+        }
+        gesture=nil;zoomRestore=nil;sharedDisplay=display
+        pixelScale=display.map{Double($0.pixelScale)} ?? fallbackPixelScale
+        applySizeLimits()
+        if display != nil {applySourceFrame()}else if hasFrame{applyFrameSize()}
+        onGeometry?()
+    }
+    private func applySizeLimits(){
+        guard !role.transient else{return}
+        window.minSize=window.frameRect(forContentRect:NSRect(x:0,y:0,width:160*pixelScale,height:100*pixelScale)).size
+        window.maxSize=window.frameRect(forContentRect:NSRect(origin:.zero,
+            size:NSSize(width:maximumPixels.width*pixelScale,height:maximumPixels.height*pixelScale))).size
+    }
     func update(_ item:[String:Any]){
         window.title=item["title"] as? String ?? ""
         if role == .main {NSApp.changeWindowsItem(window,title:window.title,filename:false)}
@@ -115,17 +160,17 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
         if !nextMinimized,let x=item["x"] as? Double,let y=item["y"] as? Double,
            let width=item["width"] as? Double,let height=item["height"] as? Double,width>0,height>0 {
             let next=NSRect(x:x,y:y,width:width,height:height)
-            // Mac placement is local. Guest positions only anchor transient surfaces.
             sourceRect=next
         }
         canResize=item["resizable"] as? Bool ?? true
         if let maxWidth=item["maxWidth"] as? Double,let maxHeight=item["maxHeight"] as? Double,maxWidth>=160,maxHeight>=100 {
-            window.maxSize=window.frameRect(forContentRect:NSRect(x:0,y:0,width:maxWidth*pixelScale,height:maxHeight*pixelScale)).size
+            maximumPixels=NSSize(width:maxWidth,height:maxHeight);applySizeLimits()
         }
         if !role.transient && role != .main {
             if canResize {window.styleMask.insert(.resizable)}else{window.styleMask.remove(.resizable)}
         }
         minimized=nextMinimized
+        if sharedDisplay != nil,!geometryActive,!geometryFinishing,!minimized {applySourceFrame()}
         if !hasFrame && !role.transient && visible && !minimized && !window.isVisible {
             window.makeKeyAndOrderFront(nil);window.makeFirstResponder(content)
         }
@@ -141,7 +186,7 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
             owner.window.addChildWindow(window,ordered:.above)
         }
         guard !sourceRect.isEmpty,!owner.sourceRect.isEmpty else{return}
-        if role.transient || (role == .dialog && !placedDialog) {
+        if role.transient || (role == .dialog && sharedDisplay == nil && !placedDialog) {
             let scale=owner.content.imageScale
             let image=owner.content.imageRect
             let local=NSPoint(x:image.minX+(sourceRect.minX-owner.sourceRect.minX)*scale,
@@ -163,12 +208,19 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
         guard let width=packet.header["width"] as? Int,let height=packet.header["height"] as? Int else{return}
         let nextSize=NSSize(width:width,height:height)
         hasFrame=true
-        if first {pixelScale=min(1,min(1100/Double(width),800/Double(height)))}
+        if first {
+            fallbackPixelScale=min(1,min(1100/Double(width),800/Double(height)))
+            pixelScale=sharedDisplay.map{Double($0.pixelScale)} ?? fallbackPixelScale
+            applySizeLimits()
+        }
         let changed=nextSize != frameSize
         frameSize=nextSize;content.present(packet)
         if let failure=content.renderFailure {onError?(failure)}
-        if let expectedSize,expectedSize == nextSize {finishResize()}
-        else if changed && !role.transient && !nativeResizing && self.expectedSize == nil {applyFrameSize()}
+        if geometryFinishing,geometryConfirmed != nil,let expectedSize,expectedSize == nextSize {finishSharedGeometry()}
+        else if geometryInteraction == nil {
+            if let expectedSize,expectedSize == nextSize {finishResize()}
+            else if changed && !role.transient && !nativeResizing && self.expectedSize == nil {applyFrameSize()}
+        }
         onGeometry?()
         if first,ProcessInfo.processInfo.environment["PERPENDICULAR_CAPTURE_DIAGNOSTIC"]=="1",let image=content.currentImage{
             let directory=FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/Perpendicular Restart/QA")
@@ -189,6 +241,7 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
         return false
     }
     func windowWillClose(_ notification:Notification){
+        cancelSharedGeometry()
         if role == .main {NSApp.removeWindowsItem(window)}
         if !role.transient {content.clearModifiers();bridge.command("release")}
         onClose?()
@@ -197,6 +250,7 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
         var packet=value;packet["window"]=id;bridge.command("input",packet)
     }
     private func applyFrameSize(){
+        if sharedDisplay != nil {applySourceFrame();return}
         guard frameSize.width>0,frameSize.height>0 else{return}
         let top=NSPoint(x:window.frame.minX,y:window.frame.maxY)
         window.setContentSize(NSSize(width:frameSize.width*pixelScale,height:frameSize.height*pixelScale))
@@ -209,6 +263,15 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
             if window.frame.height<=area.height {origin.y=min(max(origin.y,area.minY),area.maxY-window.frame.height)}
             if origin != window.frame.origin {window.setFrameOrigin(origin)}
         }
+    }
+    private func applySourceFrame(){
+        guard let sharedDisplay,!sourceRect.isEmpty,!geometryActive,!geometryFinishing else{return}
+        let mapped=sharedDisplay.macFrame(forGuest:sourceRect)
+        let frame=window.frameRect(forContentRect:mapped)
+        guard window.frame != frame else{return}
+        applyingSourceGeometry=true
+        window.setFrame(frame,display:true)
+        applyingSourceGeometry=false
     }
     private func leftMouse(_ event:NSEvent,_ value:[String:Any]){
         // Use the position recorded in this event, in global coordinates.
@@ -264,7 +327,8 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
         switch mode {
         case .remote:send(gesture.down)
         case .move:
-            bridge.command("cancel_interaction",["window":id]);content.clearModifiers()
+            if sharedDisplay != nil {beginSharedGeometry()}
+            else {bridge.command("cancel_interaction",["window":id]);content.clearModifiers()}
             if gesture.clicks == 2 {gesture.mode = .discard;toggleZoom()}
         case .resize:beginResize()
         default:break
@@ -276,7 +340,11 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
         let delta=NSPoint(x:point.x-gesture.origin.x,y:point.y-gesture.origin.y)
         switch gesture.mode {
         case .remote:send(value)
-        case .move:window.setFrameOrigin(NSPoint(x:gesture.frame.minX+delta.x,y:gesture.frame.minY+delta.y))
+        case .move:
+            window.setFrameOrigin(NSPoint(x:gesture.frame.minX+delta.x,y:gesture.frame.minY+delta.y))
+            if sharedDisplay != nil {
+                if up {commitSharedGeometry()}else{updateSharedGeometry()}
+            }
         case .resize(let edges):
             window.setFrame(edges.frame(from:gesture.frame,delta:delta,minimum:window.minSize,maximum:window.maxSize),display:true)
             if !up {updateLiveResize()}
@@ -287,6 +355,7 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
         if up {trace("gesture_finished")}
     }
     private func beginResize(){
+        if sharedDisplay != nil {beginSharedGeometry();nativeResizing=true;return}
         resizeSerial+=1;resizeDeadline?.cancel();expectedSize=nil
         liveResizeTimer?.invalidate();liveResizeTimer=nil;liveResizeSize=nil
         liveResizeInFlight=false;liveResizeFailed=false
@@ -301,6 +370,10 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
         return NSSize(width:max(160,(size.width/pixelScale).rounded()),height:max(100,(size.height/pixelScale).rounded()))
     }
     private func updateLiveResize(){
+        if sharedDisplay != nil {
+            if nativeResizing {updateSharedGeometry()}
+            return
+        }
         guard nativeResizing,canResize,!role.transient,!liveResizeFailed else{return}
         let size=resizeTargetSize
         if size == liveResizeSentSize {
@@ -334,6 +407,7 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
         }
     }
     private func commitResize(){
+        if sharedDisplay != nil {nativeResizing=false;commitSharedGeometry();return}
         guard canResize,!role.transient else{nativeResizing=false;content.suspendedPointer=false;return}
         resizeSerial+=1;let serial=resizeSerial
         liveResizeTimer?.invalidate();liveResizeTimer=nil;liveResizeSize=nil;liveResizeInFlight=false
@@ -375,6 +449,126 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
         applyFrameSize();bridge.command("release");onGeometry?()
         trace("resize_finished")
     }
+    private var sharedTarget:NSRect? {
+        guard let sharedDisplay else{return nil}
+        let frame=sharedDisplay.guestFrame(forMac:window.contentRect(forFrameRect:window.frame))
+        return NSRect(x:frame.minX.rounded(),y:frame.minY.rounded(),
+                      width:max(160,frame.width.rounded()),height:max(100,frame.height.rounded()))
+    }
+    private func beginSharedGeometry(){
+        cancelSharedGeometry()
+        geometryInteraction=UUID().uuidString;geometryActive=true
+        geometryNextSend=0;geometrySent=sharedTarget
+        content.suspendedPointer=true;content.clearModifiers()
+        bridge.command("cancel_interaction",["window":id])
+    }
+    private func updateSharedGeometry(){
+        guard geometryActive,let target=sharedTarget else{return}
+        geometryPending=target == geometrySent ? nil:target
+        pumpSharedGeometry()
+    }
+    private func commitSharedGeometry(){
+        guard geometryInteraction != nil,let target=sharedTarget else{return}
+        nativeMoveTimer?.invalidate();nativeMoveTimer=nil
+        geometryActive=false;geometryFinishing=true;geometryPending=target
+        geometryTimer?.invalidate();geometryTimer=nil
+        let interaction=geometryInteraction
+        geometryDeadline=Task{@MainActor [weak self] in
+            try? await Task.sleep(for:.seconds(3))
+            guard !Task.isCancelled,let self,self.geometryInteraction == interaction else{return}
+            self.finishSharedGeometry(error:"Windows did not finish updating the window geometry.")
+        }
+        pumpSharedGeometry()
+    }
+    private func pumpSharedGeometry(){
+        guard let interaction=geometryInteraction,!geometryInFlight,let target=geometryPending else{return}
+        let delay=geometryFinishing ? 0:max(0,geometryNextSend-ProcessInfo.processInfo.systemUptime)
+        if delay>0 {
+            guard geometryTimer == nil else{return}
+            let timer=Timer(timeInterval:delay,repeats:false){[weak self] _ in
+                MainActor.assumeIsolated {
+                    guard let self,self.geometryInteraction == interaction else{return}
+                    self.geometryTimer=nil;self.pumpSharedGeometry()
+                }
+            }
+            geometryTimer=timer;RunLoop.main.add(timer,forMode:.common);return
+        }
+        geometryPending=nil;geometrySent=target;geometryInFlight=true
+        geometryNextSend=ProcessInfo.processInfo.systemUptime+0.045
+        geometrySerial+=1;let serial=geometrySerial,final=geometryFinishing
+        let request:[String:Any]=["window":id,"gesture":interaction,"serial":serial,
+            "x":Int(target.minX),"y":Int(target.minY),"width":Int(target.width),"height":Int(target.height)]
+        trace(final ? "geometry_final_requested":"geometry_live_requested")
+        bridge.command("set_geometry",request,timeout:.seconds(1)){[weak self] result in
+            guard let self,self.geometryInteraction == interaction else{return}
+            self.geometryInFlight=false
+            guard case .success(let reply)=result,let value=reply["value"] as? [String:Any],
+                  value["accepted"] as? Bool == true,value["gesture"] as? String == interaction,
+                  value["serial"] as? Int == serial else {
+                // An unsuccessful intermediate update ends this interaction;
+                // the next snapshot can restore the actual guest placement.
+                self.finishSharedGeometry(error:"Windows could not update this window geometry.");return
+            }
+            if final {
+                guard let expected=self.geometryRect(value) else {
+                    self.finishSharedGeometry(error:"Windows could not confirm the requested window geometry.");return
+                }
+                self.geometryExpected=expected;self.geometryConfirmed=nil;self.expectedSize=nil
+                self.readSharedGeometry(interaction)
+            }
+            else {self.pumpSharedGeometry()}
+        }
+    }
+    private func geometryRect(_ value:[String:Any])->NSRect? {
+        guard let x=value["x"] as? Double,let y=value["y"] as? Double,
+              let width=value["width"] as? Double,let height=value["height"] as? Double,
+              x.isFinite,y.isFinite,width.isFinite,height.isFinite,width>0,height>0 else{return nil}
+        return NSRect(x:x,y:y,width:width,height:height)
+    }
+    private func readSharedGeometry(_ interaction:String){
+        geometryRead?.cancel()
+        geometryRead=Task{@MainActor [weak self] in
+            try? await Task.sleep(for:.milliseconds(180))
+            guard !Task.isCancelled,let self,self.geometryInteraction == interaction else{return}
+            self.bridge.command("geometry",["window":self.id],timeout:.seconds(1)){[weak self] result in
+                guard let self,self.geometryInteraction == interaction,self.geometryFinishing else{return}
+                guard case .success(let reply)=result,let value=reply["value"] as? [String:Any],
+                      let actual=self.geometryRect(value),let expected=self.geometryExpected else {
+                    self.finishSharedGeometry(error:"Windows could not confirm this window geometry.");return
+                }
+                self.sourceRect=actual
+                // An async SetWindowPos can still be queued on the app thread.
+                // Old dimensions matching an old frame do not complete a move.
+                self.geometryConfirmed=actual == expected ? actual:nil
+                self.expectedSize=self.geometryConfirmed?.size
+                if actual == expected,self.frameSize == actual.size {self.finishSharedGeometry()}
+                else {self.readSharedGeometry(interaction)}
+            }
+        }
+    }
+    private func finishSharedGeometry(error:String?=nil){
+        guard geometryInteraction != nil else{return}
+        if error != nil {gesture=nil}
+        else if let geometryConfirmed {sourceRect=geometryConfirmed}
+        cancelSharedGeometry()
+        applySourceFrame();bridge.command("release");onGeometry?()
+        if let error {onError?(error)}
+        trace("geometry_finished")
+    }
+    private func cancelSharedGeometry(){
+        let hadInteraction=geometryInteraction != nil
+        geometryInteraction=nil;geometryActive=false;geometryFinishing=false
+        geometryInFlight=false;geometryPending=nil;geometrySent=nil
+        geometryExpected=nil;geometryConfirmed=nil
+        geometryTimer?.invalidate();geometryTimer=nil
+        geometryDeadline?.cancel();geometryDeadline=nil
+        geometryRead?.cancel();geometryRead=nil
+        nativeMoveTimer?.invalidate();nativeMoveTimer=nil
+        if hadInteraction {
+            nativeResizing=false;expectedSize=nil;content.suspendedPointer=false
+            content.clearModifiers();bridge.command("release")
+        }
+    }
     private func trace(_ event:String){
         guard ProcessInfo.processInfo.environment["PERPENDICULAR_STATE_TRACE"] == "1" else{return}
         let value:[String:Any]=["type":event,"window":id,
@@ -386,6 +580,11 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
         guard canResize,expectedSize == nil else{return}
         beginResize()
         if let restore=zoomRestore {window.setFrame(restore,display:true);zoomRestore=nil}
+        else if let sharedDisplay {
+            zoomRestore=window.frame
+            let area=sharedDisplay.macFrame(forGuest:sharedDisplay.guestWorkArea ?? sharedDisplay.guestFrame)
+            window.setFrame(window.frameRect(forContentRect:area),display:true)
+        }
         else {zoomRestore=window.frame;let top=window.frame.maxY;window.setFrame(NSRect(x:window.frame.minX,y:top-window.maxSize.height,width:window.maxSize.width,height:window.maxSize.height),display:true)}
         commitResize()
     }
@@ -393,6 +592,7 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
     func windowDidResignKey(_ notification:Notification){
         if !role.transient {
             gesture=nil;content.clearModifiers();bridge.command("release")
+            if geometryInteraction != nil {finishSharedGeometry()}
             if nativeResizing {
                 resizeSerial+=1;liveResizeTimer?.invalidate();liveResizeTimer=nil;liveResizeSize=nil;liveResizeInFlight=false
                 nativeResizing=false;content.suspendedPointer=false;applyFrameSize()
@@ -400,7 +600,22 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
         }
     }
     func windowDidDeminiaturize(_ notification:Notification){bridge.command("activate",["window":id])}
-    func windowDidMove(_ notification:Notification){onGeometry?()}
+    func windowWillMove(_ notification:Notification){
+        guard role == .dialog,sharedDisplay != nil,!applyingSourceGeometry,
+              NSEvent.pressedMouseButtons & 1 != 0,NSApp.currentEvent?.window === window else{return}
+        beginSharedGeometry()
+        let timer=Timer(timeInterval:0.05,repeats:true){[weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self,self.geometryActive else{return}
+                if NSEvent.pressedMouseButtons & 1 == 0 {self.commitSharedGeometry()}
+            }
+        }
+        nativeMoveTimer=timer;RunLoop.main.add(timer,forMode:.common)
+    }
+    func windowDidMove(_ notification:Notification){
+        if !applyingSourceGeometry,geometryActive,!nativeResizing {updateSharedGeometry()}
+        onGeometry?()
+    }
     func windowDidResize(_ notification:Notification){updateLiveResize();onGeometry?()}
     func windowWillStartLiveResize(_ notification:Notification){if !role.transient{beginResize()}}
     func windowDidEndLiveResize(_ notification:Notification){if !role.transient{commitResize()}}
