@@ -218,7 +218,8 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
             let top=owner.window.convertPoint(toScreen:owner.content.convert(local,to:nil))
             if role.transient {
                 let size=frameSize == .zero ? sourceRect.size:frameSize
-                window.setFrame(NSRect(x:top.x,y:top.y-size.height*scale,width:size.width*scale,height:size.height*scale),display:true)
+                let frame=NSRect(x:top.x,y:top.y-size.height*scale,width:size.width*scale,height:size.height*scale)
+                if window.frame != frame {window.setFrame(frame,display:true)}
             }else{
                 window.setFrameTopLeftPoint(top);placedDialog=true
             }
@@ -245,7 +246,7 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
             if let expectedSize,expectedSize == nextSize {finishResize()}
             else if changed && !role.transient && !nativeResizing && self.expectedSize == nil {applyFrameSize()}
         }
-        onGeometry?()
+        if first || changed {onGeometry?()}
         if first,ProcessInfo.processInfo.environment["PERPENDICULAR_CAPTURE_DIAGNOSTIC"]=="1",let image=content.currentImage{
             let directory=FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/Perpendicular Restart/QA")
             try? FileManager.default.createDirectory(at:directory,withIntermediateDirectories:true,attributes:[.posixPermissions:0o700])

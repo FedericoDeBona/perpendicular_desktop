@@ -165,6 +165,8 @@ unsafe fn run(target: &Target, outbox: &Outbox, stop: &AtomicBool) -> Result<(),
                 let current = frame.ContentSize().map_err(error)?;
                 if current.Width <= 0
                     || current.Height <= 0
+                    || current.Width > 16_384
+                    || current.Height > 16_384
                     || i64::from(current.Width) * i64::from(current.Height) > 8_388_608
                 {
                     let _ = frame.Close();
@@ -218,6 +220,17 @@ unsafe fn run(target: &Target, outbox: &Outbox, stop: &AtomicBool) -> Result<(),
                     generation += 1;
                     previous = geometry;
                 }
+                let alignment = outbox.row_alignment();
+                let row_bytes = (width as usize).checked_mul(4).ok_or("Invalid capture width")?;
+                let stride = row_bytes.div_ceil(alignment).checked_mul(alignment).ok_or("Invalid capture stride")?;
+                let total = stride.checked_mul(height as usize).ok_or("Invalid capture size")?;
+                if x < 0 || y < 0 || width <= 0 || height <= 0
+                    || i64::from(x) + i64::from(width) > i64::from(desc.Width)
+                    || i64::from(y) + i64::from(height) > i64::from(desc.Height)
+                    || stride < row_bytes || total > 34 * 1024 * 1024
+                {
+                    return Err("Invalid capture rectangle".into());
+                }
                 if staging.is_none() {
                     desc.Usage = D3D11_USAGE_STAGING;
                     desc.BindFlags = 0;
@@ -233,26 +246,31 @@ unsafe fn run(target: &Target, outbox: &Outbox, stop: &AtomicBool) -> Result<(),
                         .map_err(error)?;
                 }
                 let backing = staging.as_ref().ok_or("Missing readback resource")?;
+                let mut pixels = Vec::<u8>::with_capacity(total);
                 context.CopyResource(backing, &texture);
                 let mut mapped = D3D11_MAPPED_SUBRESOURCE::default();
                 context
                     .Map(backing, 0, D3D11_MAP_READ, 0, Some(&mut mapped))
                     .map_err(error)?;
-                let alignment = outbox.row_alignment();
-                let stride = (width as usize * 4).div_ceil(alignment) * alignment;
-                let mut pixels = vec![0u8; stride * height as usize];
                 let valid =
-                    !mapped.pData.is_null() && mapped.RowPitch as i64 >= i64::from(x + width) * 4;
+                    !mapped.pData.is_null() && mapped.RowPitch as i64 >= (i64::from(x) + i64::from(width)) * 4
+                    && (y as usize + height as usize - 1).checked_mul(mapped.RowPitch as usize)
+                        .and_then(|last| last.checked_add((x as usize + width as usize) * 4)).is_some();
                 if valid {
                     for row in 0..height as usize {
+                        let destination = pixels.as_mut_ptr().add(row * stride);
                         std::ptr::copy_nonoverlapping(
                             (mapped.pData as *const u8).add(
                                 (row + y as usize) * mapped.RowPitch as usize + x as usize * 4,
                             ),
-                            pixels.as_mut_ptr().add(row * stride),
-                            width as usize * 4,
+                            destination,
+                            row_bytes,
                         );
+                        std::ptr::write_bytes(destination.add(row_bytes), 0, stride - row_bytes);
                     }
+                    // Every row and every padding byte is initialized before
+                    // publication. Avoid zeroing the BGRA area just to overwrite it.
+                    pixels.set_len(total);
                 }
                 context.Unmap(backing, 0);
                 frame.Close().map_err(error)?;
