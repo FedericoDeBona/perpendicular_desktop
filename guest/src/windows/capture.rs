@@ -69,7 +69,7 @@ impl Target {
             geometry: Mutex::new((0, 0, 0, 0, 0)),
         }
     }
-    fn set_phase(&self, phase: Phase) {
+    pub(super) fn set_phase(&self, phase: Phase) {
         self.capture_phase.store(phase as u8, Ordering::Release);
     }
     pub fn capture_phase_name(&self) -> &'static str {
@@ -95,7 +95,10 @@ pub fn spawn(target: Arc<Target>, outbox: Arc<Outbox>) -> Arc<AtomicBool> {
     let flag = stop.clone();
     target.set_phase(Phase::Starting);
     std::thread::spawn(move || {
-        if let Err(message) = unsafe { run(&target, &outbox, &flag) } {
+        let result = if catalogue::window_class(target.hwnd) == "#32768" {
+            super::menu_capture::run(&target, &outbox, &flag)
+        } else { unsafe { run(&target, &outbox, &flag) } };
+        if let Err(message) = result {
             target.set_phase(Phase::Error);
             if !flag.load(Ordering::Acquire) && target.valid() {
                 outbox.control(json!({"type":"window_error","window":target.id,"message":message}));

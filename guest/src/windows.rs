@@ -5,6 +5,7 @@ mod display;
 mod drivers;
 mod execute;
 mod icons;
+mod menu_capture;
 mod identity;
 mod service;
 mod window_control;

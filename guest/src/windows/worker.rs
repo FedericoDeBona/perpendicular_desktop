@@ -1208,7 +1208,15 @@ impl Worker {
                         }
                         let mut gui = GUITHREADINFO { cbSize: size_of::<GUITHREADINFO>() as u32, ..Default::default() };
                         GetGUIThreadInfo(0, &mut gui).map_err(error)?;
-                        if !gui.hwndCapture.is_invalid() && GetAncestor(gui.hwndCapture, GA_ROOT) != requested_root {
+                        let capture_root = GetAncestor(gui.hwndCapture, GA_ROOT);
+                        // A classic menu runs inside its authenticated owner's
+                        // menu loop: Windows keeps mouse capture on that owner,
+                        // not the #32768 popup receiving this click.
+                        let owner_menu_capture = catalogue::window_class(target.hwnd) == "#32768"
+                            && capture_root.0 as usize == root
+                            && GetAncestor(hwnd, GA_ROOTOWNER).0 as usize == root
+                            && self.windows.values().any(|w| w.target.hwnd == root && w.target.valid());
+                        if !gui.hwndCapture.is_invalid() && capture_root != requested_root && !owner_menu_capture {
                             return Err("Another window is capturing the mouse. Release it in Windows before clicking.".into());
                         }
                         let mut current = POINT { x: x + offset_x, y: y + offset_y };
