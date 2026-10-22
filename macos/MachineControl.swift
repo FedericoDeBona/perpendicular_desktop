@@ -2,7 +2,8 @@ import Foundation
 import Darwin
 
 enum MachineControl {
-    static func execute(socket path:String, operation:String, arguments:[String:Any]=[:]) throws -> [String:Any] {
+    static func execute(socket path:String, operation:String, arguments:[String:Any]=[:],
+                        expectedUUID:String?=nil,expectedPID:Int32?=nil) throws -> [String:Any] {
         let fd=socket(AF_UNIX,SOCK_STREAM,0)
         guard fd>=0 else { throw failure("Cannot open machine control.") }
         defer { close(fd) }
@@ -12,6 +13,14 @@ enum MachineControl {
         withUnsafeMutableBytes(of:&address.sun_path){$0.copyBytes(from:bytes)}
         let connected=withUnsafePointer(to:&address){$0.withMemoryRebound(to:sockaddr.self,capacity:1){connect(fd,$0,socklen_t(MemoryLayout<sockaddr_un>.size))}}
         guard connected==0 else { throw failure("Windows is not running.") }
+        if let expectedPID {
+            var peer:pid_t=0;var size=socklen_t(MemoryLayout<pid_t>.size)
+            var uid:uid_t=0;var gid:gid_t=0
+            guard getpeereid(fd,&uid,&gid)==0,uid==getuid(),
+                  getsockopt(fd,SOL_LOCAL,LOCAL_PEERPID,&peer,&size)==0,peer==expectedPID else {
+                throw failure("The Windows process changed. Refresh its state before trying again.")
+            }
+        }
         var noSignal:Int32=1
         _=setsockopt(fd,SOL_SOCKET,SO_NOSIGPIPE,&noSignal,socklen_t(MemoryLayout<Int32>.size))
         let deadline=ProcessInfo.processInfo.systemUptime+3
@@ -50,6 +59,12 @@ enum MachineControl {
         }
         _=try receive()
         _=try exchange(["execute":"qmp_capabilities"])
+        if let expectedUUID {
+            let identity=try exchange(["execute":"query-uuid"])
+            guard (identity["UUID"] as? String)?.lowercased()==expectedUUID.lowercased() else {
+                throw failure("Machine control belongs to a different virtual machine.")
+            }
+        }
         return try exchange(["execute":operation,"arguments":arguments])
     }
     private static func failure(_ message:String)->NSError {NSError(domain:"Machine",code:1,userInfo:[NSLocalizedDescriptionKey:message])}

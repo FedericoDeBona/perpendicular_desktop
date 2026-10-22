@@ -2,6 +2,13 @@ import Foundation
 import Darwin
 import AppKit
 
+enum MachineRuntimeState:Equatable,Sendable {
+    case stopped,running(Int32),unreachable(Int32?)
+    var pid:Int32? {
+        switch self {case .stopped:return nil;case .running(let pid):return pid;case .unreachable(let pid):return pid}
+    }
+}
+
 struct MachineConfiguration: Codable {
     let id: String
     let name: String
@@ -60,6 +67,32 @@ final class VirtualMachineController {
         if machine?.isRunning == true { return true }
         return (try? MachineControl.execute(socket:controlSocket,operation:"query-uuid")["UUID"] as? String) == configuration.id
     }
+    /// QMP runs away from AppKit. A live recorded process with an unavailable
+    /// control channel is unknown, never permission to start a second VM.
+    func observedState() async -> MachineRuntimeState {
+        let directory=directory,id=configuration.id,socket=controlSocket
+        return await Task.detached {
+            let pidFile=directory.appendingPathComponent("qemu-system-aarch64.pid")
+            let saved=(try? String(contentsOf:pidFile,encoding:.utf8)).flatMap{Int32($0.trimmingCharacters(in:.whitespacesAndNewlines))}
+            let live=saved.flatMap{pid -> Int32? in
+                guard pid>1 else{return nil}
+                return kill(pid,0)==0 || errno != ESRCH ? pid:nil
+            }
+            do {
+                let reply=try MachineControl.execute(socket:socket,operation:"query-uuid",expectedPID:live)
+                guard (reply["UUID"] as? String)?.lowercased()==id.lowercased(),let live else{return .unreachable(live)}
+                return .running(live)
+            }catch {return live.map{.unreachable($0)} ?? .stopped}
+        }.value
+    }
+    func forceStop(expectedPID:Int32) async throws {
+        let socket=controlSocket,id=configuration.id
+        // Authenticate both this VM and this process generation on the same
+        // connection that receives quit. Never kill a PID from a stale file.
+        try await Task.detached {
+            _=try MachineControl.execute(socket:socket,operation:"quit",expectedUUID:id,expectedPID:expectedPID)
+        }.value
+    }
     var nativeGraphicsEnabled:Bool {configuration.graphics == "native3D" && configuration.recoveryDisplay != true}
     var virtualDisplayEnabled:Bool {nativeGraphicsEnabled}
     var desktopIsKey:Bool {desktop?.window.isKeyWindow == true}
@@ -83,13 +116,18 @@ final class VirtualMachineController {
         return try VirtualMachineController(directory:directory,runtime:runtime)
     }
 
-    func shutdown() throws {
-        guard isRunning else { return }
-        _ = try MachineControl.execute(socket:controlSocket,operation:"system_powerdown")
+    func shutdown() async throws {
+        let state=await observedState()
+        if state == .stopped{return}
+        guard let pid=state.pid else{throw CocoaError(.executableRuntimeMismatch)}
+        let socket=controlSocket,id=configuration.id
+        try await Task.detached {
+            _=try MachineControl.execute(socket:socket,operation:"system_powerdown",expectedUUID:id,expectedPID:pid)
+        }.value
     }
 
-    func showDesktop() throws {
-        if !isRunning {try start()}
+    func showDesktop() async throws {
+        try await start()
         if let launch=desktopLaunch() {
             if desktop == nil {desktop=try DesktopWindow(socket:launch.socket,endpoint:{[weak self] in self?.desktopLaunch()?.native})}
             desktop?.show();return
@@ -131,8 +169,12 @@ final class VirtualMachineController {
         return launch
     }
 
-    func start() throws {
-        guard !isRunning else { return }
+    func start() async throws {
+        switch await observedState() {
+        case .running:return
+        case .unreachable:throw CocoaError(.executableRuntimeMismatch,userInfo:[NSLocalizedDescriptionKey:"Lo stato della VM non è verificabile. Non avvio una seconda istanza."])
+        case .stopped:break
+        }
         closeDesktop()
         let vm = directory.appendingPathComponent("Windows")
         guard configuration.graphics != "virtio2D" || configuration.recoveryDisplay == true else {
@@ -145,7 +187,7 @@ final class VirtualMachineController {
         try FileManager.default.createDirectory(at:displayDirectory,withIntermediateDirectories:false,attributes:[.posixPermissions:0o700])
         let desktopSocket=displayDirectory.appendingPathComponent("desktop.sock").path
         let tpmSocket = "/tmp/perpendicular-tpm-\(getuid())-\(configuration.id.prefix(8)).sock"
-        try stopPreviousTPM(socket:tpmSocket,vm:vm)
+        try await stopPreviousTPM(socket:tpmSocket,vm:vm)
         try? FileManager.default.removeItem(atPath: controlSocket)
         try? FileManager.default.removeItem(atPath: tpmSocket)
         let tpmState=configuration.tpmStateFile.map{"backend-uri=file://\($0),lock"} ?? "dir=\(vm.path)/tpm"
@@ -154,7 +196,7 @@ final class VirtualMachineController {
         // The TPM creates its socket before the VM can attach to it.
         let deadline = Date().addingTimeInterval(10)
         while tpm?.isRunning == true, !FileManager.default.fileExists(atPath: tpmSocket), Date() < deadline {
-            Thread.sleep(forTimeInterval: 0.02)
+            try await Task.sleep(for:.milliseconds(20))
         }
         guard FileManager.default.fileExists(atPath: tpmSocket) else {
             throw CocoaError(.fileNoSuchFile, userInfo: [NSLocalizedDescriptionKey: "The virtual TPM did not start."])
@@ -209,9 +251,8 @@ final class VirtualMachineController {
                 if tpm?.isRunning==true{tpm?.terminate()}
                 throw CocoaError(.executableRuntimeMismatch,userInfo:[NSLocalizedDescriptionKey:"Windows could not start. See qemu.log in the machine folder."])
             }
-            if FileManager.default.fileExists(atPath:controlSocket),
-               (try? MachineControl.execute(socket:controlSocket,operation:"query-uuid")["UUID"] as? String) == c.id {return}
-            Thread.sleep(forTimeInterval:0.03)
+            if FileManager.default.fileExists(atPath:controlSocket),case .running=await observedState() {return}
+            try await Task.sleep(for:.milliseconds(30))
         }
         // A live VM can take longer on its first launch. The guest connection
         // and desktop retry report readiness; do not label a slow boot failed.
@@ -220,7 +261,7 @@ final class VirtualMachineController {
         }
     }
 
-    private func stopPreviousTPM(socket:String,vm:URL)throws{
+    private func stopPreviousTPM(socket:String,vm:URL) async throws {
         guard let text=try? String(contentsOf:directory.appendingPathComponent("swtpm.pid"),encoding:.utf8),let pid=Int32(text),kill(pid,0) == 0 else{return}
         let inspect=Process();inspect.executableURL=URL(fileURLWithPath:"/bin/ps");inspect.arguments=["-p",String(pid),"-o","command="]
         let pipe=Pipe();inspect.standardOutput=pipe;try inspect.run()
@@ -228,7 +269,7 @@ final class VirtualMachineController {
         guard command.contains(socket),command.contains(vm.path+"/tpm") else{throw CocoaError(.executableRuntimeMismatch,userInfo:[NSLocalizedDescriptionKey:"The saved TPM process does not belong to this machine."])}
         kill(pid,SIGTERM)
         let deadline=Date().addingTimeInterval(3)
-        while kill(pid,0) == 0,Date()<deadline {Thread.sleep(forTimeInterval:0.03)}
+        while kill(pid,0) == 0,Date()<deadline {try await Task.sleep(for:.milliseconds(30))}
         guard kill(pid,0) != 0 else{throw CocoaError(.executableRuntimeMismatch,userInfo:[NSLocalizedDescriptionKey:"The virtual TPM is still stopping."])}
     }
     private func launch(_ name: String, _ arguments: [String], log: String,executable:URL?=nil,environment:[String:String]?=nil) throws -> Process {

@@ -30,8 +30,18 @@ struct Launcher:View {
                     Button{model.showProcesses()}label:{Label("Processi",systemImage:"waveform.path.ecg")}
                         .disabled(!model.connected)
                     Button(action:model.showWindows){Label("Apri Windows",systemImage:"desktopcomputer")}
-                        .controlSize(.large).disabled(!model.desktopAvailable)
+                        .controlSize(.large).disabled(!model.desktopAvailable || model.machineOperation != nil)
                         .help("Apri il desktop Windows, anche durante la riconnessione")
+                }
+                HStack(spacing:12){
+                    Circle().fill(model.machineState == .stopped ? Color.secondary:Color.accentColor).frame(width:6,height:6)
+                    Text(model.machineStateLabel).font(.system(size:12)).foregroundStyle(.secondary).lineLimit(2)
+                        .accessibilityIdentifier("windowsMachineState")
+                    Spacer(minLength:0)
+                    if model.machineOperation != nil {ProgressView().controlSize(.small)}
+                    Button("Avvia Windows",action:model.startWindows).disabled(!model.canStartWindows)
+                    Button("Arresto forzato…",role:.destructive,action:model.forceStopWindows).disabled(!model.canStopWindows)
+                        .help("Interrompe la VM anche se Windows o il guest agent non rispondono")
                 }
                 HStack(spacing:12){
                     HStack(spacing:9){
@@ -72,7 +82,7 @@ struct Launcher:View {
                 Text("\(results.count)").font(.system(size:11,weight:.medium)).foregroundStyle(.secondary)
                     .padding(.horizontal,7).padding(.vertical,2).background(.quaternary,in:Capsule())
                 Spacer()
-                if !model.connected && !model.apps.isEmpty {Text("In attesa di Windows…").font(.caption).foregroundStyle(.secondary)}
+                if !model.connected && !model.apps.isEmpty && model.machineState != .stopped {Text("In attesa di Windows…").font(.caption).foregroundStyle(.secondary)}
             }.padding(.horizontal,26).padding(.bottom,12)
             if results.isEmpty {emptyState.frame(maxWidth:.infinity,maxHeight:.infinity)}
             else {
@@ -89,8 +99,8 @@ struct Launcher:View {
             }
             Divider()
             HStack(spacing:7){
-                Circle().fill(model.connected ? Color.green:Color.orange).frame(width:6,height:6)
-                Text(model.connected ? "Windows collegato":"Connessione a Windows…")
+                Circle().fill(model.machineState == .stopped ? Color.secondary:model.connected ? Color.green:Color.orange).frame(width:6,height:6)
+                Text(model.machineStateLabel)
                 Spacer()
                 if !model.openingApps.isEmpty {Text("Apertura in corso…")}
                 else if !model.activeApps.isEmpty {Text(model.activeApps.count == 1 ? "1 app aperta":"\(model.activeApps.count) app aperte")}
@@ -124,6 +134,10 @@ struct Launcher:View {
                 Image(systemName:"exclamationmark.triangle").font(.system(size:30,weight:.light)).foregroundStyle(.tertiary)
                 Text("Windows non è disponibile").font(.system(size:18,weight:.semibold))
                 Text("Controlla il messaggio qui sopra per continuare.").foregroundStyle(.secondary)
+            }else if model.machineState == .stopped {
+                Image(systemName:"power").font(.system(size:30,weight:.light)).foregroundStyle(.tertiary)
+                Text("Windows è spento").font(.system(size:18,weight:.semibold))
+                Text("Premi Avvia Windows per usare le tue app.").foregroundStyle(.secondary)
             }else if model.apps.isEmpty && (!model.connected || model.catalogueLoading) {
                 ProgressView().controlSize(.regular).padding(.bottom,4)
                 Text(model.connected ? "Cerco le tue app…":"Windows si sta collegando").font(.system(size:18,weight:.semibold))

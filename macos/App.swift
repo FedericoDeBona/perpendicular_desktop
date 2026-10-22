@@ -14,6 +14,10 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
     @Published var status="Waiting for Windows…"
     @Published var displayStatus="Waiting for Windows display…"
     @Published var connected=false
+    @Published private(set) var machineState:MachineRuntimeState = .unreachable(nil)
+    @Published private(set) var machineOperation:String?
+    private var machineStateTask:Task<Void,Never>?
+    private var machineStateRevision=UUID()
     @Published private(set) var catalogueLoading=false
     @Published var launcherNotice:String?
     @Published private(set) var openingApps:Set<String>=[]
@@ -116,7 +120,6 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
             }catch{
                 try? FileHandle.standardError.write(contentsOf:Data(("Local control unavailable: "+error.localizedDescription+"\n").utf8))
             }
-            if !machine.isRunning{try machine.start()}
         }catch{status=error.localizedDescription;launcherNotice="Windows non può essere avviato. "+error.localizedDescription}
         launcher=NSWindow(contentRect:NSRect(x:200,y:160,width:800,height:660),styleMask:[.titled,.closable,.resizable,.miniaturizable],backing:.buffered,defer:false)
         launcher.title="Perpendicular";launcher.isReleasedWhenClosed=false
@@ -140,7 +143,9 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
         recoveryItem=NSMenuItem(title:"Recovery Display",action:#selector(toggleRecoveryDisplay),keyEquivalent:"")
         recoveryItem.target=self;recoveryItem.state=machine?.configuration.recoveryDisplay == true ? .on:.off
         recoveryItem.isEnabled=machine != nil;menu.addItem(recoveryItem)
-        let shutdown=NSMenuItem(title:"Shut Down Windows",action:#selector(shutdownWindows),keyEquivalent:"");shutdown.target=self;menu.addItem(shutdown)
+        let start=NSMenuItem(title:"Avvia Windows",action:#selector(startWindows),keyEquivalent:"");start.target=self;menu.addItem(start)
+        let shutdown=NSMenuItem(title:"Spegni Windows",action:#selector(shutdownWindows),keyEquivalent:"");shutdown.target=self;menu.addItem(shutdown)
+        let force=NSMenuItem(title:"Arresta Windows forzatamente…",action:#selector(forceStopWindows),keyEquivalent:"");force.target=self;menu.addItem(force)
         menu.addItem(.separator());menu.addItem(withTitle:"Quit",action:#selector(NSApplication.terminate(_:)),keyEquivalent:"q")
         NSApp.mainMenu=main
         NotificationCenter.default.addObserver(self,selector:#selector(hostDisplaysChanged),
@@ -155,15 +160,102 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
         let windowMenu=NSMenu(title:"Window");windowItem.submenu=windowMenu;NSApp.windowsMenu=windowMenu
         windowMenu.addItem(withTitle:"Minimize",action:#selector(NSWindow.performMiniaturize(_:)),keyEquivalent:"m")
         let close=NSMenuItem(title:"Close",action:#selector(closeCurrentWindow),keyEquivalent:"w");close.target=self;windowMenu.addItem(close)
+        startMachineObservation()
+        startWindows()
     }
     func applicationShouldTerminateAfterLastWindowClosed(_ sender:NSApplication)->Bool{false}
     func applicationShouldHandleReopen(_ sender:NSApplication,hasVisibleWindows flag:Bool)->Bool{showApplications();return false}
     @objc func showApplications(){launcher.makeKeyAndOrderFront(nil);NSApp.activate(ignoringOtherApps:true);NotificationCenter.default.post(name:.launcherFocusSearch,object:nil)}
     @objc func closeCurrentWindow(){(NSApp.keyWindow ?? NSApp.mainWindow)?.performClose(nil)}
-    func applicationWillTerminate(_ notification:Notification){localControl?.stop();bridge?.command("release");machine?.closeDesktop()}
+    func applicationWillTerminate(_ notification:Notification){machineStateTask?.cancel();localControl?.stop();bridge?.command("release");machine?.closeDesktop()}
     var desktopAvailable:Bool {machine != nil}
-    @objc func showWindows(){do{guard let machine else{return};try machine.showDesktop()}catch{status=error.localizedDescription;launcherNotice="Non riesco ad aprire il desktop Windows. "+error.localizedDescription}}
-    @objc func shutdownWindows(){do{try machine.shutdown()}catch{status=error.localizedDescription}}
+    var canStartWindows:Bool {machine != nil && machineState == .stopped && machineOperation == nil && !restarting}
+    var canStopWindows:Bool {machine != nil && machineState.pid != nil && machineOperation == nil && !restarting}
+    var machineStateLabel:String {
+        if let machineOperation {return machineOperation}
+        switch machineState {
+        case .stopped:return "Windows spento"
+        case .running:return connected ? "Windows acceso e collegato":"Windows acceso · collegamento in attesa"
+        case .unreachable:return "Stato Windows non verificabile"
+        }
+    }
+    private func acceptMachineState(_ state:MachineRuntimeState){
+        let changed=machineState != state
+        machineState=state
+        if state == .stopped,changed {
+            bridge?.disconnect()
+            for window in Array(windows.values) {window.retire()}
+            windows=[:];earlyFrames=[:];windowApps=[:]
+            machine?.closeDesktop();status="Windows spento"
+        }
+    }
+    private func startMachineObservation(){
+        machineStateTask=Task{@MainActor [weak self] in
+            while !Task.isCancelled {
+                if let self,let machine=self.machine,self.machineOperation == nil,!self.restarting {
+                    let revision=self.machineStateRevision
+                    let state=await machine.observedState()
+                    if !Task.isCancelled,self.machine === machine,self.machineStateRevision == revision,
+                       self.machineOperation == nil,!self.restarting {self.acceptMachineState(state)}
+                }
+                do {try await Task.sleep(for:.seconds(2))}catch{return}
+            }
+        }
+    }
+    @objc func startWindows(){
+        guard let machine,machineOperation == nil,!restarting else{return}
+        machineStateRevision=UUID();machineOperation="Avvio di Windows…";launcherNotice=nil
+        Task{@MainActor [weak self] in
+            guard let self else{return}
+            defer{self.machineOperation=nil}
+            do {try await machine.start();self.acceptMachineState(await machine.observedState())}
+            catch {self.acceptMachineState(await machine.observedState());self.launcherNotice="Non riesco ad avviare Windows. "+error.localizedDescription}
+        }
+    }
+    @objc func forceStopWindows(){
+        guard canStopWindows,let machine,let pid=machineState.pid else{return}
+        let alert=NSAlert();alert.alertStyle = .warning
+        alert.messageText="Arrestare forzatamente Windows?"
+        alert.informativeText="Windows e tutte le sue app verranno interrotti immediatamente. Le modifiche non salvate possono andare perse. Usa Spegni Windows per una chiusura normale."
+        alert.addButton(withTitle:"Annulla")
+        alert.addButton(withTitle:"Arresta Windows").hasDestructiveAction=true
+        guard alert.runModal() == .alertSecondButtonReturn else{return}
+        guard self.machine === machine,machineState.pid == pid,machineOperation == nil,!restarting else{return}
+        machineStateRevision=UUID();machineOperation="Arresto forzato di Windows…";launcherNotice=nil
+        Task{@MainActor [weak self] in
+            guard let self else{return}
+            defer{self.machineOperation=nil}
+            var commandError:Error?
+            do {try await machine.forceStop(expectedPID:pid)}catch {commandError=error}
+            var actual=await machine.observedState()
+            let deadline=Date().addingTimeInterval(10)
+            while commandError == nil,actual != .stopped,Date()<deadline {
+                try? await Task.sleep(for:.milliseconds(250));actual=await machine.observedState()
+            }
+            self.acceptMachineState(actual)
+            if actual != .stopped {
+                self.launcherNotice="L’arresto di Windows non è confermato. "+(commandError?.localizedDescription ?? "Il processo è ancora attivo.")
+            }
+        }
+    }
+    @objc func showWindows(){
+        guard let machine,machineOperation == nil,!restarting else{return}
+        machineStateRevision=UUID();machineOperation="Apertura desktop Windows…"
+        Task{@MainActor [weak self] in
+            guard let self else{return};defer{self.machineOperation=nil}
+            do {try await machine.showDesktop();self.acceptMachineState(await machine.observedState())}
+            catch {self.launcherNotice="Non riesco ad aprire il desktop Windows. "+error.localizedDescription}
+        }
+    }
+    @objc func shutdownWindows(){
+        guard canStopWindows,let machine else{return}
+        machineStateRevision=UUID();machineOperation="Richiesta di spegnimento…";launcherNotice=nil
+        Task{@MainActor [weak self] in
+            guard let self else{return};defer{self.machineOperation=nil}
+            do {try await machine.shutdown();self.acceptMachineState(await machine.observedState())}
+            catch {self.launcherNotice="Non riesco a richiedere lo spegnimento. "+error.localizedDescription}
+        }
+    }
 
     private func localResponse(_ value:[String:Any],reply:MacLocalControl.Reply){
         let data=(try? JSONSerialization.data(withJSONObject:value,options:[.sortedKeys])) ?? Data("{\"ok\":false,\"error\":\"Response could not be encoded.\"}".utf8)
@@ -189,7 +281,10 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
             localResponse(["ok":false,"error":"Unexpected command fields."],reply:reply);return
         }
         if command == "status" {
-            localResponse(["ok":true,"result":["connected":connected,"machineRunning":machine?.isRunning ?? false,
+            let running:Any
+            switch machineState {case .running:running=true;case .stopped:running=false;case .unreachable:running=NSNull()}
+            localResponse(["ok":true,"result":["connected":connected,"machineRunning":running,
+                "machineState":machineStateLabel,"machineOperation":machineOperation as Any? ?? NSNull(),
                 "status":status,"displayStatus":displayStatus,"primaryMatchesHost":sharedDisplay != nil,
                 "windowCount":windows.count,"capabilities":guestCapabilities,
                 "frameChannel":bridge?.separateFrames ?? false,
@@ -282,29 +377,31 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
         restartDisplay(graphics:profile,recovery:false)
     }
     func validateMenuItem(_ item:NSMenuItem)->Bool {
+        if item.action == #selector(startWindows) {return canStartWindows}
+        if item.action == #selector(forceStopWindows) || item.action == #selector(shutdownWindows) {return canStopWindows}
         if item.action == #selector(selectDisplay(_:)) || item.action == #selector(toggleRecoveryDisplay) {
-            return machine != nil && !restarting
+            return machine != nil && !restarting && machineOperation == nil
         }
         return true
     }
     private func restartDisplay(graphics:String?,recovery:Bool){
-        guard let previous=machine,!restarting else{return}
+        guard let previous=machine,!restarting,machineOperation == nil else{return}
         restarting=true;recoveryItem.isEnabled=false;status="Restarting Windows…"
         Task{@MainActor [weak self] in
             guard let self else{return}
             defer {self.restarting=false;self.recoveryItem.isEnabled=true}
             do {
-                try previous.shutdown()
+                try await previous.shutdown()
                 let deadline=Date().addingTimeInterval(60)
-                while previous.isRunning,Date()<deadline {try await Task.sleep(for:.milliseconds(500))}
-                guard !previous.isRunning else {
+                while await previous.observedState() != .stopped,Date()<deadline {try await Task.sleep(for:.milliseconds(500))}
+                guard await previous.observedState() == .stopped else {
                     self.status="Windows has not shut down. Save your work or use Show Windows.";return
                 }
                 previous.closeDesktop()
                 self.machine=try previous.withDisplay(graphics:graphics,recovery:recovery)
                 self.recoveryItem.state=recovery ? .on:.off
                 for item in self.displayItems {item.state=self.machine.configuration.graphics == item.representedObject as? String ? .on:.off}
-                try self.machine.start();try self.machine.showDesktop()
+                try await self.machine.start();try await self.machine.showDesktop()
                 self.status="Starting Windows…"
             }catch {self.status=error.localizedDescription}
         }

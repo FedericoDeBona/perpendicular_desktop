@@ -238,6 +238,7 @@ final class GuestBridge {
         }
     }
     private func receive(_ id:UUID,_ packet:GuestPacket) {
+        guard clients[id] != nil else{return}
         let h=packet.header
         if h["type"] as? String == "hello" {
             guard h["protocol"] as? Int == 1, h["token"] as? String == token,
@@ -299,6 +300,12 @@ final class GuestBridge {
         var value:[String:Any]=["type":"frame_pipeline","timings":lastFrameTimings]
         for key in ["window","sequence","width","height","bytes"] {value[key]=header[key]}
         if let data=try? JSONSerialization.data(withJSONObject:value,options:[.sortedKeys]){try? FileHandle.standardError.write(contentsOf:data+Data([10]))}
+    }
+    func disconnect(){
+        let previous=Array(clients.values)
+        if let active {disconnected(active)}
+        clients.removeAll()
+        for client in previous {client.cancel()}
     }
     private func disconnected(_ id:UUID) {
         clients.removeValue(forKey:id)
