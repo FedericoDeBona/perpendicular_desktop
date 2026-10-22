@@ -286,7 +286,7 @@ final class GuestBridge {
         onPacket?(packet)
     }
     private func recordFrameTimings(_ header:[String:Any]) {
-        let keys=["guestCopySubmitMilliseconds","guestMapMilliseconds","guestPixelCopyMilliseconds","guestUnmapMilliseconds",
+        let keys=["guestBufferReused","guestCopySubmitMilliseconds","guestMapMilliseconds","guestPixelCopyMilliseconds","guestUnmapMilliseconds",
                   "guestFrameAgeAtSendMilliseconds","guestReadbackMilliseconds","guestBackpressureMilliseconds","guestQueueMilliseconds",
                   "hostReceiveMilliseconds","hostDispatchMilliseconds","hostReadCallbacks","guestEncodeMilliseconds","hostDecodeMilliseconds","wireBytes","bytes"]
         lastFrameTimings=keys.reduce(into:[:]) {value,key in

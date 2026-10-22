@@ -13,7 +13,7 @@ use windows::Win32::System::Performance::{QueryPerformanceCounter, QueryPerforma
 
 pub struct Packet {
     pub header: Value,
-    pub bytes: Vec<u8>,
+    pub bytes: Arc<Vec<u8>>,
     // WGC uses QPC expressed in 100 ns units. Absolute guest clocks stay local.
     frame_time_100ns: Option<i64>,
     enqueued: Option<Instant>,
@@ -54,20 +54,20 @@ impl Outbox {
         }
         pending.controls.push_back(Packet {
             header,
-            bytes: Vec::new(),
+            bytes: Arc::new(Vec::new()),
             frame_time_100ns: None,
             enqueued: None,
         });
         self.wake.notify_one();
     }
-    pub fn frame(&self, id: &str, header: Value, bytes: Vec<u8>, frame_time_100ns: Option<i64>) {
+    pub fn frame(&self, id: &str, header: Value, bytes: impl Into<Arc<Vec<u8>>>, frame_time_100ns: Option<i64>) {
         let mut pending = self.pending.lock().unwrap();
         if !pending.frames.contains_key(id) {
             pending.order.push_back(id.to_owned());
         }
         pending
             .frames
-            .insert(id.to_owned(), Packet { header, bytes, frame_time_100ns, enqueued:Some(Instant::now()) });
+            .insert(id.to_owned(), Packet { header, bytes:bytes.into(), frame_time_100ns, enqueued:Some(Instant::now()) });
         if !self.split.load(Ordering::Acquire) {
             self.wake.notify_one();
         }
@@ -89,7 +89,7 @@ impl Outbox {
         stream.set_nodelay(true).map_err(super::error)?;
         stream.set_write_timeout(Some(Duration::from_secs(3))).map_err(super::error)?;
         stream.set_read_timeout(Some(Duration::from_secs(5))).map_err(super::error)?;
-        send(&mut stream, Packet { header:hello, bytes:Vec::new(), frame_time_100ns:None, enqueued:None }).map_err(super::error)?;
+        send(&mut stream, Packet { header:hello, bytes:Arc::new(Vec::new()), frame_time_100ns:None, enqueued:None }).map_err(super::error)?;
         self.row_alignment.store(256, Ordering::Release);
         self.split.store(true, Ordering::Release);
         self.wake.notify_one();
@@ -113,7 +113,10 @@ impl Outbox {
                     if encoded.len() + 64 < packet.bytes.len() {
                         packet.header["encoding"] = json!("lz4-block");
                         packet.header["encodedBytes"] = json!(encoded.len());
-                        packet.bytes = encoded;
+                        // Compression finished reading the immutable source.
+                        // Dropping this reference can make its allocation
+                        // uniquely available to the next capture immediately.
+                        packet.bytes = Arc::new(encoded);
                     }
                 }
                 packet.header["wireBytes"] = json!(packet.bytes.len());
@@ -156,7 +159,7 @@ impl Outbox {
                 } else {
                     Packet {
                         header: json!({"type":"heartbeat"}),
-                        bytes: Vec::new(),
+                        bytes: Arc::new(Vec::new()),
                         frame_time_100ns: None,
                         enqueued: None,
                     }

@@ -275,6 +275,7 @@ unsafe fn run(target: &Target, outbox: &Outbox, stop: &AtomicBool) -> Result<(),
             let mut previous = [0; 6];
             let mut staging: Option<ID3D11Texture2D> = None;
             let mut staging_size = (0, 0);
+            let mut last_pixels = Arc::new(Vec::<u8>::new());
             while !stop.load(Ordering::Acquire) && outbox.connected.load(Ordering::Acquire) {
                 let started = Instant::now();
                 target.set_phase(Phase::Validating);
@@ -406,7 +407,13 @@ unsafe fn run(target: &Target, outbox: &Outbox, stop: &AtomicBool) -> Result<(),
                         .map_err(|e| gpu_error(&device, "Create readback texture", e))?;
                 }
                 let backing = staging.as_ref().ok_or("Missing readback resource")?;
-                let mut pixels = Vec::<u8>::with_capacity(total);
+                // Never copy the old image or mutate storage still held by the
+                // encoder/writer. Reuse only an exclusively owned allocation;
+                // otherwise allocate the new frame as before, with no waiting.
+                let buffer_reused = Arc::get_mut(&mut last_pixels).is_some_and(|p| p.capacity() >= total);
+                if !buffer_reused { last_pixels = Arc::new(Vec::with_capacity(total)); }
+                let pixels = Arc::get_mut(&mut last_pixels).ok_or("Capture buffer is still in use")?;
+                pixels.clear();
                 target.set_phase(Phase::Mapping);
                 let readback_started = Instant::now();
                 let mut valid = true;
@@ -473,10 +480,11 @@ unsafe fn run(target: &Target, outbox: &Outbox, stop: &AtomicBool) -> Result<(),
                 target.capture_frames.store(sequence, Ordering::Release);
                 outbox.frame(&target.id,json!({"type":"frame","window":target.id,"sequence":sequence,"generation":generation,
                     "width":width,"height":height,"stride":stride,"bytes":pixels.len(),"capture":"wgc-hardware-readback",
+                    "guestBufferReused":u8::from(buffer_reused),
                     "guestReadbackMilliseconds":readback_milliseconds,
                     "guestCopySubmitMilliseconds":copy_submit_ms,"guestMapMilliseconds":map_ms,
                     "guestPixelCopyMilliseconds":pixel_copy_ms,"guestUnmapMilliseconds":unmap_ms,
-                    "guestBackpressureMilliseconds":backpressure_milliseconds}),pixels,frame_time_100ns);
+                    "guestBackpressureMilliseconds":backpressure_milliseconds}),last_pixels.clone(),frame_time_100ns);
                 if let Some(delay) = Duration::from_millis(16).checked_sub(started.elapsed()) {
                     std::thread::sleep(delay);
                 }

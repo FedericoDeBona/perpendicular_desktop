@@ -288,3 +288,11 @@ Questa modifica riguarda metadati e sorgenti del broker; non rimuove il costo WG
 SysShadow senza caption o bordo ridimensionabile viene esclusa dal catalogo delle superfici: è una decorazione, e AppKit fornisce già l'ombra alla finestra Mac. Tooltip e popup con contenuto non vengono esclusi insieme alle ombre. La creazione dell'item WGC precede il device Direct3D; un HWND non catturabile termina quindi prima di allocare un contesto GPU. Il ripristino WinRT è garantito anche sulle uscite anticipate.
 
 Un errore di cattura dei soli tooltips_class32/MicrosoftWindowsTooltip è identificato come tooltip nel messaggio window_error. Il frontend ne conserva il fallimento per superficie ma non lo presenta come indisponibilità dell'app nel launcher. geometry_snapshot conserva chiamata, HRESULT e stato; main, dialoghi, menu e gli altri popup mantengono il normale percorso di errore. Questo non aggiunge supporto alla cattura dei suggerimenti rifiutati da WGC.
+
+### Riuso esclusivo dell'allocazione BGRA
+
+I pixel del pacchetto guest sono posseduti da Arc<Vec<u8>>. WGC conserva un riferimento all'ultima allocazione del proprio run e la riscrive soltanto quando Arc::get_mut ne dimostra il possesso esclusivo e la capacità è sufficiente. Se encoder o writer la stanno ancora leggendo, o se la finestra cresce oltre la capacità, viene allocato un nuovo vettore senza copiare l'immagine precedente e senza aspettare il consumatore. Ogni riga e padding vengono comunque inizializzati prima della pubblicazione.
+
+Il writer comprime la sorgente immutabile; quando sceglie il blocco LZ4 rilascia il riferimento BGRA dopo aver completato l'encode. Il percorso senza compressione conserva il riferimento fino al completamento della scrittura. Vec dei menu e controlli passano attraverso la medesima proprietà immutabile, senza cambiare il protocollo. Non esistono pool globali, restituzioni tardive per ID o buffer condivisi fra run; resta trattenuta al massimo l'ultima allocazione per run più i pacchetti già limitati dalle code. guestBufferReused indica0/1 nell'ultimo frame.
+
+Questo risparmia allocazioni e primo accesso alle pagine osservati nella copia CPU; il readback completo e la copia dei pixel rimangono. Il riuso locale non rende il percorso Windows–Mac zero-copy e non dimostra da solo un miglioramento end-to-end.
