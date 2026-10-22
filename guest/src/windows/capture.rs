@@ -17,7 +17,7 @@ use windows::{
     Win32::{
         Foundation::{HMODULE, HWND, POINT, RECT, SetLastError, GetLastError, WIN32_ERROR},
         Graphics::{
-            Direct3D::{D3D_DRIVER_TYPE_HARDWARE, D3D_FEATURE_LEVEL_11_0},
+            Direct3D::{D3D_DRIVER_TYPE, D3D_DRIVER_TYPE_HARDWARE, D3D_DRIVER_TYPE_WARP, D3D_FEATURE_LEVEL_11_0},
             Direct3D11::*,
             Dwm::{DWMWA_EXTENDED_FRAME_BOUNDS, DwmGetWindowAttribute},
             Dxgi::{Common::DXGI_FORMAT_B8G8R8A8_UNORM, IDXGIDevice},
@@ -60,6 +60,7 @@ pub struct Target {
     pub capture_phase: AtomicU8,
     pub capture_frames: AtomicU64,
     pub capture_device: Mutex<Option<Value>>,
+    pub readback_device_lost: AtomicBool,
     // Generation, dimensions, and image origin relative to the Windows client origin.
     pub geometry: Mutex<(u64, i32, i32, i32, i32)>,
 }
@@ -75,6 +76,7 @@ impl Target {
             capture_phase: AtomicU8::new(Phase::Starting as u8),
             capture_frames: AtomicU64::new(0),
             capture_device: Mutex::new(None),
+            readback_device_lost: AtomicBool::new(false),
             geometry: Mutex::new((0, 0, 0, 0, 0)),
         }
     }
@@ -106,9 +108,19 @@ pub fn spawn(target: Arc<Target>, outbox: Arc<Outbox>) -> Arc<AtomicBool> {
     std::thread::spawn(move || {
         let class = catalogue::window_class(target.hwnd);
         let tooltip = class.eq_ignore_ascii_case("tooltips_class32") || class == "MicrosoftWindowsTooltip";
-        let result = if class == "#32768" {
+        let mut result = if class == "#32768" {
             super::menu_capture::run(&target, &outbox, &flag)
-        } else { unsafe { run(&target, &outbox, &flag) } };
+        } else { unsafe { run(&target, &outbox, &flag, D3D_DRIVER_TYPE_HARDWARE, None) } };
+        if result.is_err() && target.readback_device_lost.swap(false,Ordering::AcqRel)
+            && !flag.load(Ordering::Acquire) && outbox.connected.load(Ordering::Acquire) && target.valid()
+        {
+            // One replacement session, after the failed hardware session and
+            // all its resources have returned. No retry loop or device reuse.
+            let failure=result.as_ref().unwrap_err().clone();
+            outbox.control(json!({"type":"window_notice","window":target.id,
+                "message":"Lettura GPU interrotta: tentativo di recupero software della cattura.","role":"window"}));
+            result=unsafe {run(&target,&outbox,&flag,D3D_DRIVER_TYPE_WARP,Some(&failure))};
+        }
         if let Err(message) = result {
             let mut description = target.capture_device.lock().unwrap();
             let description = description.get_or_insert_with(|| json!({}));
@@ -196,7 +208,7 @@ unsafe fn create_item(target:&Target,interop:&IGraphicsCaptureItemInterop)->Resu
     }
 }
 
-unsafe fn run(target: &Target, outbox: &Outbox, stop: &AtomicBool) -> Result<(), String> {
+unsafe fn run(target: &Target, outbox: &Outbox, stop: &AtomicBool, driver:D3D_DRIVER_TYPE, hardware_failure:Option<&str>) -> Result<(), String> {
     unsafe {
         RoInitialize(RO_INIT_MULTITHREADED).map_err(error)?;
         struct Apartment;
@@ -229,7 +241,7 @@ unsafe fn run(target: &Target, outbox: &Outbox, stop: &AtomicBool) -> Result<(),
         let mut context = None;
         D3D11CreateDevice(
             None,
-            D3D_DRIVER_TYPE_HARDWARE,
+            driver,
             HMODULE::default(),
             D3D11_CREATE_DEVICE_BGRA_SUPPORT,
             Some(&[D3D_FEATURE_LEVEL_11_0]),
@@ -241,10 +253,22 @@ unsafe fn run(target: &Target, outbox: &Outbox, stop: &AtomicBool) -> Result<(),
         .map_err(error)?;
         let device = device.ok_or("Missing capture device")?;
         let context = context.ok_or("Missing capture context")?;
-        let description = super::display::device_description(&device).map_err(error)?;
-        if description["hardwareDevice"] != true {
+        // WGC's free-threaded pool also uses this device. The immediate
+        // context is not thread-safe by default; protect it before publishing
+        // the WinRT device to the capture pool, including during teardown.
+        let multithread:ID3D11Multithread=context.cast().map_err(error)?;
+        let _ = multithread.SetMultithreadProtected(true);
+        if !multithread.GetMultithreadProtected().as_bool() {
+            return Err("The capture context did not enable multithread protection".into());
+        }
+        let mut description = super::display::device_description(&device).map_err(error)?;
+        description["multithreadProtected"]=json!(true);
+        if driver==D3D_DRIVER_TYPE_HARDWARE && description["hardwareDevice"] != true {
             return Err("The capture device is a software adapter, not the Windows GPU".into());
         }
+        let software_recovery=driver==D3D_DRIVER_TYPE_WARP;
+        description["softwareRecovery"]=json!(software_recovery);
+        if let Some(failure)=hardware_failure {description["hardwareFailure"]=json!(failure);}
         *target.capture_device.lock().unwrap() = Some(description);
         let dxgi: IDXGIDevice = device.cast().map_err(error)?;
         let runtime: IDirect3DDevice = CreateDirect3D11DeviceFromDXGIDevice(&dxgi)
@@ -270,8 +294,9 @@ unsafe fn run(target: &Target, outbox: &Outbox, stop: &AtomicBool) -> Result<(),
         })).map_err(error)?;
         session.StartCapture().map_err(|e| gpu_error(&device, "StartCapture", e))?;
         let result = (|| -> Result<(), String> {
-            let mut sequence = 0u64;
-            let mut generation = 1u64;
+            let mut sequence = target.capture_frames.load(Ordering::Acquire);
+            let mut generation = target.geometry.lock().unwrap().0.max(1);
+            let mut recovery_reported=false;
             let mut previous = [0; 6];
             let mut staging: Option<ID3D11Texture2D> = None;
             let mut staging_size = (0, 0);
@@ -430,7 +455,13 @@ unsafe fn run(target: &Target, outbox: &Outbox, stop: &AtomicBool) -> Result<(),
                     let mut mapped = D3D11_MAPPED_SUBRESOURCE::default();
                     context
                         .Map(backing, 0, D3D11_MAP_READ, 0, Some(&mut mapped))
-                        .map_err(|e| gpu_error(&device, "Map readback texture", e))?;
+                        .map_err(|e| {
+                            let reason=device.GetDeviceRemovedReason().err().map(|reason|reason.code().0 as u32);
+                            if matches!(reason,Some(0x887a0020|0x887a0005|0x887a0006|0x887a0007)) {
+                                target.readback_device_lost.store(true,Ordering::Release);
+                            }
+                            gpu_error(&device,"Map readback texture",e)
+                        })?;
                     map_ms += map_started.elapsed().as_secs_f64() * 1000.0;
                     let copying = Instant::now();
                     valid = !mapped.pData.is_null() && mapped.RowPitch as usize >= row_bytes
@@ -478,8 +509,13 @@ unsafe fn run(target: &Target, outbox: &Outbox, stop: &AtomicBool) -> Result<(),
                 };
                 *target.geometry.lock().unwrap() = (generation, width, height, offset.0, offset.1);
                 target.capture_frames.store(sequence, Ordering::Release);
+                if software_recovery && !recovery_reported {
+                    outbox.control(json!({"type":"window_notice","window":target.id,"role":"window",
+                        "message":"Recupero software della cattura attivo: la lettura GPU ha restituito un errore."}));
+                    recovery_reported=true;
+                }
                 outbox.frame(&target.id,json!({"type":"frame","window":target.id,"sequence":sequence,"generation":generation,
-                    "width":width,"height":height,"stride":stride,"bytes":pixels.len(),"capture":"wgc-hardware-readback",
+                    "width":width,"height":height,"stride":stride,"bytes":pixels.len(),"capture":if software_recovery {"wgc-software-recovery"} else {"wgc-hardware-readback"},
                     "guestBufferReused":u8::from(buffer_reused),
                     "guestReadbackMilliseconds":readback_milliseconds,
                     "guestCopySubmitMilliseconds":copy_submit_ms,"guestMapMilliseconds":map_ms,

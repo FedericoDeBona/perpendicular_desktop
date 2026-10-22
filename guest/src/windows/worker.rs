@@ -189,7 +189,7 @@ impl Worker {
         outbox.control(
             json!({"type":"hello","protocol":1,"token":config.token,"epoch":self.epoch,
             "sid":self.sid,"session":self.session,"version":env!("CARGO_PKG_VERSION"),
-            "capabilities":{"capture":"wgc-hardware-readback","windows":4,"transients":12,"windowRoles":true,"input":true,"catalogue":true,"appIcon":true,"frameChannel":true,"frameEncodings":["lz4-block"],"displayInfo":true,"driverInfo":true,"graphicsInfo":true,"displayConfigure":true,"sharedGeometry":true,"processControl":true,"clipboard":true,"clipboardTextBytes":262144,"applicationStatus":true,"execute":true,"executeTimeoutSeconds":60,"executeOutputBytes":65536,"displayEvents":self.display_observer.is_some()}}),
+            "capabilities":{"capture":"wgc-hardware-readback-with-software-recovery","windows":4,"transients":12,"windowRoles":true,"input":true,"catalogue":true,"appIcon":true,"frameChannel":true,"frameEncodings":["lz4-block"],"displayInfo":true,"driverInfo":true,"graphicsInfo":true,"displayConfigure":true,"sharedGeometry":true,"processControl":true,"clipboard":true,"clipboardTextBytes":262144,"applicationStatus":true,"execute":true,"executeTimeoutSeconds":60,"executeOutputBytes":65536,"displayEvents":self.display_observer.is_some()}}),
         );
         let (sender, receiver) = mpsc::sync_channel(128);
         let state = outbox.clone();
@@ -968,6 +968,7 @@ impl Worker {
             capture_phase: AtomicU8::new(capture::Phase::Starting as u8),
             capture_frames: AtomicU64::new(0),
             capture_device: Mutex::new(None),
+            readback_device_lost: AtomicBool::new(false),
             geometry: Mutex::new((0, 0, 0, 0, 0)),
         });
         let stop = Some(capture::spawn(target.clone(), outbox.clone()));
@@ -1106,6 +1107,7 @@ impl Worker {
                 capture_phase: AtomicU8::new(capture::Phase::Starting as u8),
                 capture_frames: AtomicU64::new(0),
                 capture_device: Mutex::new(None),
+            readback_device_lost: AtomicBool::new(false),
                 geometry: Mutex::new((0, 0, 0, 0, 0)),
             });
             self.windows.insert(

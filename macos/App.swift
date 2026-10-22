@@ -816,6 +816,11 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
         case "reply":
             if value["ok"] as? Bool == false,value["operation"] as? String == "input",
                value["message"] as? String == "Windows did not grant this window keyboard focus" {inputFocusFailed()}
+        case "window_notice":
+            // A recovery warning is not a stopped capture. It can arrive after
+            // the first frame on the separate frame connection.
+            guard let id=value["window"] as? String,windows[id] != nil else{return}
+            launcherNotice=value["message"] as? String
         case "window_error","launch_error":
             if let id=value["window"] as? String {failedWindows.insert(id)}
             refreshApplicationStates()
