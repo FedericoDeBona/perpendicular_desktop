@@ -189,7 +189,7 @@ impl Worker {
         outbox.control(
             json!({"type":"hello","protocol":1,"token":config.token,"epoch":self.epoch,
             "sid":self.sid,"session":self.session,"version":env!("CARGO_PKG_VERSION"),
-            "capabilities":{"capture":"software","windows":4,"transients":12,"windowRoles":true,"input":true,"catalogue":true,"appIcon":true,"frameChannel":true,"displayInfo":true,"driverInfo":true,"graphicsInfo":true,"displayConfigure":true,"sharedGeometry":true,"processControl":true,"applicationStatus":true,"execute":true,"executeTimeoutSeconds":60,"executeOutputBytes":65536,"displayEvents":self.display_observer.is_some()}}),
+            "capabilities":{"capture":"software","windows":4,"transients":12,"windowRoles":true,"input":true,"catalogue":true,"appIcon":true,"frameChannel":true,"frameEncodings":["lz4-block"],"displayInfo":true,"driverInfo":true,"graphicsInfo":true,"displayConfigure":true,"sharedGeometry":true,"processControl":true,"applicationStatus":true,"execute":true,"executeTimeoutSeconds":60,"executeOutputBytes":65536,"displayEvents":self.display_observer.is_some()}}),
         );
         let (sender, receiver) = mpsc::sync_channel(128);
         let state = outbox.clone();
@@ -231,10 +231,12 @@ impl Worker {
                 let request = command["request"].clone();
                 if command["operation"] == "frame_channel" {
                     let channel = command["channel"].as_str().filter(|s| s.len() == 32 && s.bytes().all(|b| b.is_ascii_hexdigit()));
-                    if frame_channel_started || channel.is_none() || command["rowAlignment"] != 256 {
+                    if frame_channel_started || channel.is_none() || command["rowAlignment"] != 256
+                        || (!command["encoding"].is_null() && command["encoding"] != "lz4-block") {
                         outbox.control(json!({"type":"reply","request":request,"ok":false,"message":"Invalid or duplicate frame channel"}));
                         continue;
                     }
+                    let compress_frames = command["encoding"] == "lz4-block";
                     frame_channel_started = true;
                     let channel = channel.unwrap().to_owned();
                     let endpoint: SocketAddr = format!("10.0.2.2:{}", config.port).parse().map_err(error)?;
@@ -246,7 +248,7 @@ impl Worker {
                         match result {
                             Ok(stream) => {
                                 sender.control(json!({"type":"reply","request":request,"ok":true,"result":{"accepted":true}}));
-                                if sender.clone().start_frames(stream, hello).is_err() {sender.connected.store(false, Ordering::Release);}
+                                if sender.clone().start_frames(stream, hello, compress_frames).is_err() {sender.connected.store(false, Ordering::Release);}
                             }
                             Err(_) => {sender.connected.store(false, Ordering::Release);}
                         }

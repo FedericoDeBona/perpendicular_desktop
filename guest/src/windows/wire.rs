@@ -85,7 +85,7 @@ impl Outbox {
     }
     /// Enabled only after the host requests the optional authenticated pixel
     /// connection. Older hosts keep the original combined stream.
-    pub fn start_frames(self: Arc<Self>, mut stream: TcpStream, hello: Value) -> Result<(), String> {
+    pub fn start_frames(self: Arc<Self>, mut stream: TcpStream, hello: Value, compress_frames: bool) -> Result<(), String> {
         stream.set_nodelay(true).map_err(super::error)?;
         stream.set_write_timeout(Some(Duration::from_secs(3))).map_err(super::error)?;
         stream.set_read_timeout(Some(Duration::from_secs(5))).map_err(super::error)?;
@@ -103,7 +103,20 @@ impl Outbox {
                 if packet.is_some() { self.slot_wake.notify_all(); }
                 packet
             };
-            if let Some(packet) = packet {
+            if let Some(mut packet) = packet {
+                // Encode only the frame actually selected by the writer. Each
+                // block is independent; replacing pending frames needs no base.
+                if compress_frames && packet.bytes.len() >= 1024 {
+                    let started = Instant::now();
+                    let encoded = lz4_flex::block::compress(&packet.bytes);
+                    packet.header["guestEncodeMilliseconds"] = json!(started.elapsed().as_secs_f64()*1000.0);
+                    if encoded.len() + 64 < packet.bytes.len() {
+                        packet.header["encoding"] = json!("lz4-block");
+                        packet.header["encodedBytes"] = json!(encoded.len());
+                        packet.bytes = encoded;
+                    }
+                }
+                packet.header["wireBytes"] = json!(packet.bytes.len());
                 let mut receipt = [0u8;1];
                 if send(&mut stream, packet).is_err() || stream.read_exact(&mut receipt).is_err() || receipt[0] != 1 {
                     self.connected.store(false, Ordering::Release);

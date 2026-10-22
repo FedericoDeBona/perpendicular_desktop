@@ -104,12 +104,13 @@ final class GuestConnection: @unchecked Sendable {
                         self.connection.cancel();return
                     }
                     let received=ProcessInfo.processInfo.systemUptime
-                    let complete:@Sendable (Data,GuestFrameSurface?,Int)->Void = {[weak self] bytes,surface,callbacks in
+                    let complete:@Sendable (Data,GuestFrameSurface?,Int,Double)->Void = {[weak self] bytes,surface,callbacks,decodeMilliseconds in
                         guard let self else{return}
                         var header=packet.header
                         let completed=ProcessInfo.processInfo.systemUptime
-                        header["hostReceiveMilliseconds"]=(completed-received)*1000
+                        header["hostReceiveMilliseconds"]=max(0,(completed-received)*1000-decodeMilliseconds)
                         header["hostReceivedAt"]=completed
+                        header["hostDecodeMilliseconds"]=decodeMilliseconds
                         if callbacks>0 {header["hostReadCallbacks"]=Double(callbacks)}
                         self.offer(window,GuestPacket(header:header,pixels:bytes,surface:surface))
                         // This retires only the independent CPU/network copy.
@@ -119,9 +120,33 @@ final class GuestConnection: @unchecked Sendable {
                         })}
                         self.readHeader()
                     }
-                    if let surface=GuestFrameSurface.allocate(width:width,height:height,stride:stride) {
-                        self.readSurface(surface,offset:0,callbacks:0){complete(Data(),surface,$0)}
-                    } else {self.read(stride*height){complete($0,nil,0)}}
+                    let encoding=object["encoding"] as? String ?? "raw"
+                    if encoding == "lz4-block" {
+                        guard self.frameOnly,let count=object["encodedBytes"] as? Int,count>0,count<stride*height else {
+                            self.connection.cancel();return
+                        }
+                        self.read(count){[weak self] encoded in
+                            guard let self else{return}
+                            let started=ProcessInfo.processInfo.systemUptime
+                            let surface=GuestFrameSurface.allocate(width:width,height:height,stride:stride,decodeGuard:true)
+                            if let surface {
+                                guard GuestFrameCodec.decodeLZ4(encoded,into:UnsafeMutableRawBufferPointer(start:surface.contents,count:surface.byteCount+1),expected:surface.byteCount) else {
+                                    self.connection.cancel();return
+                                }
+                                complete(Data(),surface,0,(ProcessInfo.processInfo.systemUptime-started)*1000)
+                            }else{
+                                var pixels=Data(count:stride*height+1)
+                                let valid=pixels.withUnsafeMutableBytes { GuestFrameCodec.decodeLZ4(encoded,into:$0,expected:stride*height) }
+                                guard valid else{self.connection.cancel();return}
+                                pixels.removeLast()
+                                complete(pixels,nil,0,(ProcessInfo.processInfo.systemUptime-started)*1000)
+                            }
+                        }
+                    }else if encoding == "raw",object["encodedBytes"] == nil {
+                        if let surface=GuestFrameSurface.allocate(width:width,height:height,stride:stride) {
+                            self.readSurface(surface,offset:0,callbacks:0){complete(Data(),surface,$0,0)}
+                        } else {self.read(stride*height){complete($0,nil,0,0)}}
+                    }else{self.connection.cancel();return}
                 } else {
                     Task { @MainActor [self] in self.packet(self.id,packet) }
                     // Authentication is decided on the main actor. Do not
@@ -238,7 +263,9 @@ final class GuestBridge {
             if (h["capabilities"] as? [String:Any])?["frameChannel"] as? Bool == true {
                 let channel=UUID().uuidString.replacingOccurrences(of:"-",with:"").lowercased()
                 frameChannel=channel
-                command("frame_channel",["channel":channel,"rowAlignment":256],timeout:.seconds(5)){[weak self] result in
+                var options:[String:Any]=["channel":channel,"rowAlignment":256]
+                if ((h["capabilities"] as? [String:Any])?["frameEncodings"] as? [String])?.contains("lz4-block") == true {options["encoding"]="lz4-block"}
+                command("frame_channel",options,timeout:.seconds(5)){[weak self] result in
                     if case .failure=result,self?.active == id {self?.clients[id]?.cancel()}
                 }
             }
@@ -260,9 +287,9 @@ final class GuestBridge {
     }
     private func recordFrameTimings(_ header:[String:Any]) {
         let keys=["guestFrameAgeAtSendMilliseconds","guestReadbackMilliseconds","guestBackpressureMilliseconds","guestQueueMilliseconds",
-                  "hostReceiveMilliseconds","hostDispatchMilliseconds","hostReadCallbacks"]
+                  "hostReceiveMilliseconds","hostDispatchMilliseconds","hostReadCallbacks","guestEncodeMilliseconds","hostDecodeMilliseconds","wireBytes","bytes"]
         lastFrameTimings=keys.reduce(into:[:]) {value,key in
-            if let number=header[key] as? Double,number.isFinite,number>=0,number<=60000 {value[key]=number}
+            if let number=header[key] as? Double,number.isFinite,number>=0,number <= ((key == "wireBytes" || key == "bytes") ? 34*1024*1024:60000) {value[key]=number}
         }
         frameReceiveMilliseconds=lastFrameTimings["hostReceiveMilliseconds"] ?? 0
         guard ProcessInfo.processInfo.environment["PERPENDICULAR_STATE_TRACE"] == "1" else{return}
