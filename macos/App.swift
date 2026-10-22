@@ -256,7 +256,9 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
             localGeometrySnapshot(ids.dropFirst(),rows:rows,epoch:epoch,reply:reply);return
         }
         let frame=controller.window.frame
+        let content=controller.window.contentRect(forFrameRect:frame)
         let row:[String:Any]=["id":id,"title":controller.window.title,"role":controller.role.rawValue,
+            "macContentPoints":["x":content.minX,"y":content.minY,"width":content.width,"height":content.height],
             "macFramePoints":["x":frame.minX,"y":frame.minY,"width":frame.width,"height":frame.height]]
         bridge.command("geometry",["window":id],timeout:.seconds(2)){[weak self] result in
             guard let self else{return}
@@ -538,9 +540,9 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
     }
     private func prepareDisplay(){
         guard displayConfigurable,machine.virtualDisplayEnabled,let host=HostDisplay.current().first(where:\.primary) else{return}
-        let width=min(4096,Int((host.frame.width*host.scale).rounded()))
-        let height=min(4096,8_388_608/max(1,width),Int((host.frame.height*host.scale).rounded()))
-        configureDisplay(width:width,height:height,epoch:displayEpoch)
+        let size=host.guestPixelSize
+        let width=Int(size.width),height=Int(size.height)
+        configureDisplay(width:width,height:height,workArea:host.guestWorkArea,epoch:displayEpoch)
     }
     private func readDisplay(){
         guard connected,displayReadable,let epoch=displayEpoch else{return}
@@ -558,7 +560,7 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
         let confirmed=host.first(where:\.primary).flatMap{SharedDisplay.primary(host:$0,snapshot:snapshot)}
         sharedDisplay=sharedGeometryCapable ? confirmed:nil
         for window in windows.values {window.setSharedDisplay(sharedDisplay)}
-        if confirmed != nil {displayStatus="Primary Windows display matches this Mac."}
+        if confirmed != nil {displayStatus="Windows geometry matches Mac points (Retina presentation)."}
         else if let primary=(snapshot["displays"] as? [[String:Any]])?.first(where:{$0["primary"] as? Bool == true}),
                 let width=primary["width"] as? Int,let height=primary["height"] as? Int,
                 let dpi=primary["dpi"] as? Int {
@@ -570,7 +572,7 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
             try? FileHandle.standardError.write(contentsOf:data+Data([10]))
         }
     }
-    private func configureDisplay(width:Int,height:Int,epoch:String?,attempt:Int=0){
+    private func configureDisplay(width:Int,height:Int,workArea:NSRect,epoch:String?,attempt:Int=0){
         displaySetupTask?.cancel()
         displaySetupID=UUID();let setupID=displaySetupID
         displaySetupTask=Task{@MainActor [weak self] in
@@ -580,14 +582,15 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
             guard !Task.isCancelled,let self,self.connected,self.displayEpoch == epoch,self.displaySetupID == setupID else{return}
             self.invalidateDisplay("Preparing Windows display…")
             let revision=self.displayRevision
-            self.bridge.command("display_configure",["width":width,"height":height],timeout:.seconds(5)){[weak self] result in
+            let area:[String:Int]=["x":Int(workArea.minX),"y":Int(workArea.minY),"width":Int(workArea.width),"height":Int(workArea.height)]
+            self.bridge.command("display_configure",["width":width,"height":height,"workArea":area],timeout:.seconds(5)){[weak self] result in
                 guard let self,self.connected,self.displayEpoch == epoch,self.displaySetupID == setupID else{return}
                 self.displaySetupTask=nil
                 // Windows broadcasts its mode change while this request is in
                 // flight. Read once more instead of publishing an older snapshot.
                 guard self.displayRevision == revision else{self.readDisplay();return}
                 if case .failure=result {
-                    if attempt<2 {self.configureDisplay(width:width,height:height,epoch:epoch,attempt:attempt+1)}
+                    if attempt<2 {self.configureDisplay(width:width,height:height,workArea:workArea,epoch:epoch,attempt:attempt+1)}
                     else {self.status="Windows could not match the Mac display size.";self.readDisplay()}
                     return
                 }

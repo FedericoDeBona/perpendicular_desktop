@@ -333,6 +333,12 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
         applyingSourceGeometry=true
         window.setFrame(frame,display:true)
         applyingSourceGeometry=false
+        if !role.transient,window.frame != frame {
+            // AppKit can constrain a newly discovered window below its menu
+            // bar. Commit that actual placement to Windows, once, using the
+            // same acknowledged path as a user drag.
+            beginSharedGeometry();commitSharedGeometry()
+        }
     }
     private func leftMouse(_ event:NSEvent,_ value:[String:Any]){
         // Use the position recorded in this event, in global coordinates.

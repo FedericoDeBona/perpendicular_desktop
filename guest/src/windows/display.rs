@@ -6,7 +6,7 @@ use std::{
 };
 use windows::{
     Win32::{
-        Foundation::{HINSTANCE, HMODULE, HWND, LPARAM, LRESULT, POINT, WPARAM},
+        Foundation::{HINSTANCE, HMODULE, HWND, LPARAM, LRESULT, POINT, RECT, WPARAM},
         Graphics::{
             Direct3D::{D3D_DRIVER_TYPE_HARDWARE, D3D_FEATURE_LEVEL},
             Direct3D11::*,
@@ -299,6 +299,7 @@ pub fn configure(value: &Value) -> Result<Value, String> {
                 name, ENUM_REGISTRY_SETTINGS, &mut saved, EDS_RAWMODE,
             ).as_bool() && saved.dmPelsWidth == width && saved.dmPelsHeight == height;
             if mode.dmPelsWidth == width && mode.dmPelsHeight == height && saved_matches {
+                configure_work_area(value)?;
                 return Ok(snapshot());
             }
             mode.dmPelsWidth = width;
@@ -321,8 +322,36 @@ pub fn configure(value: &Value) -> Result<Value, String> {
                     applied.0
                 ));
             }
+            configure_work_area(value)?;
             return Ok(snapshot());
         }
     }
     Err("No active primary display".into())
+}
+
+/// Reserve host UI (notably the menu bar) without reclaiming the Windows
+/// taskbar. This is primary-monitor geometry, not a change of DPI or app scale.
+fn configure_work_area(value: &Value) -> Result<(), String> {
+    let Some(area)=value.get("workArea") else {return Ok(());};
+    let field=|name:&str| area[name].as_i64().and_then(|n| i32::try_from(n).ok())
+        .filter(|n| (0..=4096).contains(n)).ok_or("Invalid display work area");
+    let (x,y,width,height)=(field("x")?,field("y")?,field("width")?,field("height")?);
+    if width<160 || height<100 || x+width>value["width"].as_i64().unwrap_or(0) as i32
+        || y+height>value["height"].as_i64().unwrap_or(0) as i32 {return Err("Invalid display work area".into());}
+    unsafe {
+        let mut current=RECT::default();
+        SystemParametersInfoW(SPI_GETWORKAREA,0,Some((&mut current as *mut RECT).cast()),SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS(0))
+            .map_err(|e|e.to_string())?;
+        let mut requested=RECT {left:current.left.max(x),top:current.top.max(y),
+            right:current.right.min(x+width),bottom:current.bottom.min(y+height)};
+        if requested.right-requested.left<160 || requested.bottom-requested.top<100 {return Err("No usable shared display work area".into());}
+        if requested!=current {
+            // SENDCHANGE makes Explorer immediately reclaim this reservation.
+            // New windows and our geometry limits query the resulting work area;
+            // the configure reply supplies the confirmed snapshot to the host.
+            SystemParametersInfoW(SPI_SETWORKAREA,0,Some((&mut requested as *mut RECT).cast()),SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS(0))
+                .map_err(|e|e.to_string())?;
+        }
+    }
+    Ok(())
 }

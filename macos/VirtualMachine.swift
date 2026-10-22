@@ -102,8 +102,8 @@ final class VirtualMachineController {
     func closeDesktop(){desktop?.stop();desktop?.window.close();desktop=nil}
     func synchronizePrimaryDisplay(){
         guard virtualDisplayEnabled,let launch=desktopLaunch(),let host=HostDisplay.current().first else{return}
-        let width=min(4096,Int((host.frame.width*host.scale).rounded()))
-        let height=min(4096,8_388_608/max(1,width),Int((host.frame.height*host.scale).rounded()))
+        let size=host.guestPixelSize
+        let width=Int(size.width),height=Int(size.height)
         let request=UUID();displayRequest=request;displayControl?.stop()
         let client=DesktopConnection(path:launch.socket,receive:{_,_,_ in},layout:{[weak self] screen in
             guard let self,self.displayRequest == request,screen.width == width,screen.height == height else{return}

@@ -10,13 +10,15 @@ struct SharedDisplay:Equatable {
     let guestWorkArea: NSRect?
 
     private init(host: HostDisplay, guestFrame: NSRect, guestWorkArea: NSRect?) {
-        pixelScale = 1 / host.scale
+        pixelScale = host.frame.width / guestFrame.width
         self.guestFrame = guestFrame
         hostFrame = host.frame
         self.guestWorkArea = guestWorkArea
     }
 
-    /// Read the actual guest mode and DPI. Backend capabilities alone do not qualify a display.
+    /// Confirm the requested pixel mode, independently of Windows UI scaling.
+    /// DPI controls text/control sizes inside Windows; it does not change the
+    /// physical coordinates reported by our per-monitor-aware guest worker.
     static func primary(host: HostDisplay, snapshot: [String: Any]) -> SharedDisplay? {
         guard host.primary, valid(host.frame), host.scale.isFinite, host.scale > 0,
               let displays = snapshot["displays"] as? [[String: Any]],
@@ -28,9 +30,8 @@ struct SharedDisplay:Equatable {
         let monitor = displays[index]
         guard let frame = rectangle(monitor),
               let dpi = integer(monitor["dpi"]), dpi > 0,
-              frame.width == host.frame.width * host.scale,
-              frame.height == host.frame.height * host.scale,
-              dpi == 96 * host.scale else { return nil }
+              frame.size == host.guestPixelSize,
+              host.frame.width / frame.width == host.frame.height / frame.height else { return nil }
 
         var workArea: NSRect?
         if let value = monitor["workArea"] {
@@ -38,7 +39,11 @@ struct SharedDisplay:Equatable {
                   frame.contains(area) else { return nil }
             workArea = area
         }
-        return SharedDisplay(host: host, guestFrame: frame, guestWorkArea: workArea)
+        let mapping=SharedDisplay(host: host, guestFrame: frame, guestWorkArea: workArea)
+        // Reserve the Mac menu bar in Windows too. Otherwise AppKit silently
+        // shifts a window at guest y=0 and both sides disagree immediately.
+        guard let workArea,host.workArea.contains(mapping.macFrame(forGuest:workArea)) else{return nil}
+        return mapping
     }
 
     func macFrame(forGuest frame: NSRect) -> NSRect {
