@@ -104,7 +104,9 @@ pub fn spawn(target: Arc<Target>, outbox: Arc<Outbox>) -> Arc<AtomicBool> {
     let flag = stop.clone();
     target.set_phase(Phase::Starting);
     std::thread::spawn(move || {
-        let result = if catalogue::window_class(target.hwnd) == "#32768" {
+        let class = catalogue::window_class(target.hwnd);
+        let tooltip = class.eq_ignore_ascii_case("tooltips_class32") || class == "MicrosoftWindowsTooltip";
+        let result = if class == "#32768" {
             super::menu_capture::run(&target, &outbox, &flag)
         } else { unsafe { run(&target, &outbox, &flag) } };
         if let Err(message) = result {
@@ -114,7 +116,8 @@ pub fn spawn(target: Arc<Target>, outbox: Arc<Outbox>) -> Arc<AtomicBool> {
             description["failure"] = json!(message);
             target.set_phase(Phase::Error);
             if !flag.load(Ordering::Acquire) && target.valid() {
-                outbox.control(json!({"type":"window_error","window":target.id,"message":message}));
+                outbox.control(json!({"type":"window_error","window":target.id,"message":message,
+                    "role":if tooltip {"tooltip"} else {"window"}}));
             }
         } else if target.capture_phase.load(Ordering::Acquire) != Phase::Invalidated as u8 {
             target.set_phase(Phase::Ended);
@@ -196,9 +199,31 @@ unsafe fn create_item(target:&Target,interop:&IGraphicsCaptureItemInterop)->Resu
 unsafe fn run(target: &Target, outbox: &Outbox, stop: &AtomicBool) -> Result<(), String> {
     unsafe {
         RoInitialize(RO_INIT_MULTITHREADED).map_err(error)?;
+        struct Apartment;
+        impl Drop for Apartment {
+            fn drop(&mut self) { unsafe { windows::Win32::System::WinRT::RoUninitialize(); } }
+        }
+        let _apartment = Apartment;
         SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
         if !GraphicsCaptureSession::IsSupported().map_err(error)? {
             return Err("Window capture is unsupported".into());
+        }
+        // HWND admission is independent of Direct3D. A rejected tooltip must
+        // not allocate a GPU device/context just to discover it has no item.
+        let interop: IGraphicsCaptureItemInterop =
+            factory::<GraphicsCaptureItem, IGraphicsCaptureItemInterop>().map_err(error)?;
+        while IsIconic(HWND(target.hwnd as *mut _)).as_bool() {
+            if stop.load(Ordering::Acquire)
+                || !outbox.connected.load(Ordering::Acquire)
+                || !target.valid()
+            {
+                return Ok(());
+            }
+            std::thread::sleep(Duration::from_millis(75));
+        }
+        let item = create_item(target, &interop)?;
+        if stop.load(Ordering::Acquire) || !outbox.connected.load(Ordering::Acquire) || !target.valid() {
+            return Ok(());
         }
         let mut device = None;
         let mut context = None;
@@ -226,21 +251,6 @@ unsafe fn run(target: &Target, outbox: &Outbox, stop: &AtomicBool) -> Result<(),
             .map_err(|e| gpu_error(&device, "CreateDirect3D11DeviceFromDXGIDevice", e))?
             .cast()
             .map_err(error)?;
-        let interop: IGraphicsCaptureItemInterop =
-            factory::<GraphicsCaptureItem, IGraphicsCaptureItemInterop>().map_err(error)?;
-        // A minimized HWND can initially report a tiny backing surface. Wait for a
-        // normal window before allocating its capture pool, including after reconnect.
-        while IsIconic(HWND(target.hwnd as *mut _)).as_bool() {
-            if stop.load(Ordering::Acquire)
-                || !outbox.connected.load(Ordering::Acquire)
-                || !target.valid()
-            {
-                windows::Win32::System::WinRT::RoUninitialize();
-                return Ok(());
-            }
-            std::thread::sleep(Duration::from_millis(75));
-        }
-        let item = create_item(target, &interop)?;
         let mut size = item.Size().map_err(error)?;
         let pool = Direct3D11CaptureFramePool::CreateFreeThreaded(
             &runtime,
@@ -479,7 +489,6 @@ unsafe fn run(target: &Target, outbox: &Outbox, stop: &AtomicBool) -> Result<(),
         let _ = session.Close();
         let _ = pool.RemoveFrameArrived(registration);
         let _ = pool.Close();
-        windows::Win32::System::WinRT::RoUninitialize();
         result
     }
 }

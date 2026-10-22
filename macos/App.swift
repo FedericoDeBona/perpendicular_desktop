@@ -706,6 +706,9 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
         case "window_error","launch_error":
             if let id=value["window"] as? String {failedWindows.insert(id)}
             refreshApplicationStates()
+            // A rejected suggestion is diagnosed per surface in the guest.
+            // It does not make its still-running document unavailable.
+            if value["type"] as? String == "window_error",value["role"] as? String == "tooltip" {return}
             status=value["message"] as? String ?? "This application is unavailable. Use Show Windows."
             launcherNotice=value["message"] as? String ?? "Questa app non è disponibile. Puoi continuare dal desktop Windows."
             if let app=value["app"] as? String {finishOpening(app);if value["type"] as? String == "launch_error" {openingNoticeApp=app}}

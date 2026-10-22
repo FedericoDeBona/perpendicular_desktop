@@ -369,6 +369,11 @@ pub fn details(raw: usize, sid: &str, session: u32) -> Option<Value> {
         let style = GetWindowLongPtrW(hwnd, GWL_STYLE) as u32;
         let ex_style = GetWindowLongPtrW(hwnd, GWL_EXSTYLE) as u32;
         let caption = style & WS_CAPTION.0 == WS_CAPTION.0;
+        // DWM's decoration has no independent app content or input surface.
+        // AppKit supplies the shadow of the corresponding Mac window.
+        if class == "SysShadow" && !caption && style & WS_THICKFRAME.0 == 0 {
+            return None;
+        }
         // WS_POPUP alone also describes real dialogs. Preserve those as documents.
         let role = if class == "#32768" {
             "popup"
