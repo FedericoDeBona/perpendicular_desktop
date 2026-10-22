@@ -15,7 +15,7 @@ use windows::{
         DirectX::{Direct3D11::IDirect3DDevice, DirectXPixelFormat},
     },
     Win32::{
-        Foundation::{HMODULE, HWND, POINT, RECT},
+        Foundation::{HMODULE, HWND, POINT, RECT, SetLastError, GetLastError, WIN32_ERROR},
         Graphics::{
             Direct3D::{D3D_DRIVER_TYPE_WARP, D3D_FEATURE_LEVEL_11_0},
             Direct3D11::*,
@@ -30,7 +30,10 @@ use windows::{
         },
         UI::{
             HiDpi::{DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, SetThreadDpiAwarenessContext},
-            WindowsAndMessaging::{GetClientRect, GetWindowRect, IsIconic},
+            WindowsAndMessaging::{GetClientRect, GetWindowRect, IsIconic, IsWindowVisible,
+                GetAncestor, GetWindow, GetWindowDisplayAffinity, GetWindowLongPtrW, SetWindowLongPtrW,
+                GA_ROOT, GW_OWNER, GWL_EXSTYLE, GWL_STYLE, WS_CAPTION, WS_CHILD,
+                WS_EX_APPWINDOW, WS_EX_TOOLWINDOW, WS_EX_NOACTIVATE},
         },
     },
     core::{Interface, factory},
@@ -51,6 +54,9 @@ pub struct Target {
     pub session: u32,
     pub full_frame: bool,
     pub hosted: Option<catalogue::HostedContent>,
+    // Shared only for creation on this HWND, including overlapping reconnects.
+    // Frame progress and geometry below remain private to each capture run.
+    pub item_creation: Arc<Mutex<()>>,
     pub capture_phase: AtomicU8,
     pub capture_frames: AtomicU64,
     // Generation, dimensions, and image origin relative to the Windows client origin.
@@ -64,6 +70,7 @@ impl Target {
             id: self.id.clone(), hwnd: self.hwnd, pid: self.pid, creation: self.creation,
             sid: self.sid.clone(), session: self.session, full_frame: self.full_frame,
             hosted: self.hosted.clone(),
+            item_creation:self.item_creation.clone(),
             capture_phase: AtomicU8::new(Phase::Starting as u8),
             capture_frames: AtomicU64::new(0),
             geometry: Mutex::new((0, 0, 0, 0, 0)),
@@ -112,6 +119,74 @@ pub fn spawn(target: Arc<Target>, outbox: Arc<Outbox>) -> Arc<AtomicBool> {
     stop
 }
 
+struct DialogAdmission<'a> { target: &'a Target, active: bool }
+impl DialogAdmission<'_> {
+    unsafe fn restore(&mut self) -> Result<(), String> {
+        if !self.active { return Ok(()); }
+        if !self.target.valid() { self.active=false;return Ok(()); }
+        let hwnd=HWND(self.target.hwnd as *mut _);
+        unsafe {
+            let current=GetWindowLongPtrW(hwnd,GWL_EXSTYLE);
+            let bit=WS_EX_APPWINDOW.0 as isize;
+            // Clear only our bit; preserve other attributes changed by the app.
+            if current & bit != 0 {
+                SetLastError(WIN32_ERROR(0));
+                let previous=SetWindowLongPtrW(hwnd,GWL_EXSTYLE,current & !bit);
+                if previous==0 && GetLastError().0!=0 { return Err("Could not restore dialog capture admission".into()); }
+            }
+            if GetWindowLongPtrW(hwnd,GWL_EXSTYLE) & bit != 0 { return Err("Dialog capture admission was not restored".into()); }
+        }
+        self.active=false;Ok(())
+    }
+}
+impl Drop for DialogAdmission<'_> {
+    fn drop(&mut self) { let _=unsafe {self.restore()}; }
+}
+
+unsafe fn create_item(target:&Target,interop:&IGraphicsCaptureItemInterop)->Result<GraphicsCaptureItem,String> {
+    let _creation=target.item_creation.lock().map_err(|_| "Capture item creation interrupted")?;
+    unsafe {
+        if !target.valid() {return Err("Window retired before capture".into());}
+        let hwnd=HWND(target.hwnd as *mut _);
+        let initial=match interop.CreateForWindow::<GraphicsCaptureItem>(hwnd) {
+            Ok(item)=>return Ok(item),
+            Err(e)=>e,
+        };
+        // This is a single, cause-specific admission for authenticated classic
+        // dialogs. Do not alter tooltips, children or capture-excluded windows.
+        if initial.code()!=windows::core::HRESULT(0x80070057u32 as i32)
+            || target.full_frame || catalogue::window_class(target.hwnd)!="#32770"
+            || !IsWindowVisible(hwnd).as_bool() || GetAncestor(hwnd,GA_ROOT)!=hwnd {
+            return Err(format!("CreateForWindow: {initial}"));
+        }
+        let owner=GetWindow(hwnd,GW_OWNER).map_err(error)?;
+        let style=GetWindowLongPtrW(hwnd,GWL_STYLE) as u32;
+        let original=GetWindowLongPtrW(hwnd,GWL_EXSTYLE);
+        let bit=WS_EX_APPWINDOW.0 as isize;
+        let mut affinity=0u32;let mut owner_affinity=0u32;
+        if identity::owner(owner,&target.sid,target.session)!=Some((target.pid,target.creation))
+            || style & WS_CHILD.0 != 0 || style & WS_CAPTION.0 != WS_CAPTION.0
+            || original & (WS_EX_APPWINDOW.0 | WS_EX_TOOLWINDOW.0 | WS_EX_NOACTIVATE.0) as isize != 0
+            || GetWindowDisplayAffinity(hwnd,&mut affinity).is_err() || affinity!=0
+            || GetWindowDisplayAffinity(owner,&mut owner_affinity).is_err() || owner_affinity!=0
+            || !target.valid() {
+            return Err(format!("CreateForWindow: {initial}"));
+        }
+        SetLastError(WIN32_ERROR(0));
+        let previous=SetWindowLongPtrW(hwnd,GWL_EXSTYLE,original | bit);
+        if previous==0 && GetLastError().0!=0 {return Err(format!("Dialog capture admission: {}",windows::core::Error::from_thread()));}
+        let mut admission=DialogAdmission {target,active:true};
+        if !target.valid() || GetWindowLongPtrW(hwnd,GWL_EXSTYLE) & bit == 0 {
+            return Err("Dialog retired before capture admission".into());
+        }
+        let item=interop.CreateForWindow::<GraphicsCaptureItem>(hwnd);
+        // Restore before starting a capture session, even when creation fails.
+        admission.restore()?;
+        if !target.valid() {return Err("Dialog retired during capture admission".into());}
+        item.map_err(|e|format!("CreateForWindow after dialog admission: {e}"))
+    }
+}
+
 unsafe fn run(target: &Target, outbox: &Outbox, stop: &AtomicBool) -> Result<(), String> {
     unsafe {
         RoInitialize(RO_INIT_MULTITHREADED).map_err(error)?;
@@ -154,9 +229,7 @@ unsafe fn run(target: &Target, outbox: &Outbox, stop: &AtomicBool) -> Result<(),
             }
             std::thread::sleep(Duration::from_millis(75));
         }
-        let item: GraphicsCaptureItem = interop
-            .CreateForWindow(HWND(target.hwnd as *mut _))
-            .map_err(error)?;
+        let item = create_item(target, &interop)?;
         let mut size = item.Size().map_err(error)?;
         let pool = Direct3D11CaptureFramePool::CreateFreeThreaded(
             &runtime,
