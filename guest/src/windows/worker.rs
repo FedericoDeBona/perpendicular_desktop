@@ -13,7 +13,7 @@ use std::{
     path::{Path, PathBuf},
     sync::{
         Arc, Mutex,
-        atomic::{AtomicBool, AtomicU8, Ordering},
+        atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering},
         mpsc,
     },
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
@@ -216,6 +216,7 @@ impl Worker {
             if let Some(window) = self.windows.get_mut(&id) { window.metadata = metadata; }
         }
         for window in self.windows.values_mut() {
+            window.target = Arc::new(window.target.fresh_capture());
             window.stop = Some(capture::spawn(window.target.clone(), outbox.clone()));
         }
         self.snapshot(&outbox);
@@ -498,6 +499,7 @@ impl Worker {
                     "geometry" => {
                         let mut state = window_control::state(&target)?;
                         state["capturePhase"] = json!(target.capture_phase_name());
+                        state["captureFrames"] = json!(target.capture_frames.load(Ordering::Acquire));
                         state["captureStopped"] = json!(window.stop.as_ref()
                             .map(|stop| stop.load(Ordering::Acquire)).unwrap_or(true));
                         return Ok(state);
@@ -906,6 +908,7 @@ impl Worker {
             full_frame: metadata["role"] != "dialog",
             hosted,
             capture_phase: AtomicU8::new(capture::Phase::Starting as u8),
+            capture_frames: AtomicU64::new(0),
             geometry: Mutex::new((0, 0, 0, 0, 0)),
         });
         let stop = Some(capture::spawn(target.clone(), outbox.clone()));
@@ -1027,6 +1030,7 @@ impl Worker {
                 full_frame: metadata["role"] != "dialog",
                 hosted,
                 capture_phase: AtomicU8::new(capture::Phase::Starting as u8),
+                capture_frames: AtomicU64::new(0),
                 geometry: Mutex::new((0, 0, 0, 0, 0)),
             });
             self.windows.insert(

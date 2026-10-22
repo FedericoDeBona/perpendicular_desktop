@@ -28,6 +28,7 @@ pub struct Outbox {
     pending: Mutex<Pending>,
     wake: Condvar,
     frame_wake: Condvar,
+    slot_wake: Condvar,
     split: AtomicBool,
     row_alignment: AtomicUsize,
     pub connected: AtomicBool,
@@ -39,6 +40,7 @@ impl Outbox {
             pending: Mutex::new(Pending::default()),
             wake: Condvar::new(),
             frame_wake: Condvar::new(),
+            slot_wake: Condvar::new(),
             split: AtomicBool::new(false),
             row_alignment: AtomicUsize::new(4),
             connected: AtomicBool::new(true),
@@ -72,6 +74,15 @@ impl Outbox {
         self.frame_wake.notify_one();
     }
     pub fn row_alignment(&self) -> usize { self.row_alignment.load(Ordering::Acquire) }
+    pub fn wait_for_frame_slot(&self, id: &str, stop: &AtomicBool) -> bool {
+        let mut pending = self.pending.lock().unwrap();
+        while pending.frames.contains_key(id)
+            && self.connected.load(Ordering::Acquire) && !stop.load(Ordering::Acquire)
+        {
+            pending = self.slot_wake.wait_timeout(pending, Duration::from_millis(25)).unwrap().0;
+        }
+        self.connected.load(Ordering::Acquire) && !stop.load(Ordering::Acquire)
+    }
     /// Enabled only after the host requests the optional authenticated pixel
     /// connection. Older hosts keep the original combined stream.
     pub fn start_frames(self: Arc<Self>, mut stream: TcpStream, hello: Value) -> Result<(), String> {
@@ -88,7 +99,9 @@ impl Outbox {
                 if pending.order.is_empty() {
                     pending = self.frame_wake.wait_timeout(pending, Duration::from_secs(2)).unwrap().0;
                 }
-                pending.order.pop_front().and_then(|id| pending.frames.remove(&id))
+                let packet = pending.order.pop_front().and_then(|id| pending.frames.remove(&id));
+                if packet.is_some() { self.slot_wake.notify_all(); }
+                packet
             };
             if let Some(packet) = packet {
                 let mut receipt = [0u8;1];
@@ -105,6 +118,7 @@ impl Outbox {
         let mut pending = self.pending.lock().unwrap();
         pending.frames.remove(id);
         pending.order.retain(|value| value != id);
+        self.slot_wake.notify_all();
     }
     pub fn writer(self: Arc<Self>, mut stream: TcpStream) {
         let _ = stream.set_write_timeout(Some(Duration::from_secs(3)));
@@ -123,7 +137,7 @@ impl Outbox {
                 } else if !self.split.load(Ordering::Acquire) && !pending.order.is_empty() {
                     let id = pending.order.pop_front().unwrap();
                     match pending.frames.remove(&id) {
-                        Some(p) => p,
+                        Some(p) => { self.slot_wake.notify_all(); p },
                         None => continue,
                     }
                 } else {

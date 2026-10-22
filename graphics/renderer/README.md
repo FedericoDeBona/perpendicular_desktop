@@ -26,6 +26,10 @@ L'allocazione del contenitore proxy precede la richiesta al server, quindi il su
 
 ## Diagnostica facoltativa degli HANDLE condivisi
 
+Anche `rebuild-native-renderer.py`, per la base host-v3 con `channel.h` disponibile sul Mac originale, applica ora l’ammissione prima della creazione del worker. Usa `context-admission-channel.patch`: conserva la configurazione non bloccante di entrambe le estremità del canale di quella base. La patch dell’altra base resize rimane distinta. Non mescolare i sorgenti o sostituire una sola libreria.
+
+Il preparatore esegue il controllo C sul broker effettivamente compilato: riempimento dei 32 slot, rifiuto senza modificare i contesti sani, ritiro confermato e nuova ammissione. Manifest e ricevuta dichiarano `context_admission=1`. La ricompilazione ordinaria non include la diagnostica HANDLE opzionale e rimuove dal manifest un eventuale flag ereditato dalla variante di input.
+
 L'opzione `--shared-handle-diagnostics` aggiunge soltanto un contatore alle sette API DXGI/D3D11 che il renderer già rifiuta: `GetSharedHandle`, i due `CreateSharedHandle`, `OpenSharedResource`, `OpenSharedResource1`, `OpenSharedResourceByName` e `OpenSharedFence`. Non cambia il risultato HRESULT né abilita nuove forme di condivisione. Lo script verifica anche l'hash del sorgente interessato, ricompila una sesta unità C e conserva una ricevuta separata. QEMU, backend DXMT, driver e protocolli rimangono quelli del runtime indicato.
 
 Il renderer emette un messaggio iniziale di abilitazione e registra soltanto nome API, HRESULT e conteggio, con PID e data del logger esistente. Ogni contatore atomico per processo si ferma a 128; vengono scritti soltanto 1, 2, 4, 8, 16, 32, 64 e 128: al massimo otto righe per API e processo. Il valore 128 indica almeno 128 chiamate. Non sono registrati handle, puntatori, nomi di risorse, argomenti o contenuti guest. La diagnostica va usata in un runtime separato per una breve prova mirata, poi rimossa dall'uso ordinario.

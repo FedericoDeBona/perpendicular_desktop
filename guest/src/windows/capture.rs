@@ -3,7 +3,7 @@ use serde_json::json;
 use std::{
     sync::{
         Arc, Mutex,
-        atomic::{AtomicBool, AtomicU8, Ordering},
+        atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering},
         mpsc,
     },
     time::{Duration, Instant},
@@ -39,7 +39,7 @@ use windows::{
 #[repr(u8)]
 pub enum Phase {
     Starting, Validating, Waiting, Reading, Mapping, Publishing,
-    Recreating, Closing, Ended, Error, Invalidated,
+    Recreating, Closing, Ended, Error, Invalidated, Backpressure,
 }
 
 pub struct Target {
@@ -52,10 +52,23 @@ pub struct Target {
     pub full_frame: bool,
     pub hosted: Option<catalogue::HostedContent>,
     pub capture_phase: AtomicU8,
+    pub capture_frames: AtomicU64,
     // Generation, dimensions, and image origin relative to the Windows client origin.
     pub geometry: Mutex<(u64, i32, i32, i32, i32)>,
 }
 impl Target {
+    /// The HWND identity survives a reconnect; capture progress and geometry do
+    /// not. A retiring thread keeps its own Target and cannot overwrite this run.
+    pub fn fresh_capture(&self) -> Self {
+        Self {
+            id: self.id.clone(), hwnd: self.hwnd, pid: self.pid, creation: self.creation,
+            sid: self.sid.clone(), session: self.session, full_frame: self.full_frame,
+            hosted: self.hosted.clone(),
+            capture_phase: AtomicU8::new(Phase::Starting as u8),
+            capture_frames: AtomicU64::new(0),
+            geometry: Mutex::new((0, 0, 0, 0, 0)),
+        }
+    }
     fn set_phase(&self, phase: Phase) {
         self.capture_phase.store(phase as u8, Ordering::Release);
     }
@@ -63,7 +76,7 @@ impl Target {
         match self.capture_phase.load(Ordering::Acquire) {
             0 => "starting", 1 => "validating", 2 => "waiting", 3 => "reading",
             4 => "mapping", 5 => "publishing", 6 => "recreating", 7 => "closing",
-            8 => "ended", 9 => "error", 10 => "invalidated", _ => "unknown",
+            8 => "ended", 9 => "error", 10 => "invalidated", 11 => "backpressure", _ => "unknown",
         }
     }
     pub fn valid(&self) -> bool {
@@ -189,6 +202,21 @@ unsafe fn run(target: &Target, outbox: &Outbox, stop: &AtomicBool) -> Result<(),
                     let Ok(newer) = pool.TryGetNextFrame() else {break};
                     let _ = frame.Close(); frame = newer;
                 }
+                // Keep this GPU frame until the replaceable network slot is
+                // available. Do not read back images just to replace pending
+                // pixels, and never discard the final update of a static window.
+                let waiting = Instant::now();
+                target.set_phase(Phase::Backpressure);
+                if !outbox.wait_for_frame_slot(&target.id, stop) {
+                    let _ = frame.Close();
+                    break;
+                }
+                let backpressure_milliseconds = waiting.elapsed().as_secs_f64() * 1000.0;
+                for _ in 0..2 {
+                    let Ok(newer) = pool.TryGetNextFrame() else {break};
+                    let _ = frame.Close(); frame = newer;
+                }
+                target.set_phase(Phase::Reading);
                 let frame_time_100ns = frame.SystemRelativeTime().ok().map(|time| time.Duration);
                 let current = frame.ContentSize().map_err(error)?;
                 if current.Width <= 0
@@ -311,6 +339,9 @@ unsafe fn run(target: &Target, outbox: &Outbox, stop: &AtomicBool) -> Result<(),
                 if !valid {
                     return Err("Invalid capture stride".into());
                 }
+                if stop.load(Ordering::Acquire) || !outbox.connected.load(Ordering::Acquire) {
+                    break;
+                }
                 target.set_phase(Phase::Publishing);
                 sequence += 1;
                 let bounds = catalogue::frame_bounds(hwnd).ok_or("Window geometry unavailable")?;
@@ -324,9 +355,11 @@ unsafe fn run(target: &Target, outbox: &Outbox, stop: &AtomicBool) -> Result<(),
                     (0, 0)
                 };
                 *target.geometry.lock().unwrap() = (generation, width, height, offset.0, offset.1);
+                target.capture_frames.store(sequence, Ordering::Release);
                 outbox.frame(&target.id,json!({"type":"frame","window":target.id,"sequence":sequence,"generation":generation,
                     "width":width,"height":height,"stride":stride,"bytes":pixels.len(),"capture":"software",
-                    "guestReadbackMilliseconds":readback_milliseconds}),pixels,frame_time_100ns);
+                    "guestReadbackMilliseconds":readback_milliseconds,
+                    "guestBackpressureMilliseconds":backpressure_milliseconds}),pixels,frame_time_100ns);
                 if let Some(delay) = Duration::from_millis(16).checked_sub(started.elapsed()) {
                     std::thread::sleep(delay);
                 }

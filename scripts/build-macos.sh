@@ -17,7 +17,10 @@ cp "$guest" guest/install.ps1 guest/install.cmd "$app/Contents/Resources/Guest/"
 if [[ "${SKIP_RUNTIME:-0}" != 1 ]]; then
     python3 scripts/package-runtime.py "$app"
 fi
-if [[ -d .build/Native3D && ! -e "$app/Contents/Resources/Native3D" ]]; then
+if [[ -d .build/Native3D ]]; then
+    # RuntimeStore preserves the running VM's immutable copy. Always refresh
+    # the next build; an existing bundle must not silently keep an old renderer.
+    rm -rf "$app/Contents/Resources/Native3D"
     cp -R .build/Native3D "$app/Contents/Resources/Native3D"
 fi
 rm -rf "$app/Contents/Resources/Display2D"

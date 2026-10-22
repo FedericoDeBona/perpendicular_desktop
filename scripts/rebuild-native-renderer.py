@@ -91,6 +91,8 @@ def main():
         target.write_text(relocate((source / name).read_text()))
     patch = REPO / 'graphics/renderer/context-retirement.patch'
     run(['patch', '-p1', '--forward', '--batch', '-i', patch], copied)
+    admission_patch = REPO / 'graphics/renderer/context-admission-channel.patch'
+    run(['patch', '-p1', '--forward', '--batch', '-i', admission_patch], copied)
     changed = ['src/perp-sync/proxy-broker.c', 'src/proxy/proxy_context.c',
                'src/proxy/proxy_client.c', 'server/render_client.c', 'server/render_worker.c']
     diagnostic_patch = REPO / 'graphics/renderer/shared-handle-diagnostics.patch'
@@ -108,6 +110,16 @@ def main():
             command[command.index(option) + 1] = str(value)
         run(command, reference / 'build')
         objects[record['output']] = obj
+        if name == 'src/perp-sync/proxy-broker.c':
+            admission_command = list(command)
+    for flag in ['-c', '-o', '-MF', '-MQ']:
+        index = admission_command.index(flag)
+        del admission_command[index:index + 2]
+    admission_command.remove('-MD')
+    check = work / 'check-admission'
+    run([*admission_command, '-UNDEBUG', REPO / 'graphics/renderer/check-admission.c',
+         '-o', check], reference / 'build')
+    run([check])
     patched_archive = work / 'libvirgl.a'
     shutil.copy2(archive, patched_archive)
     run(['ar', '-r', patched_archive, *[v for k, v in objects.items() if k.startswith('src/')]])
@@ -150,6 +162,10 @@ def main():
         manifest['files'][name] = digest(target)
     manifest['renderer_control_version'] = 2
     manifest['context_retirement'] = 1
+    manifest['context_admission'] = 1
+    # Both binaries are rebuilt from the pinned base, not copied from the input.
+    # Do not inherit a diagnostic capability that this build did not compile.
+    manifest.pop('shared_handle_diagnostics', None)
     receipt = {'base_library_sha256': LIBRARY_SHA, 'base_server_sha256': SERVER_SHA,
                'base_archive_sha256': ARCHIVE_SHA, 'source_inputs': inputs,
                'patch_sha256': digest(patch), 'guest_wire_version': 1,
@@ -159,6 +175,12 @@ def main():
     notices.mkdir(exist_ok=True)
     shutil.copy2(patch, notices / patch.name)
     (notices / 'context-retirement.json').write_text(json.dumps(receipt, indent=2) + '\n')
+    shutil.copy2(admission_patch, notices / admission_patch.name)
+    (notices / 'context-admission.json').write_text(json.dumps({
+        'base_library_sha256': LIBRARY_SHA, 'base_server_sha256': SERVER_SHA,
+        'patch_sha256': digest(admission_patch), 'context_limit': 32,
+        'admission_before_worker_creation': True, 'runtime_verified': False,
+    }, indent=2) + '\n')
     if args.shared_handle_diagnostics:
         manifest['shared_handle_diagnostics'] = 1
         shutil.copy2(diagnostic_patch, notices / diagnostic_patch.name)

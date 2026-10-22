@@ -151,7 +151,25 @@ Aggiornamento successivo dell’utente: saltare per ora il problema specifico di
 Richiesta dell’utente del 21 ottobre 2026, da non implementare nella fase attuale: introdurre le scorciatoie in stile Mac nelle applicazioni Windows. Consultare l’implementazione della vecchia app Perpendicular soltanto per recuperare il comportamento pertinente, distinguendo scorciatoie, testo composto e appunti. Questa voce non amplia il lavoro attivo su monitor, grafica e geometria.
 
 
-## Punto di ripresa — stop richiesto il 22 ottobre 2026
+## Obiettivo corrente — stabilità e fluidità 3D, 22 ottobre 2026
+
+Su nuova richiesta dell’utente riprendere il percorso grafico locale, dando priorità a meno crash, blocchi e scatti e alla riduzione delle copie effettive. Usare i nuovi guest tool per eseguire comandi nella VM direttamente dal Mac. Non richiedere una console PowerShell interattiva per la normale manutenzione.
+
+Procedere con piccoli risultati completi:
+
+1. Verificare il runtime realmente avviato e integrare nella sua build compatibile il rifiuto dei contesti in eccesso prima di creare processi renderer. Conservare un runtime precedente e un checkpoint prima del cambio; non aumentare indiscriminatamente i limiti.
+2. Stabilizzare il ciclo di vita della cattura: stato e fine del thread riferiti al singolo run, isolamento delle vecchie connessioni e recupero limitato soltanto quando il guasto è identificato. Controllo e input devono rimanere utilizzabili.
+3. Ridurre allocazioni, copie e attese nel percorso reale misurato. Distinguere accelerazione Windows, cattura/trasporto della finestra e presentazione Metal: chiamare zero-copy soltanto i tratti senza copia, senza attribuirlo all’intero percorso BGRA su TCP.
+4. Fare pochi controlli mirati: compilazione e una breve prova reale di contenuto, movimento/resize e riconnessione interessati dalla modifica. Niente grandi harness, centinaia di test o benchmark estesi. Se un intervento non dà progresso utilizzabile, registrare il limite e passare a un passo più piccolo.
+5. Pubblicare incrementi coerenti su GitHub, aggiornare le evidenze e lasciare l’app ricompilata e aperta. Preservare documenti e VM originale; Creality specifico e scorciatoie Mac restano rinviati.
+
+Il primo ciclo deve consegnare almeno un miglioramento concreto integrato e verificato, con limiti e prossimo intervento espliciti. Una singola riuscita non certifica l’affidabilità generale e un retry non dimostra risolta la causa.
+
+Primo incremento del22 ottobre: runtime del Mac aggiornabile correttamente nel pacchetto, ammissione anticipata dei contesti integrata nella base effettiva, stato cattura isolato alla riconnessione e attesa prima del readback sotto backpressure. Build e controllo C mirato riusciti; finestra Win32 aggiornata fino all’ultimo stato e recuperata dopo riconnessione con lo stesso identificatore. Evidenze e tentativi falliti in VERIFICATION.md. L’obiettivo generale rimane aperto: guasti WinUI, eventuali stalli GET_BLOB e copie WARP/TCP non sono risolti da questo incremento.
+
+Prossimo passo: partire da questo runtime verificato e dallo stato per-run per separare blocco della cattura, risorse del renderer e trasporto; valutare la riduzione del volume BGRA o un percorso di superficie condivisa per finestra soltanto con una prova completa. Non ripetere l’autoaggiornamento del servizio come figlio di`execute`, neppure con il semplice RunAs: l’arresto del worker può interromperlo. Usare un installer realmente indipendente; i normali comandi possono essere eseguiti direttamente dal Mac.
+
+## Punto di ripresa precedente — stop richiesto il 22 ottobre 2026
 
 Prova fermata su richiesta dell’utente, modifiche annotate e pubblicate. Il frontend diagnostico è chiuso; la sola VM di sviluppo rimane accesa. VM originale e documenti intatti. Build finale Mac9418153157d9, guest diagnostico e4bc516cf7c7; dettagli e limiti in VERIFICATION.md. Non considerare risolto il blocco intermittente della cattura dopo aggiornamento/riconnessione del bridge.
 
