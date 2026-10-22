@@ -181,3 +181,10 @@ Alla ripresa, nell’ordine:
 4. Dopo la correzione, una breve prova nelle finestre reali: avvio Impostazioni dal launcher, ricerca/testo, resize, popup e riconnessione; riusare le evidenze già valide di Blocco note e icone, senza ripetere matrici estese.
 
 Creality resta rinviato. Scorciatoie Mac rimangono lavoro futuro. Non riprendere pulizie Parallels, UAC, cambi ISO o driver senza una nuova necessità concreta.
+
+
+## VM corrente — Windows IoT LTSC installata dall’utente, 22 ottobre 2026
+
+L’ultima richiesta sostituisce la base Windows precedente: usare la nuova VM UTM Windows 11 IoT LTSC e installarvi guest tool e driver necessari. L’utente autorizza esplicitamente la rimozione delle vecchie VM per recuperare spazio; il precedente vincolo di conservare quelle originali non si applica a questa pulizia. Conservare invece la nuova sorgente UTM e lavorare su una copia APFS indipendente, con TPM e contenuto UEFI preservati.
+
+La macchina corrente di Perpendicular deriva ora da questa nuova installazione. Il bootstrap aggiunge soltanto il bridge Rust attuale e i pacchetti ARM64 firmati di rete e grafica, senza vecchi agenti, sharing, impostazioni RDP o workaround grafici ereditati. Questo cambio di sistema non dimostra risolti i problemi generali di WinUI, cattura o renderer. Dopo una breve verifica di avvio, collegamento e singola app riprendere gli incrementi piccoli di stabilità/fluidità sopra indicati, partendo dalle nuove evidenze.

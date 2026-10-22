@@ -16,6 +16,7 @@ struct MachineConfiguration: Codable {
     let graphics:String?
     let recoveryDisplay:Bool?
     let keyboardLayout:String?
+    let tpmStateFile:String?
 }
 
 @MainActor
@@ -42,6 +43,14 @@ final class VirtualMachineController {
             guard !layout.isEmpty,layout.utf8.count<=32,layout.utf8.allSatisfy({(97...122).contains($0) || (48...57).contains($0) || $0 == 45 || $0 == 95}),
                   FileManager.default.fileExists(atPath:runtime.deletingLastPathComponent().appendingPathComponent("share/qemu/keymaps/\(layout)").path) else {
                 throw CocoaError(.coderReadCorrupt,userInfo:[NSLocalizedDescriptionKey:"Unsupported Windows console keyboard layout."])
+            }
+        }
+        if let file=configuration.tpmStateFile {
+            let state=URL(fileURLWithPath:file).standardizedFileURL
+            let allowed=directory.appendingPathComponent("Windows/tpm").standardizedFileURL.path+"/"
+            guard state.path.hasPrefix(allowed),FileManager.default.fileExists(atPath:state.path),
+                  !file.contains(",") else {
+                throw CocoaError(.coderReadCorrupt,userInfo:[NSLocalizedDescriptionKey:"Invalid imported Windows TPM state."])
             }
         }
         controlSocket = "/tmp/perpendicular-\(getuid())-\(configuration.id.prefix(8)).sock"
@@ -139,7 +148,8 @@ final class VirtualMachineController {
         try stopPreviousTPM(socket:tpmSocket,vm:vm)
         try? FileManager.default.removeItem(atPath: controlSocket)
         try? FileManager.default.removeItem(atPath: tpmSocket)
-        tpm = try launch("swtpm", ["socket", "--tpm2", "--tpmstate", "dir=\(vm.path)/tpm",
+        let tpmState=configuration.tpmStateFile.map{"backend-uri=file://\($0),lock"} ?? "dir=\(vm.path)/tpm"
+        tpm = try launch("swtpm", ["socket", "--tpm2", "--tpmstate", tpmState,
             "--ctrl", "type=unixio,path=\(tpmSocket)", "--flags", "not-need-init"], log: "tpm.log")
         // The TPM creates its socket before the VM can attach to it.
         let deadline = Date().addingTimeInterval(10)

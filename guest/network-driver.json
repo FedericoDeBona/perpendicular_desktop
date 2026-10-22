@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "provider": "Red Hat VirtIO Ethernet Adapter",
+  "version": "100.100.104.27100",
+  "source": "https://github.com/virtio-win/kvm-guest-drivers-windows",
+  "members": {
+    "netkvm.cat": "2141ca89df27f585a067f637c9a0e24923d0eaf2da6704c4224cb0dc5e04f088",
+    "netkvm.inf": "0d8bcd89cb1022cf3fe185b252c77257d5c6a0957613be034c6d463d44d95c5f",
+    "netkvm.sys": "46df2bc1f2b31a0df4b8d5b056d018cf5b6cdc7b25299523243a31cd02e5086d",
+    "netkvmp.exe": "261d52ec38bcfbb2a28a4b0d874736ca12387b1ce64bd5803eaf5a055e745ecc",
+    "Readme.md": "b2eae8d3d3b488f14e481cc09e9297c841930fde9d6d0f7b3c5520ec49ada7ed"
+  }
+}

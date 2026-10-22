@@ -5,9 +5,11 @@ Copies disk, EFI and TPM together. Does not start Windows, install guest tools,
 clean existing integrations, alter the source, or overwrite a destination.
 """
 import argparse
+import hashlib
 from datetime import datetime, timezone
 import json
 import os
+import plistlib
 from pathlib import Path
 import re
 import secrets
@@ -62,6 +64,99 @@ def write_private(path, value):
         json.dump(value, output, indent=2, sort_keys=True)
         output.write('\n')
     path.chmod(0o600)
+
+
+def prepare_utm(source, root, image_tool, firmware, preferred_port, dry_run):
+    """Import one offline ARM64 UTM VM, retaining its UEFI variables and TPM.
+
+    UTM stores variables as qcow2 and TPM state in a single swtpm file. Convert
+    only the variables container; never reset the firmware variables or TPM.
+    """
+    source = source.resolve(strict=True)
+    require(source.is_dir() and source.suffix == '.utm', 'Expected a UTM bundle.')
+    require(not root.exists() and not root.is_symlink(), 'Destination already exists.')
+    root = root.parent.resolve(strict=True) / root.name
+    require(not root.is_relative_to(source), 'Destination must be outside the source VM.')
+    config_file = source / 'config.plist'
+    regular(config_file)
+    config = plistlib.loads(config_file.read_bytes())
+    require(config.get('Backend') == 'QEMU' and config.get('ConfigurationVersion') == 4,
+            'Only the inspected QEMU UTM configuration v4 is supported.')
+    system, qemu = config.get('System', {}), config.get('QEMU', {})
+    require(system.get('Architecture') == 'aarch64' and system.get('Target') == 'virt',
+            'This import requires an ARM64 virt machine.')
+    require(qemu.get('TPMDevice') is True and qemu.get('UEFIBoot') is True,
+            'This import preserves an existing TPM and UEFI boot.')
+    require(not qemu.get('AdditionalArguments'), 'Inspect custom QEMU arguments before import.')
+    disks = [d for d in config.get('Drive', []) if d.get('ImageType') == 'Disk']
+    require(len(disks) == 1 and disks[0].get('Interface') == 'NVMe', 'Expected one NVMe system disk.')
+    name = disks[0].get('ImageName')
+    require(isinstance(name, str) and Path(name).name == name, 'Invalid UTM disk filename.')
+    require(firmware is not None, 'Provide --utm-firmware matching the firmware used by UTM.')
+    firmware = firmware.resolve(strict=True)
+    uuid.UUID(config['Information']['UUID'])
+    cpus = system.get('CPUCount', 0) or min(4, os.cpu_count() or 1)
+    memory = system.get('MemorySize')
+    require(type(cpus) is int and 1 <= cpus <= 64 and type(memory) is int and 512 <= memory <= 1_048_576,
+            'Invalid UTM CPU or memory configuration.')
+    disk, variables, tpm = (source / 'Data' / name, source / 'Data/efi_vars.fd', source / 'Data/tpmdata')
+    watched = [config_file, disk, variables, tpm, firmware]
+    for path in watched:
+        regular(path)
+    before = {path: identity(path) for path in watched}
+    require_offline(source, watched)
+    for path in [disk, variables]:
+        info = json.loads(subprocess.check_output([str(image_tool), 'info', '--output=json', str(path)]))
+        require(info.get('format') == 'qcow2' and not info.get('backing-filename')
+                and not info.get('encrypted') and not info.get('dirty-flag'),
+                'Expected a clean standalone qcow2: ' + path.name)
+        if path == variables:
+            require(info.get('virtual-size') == firmware.stat().st_size == 64 * 1024 * 1024,
+                    'Unexpected UEFI flash size.')
+    require(all(identity(path) == before[path] for path in watched), 'Source changed during inspection.')
+    if dry_run:
+        print('Offline ARM64 UTM source checked:', source)
+        print('Would clone disk, matching firmware and single-file TPM, and convert UEFI variables:', root)
+        return
+    os.umask(0o077)
+    (root / 'Windows/tpm').mkdir(parents=True, mode=0o700)
+    copied = []
+    for path, relative in [(disk, 'Windows/system.qcow2'), (firmware, 'Windows/efi-code.fd'),
+                           (tpm, 'Windows/tpm/tpmdata')]:
+        require_offline(source, watched)
+        require(all(identity(p) == before[p] for p in watched), 'Source changed before copying.')
+        target = root / relative
+        subprocess.run(['/bin/cp', '-c', str(path), str(target)], check=True)
+        target.chmod(0o600)
+        require(target.stat().st_size == before[path][2], 'Unexpected cloned size.')
+        copied.append({'source': str(path), 'file': relative, 'bytes': target.stat().st_size})
+    target_vars = root / 'Windows/efi-vars.fd'
+    subprocess.run([str(image_tool), 'convert', '-f', 'qcow2', '-O', 'raw', str(variables), str(target_vars)], check=True)
+    subprocess.run([str(image_tool), 'compare', '-f', 'qcow2', '-F', 'raw', str(variables), str(target_vars)], check=True)
+    target_vars.chmod(0o600)
+    require_offline(source, watched)
+    require(all(identity(path) == before[path] for path in watched), 'Source changed during preparation.')
+    machine_id = str(uuid.uuid4())
+    mac = '02:' + ':'.join(f'{value:02x}' for value in secrets.token_bytes(5))
+    write_private(root / 'machine.json', {
+        'id': machine_id, 'name': config['Information'].get('Name', 'Windows IoT'),
+        'cpus': cpus, 'memoryMiB': memory, 'disk': str(root / 'Windows/system.qcow2'),
+        'firmware': str(root / 'Windows/efi-code.fd'), 'variables': str(target_vars),
+        'tpmStateFile': str(root / 'Windows/tpm/tpmdata'), 'mac': mac,
+        'guestPort': choose_port(preferred_port), 'token': secrets.token_hex(32),
+        'graphics': 'standard', 'recoveryDisplay': False, 'keyboardLayout': 'it',
+    })
+    write_private(root / 'source-receipt.json', {
+        'schema': 1, 'createdAt': datetime.now(timezone.utc).isoformat(),
+        'method': 'offline APFS UTM import; qcow2-to-raw UEFI container conversion',
+        'sourceDirectory': str(source), 'sourceMachineID': config['Information']['UUID'],
+        'machineID': machine_id, 'files': copied, 'sourceChanged': False,
+        'tpmBackend': 'single file, preserved', 'variablesComparedEqual': True,
+        'firmwareSHA256': hashlib.sha256(firmware.read_bytes()).hexdigest(),
+        'VMStarted': False, 'guestIntegrationsChanged': False,
+    })
+    print('Prepared offline UTM development copy:', root)
+    print('Original UTM VM, UEFI contents and TPM identity preserved. Windows was not started.')
 
 
 def prepare(source, root, image_tool, preferred_port, dry_run):
@@ -161,14 +256,19 @@ def prepare(source, root, image_tool, preferred_port, dry_run):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--source', type=Path, required=True, help='Existing offline VM directory containing config.json')
+    parser.add_argument('--source', type=Path, required=True, help='Existing offline VM directory containing config.json, or an ARM64 QEMU .utm bundle')
     parser.add_argument('--root', type=Path, default=Path.home() / 'Library/Application Support/Perpendicular Restart',
                         help='New destination directory; it must not already exist')
     parser.add_argument('--qemu-img', type=Path, help='Existing qemu-img executable if it is not on PATH')
     parser.add_argument('--guest-port', type=int, default=17837, help='Preferred free loopback port (default: 17837)')
     parser.add_argument('--dry-run', action='store_true', help='Validate the source without creating or copying anything')
+    parser.add_argument('--utm-firmware', type=Path, help='Matching UTM firmware; required for an ARM64 .utm import')
     args = parser.parse_args()
     require(1024 <= args.guest_port <= 65535, 'The guest port must be between 1024 and 65535.')
     image_tool = args.qemu_img or shutil.which('qemu-img')
     require(image_tool is not None, 'Provide --qemu-img with the existing image tool path.')
-    prepare(args.source.expanduser(), args.root.expanduser(), Path(image_tool), args.guest_port, args.dry_run)
+    if args.source.suffix == '.utm':
+        prepare_utm(args.source.expanduser(), args.root.expanduser(), Path(image_tool),
+                    args.utm_firmware, args.guest_port, args.dry_run)
+    else:
+        prepare(args.source.expanduser(), args.root.expanduser(), Path(image_tool), args.guest_port, args.dry_run)

@@ -11,6 +11,7 @@ import argparse
 
 parser=argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--graphics-driver-dir',type=Path,help='Stage the pinned ARM64 graphics driver in addition to guest tools')
+parser.add_argument('--network-driver-dir',type=Path,help='Stage the pinned ARM64 NetKVM driver for a fresh Windows install')
 parser.add_argument('--remove-legacy',action='store_true',help='Stage the explicit one-time removal of previous Perpendicular agents and sharing')
 arguments=parser.parse_args()
 
@@ -19,9 +20,20 @@ root=Path.home()/'Library/Application Support/Perpendicular Restart'
 configuration=json.loads((root/'machine.json').read_text())
 executable=repo/'guest/target/aarch64-pc-windows-msvc/release/perpendicular-guest.exe'
 sources=[executable,repo/'guest/install.ps1',repo/'guest/install.cmd',repo/'guest/diagnostics.ps1']
+if arguments.network_driver_dir or arguments.graphics_driver_dir:
+    sources += [repo/'guest/setup-machine.cmd',repo/'guest/setup-machine.ps1']
 if arguments.remove_legacy:
     sources += [repo/'guest/remove-legacy.ps1',repo/'guest/remove-legacy.cmd',repo/'guest/inspect-legacy.ps1']
 drivers=[]
+network_drivers=[]
+if arguments.network_driver_dir:
+    sources += [repo/'guest/install-network.ps1',repo/'guest/network-driver.json']
+    network_manifest=json.loads((repo/'guest/network-driver.json').read_text())
+    for name,expected in network_manifest['members'].items():
+        path=arguments.network_driver_dir/name
+        if path.name != name or hashlib.sha256(path.read_bytes()).hexdigest()!=expected:
+            raise RuntimeError('Network driver does not match the pinned package: '+name)
+        network_drivers.append(path)
 if arguments.graphics_driver_dir:
     sources += [repo/'guest/install-graphics.ps1',repo/'guest/install-graphics.cmd',repo/'guest/graphics-driver.json']
     manifest=json.loads((repo/'guest/graphics-driver.json').read_text())
@@ -35,6 +47,8 @@ for source in sources:
     digest.update(source.read_bytes())
 for source in drivers:
     digest.update(source.read_bytes())
+for source in network_drivers:
+    digest.update(source.read_bytes())
 digest.update(configuration['token'].encode())
 setup=root/'Bootstrap'/digest.hexdigest()[:16]
 setup.mkdir(parents=True,exist_ok=True,mode=0o700)
@@ -44,6 +58,10 @@ if drivers:
     (setup/'Graphics').mkdir(exist_ok=True,mode=0o700)
     for source in drivers:
         shutil.copy2(source,setup/'Graphics'/source.name)
+if network_drivers:
+    (setup/'NetKVM').mkdir(exist_ok=True,mode=0o700)
+    for source in network_drivers:
+        shutil.copy2(source,setup/'NetKVM'/source.name)
 (setup/'connection.json').write_text(json.dumps({'port':configuration['guestPort'],'token':configuration['token']}))
 (setup/'connection.json').chmod(0o600)
 iso=setup.with_suffix('.iso')
@@ -71,3 +89,5 @@ if arguments.remove_legacy:
     print('For the explicitly requested legacy-agent/sharing cleanup and bridge install, run D:\\remove-legacy.cmd instead.')
 if drivers:
     print('For the signed graphics driver, run D:\\install-graphics.cmd. This does not reinstall old guest integrations.')
+if drivers or network_drivers:
+    print('For the staged drivers and bridge together, run D:\\setup-machine.cmd with normal Windows elevation.')
