@@ -162,19 +162,49 @@ final class ApplicationContent:NSView {
     }
     func clearModifiers(){flushText();modifiers.removeAll();virtualKeys.removeAll()}
     private func shortcut(_ key:Int){
-        emit(["event":"key","key":0x11,"down":true])
-        emit(["event":"key","key":key,"down":true])
-        emit(["event":"key","key":key,"down":false])
-        emit(["event":"key","key":0x11,"down":false])
+        chord([0x11,key])
     }
+    private func chord(_ keys:[Int]){emit(["event":"chord","keys":keys]);modifiers.removeAll();virtualKeys.removeAll()}
     override func selectAll(_ sender:Any?){shortcut(0x41)}
-    @objc func copy(_ sender:Any?){shortcut(0x43)}
-    @objc func paste(_ sender:Any?){shortcut(0x56)}
-    @objc func cut(_ sender:Any?){shortcut(0x58)}
+    @objc func copy(_ sender:Any?){emit(["event":"clipboard","action":"copy"])}
+    @objc func paste(_ sender:Any?){emit(["event":"clipboard","action":"paste"])}
+    @objc func cut(_ sender:Any?){emit(["event":"clipboard","action":"cut"])}
+    override func performKeyEquivalent(with event:NSEvent)->Bool {
+        guard window?.isKeyWindow == true,window?.firstResponder === self,event.modifierFlags.contains(.command) else{return false}
+        // Preserve app switching, hide/minimize, system controls and full screen.
+        if [4,46,48,49,50,43].contains(event.keyCode) || (event.keyCode == 3 && event.modifierFlags.contains(.control)){return false}
+        keyDown(with:event);return true
+    }
     override func keyDown(with event:NSEvent){
+        let flags=event.modifierFlags
+        let shift=flags.contains(.shift) ? [0x10]:[]
+        if flags.contains(.command),!flags.contains(.control),!flags.contains(.option){
+            switch event.keyCode {
+            case 8:if !event.isARepeat {copy(nil)};return
+            case 7:if !event.isARepeat {cut(nil)};return
+            case 9:if !event.isARepeat {paste(nil)};return
+            case 12:chord([0x12,0x73]);return // Command-Q → Alt-F4.
+            case 6 where flags.contains(.shift):chord([0x11,0x59]);return
+            case 123:chord(shift+[0x24]);return
+            case 124:chord(shift+[0x23]);return
+            case 126:chord(shift+[0x11,0x24]);return
+            case 125:chord(shift+[0x11,0x23]);return
+            case 51:chord([0x10,0x24]);chord([0x08]);return
+            default:if let key=Self.keys[event.keyCode]{chord(shift+[0x11,key]);return}
+            }
+        }
+        if flags.contains(.option),!flags.contains(.command),!flags.contains(.control),
+           [51,117,123,124].contains(event.keyCode),let key=Self.keys[event.keyCode]{chord(shift+[0x11,key]);return}
         synchronizeModifiers(event.modifierFlags)
+        // AppKit reports backward Delete as U+007F, which is not printable.
+        // Route navigation/editing keys before considering committed text.
+        if [36,48,51,53,115,116,117,119,121,123,124,125,126].contains(event.keyCode),let key=Self.keys[event.keyCode]{
+            virtualKeys.insert(event.keyCode);emit(["event":"key","key":key,"down":true]);return
+        }
         if !event.modifierFlags.contains(.command),!event.modifierFlags.contains(.control),
-           let text=event.characters,!text.isEmpty,text.unicodeScalars.allSatisfy({$0.value>=32 && !($0.value>=0xF700 && $0.value<=0xF8FF)}){
+           let text=event.characters,!text.isEmpty,text.unicodeScalars.allSatisfy({$0.properties.generalCategory != .control && !($0.value>=0xF700 && $0.value<=0xF8FF)}){
+            // Option produces committed Mac symbols, not a Windows Alt chord.
+            synchronizeModifiers(event.modifierFlags.subtracting(.option))
             queueText(text);return
         }
         if let key=Self.keys[event.keyCode]{virtualKeys.insert(event.keyCode);emit(["event":"key","key":key,"down":true])}
@@ -187,5 +217,6 @@ final class ApplicationContent:NSView {
         12:0x51,13:0x57,14:0x45,15:0x52,16:0x59,17:0x54,18:0x31,19:0x32,20:0x33,21:0x34,22:0x36,23:0x35,
         25:0x39,26:0x37,28:0x38,29:0x30,31:0x4F,32:0x55,34:0x49,35:0x50,37:0x4C,38:0x4A,40:0x4B,
         45:0x4E,46:0x4D,36:0x0D,48:0x09,49:0x20,51:0x08,53:0x1B,115:0x24,116:0x21,117:0x2E,119:0x23,121:0x22,
-        123:0x25,124:0x27,125:0x28,126:0x26]
+        123:0x25,124:0x27,125:0x28,126:0x26,
+        122:0x70,120:0x71,99:0x72,118:0x73,96:0x74,97:0x75,98:0x76,100:0x77,101:0x78,109:0x79,103:0x7A,111:0x7B]
 }

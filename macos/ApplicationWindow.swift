@@ -67,6 +67,7 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
     private var placedDialog=false
     private var gesture:MouseGesture?
     private var inputBlocked=false
+    private var clipboardRequest:UUID?
     private var deferredInput:[WindowInput]=[]
     private var deferredTextBytes=0
     private var drainingInput=false
@@ -86,6 +87,7 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
     private var fallbackPixelScale=1.0
     private var sharedDisplay:SharedDisplay?
     private var applyingSourceGeometry=false
+    private var adjustedInitialPlacement=false
     private var maximumPixels=NSSize(width:4096,height:4096)
     private var geometryInteraction:String?
     private var geometrySerial=0
@@ -160,7 +162,7 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
         }
         if inputBlocked || !deferredInput.isEmpty {cancelInput("The display changed before the pending input could be sent.")}
         else {gesture=nil}
-        zoomRestore=nil;sharedDisplay=display
+        zoomRestore=nil;adjustedInitialPlacement=false;sharedDisplay=display
         pixelScale=display.map{Double($0.pixelScale)} ?? fallbackPixelScale
         applySizeLimits()
         if display != nil {applySourceFrame()}else if hasFrame{applyFrameSize()}
@@ -285,7 +287,9 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
     }
     private func deliver(_ value:WindowInput){
         switch value {
-        case .input(let packet):send(packet)
+        case .input(let packet):
+            if packet["event"] as? String == "clipboard",let action=packet["action"] as? String {transferClipboard(action)}
+            else {send(packet)}
         case .leftMouse(let event,let packet):leftMouse(event,packet)
         }
     }
@@ -299,6 +303,7 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
         }
     }
     private func cancelInput(_ message:String?=nil){
+        clipboardRequest=nil
         let interrupted=inputBlocked || !deferredInput.isEmpty
         // clearModifiers also flushes composed text. Cancellation must discard
         // that tail rather than deliver it to the control preceding the click.
@@ -309,6 +314,35 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
     }
     private func send(_ value:[String:Any]){
         var packet=value;packet["window"]=id;bridge.command("input",packet)
+    }
+    private func transferClipboard(_ action:String){
+        guard window.isKeyWindow,window.firstResponder === content else{return}
+        let pasteboard=NSPasteboard.general,version=pasteboard.changeCount
+        var request:[String:Any]=["window":id,"action":action]
+        if action == "paste" {
+            guard let text=pasteboard.string(forType:.string),!text.contains("\0"),text.utf8.count<=262_144 else {
+                onError?("Gli appunti devono contenere testo, fino a 256 KB.");return
+            }
+            request["text"]=text
+            guard let encoded=try? JSONSerialization.data(withJSONObject:request),encoded.count<1_000_000 else {
+                onError?("Il testo degli appunti supera il limite di trasferimento.");return
+            }
+        }
+        let nonce=UUID();clipboardRequest=nonce;inputBlocked=true
+        content.clearModifiers()
+        bridge.command("clipboard",request,timeout:.seconds(3)){[weak self] result in
+            guard let self,self.clipboardRequest == nonce else{return}
+            self.clipboardRequest=nil
+            defer{self.inputBlocked=false;self.drainInput()}
+            guard self.window.isKeyWindow,self.window.firstResponder === self.content else{return}
+            guard case .success(let reply)=result,let value=reply["value"] as? [String:Any] else {
+                if case .failure(let error)=result {self.onError?(error.localizedDescription)};return
+            }
+            if action != "paste",let text=value["text"] as? String,text.utf8.count<=262_144 {
+                guard pasteboard.changeCount == version else{self.onError?("Gli appunti Mac sono cambiati durante la copia; li ho conservati.");return}
+                pasteboard.clearContents();pasteboard.setString(text,forType:.string)
+            }
+        }
     }
     private func applyFrameSize(){
         if sharedDisplay != nil {applySourceFrame();return}
@@ -333,10 +367,11 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
         applyingSourceGeometry=true
         window.setFrame(frame,display:true)
         applyingSourceGeometry=false
-        if !role.transient,window.frame != frame {
-            // AppKit can constrain a newly discovered window below its menu
-            // bar. Commit that actual placement to Windows, once, using the
-            // same acknowledged path as a user drag.
+        if !role.transient,hasFrame,window.isVisible,window.frame != frame,!adjustedInitialPlacement {
+            // Reconcile AppKit's placement only after the window is visible
+            // with an image. An unsuccessful correction must not restart on
+            // every snapshot and keep input suspended indefinitely.
+            adjustedInitialPlacement=true
             beginSharedGeometry();commitSharedGeometry()
         }
     }

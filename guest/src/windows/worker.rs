@@ -2,7 +2,7 @@ use super::{
     Configuration, app_process,
     capture::{self, Target},
     catalogue::{self, Catalogue},
-    display, error, execute, identity, window_control,
+    clipboard, display, error, execute, identity, window_control,
     wire::{self, Outbox},
 };
 use serde_json::{Value, json};
@@ -189,7 +189,7 @@ impl Worker {
         outbox.control(
             json!({"type":"hello","protocol":1,"token":config.token,"epoch":self.epoch,
             "sid":self.sid,"session":self.session,"version":env!("CARGO_PKG_VERSION"),
-            "capabilities":{"capture":"wgc-hardware-readback","windows":4,"transients":12,"windowRoles":true,"input":true,"catalogue":true,"appIcon":true,"frameChannel":true,"frameEncodings":["lz4-block"],"displayInfo":true,"driverInfo":true,"graphicsInfo":true,"displayConfigure":true,"sharedGeometry":true,"processControl":true,"applicationStatus":true,"execute":true,"executeTimeoutSeconds":60,"executeOutputBytes":65536,"displayEvents":self.display_observer.is_some()}}),
+            "capabilities":{"capture":"wgc-hardware-readback","windows":4,"transients":12,"windowRoles":true,"input":true,"catalogue":true,"appIcon":true,"frameChannel":true,"frameEncodings":["lz4-block"],"displayInfo":true,"driverInfo":true,"graphicsInfo":true,"displayConfigure":true,"sharedGeometry":true,"processControl":true,"clipboard":true,"clipboardTextBytes":262144,"applicationStatus":true,"execute":true,"executeTimeoutSeconds":60,"executeOutputBytes":65536,"displayEvents":self.display_observer.is_some()}}),
         );
         let (sender, receiver) = mpsc::sync_channel(128);
         let state = outbox.clone();
@@ -439,11 +439,13 @@ impl Worker {
                 if self.pending.iter().any(|p| p.app == app) {
                     return Ok(json!({"accepted":true,"pending":true}));
                 }
+                let activation = self.catalogue.prepare_launch(app)?;
                 if self.applications.get(app).is_some_and(|session| {
                     // The observation grace period is not evidence of a live
                     // launch. Pending activation is checked above; after a
                     // verified exit the user must be able to launch again.
-                    session.activation.is_some() || session.processes.iter().any(app_process::Process::alive)
+                    session.activation.is_some() || (!activation.is_packaged()
+                        && session.processes.iter().any(app_process::Process::alive))
                 }) {
                     outbox.control(json!({"type":"launch_state","app":app,"state":"waiting"}));
                     return Ok(json!({"accepted":true,"existing":true,"ready":false}));
@@ -454,7 +456,6 @@ impl Worker {
                 if !self.applications.contains_key(app) && self.applications.len() >= 8 {
                     return Err("Too many application transitions are still active".into());
                 }
-                let activation = self.catalogue.prepare_launch(app)?;
                 self.activation_serial += 1;
                 let nonce = self.activation_serial;
                 let sender = self.activation_sender.clone();
@@ -465,8 +466,9 @@ impl Worker {
                 }).map_err(error)?;
                 let until = Instant::now() + Duration::from_secs(30);
                 log(format!("Application activation started app={app} nonce={nonce}"));
+                let processes=self.applications.remove(app).map(|session|session.processes).unwrap_or_default();
                 self.applications.insert(app.into(), ApplicationSession {
-                    processes: Vec::new(), gap_until: Some(until), startup_until: until,
+                    processes, gap_until: Some(until), startup_until: until,
                     activation: Some(nonce),
                 });
                 self.next_process_scan = Instant::now();
@@ -496,7 +498,7 @@ impl Worker {
                 self.release();
                 Ok(json!({}))
             }
-            "input" | "activate" | "resize" | "close" | "hit_test" | "geometry" | "set_geometry"
+            "input" | "clipboard" | "activate" | "resize" | "close" | "hit_test" | "geometry" | "set_geometry"
             | "cancel_interaction" => {
                 let id = value["window"].as_str().ok_or("Missing window identity")?;
                 let window = self.windows.get(id).ok_or("Window retired")?;
@@ -505,7 +507,7 @@ impl Worker {
                 }
                 let target = window.target.clone();
                 match value["operation"].as_str().unwrap() {
-                    "input" => {
+                    "input" | "clipboard" => {
                         let root = self.input_root(window);
                         let root_hwnd = root.target.hwnd;
                         let root_id = root.target.id.clone();
@@ -515,7 +517,21 @@ impl Worker {
                             .filter(|w| self.input_root(w).target.id == root_id)
                             .map(|w| w.target.hwnd)
                             .collect();
-                        self.input(&target, root_hwnd, &related, value)?;
+                        if value["operation"]=="clipboard" {
+                            let action=value["action"].as_str().ok_or("Missing clipboard action")?;
+                            let key=match action {"copy"=>0x43,"cut"=>0x58,"paste"=>0x56,_=>return Err("Unsupported clipboard action".into())};
+                            if !unsafe {IsWindowEnabled(HWND(target.hwnd as *mut _)).as_bool()} {return Err("This app is waiting for a dialog".into());}
+                            activate_window(HWND(root_hwnd as *mut _))?;
+                            self.release();
+                            let sequence=clipboard::sequence();
+                            if action=="paste" {clipboard::write(value["text"].as_str().ok_or("Missing clipboard text")?)?;}
+                            self.input(&target,root_hwnd,&related,&json!({"event":"chord","keys":[0x11,key]}))?;
+                            if action!="paste" {
+                                let text=clipboard::read_after(sequence)?;
+                                if !target.valid() || !related.contains(&(unsafe {GetAncestor(GetForegroundWindow(), GA_ROOT)}.0 as usize)) {return Err("Clipboard focus changed".into());}
+                                return Ok(json!({"text":text}));
+                            }
+                        }else{self.input(&target, root_hwnd, &related, value)?;}
                     }
                     "activate" => {
                         let active = self.activation_window(window)?;
@@ -1127,7 +1143,7 @@ impl Worker {
             }
             let kind = value["event"].as_str().ok_or("Missing input type")?;
             let foreground = GetAncestor(GetForegroundWindow(), GA_ROOT).0 as usize;
-            let needs_focus = kind == "key" || kind == "text";
+            let needs_focus = kind == "key" || kind == "text" || kind == "chord";
             if needs_focus && !related.contains(&foreground) {
                 activate_window(HWND(root as *mut _))?;
             }
@@ -1285,6 +1301,7 @@ impl Worker {
                         .as_str()
                         .filter(|s| s.len() <= 1024)
                         .ok_or("Invalid input text")?;
+                    if text.chars().any(|c|c=='\u{7f}' || (c.is_control() && !matches!(c,'\r'|'\n'|'\t'))) {return Err("Control characters must be sent as keys".into());}
                     let mut focus = GUITHREADINFO::default();
                     focus.cbSize = size_of::<GUITHREADINFO>() as u32;
                     GetGUIThreadInfo(0, &mut focus).map_err(error)?;
@@ -1337,6 +1354,16 @@ impl Worker {
                             return Err("The application did not accept text in time".into());
                         }
                     }
+                }
+                "chord" => {
+                    let keys=value["keys"].as_array().filter(|k|!k.is_empty() && k.len()<=4).ok_or("Invalid shortcut")?;
+                    let keys:Vec<u16>=keys.iter().map(|k|k.as_u64().filter(|k|*k>0 && *k<=255).map(|k|k as u16).ok_or("Invalid shortcut key")).collect::<Result<_,_>>()?;
+                    self.release();
+                    self.pressed.extend(keys.iter().copied());
+                    let inputs:Vec<INPUT>=keys.iter().map(|k|keyboard(*k,false)).chain(keys.iter().rev().map(|k|keyboard(*k,true))).collect();
+                    if SendInput(&inputs,size_of::<INPUT>() as i32) as usize != inputs.len() {self.release();return Err("Windows did not accept the shortcut".into());}
+                    self.pressed.clear();
+                    if target.hosted.is_none(){std::thread::sleep(Duration::from_millis(16));}
                 }
                 "key" => {
                     let key = value["key"]
@@ -1402,11 +1429,11 @@ fn keyboard(key: u16, up: bool) -> INPUT {
         Anonymous: INPUT_0 {
             ki: KEYBDINPUT {
                 wVk: VIRTUAL_KEY(key),
-                dwFlags: if up {
+                dwFlags: (if up {
                     KEYEVENTF_KEYUP
                 } else {
                     KEYBD_EVENT_FLAGS(0)
-                },
+                }) | if (0x21..=0x28).contains(&key) || key==0x2d || key==0x2e {KEYEVENTF_EXTENDEDKEY} else {KEYBD_EVENT_FLAGS(0)},
                 ..Default::default()
             },
         },

@@ -58,7 +58,8 @@ final class GuestConnection: @unchecked Sendable {
         Task { @MainActor [self] in ended(id) }
     }
     func send(_ header: [String: Any]) {
-        guard let bytes = try? JSONSerialization.data(withJSONObject: header), bytes.count <= 16384 else { return }
+        let limit=header["operation"] as? String == "clipboard" ? 1_048_576:16384
+        guard let bytes = try? JSONSerialization.data(withJSONObject: header), bytes.count <= limit else { return }
         var length = UInt32(bytes.count).littleEndian
         var message = withUnsafeBytes(of: &length) { Data($0) }; message.append(bytes)
         connection.send(content: message, completion: .contentProcessed { [weak self] error in

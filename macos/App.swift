@@ -726,7 +726,7 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
             displayEpoch=value["epoch"] as? String
             invalidateDisplay("Checking Windows display…")
             let capabilities=value["capabilities"] as? [String:Any] ?? [:]
-            guestCapabilities=Dictionary(uniqueKeysWithValues:["execute","displayInfo","driverInfo","graphicsInfo","sharedGeometry","appIcon","applicationStatus","processControl"].map{($0,capabilities[$0] as? Bool == true)})
+            guestCapabilities=Dictionary(uniqueKeysWithValues:["execute","displayInfo","driverInfo","graphicsInfo","sharedGeometry","appIcon","applicationStatus","processControl","clipboard"].map{($0,capabilities[$0] as? Bool == true)})
             startApplicationStatusUpdates()
             pumpApplicationIcons()
             displayReadable=capabilities["displayInfo"] as? Bool == true

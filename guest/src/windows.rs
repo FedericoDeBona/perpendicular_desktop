@@ -1,6 +1,7 @@
 mod app_process;
 mod capture;
 mod catalogue;
+mod clipboard;
 mod display;
 mod drivers;
 mod execute;

@@ -109,6 +109,11 @@ pub struct Activation {
     pidl: Vec<u16>,
     packaged_id: Option<String>,
 }
+impl Activation {
+    // A verified registered package can be explicitly activated again after
+    // its FrameHost/CoreWindow disappears, without starting a desktop duplicate.
+    pub fn is_packaged(&self)->bool {self.packaged_id.is_some()}
+}
 
 // AppsFolder also contains desktop shortcuts with explicit AppUserModelIDs.
 // Select package activation only after Windows parses the identity and finds a
