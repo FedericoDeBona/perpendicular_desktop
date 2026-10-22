@@ -1,0 +1,59 @@
+--- a/src/perp-sync/worker-prefix.inc
++++ b/src/perp-sync/worker-prefix.inc
+@@ -25,8 +25,8 @@
+     uint64_t retire_epoch;
+ } LiveClaim;
+ static LiveClaim live_claims[LIVE_MAX_SOURCES];
+-/* Canonical COM references prevent pointer reuse from laundering an import. */
+-static void *live_imported[LIVE_MAX_SOURCES];
++/* Per-object provenance expires with the resource, never with a reused address. */
++static GUID live_import_key;
+ static bool live_emit(PerpBrokerHeader *h,const void *body,size_t bytes,const int *fds,unsigned count);
+ static void live_fault_at_locked(const char *function,unsigned line);
+ #define live_fault_locked() live_fault_at_locked(__func__,__LINE__)
+--- a/src/perp-sync/worker-suffix.inc
++++ b/src/perp-sync/worker-suffix.inc
+@@ -82,29 +82,29 @@
+     }
+     unlock();return good;
+ }
++#include "import-marker.h"
+ void perp_live_worker_imported(struct npt_context *ctx,void *texture)
+ {
+-    lock();void *key=identity(texture);void **slot=NULL;
+-    if(ctx!=live_context || !key) {release(&key);live_fault_locked();unlock();return;}
+-    for(unsigned i=0;i<LIVE_MAX_SOURCES;i++) {
+-        if(live_imported[i]==key) {release(&key);unlock();return;}
+-        if(!live_imported[i])slot=&live_imported[i];
+-    }
+-    if(slot)*slot=key;
+-    else {release(&key);live_fault_locked();}
++    lock();bool imported=false;
++    if(ctx!=live_context || !perp_import_marker(texture,&live_import_key,true,&imported) || !imported)
++        live_fault_locked();
+     unlock();
+ }
+ bool perp_live_worker_source(struct npt_context *ctx,void *texture)
+ {
+-    lock();void *key=identity(texture);bool good=ctx==live_context && key && !live_faulted;
+-    for(unsigned i=0;good && i<LIVE_MAX_SOURCES;i++)if(live_imported[i]==key)good=false;
+-    release(&key);unlock();return good;
+-}
+-void perp_live_worker_created(struct npt_context *ctx) {live_context=ctx;}
++    lock();bool imported=false,good=ctx==live_context && !live_faulted;
++    if(good && !perp_import_marker(texture,&live_import_key,false,&imported)) {
++        live_fault_locked();good=false;
++    }
++    unlock();return good && !imported;
++}
++void perp_live_worker_created(struct npt_context *ctx)
++{
++    arc4random_buf(&live_import_key,sizeof(live_import_key));live_context=ctx;
++}
+ void perp_live_worker_stopped(struct npt_context *ctx)
+ {
+     if(live_context!=ctx)return;
+-    for(unsigned i=0;i<LIVE_MAX_SOURCES;i++)release(&live_imported[i]);
+     release((void **)&live_completion_fence);release(&live_completion_owner);live_completion_value=0;
+     if(live_broker>=0)close(live_broker);
+     if(live_acks[0]>=0)close(live_acks[0]);if(live_acks[1]>=0)close(live_acks[1]);

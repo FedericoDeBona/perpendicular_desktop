@@ -97,6 +97,10 @@ def main():
     run(['patch', '-p1', '--forward', '--batch', '-i', admission_patch], copied)
     resource_patch = REPO / 'graphics/renderer/resource-retirement.patch'
     run(['patch', '-p1', '--forward', '--batch', '-i', resource_patch], copied)
+    import_patch = REPO / 'graphics/renderer/import-lifetime.patch'
+    run(['patch', '-p1', '--forward', '--batch', '-i', import_patch], copied)
+    import_header = REPO / 'graphics/renderer/import-marker.h'
+    shutil.copy2(import_header, private / import_header.name)
     changed = ['src/perp-sync/proxy-broker.c', 'src/proxy/proxy_context.c',
                'src/proxy/proxy_client.c', 'server/render_client.c', 'server/render_worker.c',
                'src/perp-sync/snapshot.c']
@@ -129,6 +133,10 @@ def main():
     run([*admission_command, '-UNDEBUG', REPO / 'graphics/renderer/check-resource-retirement.c',
          '-o', resource_check], reference / 'build')
     run([resource_check])
+    import_check = work / 'check-import-lifetime'
+    run([*admission_command, '-UNDEBUG', '-I' + str(REPO / 'graphics/renderer'),
+         REPO / 'graphics/renderer/check-import-lifetime.c', '-o', import_check], reference / 'build')
+    run([import_check, runtime / 'lib/libdxmt-native.dylib'])
     patched_archive = work / 'libvirgl.a'
     shutil.copy2(archive, patched_archive)
     run(['ar', '-r', patched_archive, *[v for k, v in objects.items() if k.startswith('src/')]])
@@ -173,6 +181,7 @@ def main():
     manifest['context_retirement'] = 1
     manifest['context_admission'] = 1
     manifest['resource_retirement'] = 1
+    manifest['import_lifetime'] = 1
     # Both binaries are rebuilt from the pinned base, not copied from the input.
     # Do not inherit a diagnostic capability that this build did not compile.
     manifest.pop('shared_handle_diagnostics', None)
@@ -196,6 +205,13 @@ def main():
         'base_library_sha256': LIBRARY_SHA, 'base_server_sha256': SERVER_SHA,
         'patch_sha256': digest(resource_patch), 'resource_limit': 256,
         'exact_worker_confirmation_and_snapshot_ack': True, 'runtime_verified': False,
+    }, indent=2) + '\n')
+    shutil.copy2(import_patch, notices / import_patch.name)
+    shutil.copy2(import_header, notices / import_header.name)
+    (notices / 'import-lifetime.json').write_text(json.dumps({
+        'patch_sha256': digest(import_patch), 'header_sha256': digest(import_header),
+        'host_private_random_key': True, 'retained_import_references': 0,
+        'runtime_verified': False,
     }, indent=2) + '\n')
     if args.shared_handle_diagnostics:
         manifest['shared_handle_diagnostics'] = 1
