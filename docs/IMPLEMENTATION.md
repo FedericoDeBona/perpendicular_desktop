@@ -263,3 +263,12 @@ Il PID restituito viene aperto per lettura, il suo GetApplicationUserModelId dev
 Fonti Microsoft: [ActivateApplication e PID restituito](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nf-shobjidl_core-iapplicationactivationmanager-activateapplication), [AUMID delle app installate](https://learn.microsoft.com/en-us/windows/configuration/store/find-aumid).
 
 Il periodo di osservazione dopo la scomparsa dell'ultima finestra non blocca una nuova richiesta di avvio quando non rimangono processi vivi. La lista pending e l'attivazione ancora in corso continuano a impedire duplicazioni durante il lancio; gap_until serve soltanto a conservare per poco lo stato osservato.
+
+
+### WGC su dispositivo hardware e readback a fasce
+
+La cattura delle finestre usa D3D_DRIVER_TYPE_HARDWARE e descrive l'esatto ID3D11Device impiegato dal frame pool. Il controllo condiviso con graphics_info distingue il flag SOFTWARE e l'identità Microsoft Basic Render; non presenta un dispositivo software come GPU. La descrizione del device e l'eventuale chiamata/HRESULT fallita sono leggibili in geometry_snapshot. I menu classici conservano il percorso WindowDC dedicato.
+
+Sulla IoT attuale il Map hardware di una staging piena2374×1765 fallisce; una staging riusabile con richiesta limitata a4MiB per fascia ha invece consegnato l'immagine completa. CopySubresourceRegion trasferisce il rettangolo della finestra o del client del dialogo, una fascia per volta; ogni Map viene seguito da copia delle righe e Unmap. Il buffer finale viene pubblicato soltanto se tutte le righe e il padding sono inizializzati. Dimensioni, trasporto LZ4 indipendente e buffer Metal sul Mac restano invariati.
+
+Il percorso comprende ancora letture CPU, copie nel guest e trasferimento TCP: non è zero-copy. L'ammissione di un device hardware e una singola immagine corretta non provano bassa latenza o compatibilità generale. I nuovi tempi distinguono invio CopySubresourceRegion/Flush (non tempo di esecuzione GPU), attesa Map e trasferimento del driver, copia delle righe nel guest e Unmap; il totale readback resta disponibile.

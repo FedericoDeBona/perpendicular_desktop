@@ -189,7 +189,7 @@ impl Worker {
         outbox.control(
             json!({"type":"hello","protocol":1,"token":config.token,"epoch":self.epoch,
             "sid":self.sid,"session":self.session,"version":env!("CARGO_PKG_VERSION"),
-            "capabilities":{"capture":"software","windows":4,"transients":12,"windowRoles":true,"input":true,"catalogue":true,"appIcon":true,"frameChannel":true,"frameEncodings":["lz4-block"],"displayInfo":true,"driverInfo":true,"graphicsInfo":true,"displayConfigure":true,"sharedGeometry":true,"processControl":true,"applicationStatus":true,"execute":true,"executeTimeoutSeconds":60,"executeOutputBytes":65536,"displayEvents":self.display_observer.is_some()}}),
+            "capabilities":{"capture":"wgc-hardware-readback","windows":4,"transients":12,"windowRoles":true,"input":true,"catalogue":true,"appIcon":true,"frameChannel":true,"frameEncodings":["lz4-block"],"displayInfo":true,"driverInfo":true,"graphicsInfo":true,"displayConfigure":true,"sharedGeometry":true,"processControl":true,"applicationStatus":true,"execute":true,"executeTimeoutSeconds":60,"executeOutputBytes":65536,"displayEvents":self.display_observer.is_some()}}),
         );
         let (sender, receiver) = mpsc::sync_channel(128);
         let state = outbox.clone();
@@ -540,6 +540,7 @@ impl Worker {
                         let mut state = window_control::state(&target)?;
                         state["capturePhase"] = json!(target.capture_phase_name());
                         state["captureFrames"] = json!(target.capture_frames.load(Ordering::Acquire));
+                        state["captureDevice"] = json!(*target.capture_device.lock().unwrap());
                         state["captureStopped"] = json!(window.stop.as_ref()
                             .map(|stop| stop.load(Ordering::Acquire)).unwrap_or(true));
                         return Ok(state);
@@ -950,6 +951,7 @@ impl Worker {
             item_creation: Arc::new(Mutex::new(())),
             capture_phase: AtomicU8::new(capture::Phase::Starting as u8),
             capture_frames: AtomicU64::new(0),
+            capture_device: Mutex::new(None),
             geometry: Mutex::new((0, 0, 0, 0, 0)),
         });
         let stop = Some(capture::spawn(target.clone(), outbox.clone()));
@@ -1087,6 +1089,7 @@ impl Worker {
                 item_creation: Arc::new(Mutex::new(())),
                 capture_phase: AtomicU8::new(capture::Phase::Starting as u8),
                 capture_frames: AtomicU64::new(0),
+                capture_device: Mutex::new(None),
                 geometry: Mutex::new((0, 0, 0, 0, 0)),
             });
             self.windows.insert(

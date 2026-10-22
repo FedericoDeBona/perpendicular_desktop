@@ -1,5 +1,5 @@
 use super::{catalogue, error, identity, wire::Outbox};
-use serde_json::json;
+use serde_json::{Value, json};
 use std::{
     sync::{
         Arc, Mutex,
@@ -17,7 +17,7 @@ use windows::{
     Win32::{
         Foundation::{HMODULE, HWND, POINT, RECT, SetLastError, GetLastError, WIN32_ERROR},
         Graphics::{
-            Direct3D::{D3D_DRIVER_TYPE_WARP, D3D_FEATURE_LEVEL_11_0},
+            Direct3D::{D3D_DRIVER_TYPE_HARDWARE, D3D_FEATURE_LEVEL_11_0},
             Direct3D11::*,
             Dwm::{DWMWA_EXTENDED_FRAME_BOUNDS, DwmGetWindowAttribute},
             Dxgi::{Common::DXGI_FORMAT_B8G8R8A8_UNORM, IDXGIDevice},
@@ -59,6 +59,7 @@ pub struct Target {
     pub item_creation: Arc<Mutex<()>>,
     pub capture_phase: AtomicU8,
     pub capture_frames: AtomicU64,
+    pub capture_device: Mutex<Option<Value>>,
     // Generation, dimensions, and image origin relative to the Windows client origin.
     pub geometry: Mutex<(u64, i32, i32, i32, i32)>,
 }
@@ -73,6 +74,7 @@ impl Target {
             item_creation:self.item_creation.clone(),
             capture_phase: AtomicU8::new(Phase::Starting as u8),
             capture_frames: AtomicU64::new(0),
+            capture_device: Mutex::new(None),
             geometry: Mutex::new((0, 0, 0, 0, 0)),
         }
     }
@@ -106,6 +108,10 @@ pub fn spawn(target: Arc<Target>, outbox: Arc<Outbox>) -> Arc<AtomicBool> {
             super::menu_capture::run(&target, &outbox, &flag)
         } else { unsafe { run(&target, &outbox, &flag) } };
         if let Err(message) = result {
+            let mut description = target.capture_device.lock().unwrap();
+            let description = description.get_or_insert_with(|| json!({}));
+            description["failurePhase"] = json!(target.capture_phase_name());
+            description["failure"] = json!(message);
             target.set_phase(Phase::Error);
             if !flag.load(Ordering::Acquire) && target.valid() {
                 outbox.control(json!({"type":"window_error","window":target.id,"message":message}));
@@ -198,7 +204,7 @@ unsafe fn run(target: &Target, outbox: &Outbox, stop: &AtomicBool) -> Result<(),
         let mut context = None;
         D3D11CreateDevice(
             None,
-            D3D_DRIVER_TYPE_WARP,
+            D3D_DRIVER_TYPE_HARDWARE,
             HMODULE::default(),
             D3D11_CREATE_DEVICE_BGRA_SUPPORT,
             Some(&[D3D_FEATURE_LEVEL_11_0]),
@@ -210,9 +216,14 @@ unsafe fn run(target: &Target, outbox: &Outbox, stop: &AtomicBool) -> Result<(),
         .map_err(error)?;
         let device = device.ok_or("Missing capture device")?;
         let context = context.ok_or("Missing capture context")?;
+        let description = super::display::device_description(&device).map_err(error)?;
+        if description["hardwareDevice"] != true {
+            return Err("The capture device is a software adapter, not the Windows GPU".into());
+        }
+        *target.capture_device.lock().unwrap() = Some(description);
         let dxgi: IDXGIDevice = device.cast().map_err(error)?;
         let runtime: IDirect3DDevice = CreateDirect3D11DeviceFromDXGIDevice(&dxgi)
-            .map_err(error)?
+            .map_err(|e| gpu_error(&device, "CreateDirect3D11DeviceFromDXGIDevice", e))?
             .cast()
             .map_err(error)?;
         let interop: IGraphicsCaptureItemInterop =
@@ -237,8 +248,8 @@ unsafe fn run(target: &Target, outbox: &Outbox, stop: &AtomicBool) -> Result<(),
             2,
             size,
         )
-        .map_err(error)?;
-        let session = pool.CreateCaptureSession(&item).map_err(error)?;
+        .map_err(|e| gpu_error(&device, "CreateFreeThreaded", e))?;
+        let session = pool.CreateCaptureSession(&item).map_err(|e| gpu_error(&device, "CreateCaptureSession", e))?;
         let _ = session.SetIsCursorCaptureEnabled(false);
         // Capture each surface independently: popups may extend beyond the document,
         // and real dialogs must not also be baked into the document's pixels.
@@ -247,7 +258,7 @@ unsafe fn run(target: &Target, outbox: &Outbox, stop: &AtomicBool) -> Result<(),
         let registration = pool.FrameArrived(&TypedEventHandler::new(move |_,_| {
             let _ = arrived.try_send(()); Ok(())
         })).map_err(error)?;
-        session.StartCapture().map_err(error)?;
+        session.StartCapture().map_err(|e| gpu_error(&device, "StartCapture", e))?;
         let result = (|| -> Result<(), String> {
             let mut sequence = 0u64;
             let mut generation = 1u64;
@@ -339,10 +350,6 @@ unsafe fn run(target: &Target, outbox: &Outbox, stop: &AtomicBool) -> Result<(),
                     .map_err(error)?;
                     continue;
                 }
-                if staging_size != (desc.Width, desc.Height) {
-                    staging = None;
-                    staging_size = (desc.Width, desc.Height);
-                }
                 let hwnd = HWND(target.hwnd as *mut _);
                 let (x, y, width, height) = if target.full_frame {
                     (0, 0, size.Width, size.Height)
@@ -365,7 +372,17 @@ unsafe fn run(target: &Target, outbox: &Outbox, stop: &AtomicBool) -> Result<(),
                 {
                     return Err("Invalid capture rectangle".into());
                 }
+                // Keep each staging allocation bounded independently of the
+                // window. The complete image still uses its original geometry.
+                let readback_rows = (4 * 1024 * 1024 / row_bytes.div_ceil(256).max(1) / 256)
+                    .max(1).min(height as usize);
+                if staging_size != (width as u32, readback_rows as u32) {
+                    staging = None;
+                    staging_size = (width as u32, readback_rows as u32);
+                }
                 if staging.is_none() {
+                    desc.Width = width as u32;
+                    desc.Height = readback_rows as u32;
                     desc.Usage = D3D11_USAGE_STAGING;
                     desc.BindFlags = 0;
                     desc.CPUAccessFlags = D3D11_CPU_ACCESS_READ.0 as u32;
@@ -375,40 +392,52 @@ unsafe fn run(target: &Target, outbox: &Outbox, stop: &AtomicBool) -> Result<(),
                     if desc.Format != DXGI_FORMAT_B8G8R8A8_UNORM || desc.SampleDesc.Count != 1 {
                         return Err("Unsupported capture format".into());
                     }
-                    device
-                        .CreateTexture2D(&desc, None, Some(&mut staging))
-                        .map_err(error)?;
+                    device.CreateTexture2D(&desc, None, Some(&mut staging))
+                        .map_err(|e| gpu_error(&device, "Create readback texture", e))?;
                 }
                 let backing = staging.as_ref().ok_or("Missing readback resource")?;
                 let mut pixels = Vec::<u8>::with_capacity(total);
                 target.set_phase(Phase::Mapping);
                 let readback_started = Instant::now();
-                context.CopyResource(backing, &texture);
-                let mut mapped = D3D11_MAPPED_SUBRESOURCE::default();
-                context
-                    .Map(backing, 0, D3D11_MAP_READ, 0, Some(&mut mapped))
-                    .map_err(error)?;
-                let valid =
-                    !mapped.pData.is_null() && mapped.RowPitch as i64 >= (i64::from(x) + i64::from(width)) * 4
-                    && (y as usize + height as usize - 1).checked_mul(mapped.RowPitch as usize)
-                        .and_then(|last| last.checked_add((x as usize + width as usize) * 4)).is_some();
-                if valid {
-                    for row in 0..height as usize {
-                        let destination = pixels.as_mut_ptr().add(row * stride);
-                        std::ptr::copy_nonoverlapping(
-                            (mapped.pData as *const u8).add(
-                                (row + y as usize) * mapped.RowPitch as usize + x as usize * 4,
-                            ),
-                            destination,
-                            row_bytes,
-                        );
-                        std::ptr::write_bytes(destination.add(row_bytes), 0, stride - row_bytes);
+                let mut valid = true;
+                let (mut copy_submit_ms, mut map_ms, mut pixel_copy_ms, mut unmap_ms) = (0.0, 0.0, 0.0, 0.0);
+                for first_row in (0..height as usize).step_by(readback_rows) {
+                    let rows = readback_rows.min(height as usize - first_row);
+                    let region = D3D11_BOX { left:x as u32, top:y as u32 + first_row as u32, front:0,
+                        right:(x + width) as u32, bottom:y as u32 + first_row as u32 + rows as u32, back:1 };
+                    let submitted = Instant::now();
+                    context.CopySubresourceRegion(backing, 0, 0, 0, 0, &texture, 0, Some(&region));
+                    context.Flush();
+                    copy_submit_ms += submitted.elapsed().as_secs_f64() * 1000.0;
+                    let map_started = Instant::now();
+                    let mut mapped = D3D11_MAPPED_SUBRESOURCE::default();
+                    context
+                        .Map(backing, 0, D3D11_MAP_READ, 0, Some(&mut mapped))
+                        .map_err(|e| gpu_error(&device, "Map readback texture", e))?;
+                    map_ms += map_started.elapsed().as_secs_f64() * 1000.0;
+                    let copying = Instant::now();
+                    valid = !mapped.pData.is_null() && mapped.RowPitch as usize >= row_bytes
+                        && (rows - 1).checked_mul(mapped.RowPitch as usize)
+                            .and_then(|last| last.checked_add(row_bytes)).is_some();
+                    if valid {
+                        for row in 0..rows {
+                            let destination = pixels.as_mut_ptr().add((first_row + row) * stride);
+                            std::ptr::copy_nonoverlapping(
+                                (mapped.pData as *const u8).add(row * mapped.RowPitch as usize),
+                                destination,
+                                row_bytes,
+                            );
+                            std::ptr::write_bytes(destination.add(row_bytes), 0, stride - row_bytes);
+                        }
                     }
-                    // Every row and every padding byte is initialized before
-                    // publication. Avoid zeroing the BGRA area just to overwrite it.
-                    pixels.set_len(total);
+                    pixel_copy_ms += copying.elapsed().as_secs_f64() * 1000.0;
+                    let unmapping = Instant::now();
+                    context.Unmap(backing, 0);
+                    unmap_ms += unmapping.elapsed().as_secs_f64() * 1000.0;
+                    if !valid { break; }
                 }
-                context.Unmap(backing, 0);
+                // Every pixel and padding byte is initialized before publication.
+                if valid { pixels.set_len(total); }
                 let readback_milliseconds = readback_started.elapsed().as_secs_f64() * 1000.0;
                 target.set_phase(Phase::Reading);
                 frame.Close().map_err(error)?;
@@ -433,8 +462,10 @@ unsafe fn run(target: &Target, outbox: &Outbox, stop: &AtomicBool) -> Result<(),
                 *target.geometry.lock().unwrap() = (generation, width, height, offset.0, offset.1);
                 target.capture_frames.store(sequence, Ordering::Release);
                 outbox.frame(&target.id,json!({"type":"frame","window":target.id,"sequence":sequence,"generation":generation,
-                    "width":width,"height":height,"stride":stride,"bytes":pixels.len(),"capture":"software",
+                    "width":width,"height":height,"stride":stride,"bytes":pixels.len(),"capture":"wgc-hardware-readback",
                     "guestReadbackMilliseconds":readback_milliseconds,
+                    "guestCopySubmitMilliseconds":copy_submit_ms,"guestMapMilliseconds":map_ms,
+                    "guestPixelCopyMilliseconds":pixel_copy_ms,"guestUnmapMilliseconds":unmap_ms,
                     "guestBackpressureMilliseconds":backpressure_milliseconds}),pixels,frame_time_100ns);
                 if let Some(delay) = Duration::from_millis(16).checked_sub(started.elapsed()) {
                     std::thread::sleep(delay);
@@ -451,6 +482,13 @@ unsafe fn run(target: &Target, outbox: &Outbox, stop: &AtomicBool) -> Result<(),
         windows::Win32::System::WinRT::RoUninitialize();
         result
     }
+}
+
+fn gpu_error(device: &ID3D11Device, operation: &str, cause: windows::core::Error) -> String {
+    let reason = unsafe { device.GetDeviceRemovedReason() };
+    format!("{operation}: {cause}; device status: {}", match reason {
+        Ok(()) => "S_OK".into(), Err(reason) => reason.to_string(),
+    })
 }
 
 unsafe fn client(hwnd: HWND, width: i32, height: i32) -> Result<(i32, i32, i32, i32), String> {

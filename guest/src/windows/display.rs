@@ -149,24 +149,25 @@ pub fn graphics() -> Value {
         ) {
             return json!({"hardwareDevice":false,"message":error.to_string()});
         }
-        let describe = || -> windows::core::Result<DXGI_ADAPTER_DESC1> {
-            let dxgi: IDXGIDevice = device.unwrap().cast()?;
-            let adapter: IDXGIAdapter1 = dxgi.GetAdapter()?.cast()?;
-            adapter.GetDesc1()
-        };
-        match describe() {
-            Ok(adapter) => {
-                // The primary Basic Render adapter can omit SOFTWARE even when
-                // D3D_DRIVER_TYPE_HARDWARE succeeds. Its documented PCI IDs still
-                // identify WARP: https://learn.microsoft.com/windows/win32/direct3ddxgi/d3d10-graphics-programming-guide-dxgi
-                let software = adapter.Flags & DXGI_ADAPTER_FLAG_SOFTWARE.0 as u32 != 0
-                    || (adapter.VendorId == 0x1414 && adapter.DeviceId == 0x008c);
-                json!({"hardwareDevice":!software,"softwareAdapter":software,"adapterFlags":adapter.Flags,
-                    "adapter":text(&adapter.Description),"vendor":adapter.VendorId,"device":adapter.DeviceId,
-                    "featureLevel":level.0})
-            }
+        match device.ok_or_else(windows::core::Error::from_thread).and_then(|device| device_description(&device)) {
+            Ok(description) => description,
             Err(error) => json!({"hardwareDevice":false,"message":error.to_string()}),
         }
+    }
+}
+
+/// Describe this exact device, including capture devices rather than a separate
+/// probe. Basic Render may omit SOFTWARE; its PCI identity still denotes WARP.
+pub fn device_description(device: &ID3D11Device) -> windows::core::Result<Value> {
+    unsafe {
+        let dxgi: IDXGIDevice = device.cast()?;
+        let adapter: IDXGIAdapter1 = dxgi.GetAdapter()?.cast()?;
+        let adapter: DXGI_ADAPTER_DESC1 = adapter.GetDesc1()?;
+        let software = adapter.Flags & DXGI_ADAPTER_FLAG_SOFTWARE.0 as u32 != 0
+            || (adapter.VendorId == 0x1414 && adapter.DeviceId == 0x008c);
+        Ok(json!({"hardwareDevice":!software,"softwareAdapter":software,"adapterFlags":adapter.Flags,
+            "adapter":text(&adapter.Description),"vendor":adapter.VendorId,"device":adapter.DeviceId,
+            "featureLevel":device.GetFeatureLevel().0}))
     }
 }
 
