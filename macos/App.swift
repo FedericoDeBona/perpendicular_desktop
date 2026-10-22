@@ -405,7 +405,7 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
         if state.windows.contains(where:{$0.stopped || failedWindows.contains($0.id)}) {return "Cattura interrotta"}
         if state.windows.contains(where:{receivedWindows.contains($0.id)}) {return "Finestra disponibile"}
         if !state.windows.isEmpty {return "In attesa dell’immagine"}
-        return state.running ? "In esecuzione · senza finestra":"Processo terminato"
+        return state.running ? "In esecuzione · senza finestra":"Nessun processo rilevato"
     }
     func showProcesses(for app:String?=nil){
         processFilterApp=app;processPanelVisible=true;refreshProcesses()

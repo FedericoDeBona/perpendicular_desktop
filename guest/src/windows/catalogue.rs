@@ -4,22 +4,23 @@ use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use windows::{
     Win32::{
-        Foundation::{FILETIME, HWND, LPARAM, POINT, RECT},
+        Foundation::{FILETIME, HANDLE, HWND, LPARAM, POINT, RECT, ERROR_INSUFFICIENT_BUFFER},
         Graphics::{
             Dwm::{DWMWA_CLOAKED, DWMWA_EXTENDED_FRAME_BOUNDS, DwmGetWindowAttribute},
             Gdi::ClientToScreen,
         },
         Storage::{
             EnhancedStorage::{PKEY_Link_Arguments, PKEY_Link_TargetParsingPath},
-            Packaging::Appx::GetApplicationUserModelId,
+            Packaging::Appx::{GetApplicationUserModelId, GetPackagesByPackageFamily, ParseApplicationUserModelId},
         },
         System::{
-            Com::{COINIT_APARTMENTTHREADED, CoInitializeEx, CoTaskMemFree, CoUninitialize},
+            Com::{CLSCTX_LOCAL_SERVER, COINIT_APARTMENTTHREADED, CoCreateInstance, CoInitializeEx, CoTaskMemFree, CoUninitialize},
             Threading::{GetProcessId, GetProcessTimes, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION},
         },
         UI::{
             Input::KeyboardAndMouse::IsWindowEnabled,
             Shell::{
+                AO_NONE, ApplicationActivationManager, IApplicationActivationManager,
                 BHID_EnumItems, IEnumShellItems, ILGetSize, IShellItem, IShellItem2, SEE_MASK_IDLIST,
                 SEE_MASK_NOASYNC, SEE_MASK_NOCLOSEPROCESS, SHCreateItemFromParsingName,
                 SHELLEXECUTEINFOW, SHGetIDListFromObject, SIGDN_DESKTOPABSOLUTEPARSING,
@@ -33,7 +34,7 @@ use windows::{
             },
         },
     },
-    core::{Interface, PWSTR, w},
+    core::{Interface, PCWSTR, PWSTR, w},
 };
 
 pub struct Catalogue {
@@ -82,11 +83,17 @@ pub fn host_frame(raw: usize, sid: &str, session: u32) -> Option<usize> {
 fn process_app_id(raw: usize) -> Option<String> {
     unsafe {
         let handle = identity::Handle(OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, process_id(raw)).ok()?);
+        handle_app_id(handle.0)
+    }
+}
+
+fn handle_app_id(handle: HANDLE) -> Option<String> {
+    unsafe {
         let mut length = 0;
-        let _ = GetApplicationUserModelId(handle.0, &mut length, None);
+        let _ = GetApplicationUserModelId(handle, &mut length, None);
         if length == 0 || length > 32768 { return None; }
         let mut buffer = vec![0u16; length as usize];
-        if GetApplicationUserModelId(handle.0, &mut length, Some(PWSTR(buffer.as_mut_ptr()))).0 != 0 { return None; }
+        if GetApplicationUserModelId(handle, &mut length, Some(PWSTR(buffer.as_mut_ptr()))).0 != 0 { return None; }
         Some(String::from_utf16_lossy(&buffer[..buffer.iter().position(|v| *v == 0).unwrap_or(buffer.len())]))
     }
 }
@@ -100,6 +107,24 @@ unsafe extern "system" fn collect_children(hwnd: HWND, context: LPARAM) -> windo
 /// Owned bytes only; Shell COM interfaces stay in the catalogue's apartment.
 pub struct Activation {
     pidl: Vec<u16>,
+    packaged_id: Option<String>,
+}
+
+// AppsFolder also contains desktop shortcuts with explicit AppUserModelIDs.
+// Select package activation only after Windows parses the identity and finds a
+// package registered for this user. Desktop entries keep Shell activation.
+fn registered_package(app: &str) -> bool {
+    let app: Vec<u16> = app.encode_utf16().chain(Some(0)).collect();
+    let mut family = vec![0u16; 32768];
+    let mut relative = vec![0u16; 32768];
+    let (mut family_length, mut relative_length) = (family.len() as u32, relative.len() as u32);
+    unsafe {
+        if ParseApplicationUserModelId(PCWSTR(app.as_ptr()), &mut family_length, Some(PWSTR(family.as_mut_ptr())),
+            &mut relative_length, Some(PWSTR(relative.as_mut_ptr()))).0 != 0 { return false; }
+        let (mut count, mut length) = (0, 0);
+        let result = GetPackagesByPackageFamily(PCWSTR(family.as_ptr()), &mut count, None, &mut length, None);
+        result == ERROR_INSUFFICIENT_BUFFER && count > 0
+    }
 }
 
 impl Activation {
@@ -112,6 +137,18 @@ impl Activation {
 
     fn execute(&self) -> Result<(u32, u64), String> {
         unsafe {
+            if let Some(app) = &self.packaged_id {
+                let manager: IApplicationActivationManager = CoCreateInstance(&ApplicationActivationManager, None, CLSCTX_LOCAL_SERVER).map_err(error)?;
+                let wide: Vec<u16> = app.encode_utf16().chain(Some(0)).collect();
+                let pid = manager.ActivateApplication(PCWSTR(wide.as_ptr()), PCWSTR::null(), AO_NONE).map_err(error)?;
+                let handle = identity::Handle(OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid).map_err(error)?);
+                if !handle_app_id(handle.0).is_some_and(|actual| actual.eq_ignore_ascii_case(app)) {
+                    return Err("Windows activation returned a different application identity".into());
+                }
+                let (mut created, mut exited, mut kernel, mut user) = (FILETIME::default(), FILETIME::default(), FILETIME::default(), FILETIME::default());
+                GetProcessTimes(handle.0, &mut created, &mut exited, &mut kernel, &mut user).map_err(error)?;
+                return Ok((pid, ((created.dwHighDateTime as u64) << 32) | created.dwLowDateTime as u64));
+            }
             let mut info = SHELLEXECUTEINFOW::default();
             info.cbSize = size_of::<SHELLEXECUTEINFOW>() as u32;
             info.fMask = SEE_MASK_IDLIST | SEE_MASK_NOASYNC | SEE_MASK_NOCLOSEPROCESS;
@@ -282,7 +319,8 @@ impl Catalogue {
                 }
                 offset += length;
             }
-            Ok(Activation { pidl: owned })
+            let packaged_id = self.identities.get(id).filter(|app| registered_package(app)).cloned();
+            Ok(Activation { pidl: owned, packaged_id })
         }
     }
 }

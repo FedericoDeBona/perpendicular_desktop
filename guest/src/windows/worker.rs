@@ -440,8 +440,10 @@ impl Worker {
                     return Ok(json!({"accepted":true,"pending":true}));
                 }
                 if self.applications.get(app).is_some_and(|session| {
+                    // The observation grace period is not evidence of a live
+                    // launch. Pending activation is checked above; after a
+                    // verified exit the user must be able to launch again.
                     session.activation.is_some() || session.processes.iter().any(app_process::Process::alive)
-                        || session.gap_until.is_some_and(|until| until > Instant::now())
                 }) {
                     outbox.control(json!({"type":"launch_state","app":app,"state":"waiting"}));
                     return Ok(json!({"accepted":true,"existing":true,"ready":false}));
