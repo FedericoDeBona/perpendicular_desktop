@@ -1,0 +1,287 @@
+--- a/src/perp-sync/live.h
++++ b/src/perp-sync/live.h
+@@ -7,7 +7,7 @@
+ #include <stdint.h>
+ #include "wire1-layout.h"
+ #include "broker.h"
+-enum { LIVE_ATTACH=200,LIVE_GRANT,LIVE_ENABLE,LIVE_REVOKE,LIVE_REVOKED,LIVE_DENY,LIVE_DENIED,LIVE_FAULT,LIVE_CAPTURE,LIVE_POOL_STATS };
++enum { LIVE_ATTACH=200,LIVE_GRANT,LIVE_ENABLE,LIVE_REVOKE,LIVE_REVOKED,LIVE_DENY,LIVE_DENIED,LIVE_FAULT,LIVE_CAPTURE,LIVE_POOL_STATS,LIVE_RETIRE,LIVE_RETIRED };
+ #define LIVE_MAX_CANDIDATES 4u
+ #define LIVE_MAX_PENDING 8u
+ /* Producer-owned allocation statistics, sampled after actual ACK processing. */
+--- a/src/perp-sync/proxy-broker.c
++++ b/src/perp-sync/proxy-broker.c
+@@ -31,7 +31,7 @@
+ } LiveWorker;
+ typedef struct LiveResource {
+     uint32_t id,context,last_generation,passive_contexts;uint64_t worker_epoch,epoch,blob,object,bytes;
+-    bool tainted,granted,deny_acked;
++    bool tainted,granted,deny_acked,destroyed,retiring;
+ } LiveResource;
+ typedef struct LiveFrame {
+     PerpBrokerHeader header;PerpSnapshotPacket packet;int fds[2];bool used,leased;uint64_t received;
+@@ -42,6 +42,9 @@
+ static PerpLivePoolStats pool;
+ static uint64_t abandoned,context_retirements;
+ static uint64_t session,worker_epoch,resource_epoch;
++static uint64_t resource_registrations,resource_retirements,resource_granted_retirements;
++static unsigned resource_peak;
++static void collect_resources(void);
+ static uint32_t selected,active;
+ static uint64_t received,completed,cancelled,rejected,imports_denied,peak_bytes,max_pending;
+ static bool permanently_failed,refresh_requested;
+@@ -134,7 +137,20 @@
+ void perp_live_resource_created(uint32_t id,uint32_t context,uint64_t blob,uint64_t bytes)
+ {
+     LiveWorker *w=worker(context);if(!w || !blob)return;
+-    LiveResource *r=NULL;for(unsigned i=0;i<MAX_RESOURCES;i++)if(!resources[i].id) {r=&resources[i];break;}
++    collect_resources();if(w->bad)return;
++    LiveResource *r=NULL;
++    uint64_t deadline=now()+100000000ull;
++    do {
++        for(unsigned i=0;i<MAX_RESOURCES;i++)if(!resources[i].id) {r=&resources[i];break;}
++        LiveResource *old=resource(id);
++        if(r && !old)break;
++        bool retiring=false;for(unsigned i=0;i<MAX_RESOURCES;i++)retiring|=resources[i].destroyed;
++        if(!retiring || w->bad || now()>=deadline)break;
++        // Only capacity pressure waits, bounded to 100ms. Ordinary registration
++        // stays asynchronous; consumer leases are never forcibly released.
++        collect_resources();struct pollfd wait={-1,0,0};poll(&wait,0,1);
++    }while(true);
++    if(w->bad)return;
+     const char *reason=!r?"registry full":resource(id)?"duplicate resource ID":!id?"zero resource ID":!bytes?"empty resource":bytes>LIVE_MAX_BYTES?"oversized resource":NULL;
+     if(reason || ++resource_epoch==0) {
+         unsigned live=0,tainted=0;for(unsigned i=0;i<MAX_RESOURCES;i++)if(resources[i].id) {live++;tainted+=resources[i].tainted;}
+@@ -142,14 +158,17 @@
+         fail_worker(w,"resource identity/bound");return;
+     }
+     *r=(LiveResource){.id=id,.context=context,.worker_epoch=w->epoch,.epoch=resource_epoch,.blob=blob,.bytes=bytes};
++    resource_registrations++;unsigned live=0;for(unsigned i=0;i<MAX_RESOURCES;i++)live+=resources[i].id!=0;
++    if(live>resource_peak)resource_peak=live;
+ }
+ void perp_live_resource_destroy(uint32_t id)
+ {
+     LiveResource *r=resource(id);if(!r)return;
+-    r->tainted=true;if(selected==id)selected=0;
++    r->tainted=r->destroyed=true;if(selected==id)selected=0;
+     for(unsigned i=0;i<LIVE_MAX_PENDING;i++)if(frames[i].used && frames[i].header.resource_id==id && !frames[i].leased && ready(&frames[i]))retire(&frames[i],false);
+-    /* Keep the epoch tombstone until the creating context stops: reuse of a
+-     * resource ID in this first live prototype fails closed, never aliases. */
++    /* The ordinary destroy dispatch follows on this same proxy thread.
++     * RETIRE is sent later, ordered after that dispatch and preceding grants.
++     * Keep identity and leases until the producer confirms full retirement. */
+ }
+ static bool accept_message(LiveWorker *w,const PerpBrokerHeader *h,const void *body)
+ {
+@@ -181,6 +200,20 @@
+         *claim=(LiveExport){.blob=h->blob_id,.resource=h->resource_id};
+         for(unsigned i=0;i<LIVE_MAX_SOURCES;i++)if(w->exports[i].blob==h->blob_id)w->exports[i].resource=h->resource_id;
+         return true;
++    }
++    if(h->kind==LIVE_RETIRED && h->bytes==sizeof(*h) && !h->fd_count) {
++        LiveResource *r=resource(h->resource_id);
++        if(!r || !r->destroyed || !r->retiring || r->context!=w->id || r->worker_epoch!=w->epoch ||
++           r->epoch!=h->resource_epoch || r->blob!=h->blob_id)return false;
++        for(unsigned i=0;i<LIVE_MAX_PENDING;i++)if(frames[i].used && frames[i].header.resource_id==r->id &&
++            frames[i].header.resource_epoch==r->epoch && frames[i].header.worker_epoch==r->worker_epoch)return false;
++        for(unsigned i=0;i<LIVE_MAX_SOURCES;i++) {
++            if(w->claims[i].blob==r->blob)memset(&w->claims[i],0,sizeof(w->claims[i]));
++            if(w->exports[i].blob==r->blob)memset(&w->exports[i],0,sizeof(w->exports[i]));
++        }
++        if(w->capture_resource==r->id)w->capture_resource=0;
++        resource_granted_retirements+=r->granted;
++        memset(r,0,sizeof(*r));resource_retirements++;return true;
+     }
+     if(h->kind==PERP_ACKED && h->bytes==sizeof(*h) && !h->fd_count)return true;
+     if(h->kind==LIVE_POOL_STATS && h->bytes==sizeof(*h)+sizeof(pool) && !h->fd_count) {
+@@ -255,6 +288,16 @@
+         }
+     }
+ }
++static void collect_resources(void)
++{
++    for(unsigned i=0;i<MAX_CONTEXTS;i++)if(workers[i].id && !workers[i].bad)receive_messages(&workers[i]);
++    for(unsigned i=0;i<MAX_RESOURCES;i++) {
++        LiveResource *r=&resources[i];if(!r->destroyed || r->retiring)continue;
++        LiveWorker *w=worker(r->context);if(!w || w->bad || w->epoch!=r->worker_epoch)continue;
++        PerpBrokerHeader retire={.kind=LIVE_RETIRE,.resource_id=r->id,.resource_epoch=r->epoch,.blob_id=r->blob};
++        if(send_control(w,&retire,NULL,0))r->retiring=true;else fail_worker(w,"resource retirement channel");
++    }
++}
+ bool perp_live_before_import(uint32_t context,uint32_t id)
+ {
+     LiveResource *r=resource(id);if(!r)return true;
+@@ -272,6 +315,18 @@
+     r->tainted=true;
+     if(!r->granted)return true;
+     LiveWorker *w=worker(r->context);if(!w || w->bad)return false;
++    if(r->retiring) {
++        // RETIRE is already ordered on this producer channel. A subsequent
++        // DENY could reach a claim it has just cleared. Wait for that exact
++        // retirement instead: it proves all source copies and leases ended.
++        uint64_t epoch=r->epoch,worker_epoch=r->worker_epoch,deadline=now()+1100000000ull;
++        while((r=resource(id)) && r->epoch==epoch && !w->bad && w->epoch==worker_epoch && now()<deadline) {
++            receive_messages(w);
++            struct pollfd p={w->fd,POLLIN,0};poll(&p,1,1);
++        }
++        if(!resource(id) && !w->bad && w->epoch==worker_epoch)return true;
++        imports_denied++;return false;
++    }
+     PerpBrokerHeader deny={.kind=LIVE_DENY,.resource_id=r->id,.resource_epoch=r->epoch,.blob_id=r->blob,.object_id=r->object};
+     if(!send_control(w,&deny,NULL,0))return false;
+     uint64_t deadline=now()+1100000000ull;
+@@ -311,7 +366,7 @@
+ void perp_live_scanout_pump(void)
+ {
+     if(!enabled() || permanently_failed)return;
+-    for(unsigned i=0;i<MAX_CONTEXTS;i++)if(workers[i].id && !workers[i].bad)receive_messages(&workers[i]);
++    collect_resources();
+     LiveResource *target=resource(selected);LiveWorker *desired=target && !target->tainted?worker(target->context):NULL;
+     LiveWorker *current=worker(active);
+     for(unsigned i=0;i<LIVE_MAX_PENDING;i++)if(frames[i].used && !frames[i].leased && !ready(&frames[i]) && now()-frames[i].received>1000000000ull) {
+@@ -359,13 +414,16 @@
+ {
+     if(!enabled() || permanently_failed)return false;
+     if(active)return true;
++    for(unsigned i=0;i<MAX_RESOURCES;i++)if(resources[i].destroyed)return true;
+     for(unsigned i=0;i<LIVE_MAX_PENDING;i++)if(frames[i].used)return true;
+     return false;
+ }
+ bool perp_live_scanout_take(uint32_t id,PerpLiveLease *lease)
+ {
+     LiveResource *r=resource(id);if(!r || r->tainted || id!=selected || active!=r->context || permanently_failed)return false;
+-    for(unsigned i=0;i<LIVE_MAX_PENDING;i++)if(frames[i].used && !frames[i].leased && frames[i].header.resource_id==id && ready(&frames[i])) {
++    for(unsigned i=0;i<LIVE_MAX_PENDING;i++)if(frames[i].used && !frames[i].leased && frames[i].header.resource_id==id &&
++        frames[i].header.context_id==r->context && frames[i].header.worker_epoch==r->worker_epoch &&
++        frames[i].header.resource_epoch==r->epoch && frames[i].header.blob_id==r->blob && ready(&frames[i])) {
+         LiveFrame *f=&frames[i];int fd=dup(f->fds[0]);if(fd<0)return false;
+         LiveWorker *w=worker(r->context);if(!w || f->header.status<=w->retired_batch) {close(fd);continue;}
+         *lease=(PerpLiveLease){.version=3,.resource_id=id,.context_id=r->context,.generation=f->header.snapshot_generation,
+@@ -420,5 +478,10 @@
+         (unsigned long long)pool.abandon_requests,(unsigned long long)pool.abandoned,(unsigned long long)pool.peak_bytes,(unsigned long long)pool.peak_held,(unsigned long long)pool.retirements);
+     free(base);char *full=NULL;
+     asprintf(&full,"%.*s,\"context_retirements\":%llu}",(int)strlen(result)-1,result,(unsigned long long)context_retirements);
+-    free(result);return full;
+-}
++    free(result);unsigned live=0,destroyed=0;
++    for(unsigned i=0;i<MAX_RESOURCES;i++) {live+=resources[i].id!=0;destroyed+=resources[i].destroyed;}
++    char *stats=NULL;
++    asprintf(&stats,"%.*s,\"resource_registrations\":%llu,\"resource_retirements\":%llu,\"resource_live\":%u,\"resource_destroyed\":%u,\"resource_peak\":%u,\"resource_granted_retirements\":%llu}",
++        (int)strlen(full)-1,full,(unsigned long long)resource_registrations,(unsigned long long)resource_retirements,live,destroyed,resource_peak,(unsigned long long)resource_granted_retirements);
++    free(full);return stats;
++}
+--- a/src/perp-sync/worker-prefix.inc
++++ b/src/perp-sync/worker-prefix.inc
+@@ -21,7 +21,8 @@
+ typedef struct LiveClaim {
+     uint32_t resource;
+     uint64_t blob,epoch,object;
+-    bool granted,denied,import_safe,import_reported;
++    bool granted,denied,import_safe,import_reported,destroyed;
++    uint64_t retire_epoch;
+ } LiveClaim;
+ static LiveClaim live_claims[LIVE_MAX_SOURCES];
+ /* Canonical COM references prevent pointer reuse from laundering an import. */
+--- a/src/perp-sync/worker-suffix.inc
++++ b/src/perp-sync/worker-suffix.inc
+@@ -2,6 +2,24 @@
+ static LiveClaim *live_claim_blob(uint64_t blob)
+ {
+     for(unsigned i=0;i<LIVE_MAX_SOURCES;i++)if(live_claims[i].blob==blob && blob)return &live_claims[i];return NULL;
++}
++/* A destroyed source can still own immutable snapshots held by the Mac.
++ * Clear its claim only after exact ACKs have disposed every generation. */
++static bool live_retire_claims_locked(void)
++{
++    for(unsigned i=0;i<LIVE_MAX_SOURCES;i++) {
++        LiveClaim *claim=&live_claims[i];
++        if(!claim->destroyed || !claim->retire_epoch)continue;
++        bool pending=false;
++        for(unsigned j=0;j<MAX_EXPORTS;j++)pending|=entries[j].ctx==live_context && entries[j].blob_id==claim->blob;
++        for(unsigned j=0;j<GENERATION_SLOTS;j++)pending|=generations[j].ctx==live_context && generations[j].blob_id==claim->blob;
++        if(pending)continue;
++        PerpBrokerHeader retired={.kind=LIVE_RETIRED,.resource_id=claim->resource,
++            .resource_epoch=claim->retire_epoch,.blob_id=claim->blob};
++        if(!live_emit(&retired,NULL,0,NULL,0)) {live_fault_locked();return false;}
++        memset(claim,0,sizeof(*claim));
++    }
++    return true;
+ }
+ static bool live_emit(PerpBrokerHeader *h,const void *body,size_t bytes,const int *fds,unsigned count)
+ {
+@@ -106,7 +124,12 @@
+     if(!live_context || ctx!=live_context->ctx_id)return;
+     lock();uint64_t blob=0;
+     for(unsigned i=0;i<LIVE_MAX_SOURCES;i++)if(live_claims[i].resource==resource) {
+-        blob=live_claims[i].blob;live_claims[i].denied=true;live_claims[i].granted=false;
++        LiveClaim *claim=&live_claims[i];
++        blob=claim->blob;claim->denied=true;claim->granted=false;claim->destroyed=true;
++        // Keep the exported object identity for a grant already in flight,
++        // even if forgetting the source disposes its nonbusy Export below.
++        for(unsigned j=0;j<MAX_EXPORTS;j++)if(entries[j].ctx==live_context && entries[j].blob_id==blob)
++            claim->object=entries[j].object_id;
+     }
+     unlock();if(blob)perp_snapshot_forget_export(live_context,blob);
+ }
+@@ -116,7 +139,7 @@
+     PerpBrokerHeader h={.kind=PERP_EXPORT,.blob_id=blob,.object_id=object};
+     if(valid)valid=live_emit(&h,NULL,0,NULL,0);if(!valid)live_fault_locked();unlock();return valid;
+ }
+-bool perp_live_worker_command(uint32_t ctx,const void *bytes,size_t count,const int *fds,unsigned fd_count)
++static bool live_worker_command_impl(uint32_t ctx,const void *bytes,size_t count,const int *fds,unsigned fd_count)
+ {
+     if(count!=sizeof(PerpBrokerHeader) || !live_context || ctx!=live_context->ctx_id)return false;
+     const PerpBrokerHeader *h=bytes;
+@@ -139,8 +162,14 @@
+     if(h->kind==LIVE_GRANT) {
+         lock();LiveClaim *claim=live_claim_blob(h->blob_id);Export *entry=NULL;
+         for(unsigned i=0;i<MAX_EXPORTS;i++)if(entries[i].ctx==live_context && entries[i].blob_id==h->blob_id)entry=&entries[i];
+-        bool scope=!live_faulted && claim && claim->resource==h->resource_id && h->resource_epoch &&
+-            entry && entry->object_id==h->object_id;
++        bool identity=!live_faulted && claim && claim->resource==h->resource_id && h->resource_epoch;
++        // Destruction may have disposed the Export before this queued grant
++        // arrives. Consume only its retained identity, authorizing no GPU read.
++        if(identity && claim->destroyed && claim->object && claim->object==h->object_id &&
++           (!claim->epoch || claim->epoch==h->resource_epoch)) {
++            claim->epoch=h->resource_epoch;unlock();return true;
++        }
++        bool scope=identity && entry && entry->object_id==h->object_id;
+         /* A grant may already be in flight when the ring opts out. Consuming
+          * it without granting a read keeps that race closed without killing
+          * unrelated outputs. The proxy will process the ordered taint notice. */
+@@ -185,7 +214,15 @@
+         PerpLivePoolStats stats={generation_allocations,generation_reuses,generation_abandon_requests,
+             generation_abandoned,generation_peak_bytes,generation_peak_held,acked};
+         PerpBrokerHeader pool={.kind=LIVE_POOL_STATS};
+-        if(good)good=live_emit(&pool,&stats,sizeof(stats),NULL,0);unlock();return good;
++        if(good)good=live_emit(&pool,&stats,sizeof(stats),NULL,0);
++        if(good)good=live_retire_claims_locked();unlock();return good;
++    }
++    if(h->kind==LIVE_RETIRE) {
++        lock();LiveClaim *claim=live_claim_blob(h->blob_id);
++        bool good=claim && claim->destroyed && claim->resource==h->resource_id && h->resource_epoch &&
++            (!claim->epoch || claim->epoch==h->resource_epoch) && !claim->retire_epoch;
++        if(good) {claim->retire_epoch=h->resource_epoch;good=live_retire_claims_locked();}
++        unlock();return good;
+     }
+     if(h->kind==LIVE_DENY) {
+         lock();LiveClaim *claim=live_claim_blob(h->blob_id);bool good=claim && claim->resource==h->resource_id && claim->epoch==h->resource_epoch;
+@@ -225,3 +262,18 @@
+     }
+     return false;
+ }
++
++/* One qualified diagnostic on dispatch rejection; no guest payload is logged. */
++bool perp_live_worker_command(uint32_t ctx,const void *bytes,size_t count,const int *fds,unsigned fd_count)
++{
++    bool good=live_worker_command_impl(ctx,bytes,count,fds,fd_count);
++    if(!good && count>=sizeof(PerpBrokerHeader)) {
++        const PerpBrokerHeader *h=bytes;lock();LiveClaim *claim=live_claim_blob(h->blob_id);
++        fprintf(stderr,"perp-live-worker: control rejected ctx=%u kind=%u resource=%u epoch=%llu blob=%llu claim=%u destroyed=%u claim_epoch=%llu retire_epoch=%llu object=%llu header_object=%llu\n",
++            ctx,h->kind,h->resource_id,(unsigned long long)h->resource_epoch,(unsigned long long)h->blob_id,
++            claim!=NULL,claim?claim->destroyed:0,(unsigned long long)(claim?claim->epoch:0),
++            (unsigned long long)(claim?claim->retire_epoch:0),(unsigned long long)(claim?claim->object:0),(unsigned long long)h->object_id);
++        unlock();
++    }
++    return good;
++}

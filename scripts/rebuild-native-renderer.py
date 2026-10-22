@@ -78,7 +78,9 @@ def main():
     names = ['src/proxy/proxy_context.c', 'src/proxy/proxy_client.c',
              'server/render_client.c', 'server/render_worker.c', 'server/render_worker.h',
              *['src/perp-sync/' + n for n in ('proxy-broker.c', 'live.h', 'broker.h',
-                'wire.h', 'wire1-layout.h', 'snapshot-storage.h', 'channel.h')]]
+                'wire.h', 'wire1-layout.h', 'snapshot-storage.h', 'channel.h',
+                'snapshot.c', 'snapshot.h', 'worker-prefix.inc', 'worker-suffix.inc',
+                'worker-generations.inc')]]
     diagnostic_source = 'src/neptune/npt_overrides_shared_handle.c'
     if args.shared_handle_diagnostics:
         if digest(source / diagnostic_source) != SHARED_HANDLE_SHA:
@@ -93,8 +95,11 @@ def main():
     run(['patch', '-p1', '--forward', '--batch', '-i', patch], copied)
     admission_patch = REPO / 'graphics/renderer/context-admission-channel.patch'
     run(['patch', '-p1', '--forward', '--batch', '-i', admission_patch], copied)
+    resource_patch = REPO / 'graphics/renderer/resource-retirement.patch'
+    run(['patch', '-p1', '--forward', '--batch', '-i', resource_patch], copied)
     changed = ['src/perp-sync/proxy-broker.c', 'src/proxy/proxy_context.c',
-               'src/proxy/proxy_client.c', 'server/render_client.c', 'server/render_worker.c']
+               'src/proxy/proxy_client.c', 'server/render_client.c', 'server/render_worker.c',
+               'src/perp-sync/snapshot.c']
     diagnostic_patch = REPO / 'graphics/renderer/shared-handle-diagnostics.patch'
     if args.shared_handle_diagnostics:
         run(['patch', '-p1', '--forward', '--batch', '-i', diagnostic_patch], copied)
@@ -120,6 +125,10 @@ def main():
     run([*admission_command, '-UNDEBUG', REPO / 'graphics/renderer/check-admission.c',
          '-o', check], reference / 'build')
     run([check])
+    resource_check = work / 'check-resource-retirement'
+    run([*admission_command, '-UNDEBUG', REPO / 'graphics/renderer/check-resource-retirement.c',
+         '-o', resource_check], reference / 'build')
+    run([resource_check])
     patched_archive = work / 'libvirgl.a'
     shutil.copy2(archive, patched_archive)
     run(['ar', '-r', patched_archive, *[v for k, v in objects.items() if k.startswith('src/')]])
@@ -160,16 +169,17 @@ def main():
         run(['codesign', '--force', '--sign', '-', '--timestamp=none', target])
         run(['codesign', '--verify', '--strict', target])
         manifest['files'][name] = digest(target)
-    manifest['renderer_control_version'] = 2
+    manifest['renderer_control_version'] = 3
     manifest['context_retirement'] = 1
     manifest['context_admission'] = 1
+    manifest['resource_retirement'] = 1
     # Both binaries are rebuilt from the pinned base, not copied from the input.
     # Do not inherit a diagnostic capability that this build did not compile.
     manifest.pop('shared_handle_diagnostics', None)
     receipt = {'base_library_sha256': LIBRARY_SHA, 'base_server_sha256': SERVER_SHA,
                'base_archive_sha256': ARCHIVE_SHA, 'source_inputs': inputs,
                'patch_sha256': digest(patch), 'guest_wire_version': 1,
-               'host_transport_version': 3, 'renderer_control_version': 2,
+               'host_transport_version': 3, 'renderer_control_version': 3,
                'runtime_verified': False}
     notices = result / 'Notices/Perpendicular'
     notices.mkdir(exist_ok=True)
@@ -180,6 +190,12 @@ def main():
         'base_library_sha256': LIBRARY_SHA, 'base_server_sha256': SERVER_SHA,
         'patch_sha256': digest(admission_patch), 'context_limit': 32,
         'admission_before_worker_creation': True, 'runtime_verified': False,
+    }, indent=2) + '\n')
+    shutil.copy2(resource_patch, notices / resource_patch.name)
+    (notices / 'resource-retirement.json').write_text(json.dumps({
+        'base_library_sha256': LIBRARY_SHA, 'base_server_sha256': SERVER_SHA,
+        'patch_sha256': digest(resource_patch), 'resource_limit': 256,
+        'exact_worker_confirmation_and_snapshot_ack': True, 'runtime_verified': False,
     }, indent=2) + '\n')
     if args.shared_handle_diagnostics:
         manifest['shared_handle_diagnostics'] = 1
