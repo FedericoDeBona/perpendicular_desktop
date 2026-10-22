@@ -10,6 +10,7 @@ use windows::Win32::{
         RemoteDesktop::ProcessIdToSessionId,
         Threading::{
             GetProcessTimes, OpenProcess, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SYNCHRONIZE,
+            PROCESS_TERMINATE, PROCESS_ACCESS_RIGHTS, IsProcessCritical, TerminateProcess,
             QueryFullProcessImageNameW, WaitForSingleObject,
         },
     },
@@ -24,9 +25,13 @@ pub struct Identity {
 pub struct Process {
     pub identity: Identity,
     handle: Handle,
+    image: String,
 }
 impl Process {
     pub fn open(pid: u32, sid: &str, session: u32) -> Option<Self> {
+        Self::open_with_access(pid, sid, session, PROCESS_ACCESS_RIGHTS(0))
+    }
+    fn open_with_access(pid: u32, sid: &str, session: u32, access: PROCESS_ACCESS_RIGHTS) -> Option<Self> {
         unsafe {
             let mut actual_session = 0;
             ProcessIdToSessionId(pid, &mut actual_session).ok()?;
@@ -35,7 +40,7 @@ impl Process {
             }
             let handle = Handle(
                 OpenProcess(
-                    PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_SYNCHRONIZE,
+                    PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_SYNCHRONIZE | access,
                     false,
                     pid,
                 )
@@ -47,10 +52,9 @@ impl Process {
             // A shared frame host must never authorize all of its app windows.
             let mut image = vec![0u16; 32768];
             let mut length = image.len() as u32;
-            if QueryFullProcessImageNameW(handle.0, PROCESS_NAME_WIN32, windows::core::PWSTR(image.as_mut_ptr()), &mut length).is_ok()
-                && String::from_utf16_lossy(&image[..length as usize]).rsplit('\\').next()
-                    .is_some_and(|name| name.eq_ignore_ascii_case("ApplicationFrameHost.exe"))
-            {
+            QueryFullProcessImageNameW(handle.0, PROCESS_NAME_WIN32, windows::core::PWSTR(image.as_mut_ptr()), &mut length).ok()?;
+            let image = String::from_utf16_lossy(&image[..length as usize]);
+            if image.rsplit('\\').next().is_some_and(|name| name.eq_ignore_ascii_case("ApplicationFrameHost.exe")) {
                 return None;
             }
             let (mut creation, mut exit, mut kernel, mut user) = (
@@ -67,9 +71,17 @@ impl Process {
                         | u64::from(creation.dwLowDateTime),
                 },
                 handle,
+                image,
             };
             process.alive().then_some(process)
         }
+    }
+    pub fn name(&self) -> &str { self.image.rsplit('\\').next().unwrap_or(&self.image) }
+    pub fn can_terminate(&self) -> bool {
+        if self.identity.pid == std::process::id() || ["perpendicular-guest.exe", "explorer.exe", "sihost.exe", "ShellExperienceHost.exe", "StartMenuExperienceHost.exe"].iter()
+            .any(|name| self.name().eq_ignore_ascii_case(name)) { return false; }
+        let mut critical = windows::core::BOOL::from(true);
+        unsafe { IsProcessCritical(self.handle.0, &mut critical).is_ok() && !critical.as_bool() }
     }
     pub fn alive(&self) -> bool {
         unsafe { WaitForSingleObject(self.handle.0, 0) == WAIT_TIMEOUT }
@@ -139,4 +151,29 @@ pub fn descendants(
         }
     }
     found
+}
+
+/// Reopen with minimal termination rights and validate that exact handle. Never
+/// authorize from a name, a stale row, or PID alone; do not kill descendants.
+pub fn terminate(pid: u32, creation: u64, sid: &str, session: u32) -> Result<serde_json::Value, String> {
+    let process = Process::open_with_access(pid, sid, session, PROCESS_TERMINATE)
+        .filter(|p| p.identity.creation == creation)
+        .ok_or("Il processo è terminato, è cambiato o non è accessibile nella sessione corrente")?;
+    if !process.can_terminate() { return Err("Questo processo di sistema o del bridge è protetto".into()); }
+    unsafe { TerminateProcess(process.handle.0, 1).map_err(super::error)?; }
+    Ok(serde_json::json!({"pid":pid,"creation":creation.to_string(),"terminationRequested":true}))
+}
+
+pub fn list(sid: &str, session: u32) -> Result<serde_json::Value, String> {
+    let table = snapshot().ok_or("Impossibile leggere i processi Windows")?;
+    let mut rows = Vec::new();
+    for (pid, _) in table {
+        if let Some(process) = Process::open(pid, sid, session) {
+            if rows.len() >= 512 { return Err("Troppi processi nella sessione; elenco non pubblicato".into()); }
+            rows.push(serde_json::json!({"pid":pid,"creation":process.identity.creation.to_string(),
+                "name":process.name(),"canTerminate":process.can_terminate()}));
+        }
+    }
+    rows.sort_by_key(|row| row["name"].as_str().unwrap_or("").to_lowercase());
+    Ok(serde_json::json!({"session":session,"processes":rows}))
 }

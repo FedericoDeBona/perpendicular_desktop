@@ -11,7 +11,7 @@ xcrun swiftc -swift-version 6 -O -parse-as-library -target arm64-apple-macosx14.
     -import-objc-header macos/NativeTransport/ndt.h .build/native-transport.o \
     macos/RuntimeStore.swift macos/NativeGraphics.swift macos/NativeDisplay.swift macos/DesktopConnection.swift macos/DesktopWindow.swift \
     macos/VirtualMachine.swift macos/MachineControl.swift macos/GuestBridge.swift macos/GuestFrameSurface.swift macos/MacLocalControl.swift macos/DisplayTopology.swift macos/SharedDisplay.swift \
-    macos/WindowGeometry.swift macos/WindowRenderer.swift macos/ApplicationContent.swift macos/ApplicationWindow.swift macos/Launcher.swift macos/App.swift \
+    macos/WindowGeometry.swift macos/WindowRenderer.swift macos/ApplicationContent.swift macos/ApplicationWindow.swift macos/Launcher.swift macos/GuestProcesses.swift macos/App.swift \
     -o "$app/Contents/MacOS/Perpendicular"
 cp "$guest" guest/install.ps1 guest/install.cmd "$app/Contents/Resources/Guest/"
 if [[ "${SKIP_RUNTIME:-0}" != 1 ]]; then

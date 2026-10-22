@@ -34,8 +34,11 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--socket", type=Path, default=Path.home() / "Library/Application Support/Perpendicular Restart/Control/control.sock")
     commands = parser.add_subparsers(dest="command", required=True)
-    for name in ("status", "display_info", "driver_info", "graphics_info", "geometry_snapshot"):
+    for name in ("status", "display_info", "driver_info", "graphics_info", "geometry_snapshot", "application_status", "process_list"):
         commands.add_parser(name)
+    terminate = commands.add_parser("process_terminate", help="Terminate one process using its exact identity from process_list.")
+    terminate.add_argument("pid", type=int)
+    terminate.add_argument("creation")
     execute = commands.add_parser("execute", help="Run an executable as the connected Windows user, without elevation.")
     execute.add_argument("--timeout-seconds", type=int, default=15, choices=range(1, 61), metavar="1..60")
     execute.add_argument("executable", help="Absolute Windows executable path.")
@@ -45,6 +48,8 @@ def main():
     if options.command == "execute":
         arguments = options.args[1:] if options.args[:1] == ["--"] else options.args
         request.update(executable=options.executable, args=arguments, timeoutSeconds=options.timeout_seconds)
+    if options.command == "process_terminate":
+        request.update(pid=options.pid, creation=options.creation)
     data = json.dumps(request, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
     if len(data) > REQUEST_LIMIT:
         raise RuntimeError("The local request exceeds 16 KiB.")

@@ -70,6 +70,7 @@ struct Worker {
     display_busy: Arc<AtomicBool>,
     graphics_busy: Arc<AtomicBool>,
     execution_busy: Arc<AtomicBool>,
+    process_busy: Arc<AtomicBool>,
     display_observer: Option<display::Observer>,
 }
 
@@ -144,6 +145,7 @@ pub fn run(path: &Path) -> Result<(), String> {
         display_busy: Arc::new(AtomicBool::new(false)),
         graphics_busy: Arc::new(AtomicBool::new(false)),
         execution_busy: Arc::new(AtomicBool::new(false)),
+        process_busy: Arc::new(AtomicBool::new(false)),
         display_observer: match display::Observer::new() {
             Ok(observer) => Some(observer),
             Err(error) => {
@@ -187,7 +189,7 @@ impl Worker {
         outbox.control(
             json!({"type":"hello","protocol":1,"token":config.token,"epoch":self.epoch,
             "sid":self.sid,"session":self.session,"version":env!("CARGO_PKG_VERSION"),
-            "capabilities":{"capture":"software","windows":4,"transients":12,"windowRoles":true,"input":true,"catalogue":true,"appIcon":true,"frameChannel":true,"displayInfo":true,"driverInfo":true,"graphicsInfo":true,"displayConfigure":true,"sharedGeometry":true,"execute":true,"executeTimeoutSeconds":60,"executeOutputBytes":65536,"displayEvents":self.display_observer.is_some()}}),
+            "capabilities":{"capture":"software","windows":4,"transients":12,"windowRoles":true,"input":true,"catalogue":true,"appIcon":true,"frameChannel":true,"displayInfo":true,"driverInfo":true,"graphicsInfo":true,"displayConfigure":true,"sharedGeometry":true,"processControl":true,"applicationStatus":true,"execute":true,"executeTimeoutSeconds":60,"executeOutputBytes":65536,"displayEvents":self.display_observer.is_some()}}),
         );
         let (sender, receiver) = mpsc::sync_channel(128);
         let state = outbox.clone();
@@ -268,6 +270,30 @@ impl Worker {
                                 Err(message) => json!({"type":"reply","request":request,"ok":false,"message":message}),
                             });
                             busy.store(false, Ordering::Release);
+                        });
+                    }
+                    continue;
+                }
+                if command["operation"] == "process_list" || command["operation"] == "process_terminate" {
+                    if self.process_busy.swap(true, Ordering::AcqRel) {
+                        outbox.control(json!({"type":"reply","request":request,"ok":false,"message":"Process query already running"}));
+                    } else {
+                        let sender = outbox.clone();
+                        let busy = self.process_busy.clone();
+                        let sid = self.sid.clone();
+                        let session = self.session;
+                        std::thread::spawn(move || {
+                            let result = if command["operation"] == "process_list" { app_process::list(&sid, session) }
+                            else { (|| {
+                                let pid = command["pid"].as_u64().and_then(|p| u32::try_from(p).ok()).ok_or("Invalid process ID")?;
+                                let creation = command["creation"].as_str().and_then(|s| s.parse().ok()).ok_or("Missing process creation identity")?;
+                                app_process::terminate(pid, creation, &sid, session)
+                            })() };
+                            busy.store(false, Ordering::Release);
+                            sender.control(match result {
+                                Ok(value) => json!({"type":"reply","request":request,"ok":true,"result":value}),
+                                Err(message) => json!({"type":"reply","request":request,"ok":false,"message":message}),
+                            });
                         });
                     }
                     continue;
@@ -447,6 +473,16 @@ impl Worker {
                 self.save();
                 outbox.control(json!({"type":"launch_state","app":app,"state":"waiting"}));
                 Ok(json!({"accepted":true,"ready":false}))
+            }
+            "application_status" => Ok(self.application_status()),
+            "application_close" => {
+                let app = value["app"].as_str().ok_or("Missing app identity")?;
+                let mut count = 0;
+                for window in self.windows.values().filter(|w| w.app == app && !catalogue::transient(&w.metadata) && w.target.valid()) {
+                    unsafe { PostMessageW(Some(HWND(window.target.hwnd as *mut _)), WM_CLOSE, WPARAM(0), LPARAM(0)).map_err(error)?; }
+                    count += 1;
+                }
+                Ok(json!({"closeRequested":count}))
             }
             "snapshot" => {
                 self.snapshot(outbox);
@@ -928,6 +964,20 @@ impl Worker {
             },
         );
         true
+    }
+    fn application_status(&self) -> Value {
+        let mut apps = Vec::new();
+        for (app, session) in &self.applications {
+            let windows: Vec<Value> = self.windows.values().filter(|w| w.app == *app && !catalogue::transient(&w.metadata)).map(|w| {
+                json!({"id":w.target.id,"captureFrames":w.target.capture_frames.load(Ordering::Acquire),
+                    "capturePhase":w.target.capture_phase_name(),
+                    "captureStopped":w.stop.as_ref().is_none_or(|s| s.load(Ordering::Acquire))})
+            }).collect();
+            let processes: Vec<Value> = session.processes.iter().filter(|p| p.alive()).map(|p|
+                json!({"pid":p.identity.pid,"creation":p.identity.creation.to_string(),"name":p.name()})).collect();
+            apps.push(json!({"app":app,"activationPending":session.activation.is_some(),"processes":processes,"windows":windows}));
+        }
+        json!({"epoch":self.epoch,"applications":apps})
     }
     fn snapshot(&self, outbox: &Outbox) {
         let windows:Vec<Value>=self.windows.values().map(|w|{

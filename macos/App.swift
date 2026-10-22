@@ -20,6 +20,19 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
     @Published private(set) var activeApps:Set<String>=[]
     @Published private(set) var applicationIcons:[String:NSImage]=[:]
     @Published private(set) var loadingIconID:String?
+    @Published private(set) var applicationStates:[String:GuestApplicationState]=[:]
+    @Published private(set) var applicationStatusAvailable=false
+    @Published private(set) var guestProcesses:[GuestProcess]=[]
+    @Published private(set) var processesLoading=false
+    @Published var processNotice:String?
+    @Published var processPanelVisible=false
+    @Published var processFilterApp:String?
+    @Published private(set) var terminatingProcesses:Set<String>=[]
+    private var processRequest=UUID()
+    private var applicationStatusTask:Task<Void,Never>?
+    private var applicationStatusBusy=false
+    private var receivedWindows:Set<String>=[]
+    private var failedWindows:Set<String>=[]
     private var launcherEpoch=UUID()
     private var catalogueRequest=UUID()
     private var visibleIcons:Set<String>=[]
@@ -64,6 +77,10 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
                 guard let self else{return};self.connected=value;self.status=value ? "Windows connected":"Reconnecting to Windows…"
                 self.launcherEpoch=UUID();self.catalogueLoading=false;self.loadingIconID=nil;self.failedIcons=[]
                 self.focusWarnedWindows=[]
+                self.applicationStatusTask?.cancel();self.applicationStatusTask=nil;self.applicationStatusBusy=false
+                self.applicationStates=[:];self.applicationStatusAvailable=false;self.receivedWindows=[];self.failedWindows=[]
+                self.processRequest=UUID();self.processesLoading=false;self.guestProcesses=[];self.terminatingProcesses=[]
+                if !value {self.processNotice="Windows non è collegato. I processi non sono verificabili."}
                 for task in self.openingTasks.values {task.cancel()}
                 self.openingTasks=[:];self.openingApps=[]
                 if !value {
@@ -162,11 +179,11 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
               let command=request["command"] as? String else {
             localResponse(["ok":false,"error":"Expected a JSON command."],reply:reply);return
         }
-        let allowed:Set<String>=["status","execute","display_info","driver_info","graphics_info","geometry_snapshot"]
+        let allowed:Set<String>=["status","execute","display_info","driver_info","graphics_info","geometry_snapshot","application_status","process_list","process_terminate"]
         guard allowed.contains(command) else {
             localResponse(["ok":false,"error":"This local command is not supported."],reply:reply);return
         }
-        let fields:Set<String>=command == "execute" ? ["command","executable","args","timeoutSeconds"]:["command"]
+        let fields:Set<String>=command == "execute" ? ["command","executable","args","timeoutSeconds"]:command == "process_terminate" ? ["command","pid","creation"]:["command"]
         guard Set(request.keys).isSubset(of:fields) else {
             localResponse(["ok":false,"error":"Unexpected command fields."],reply:reply);return
         }
@@ -181,6 +198,22 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
         }
         guard connected,let bridge else {
             localResponse(["ok":false,"error":"Windows is not connected."],reply:reply);return
+        }
+        if command == "application_status" || command == "process_list" || command == "process_terminate" {
+            let capability=command == "application_status" ? "applicationStatus":"processControl"
+            guard guestCapabilities[capability] == true else {
+                localResponse(["ok":false,"error":"Guest update required for process control."],reply:reply);return
+            }
+            var values:[String:Any]=[:]
+            if command == "process_terminate" {
+                guard let pid=request["pid"] as? Int,pid>0,pid<=Int(UInt32.max),
+                    let creation=request["creation"] as? String,UInt64(creation) != nil else {
+                    localResponse(["ok":false,"error":"Expected PID and exact creation identity."],reply:reply);return
+                }
+                values=["pid":pid,"creation":creation]
+            }
+            bridge.command(command,values,timeout:.seconds(6)){[weak self] result in self?.localBridgeResponse(result,reply:reply)}
+            return
         }
         if command == "execute" {
             guard guestCapabilities["execute"] == true else {
@@ -310,6 +343,7 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
         let epoch=launcherEpoch
         bridge.command("launch",["app":app.id]){[weak self] result in
             guard let self,self.launcherEpoch == epoch else{return}
+            self.refreshApplicationStates()
             switch result {
             case .failure(let error):
                 self.finishOpening(app.id);self.status=error.localizedDescription
@@ -334,6 +368,95 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
         openingTasks.removeValue(forKey:id)?.cancel()
         if openingApps.contains(id) {openingApps.remove(id)}
         if appeared,openingNoticeApp == id {launcherNotice=nil;openingNoticeApp=nil}
+    }
+    private func startApplicationStatusUpdates(){
+        guard guestCapabilities["applicationStatus"] == true else{return}
+        applicationStatusTask?.cancel()
+        applicationStatusTask=Task{@MainActor [weak self] in
+            while !Task.isCancelled {
+                self?.refreshApplicationStates()
+                do {try await Task.sleep(for:.seconds(2))}catch{return}
+            }
+        }
+    }
+    func refreshApplicationStates(){
+        guard connected,guestCapabilities["applicationStatus"] == true,!applicationStatusBusy else{return}
+        applicationStatusBusy=true;let epoch=launcherEpoch
+        bridge.command("application_status",timeout:.seconds(4)){[weak self] result in
+            guard let self,self.launcherEpoch == epoch else{return}
+            self.applicationStatusBusy=false
+            guard case .success(let reply)=result,let value=reply["value"] as? [String:Any],
+                value["epoch"] as? String == self.displayEpoch,
+                let rows=value["applications"] as? [[String:Any]],rows.count<=8 else {
+                self.applicationStatusAvailable=false;return
+            }
+            var states:[String:GuestApplicationState]=[:]
+            for row in rows {if let state=GuestApplicationState(row) {states[state.id]=state}}
+            self.applicationStates=states;self.applicationStatusAvailable=true
+            self.activeApps=Set(states.values.filter{$0.running || !$0.windows.isEmpty}.map(\.id))
+        }
+    }
+    func applicationStateLabel(_ id:String)->String {
+        guard connected else{return "Stato non disponibile"}
+        guard guestCapabilities["applicationStatus"] == true else{return activeApps.contains(id) ? "Finestra rilevata":"Apri"}
+        guard applicationStatusAvailable else{return "Verifica stato…"}
+        guard let state=applicationStates[id] else{return openingApps.contains(id) ? "Avvio richiesto…":"Apri"}
+        if state.activationPending {return "Avvio in corso…"}
+        if state.windows.contains(where:{$0.stopped || failedWindows.contains($0.id)}) {return "Cattura interrotta"}
+        if state.windows.contains(where:{receivedWindows.contains($0.id)}) {return "Finestra disponibile"}
+        if !state.windows.isEmpty {return "In attesa dell’immagine"}
+        return state.running ? "In esecuzione · senza finestra":"Processo terminato"
+    }
+    func showProcesses(for app:String?=nil){
+        processFilterApp=app;processPanelVisible=true;refreshProcesses()
+    }
+    func refreshProcesses(){
+        guard connected,!processesLoading,guestCapabilities["processControl"] == true else{return}
+        processesLoading=true;let request=UUID();processRequest=request;let epoch=launcherEpoch
+        bridge.command("process_list",timeout:.seconds(6)){[weak self] result in
+            guard let self,self.launcherEpoch == epoch,self.processRequest == request else{return}
+            self.processesLoading=false
+            switch result {
+            case .success(let reply):
+                guard let value=reply["value"] as? [String:Any],let rows=value["processes"] as? [[String:Any]],rows.count<=512 else {
+                    self.processNotice="Elenco dei processi non valido.";return
+                }
+                self.guestProcesses=rows.compactMap(GuestProcess.init);self.processNotice=nil
+                self.terminatingProcesses.formIntersection(Set(self.guestProcesses.map(\.id)))
+            case .failure(let error):self.processNotice=error.localizedDescription
+            }
+        }
+    }
+    func terminateProcess(_ process:GuestProcess){
+        guard connected,process.canTerminate,!terminatingProcesses.contains(process.id) else{return}
+        let alert=NSAlert();alert.messageText="Termina \(process.name)?"
+        alert.informativeText="I dati non salvati di questo processo andranno persi. Viene terminato soltanto il processo \(process.pid)."
+        alert.addButton(withTitle:"Annulla");alert.addButton(withTitle:"Termina processo")
+        guard let parent=launcher else{return}
+        // The process panel is already a sheet; attach confirmation to it.
+        let owner=parent.sheets.first ?? parent
+        let epoch=launcherEpoch
+        alert.beginSheetModal(for:owner){[weak self] response in
+            guard response == .alertSecondButtonReturn,let self,self.connected,self.launcherEpoch == epoch else{return}
+            self.terminatingProcesses.insert(process.id)
+            self.bridge.command("process_terminate",["pid":process.pid,"creation":process.creation],timeout:.seconds(6)){[weak self] result in
+                guard let self,self.launcherEpoch == epoch else{return}
+                self.terminatingProcesses.remove(process.id)
+                switch result {
+                case .failure(let error):self.processNotice=error.localizedDescription
+                case .success:self.processNotice="Arresto richiesto. Attendo la conferma dall’elenco Windows."
+                }
+                self.refreshApplicationStates();self.refreshProcesses()
+            }
+        }
+    }
+    func closeApplication(_ app:WindowsApplication){
+        guard connected else{return};let epoch=launcherEpoch
+        bridge.command("application_close",["app":app.id],timeout:.seconds(4)){[weak self] result in
+            guard let self,self.launcherEpoch == epoch else{return}
+            if case .failure(let error)=result {self.launcherNotice=error.localizedDescription}
+            self.refreshApplicationStates()
+        }
     }
     private func inputFocusFailed(){
         let message="Windows non ha attivato l’app. Il clic o il testo non è stato inviato."
@@ -490,7 +613,8 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
             displayEpoch=value["epoch"] as? String
             invalidateDisplay("Checking Windows display…")
             let capabilities=value["capabilities"] as? [String:Any] ?? [:]
-            guestCapabilities=Dictionary(uniqueKeysWithValues:["execute","displayInfo","driverInfo","graphicsInfo","sharedGeometry","appIcon"].map{($0,capabilities[$0] as? Bool == true)})
+            guestCapabilities=Dictionary(uniqueKeysWithValues:["execute","displayInfo","driverInfo","graphicsInfo","sharedGeometry","appIcon","applicationStatus","processControl"].map{($0,capabilities[$0] as? Bool == true)})
+            startApplicationStatusUpdates()
             pumpApplicationIcons()
             displayReadable=capabilities["displayInfo"] as? Bool == true
             displayConfigurable=capabilities["displayConfigure"] as? Bool == true
@@ -546,7 +670,8 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
                 guard item["role"] as? String != "popup",item["role"] as? String != "tooltip" else{return nil}
                 return item["app"] as? String
             })
-            if nextActiveApps != activeApps {activeApps=nextActiveApps}
+            if guestCapabilities["applicationStatus"] != true,nextActiveApps != activeApps {activeApps=nextActiveApps}
+            receivedWindows.formIntersection(current);failedWindows.formIntersection(current)
             for id in Array(windows.keys) where !current.contains(id){windows.removeValue(forKey:id)?.retire();earlyFrames.removeValue(forKey:id)}
             for item in items{
                 guard let id=item["id"] as? String,let title=item["title"] as? String else{continue}
@@ -568,6 +693,7 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
             if !items.isEmpty,status != "Windows connected" {status="Windows connected"}
         case "frame":
             guard let id=value["window"] as? String else{return}
+            receivedWindows.insert(id);failedWindows.remove(id)
             if let window=windows[id]{window.present(packet);if let app=windowApps[id]{finishOpening(app,appeared:true)}}else if earlyFrames.count<16{earlyFrames[id]=packet}
         case "activate":
             if machine?.desktopIsKey != true,let id=value["window"] as? String {windows[id]?.window.makeKeyAndOrderFront(nil)}
@@ -578,6 +704,8 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
             if value["ok"] as? Bool == false,value["operation"] as? String == "input",
                value["message"] as? String == "Windows did not grant this window keyboard focus" {inputFocusFailed()}
         case "window_error","launch_error":
+            if let id=value["window"] as? String {failedWindows.insert(id)}
+            refreshApplicationStates()
             status=value["message"] as? String ?? "This application is unavailable. Use Show Windows."
             launcherNotice=value["message"] as? String ?? "Questa app non è disponibile. Puoi continuare dal desktop Windows."
             if let app=value["app"] as? String {finishOpening(app);if value["type"] as? String == "launch_error" {openingNoticeApp=app}}

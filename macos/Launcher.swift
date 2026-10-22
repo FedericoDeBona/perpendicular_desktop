@@ -27,6 +27,8 @@ struct Launcher:View {
                         Text("Si aprono in finestre sul Mac.").font(.system(size:13)).foregroundStyle(.secondary)
                     }
                     Spacer(minLength:0)
+                    Button{model.showProcesses()}label:{Label("Processi",systemImage:"waveform.path.ecg")}
+                        .disabled(!model.connected)
                     Button(action:model.showWindows){Label("Apri Windows",systemImage:"desktopcomputer")}
                         .controlSize(.large).disabled(!model.desktopAvailable)
                         .help("Apri il desktop Windows, anche durante la riconnessione")
@@ -98,6 +100,7 @@ struct Launcher:View {
         .background(Color(nsColor:.windowBackgroundColor))
         .frame(minWidth:600,minHeight:440)
         .background(Button(""){searchFocused=true}.keyboardShortcut("f",modifiers:.command).hidden())
+        .sheet(isPresented:$model.processPanelVisible){GuestProcessesPanel(model:model)}
         .onAppear{searchFocused=true}
         .onReceive(NotificationCenter.default.publisher(for:.launcherFocusSearch)){_ in searchFocused=true}
         .onExitCommand{if !search.isEmpty {search="";searchFocused=true}}
@@ -105,8 +108,12 @@ struct Launcher:View {
 
     private func application(_ app:WindowsApplication,compact:Bool)->some View {
         LauncherApplication(app:app,icon:model.applicationIcons[app.id],compact:compact,
-            opening:model.openingApps.contains(app.id),active:model.activeApps.contains(app.id),
+            opening:model.openingApps.contains(app.id),active:model.activeApps.contains(app.id),stateLabel:model.applicationStateLabel(app.id),
             loadingIcon:model.loadingIconID == app.id,connected:model.connected){model.launch(app)}
+            .contextMenu{
+                Button("Mostra processi"){model.showProcesses(for:app.id)}
+                Button("Chiudi finestre"){model.closeApplication(app)}.disabled(!model.activeApps.contains(app.id))
+            }
             .onAppear{model.applicationBecameVisible(app)}
             .onDisappear{model.applicationBecameHidden(app)}
     }
@@ -143,6 +150,7 @@ private struct LauncherApplication:View {
     let compact:Bool
     let opening:Bool
     let active:Bool
+    let stateLabel:String
     let loadingIcon:Bool
     let connected:Bool
     let action:()->Void
@@ -177,7 +185,7 @@ private struct LauncherApplication:View {
         .onHover{hovered=$0}
         .help(opening ? "Apertura di \(app.name)…":active ? "Mostra \(app.name)":"Apri \(app.name)")
         .accessibilityLabel(app.name)
-        .accessibilityValue(opening ? "Apertura in corso":active ? "Già aperta":"")
+        .accessibilityValue(stateLabel)
     }
 
     @ViewBuilder private var applicationIcon:some View {
@@ -194,7 +202,7 @@ private struct LauncherApplication:View {
         HStack(spacing:5){
             if opening {ProgressView().controlSize(.mini)}
             else if active {Circle().fill(Color.green).frame(width:5,height:5)}
-            Text(opening ? "Apertura…":active ? "Già aperta":"Apri")
+            Text(stateLabel).lineLimit(2)
         }.font(.system(size:11)).foregroundStyle(hovered && connected ? Color.accentColor:Color.secondary)
     }
 }

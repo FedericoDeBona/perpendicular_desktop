@@ -188,3 +188,14 @@ Creality resta rinviato. Scorciatoie Mac rimangono lavoro futuro. Non riprendere
 L’ultima richiesta sostituisce la base Windows precedente: usare la nuova VM UTM Windows 11 IoT LTSC e installarvi guest tool e driver necessari. L’utente autorizza esplicitamente la rimozione delle vecchie VM per recuperare spazio; il precedente vincolo di conservare quelle originali non si applica a questa pulizia. Conservare invece la nuova sorgente UTM e lavorare su una copia APFS indipendente, con TPM e contenuto UEFI preservati.
 
 La macchina corrente di Perpendicular deriva ora da questa nuova installazione. Il bootstrap aggiunge soltanto il bridge Rust attuale e i pacchetti ARM64 firmati di rete e grafica, senza vecchi agenti, sharing, impostazioni RDP o workaround grafici ereditati. Questo cambio di sistema non dimostra risolti i problemi generali di WinUI, cattura o renderer. Dopo una breve verifica di avvio, collegamento e singola app riprendere gli incrementi piccoli di stabilità/fluidità sopra indicati, partendo dalle nuove evidenze.
+
+
+## Obiettivo attivo — utilizzabilità IoT e controllo dei processi, 22 ottobre 2026
+
+L’utente segnala che il prodotto è ancora inutilizzabile: aperture inaffidabili anche del terminale, lag e stato dei processi errato nel launcher. Continuare sulla sola copia più recente Windows 11 IoT, usando i guest tool per i comandi e REA quando una domanda sui binari/runtime lo richiede. Il precedente successo puntuale di Notepad non supera questa segnalazione.
+
+Risultati osservabili da completare in piccoli incrementi:
+
+1. Distinguere processo vivo, avvio pendente, finestra disponibile e cattura interrotta nel launcher Swift. Mostrare i processi dell’utente Windows e consentire chiusura normale delle finestre o terminazione esplicita del singolo processo attraverso il guest agent, verificandone PID, creazione, utente e sessione. La disconnessione rende lo stato sconosciuto.
+2. Riprodurre apertura/input del terminale e di una normale app, separando mancata attivazione, rendering guest e cattura. Intervenire su driver/acceleratore e trasporto soltanto sulla causa osservata; preservare la sorgente IoT, mantenere un ritorno praticabile prima di cambiare runtime.
+3. Ridurre lag e copie nel percorso reale, con una breve verifica nell’app finale e limiti espliciti; commit e push degli incrementi conclusi. Non considerare concluso l’obiettivo generale finché avvio, interazione e recupero non sono utilizzabili.
