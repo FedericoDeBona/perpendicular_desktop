@@ -56,6 +56,7 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
     private var displaySetupID=UUID()
     private var displayEpoch:String?
     private var displayRevision=0
+    private var displayWorkAreaRepairs=0
     private var displayReadable=false
     private var displayConfigurable=false
     private var sharedGeometryCapable=false
@@ -530,6 +531,7 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
         for window in windows.values {window.setSharedDisplay(nil)}
     }
     @objc private func hostDisplaysChanged(){
+        displayWorkAreaRepairs=0
         displaySetupTask?.cancel();displaySetupTask=nil
         displaySetupID=UUID()
         invalidateDisplay("Checking Windows display…")
@@ -566,6 +568,16 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
                 let dpi=primary["dpi"] as? Int {
             displayStatus="Windows display: \(width) × \(height), \(Int((Double(dpi)*100/96).rounded()))% scale."
         }else {displayStatus="Windows display is unavailable."}
+        // Explorer may replace our work area after startup or a DPI change.
+        // Repair only a confirmed matching mode, at most twice per connection;
+        // never create an endless display-change/configure feedback loop.
+        if confirmed == nil,displaySetupTask == nil,displayWorkAreaRepairs<2,
+           let primaryHost=host.first(where:\.primary),
+           let primary=(snapshot["displays"] as? [[String:Any]])?.first(where:{$0["primary"] as? Bool == true}),
+           primary["width"] as? Int == Int(primaryHost.guestPixelSize.width),
+           primary["height"] as? Int == Int(primaryHost.guestPixelSize.height) {
+            displayWorkAreaRepairs+=1;prepareDisplay()
+        }
         if ProcessInfo.processInfo.environment["PERPENDICULAR_STATE_TRACE"] == "1",
            let data=try? JSONSerialization.data(withJSONObject:["type":"display_info","guest":snapshot,
                 "host":host.map(\.description),"primaryMatchesHost":sharedDisplay != nil],options:[.sortedKeys]) {
@@ -612,6 +624,7 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
         }
         switch value["type"] as? String{
         case "hello":
+            displayWorkAreaRepairs=0
             machine.synchronizePrimaryDisplay()
             displayEpoch=value["epoch"] as? String
             invalidateDisplay("Checking Windows display…")

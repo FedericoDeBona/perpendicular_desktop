@@ -38,16 +38,17 @@ struct HostDisplay {
         guard value.isFinite,(10...2550).contains(value) else{return nil}
         return Int(value.rounded())
     }
-    /// Render one Windows pixel per Mac point. Retina backing density belongs
-    /// to the presenter; multiplying this mode by it quadruples guest pixels.
+    /// Match the Mac backing pixels so Retina presentation preserves detail.
+    /// SharedDisplay converts these pixels back to Mac points for geometry.
     var guestPixelSize:NSSize {
-        let width=min(4096,max(640,Int(frame.width.rounded())))
-        let height=min(4096,8_388_608/width,max(480,Int(frame.height.rounded())))
+        let width=min(4096,max(640,Int((frame.width*scale).rounded())))
+        let height=min(4096,8_388_608/width,max(480,Int((frame.height*scale).rounded())))
         return NSSize(width:width,height:height)
     }
     var guestWorkArea:NSRect {
         let area=workArea.intersection(frame)
-        return NSRect(x:area.minX-frame.minX,y:frame.maxY-area.maxY,width:area.width,height:area.height)
+        return NSRect(x:(area.minX-frame.minX)*scale,y:(frame.maxY-area.maxY)*scale,
+                      width:area.width*scale,height:area.height*scale)
     }
     var description:[String:Any]{
         var value:[String:Any]=["id":id,"primary":primary,"scale":Double(scale),
