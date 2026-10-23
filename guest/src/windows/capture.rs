@@ -19,7 +19,7 @@ use windows::{
         Graphics::{
             Direct3D::{D3D_DRIVER_TYPE, D3D_DRIVER_TYPE_HARDWARE, D3D_DRIVER_TYPE_WARP, D3D_FEATURE_LEVEL_11_0},
             Direct3D11::*,
-            Dwm::{DWMWA_EXTENDED_FRAME_BOUNDS, DwmGetWindowAttribute},
+            Dwm::{DWMWA_CLOAKED, DWMWA_EXTENDED_FRAME_BOUNDS, DwmGetWindowAttribute, DwmIsCompositionEnabled},
             Dxgi::{Common::DXGI_FORMAT_B8G8R8A8_UNORM, IDXGIDevice},
             Gdi::{ClientToScreen, RedrawWindow, RDW_INVALIDATE, RDW_ERASE, RDW_ALLCHILDREN},
         },
@@ -29,9 +29,11 @@ use windows::{
             RO_INIT_MULTITHREADED, RoInitialize,
         },
         UI::{
-            HiDpi::{DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, SetThreadDpiAwarenessContext},
+            Input::KeyboardAndMouse::IsWindowEnabled,
+            HiDpi::{DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, SetThreadDpiAwarenessContext, GetDpiForWindow},
             WindowsAndMessaging::{GetClientRect, GetWindowRect, IsIconic, IsWindowVisible,
                 GetAncestor, GetWindow, GetWindowDisplayAffinity, GetWindowLongPtrW, SetWindowLongPtrW,
+                GetWindowThreadProcessId, GetForegroundWindow,
                 GA_ROOT, GW_OWNER, GWL_EXSTYLE, GWL_STYLE, WS_CAPTION, WS_CHILD,
                 WS_EX_APPWINDOW, WS_EX_TOOLWINDOW, WS_EX_NOACTIVATE},
         },
@@ -164,15 +166,48 @@ impl Drop for DialogAdmission<'_> {
     fn drop(&mut self) { let _=unsafe {self.restore()}; }
 }
 
+// Read only, and only after item rejection: no titles, pixels, extra capture
+// device or retry. DWM composition enabled does not imply this HWND is drawn.
+unsafe fn item_window_state(hwnd:HWND)->Value {
+    unsafe {
+        let mut pid=0;let thread=GetWindowThreadProcessId(hwnd,Some(&mut pid));
+        let mut affinity=0;let affinity=GetWindowDisplayAffinity(hwnd,&mut affinity).ok().map(|_|affinity);
+        let mut cloaked=0u32;
+        let cloaked=DwmGetWindowAttribute(hwnd,DWMWA_CLOAKED,(&mut cloaked as *mut u32).cast(),size_of::<u32>() as u32)
+            .ok().map(|_|cloaked);
+        let mut rect=RECT::default();let rect=GetWindowRect(hwnd,&mut rect).ok().map(|_|[rect.left,rect.top,rect.right,rect.bottom]);
+        let mut client=RECT::default();let client=GetClientRect(hwnd,&mut client).ok().map(|_|[client.left,client.top,client.right,client.bottom]);
+        json!({"hwnd":hwnd.0 as usize,"pid":pid,"thread":thread,"class":catalogue::window_class(hwnd.0 as usize),
+            "root":GetAncestor(hwnd,GA_ROOT).0 as usize,"owner":GetWindow(hwnd,GW_OWNER).unwrap_or_default().0 as usize,
+            "style":format!("{:#010x}",GetWindowLongPtrW(hwnd,GWL_STYLE) as u32),
+            "exStyle":format!("{:#010x}",GetWindowLongPtrW(hwnd,GWL_EXSTYLE) as u32),
+            "visible":IsWindowVisible(hwnd).as_bool(),"enabled":IsWindowEnabled(hwnd).as_bool(),
+            "cloaked":cloaked,"affinity":affinity,"dpi":GetDpiForWindow(hwnd),"rect":rect,"clientRect":client})
+    }
+}
+fn item_admission(target:&Target,report:&Value) {
+    let mut description=target.capture_device.lock().unwrap();
+    description.get_or_insert_with(||json!({}))["itemAdmission"]=report.clone();
+}
+
 unsafe fn create_item(target:&Target,interop:&IGraphicsCaptureItemInterop)->Result<GraphicsCaptureItem,String> {
     let _creation=target.item_creation.lock().map_err(|_| "Capture item creation interrupted")?;
-    unsafe {
+    let started=Instant::now();
+    let mut report:Option<Value>=None;
+    let result=(|| unsafe {
         if !target.valid() {return Err("Window retired before capture".into());}
         let hwnd=HWND(target.hwnd as *mut _);
+        if let Some(description)=target.capture_device.lock().unwrap().as_mut() {
+            if let Some(object)=description.as_object_mut() {object.remove("itemAdmission");}
+        }
         let initial=match interop.CreateForWindow::<GraphicsCaptureItem>(hwnd) {
             Ok(item)=>return Ok(item),
             Err(e)=>e,
         };
+        report=Some(json!({"initialHRESULT":format!("{:#010x}",initial.code().0 as u32),
+            "initialFailureMilliseconds":started.elapsed().as_secs_f64()*1000.0,
+            "expectedPid":target.pid,"expectedCreation":target.creation.to_string(),"session":target.session,
+            "admissionAttempted":false}));
         // This is a single, cause-specific admission for authenticated classic
         // dialogs. Do not alter tooltips, children or capture-excluded windows.
         if initial.code()!=windows::core::HRESULT(0x80070057u32 as i32)
@@ -193,6 +228,10 @@ unsafe fn create_item(target:&Target,interop:&IGraphicsCaptureItemInterop)->Resu
             || !target.valid() {
             return Err(format!("CreateForWindow: {initial}"));
         }
+        if let Some(report)=report.as_mut() {
+            report["before"]=json!({"owner":owner.0 as usize,"style":format!("{style:#010x}"),
+                "exStyle":format!("{:#010x}",original as u32),"affinity":affinity,"ownerAffinity":owner_affinity});
+        }
         SetLastError(WIN32_ERROR(0));
         let previous=SetWindowLongPtrW(hwnd,GWL_EXSTYLE,original | bit);
         if previous==0 && GetLastError().0!=0 {return Err(format!("Dialog capture admission: {}",windows::core::Error::from_thread()));}
@@ -200,12 +239,34 @@ unsafe fn create_item(target:&Target,interop:&IGraphicsCaptureItemInterop)->Resu
         if !target.valid() || GetWindowLongPtrW(hwnd,GWL_EXSTYLE) & bit == 0 {
             return Err("Dialog retired before capture admission".into());
         }
+        if let Some(report)=report.as_mut() {
+            report["admissionAttempted"]=json!(true);report["appWindowConfirmed"]=json!(true);
+            report["admissionMilliseconds"]=json!(started.elapsed().as_secs_f64()*1000.0);
+        }
         let item=interop.CreateForWindow::<GraphicsCaptureItem>(hwnd);
+        if let Some(report)=report.as_mut() {
+            report["admissionHRESULT"]=json!(format!("{:#010x}",item.as_ref().err().map_or(0,|e|e.code().0 as u32)));
+        }
         // Restore before starting a capture session, even when creation fails.
         admission.restore()?;
         if !target.valid() {return Err("Dialog retired during capture admission".into());}
         item.map_err(|e|format!("CreateForWindow after dialog admission: {e}"))
+    })();
+    if let Some(mut report)=report {
+        // Do not insert DWM/window queries into the transient style interval.
+        // Snapshot only after success/cleanup, retaining the original guard data.
+        unsafe {
+            let hwnd=HWND(target.hwnd as *mut _);let owner=GetWindow(hwnd,GW_OWNER).unwrap_or_default();
+            report["afterCleanup"]=item_window_state(hwnd);
+            report["ownerWindow"]=if owner.0.is_null() {Value::Null}else{item_window_state(owner)};
+            report["identityValid"]=json!(target.valid());
+            report["foreground"]=json!(GetForegroundWindow().0 as usize);
+            report["compositionEnabled"]=json!(DwmIsCompositionEnabled().ok().map(|value|value.as_bool()));
+        }
+        report["failure"]=json!(result.as_ref().err());
+        item_admission(target,&report);
     }
+    result
 }
 
 unsafe fn run(target: &Target, outbox: &Outbox, stop: &AtomicBool, driver:D3D_DRIVER_TYPE, hardware_failure:Option<&str>) -> Result<(), String> {
@@ -269,6 +330,9 @@ unsafe fn run(target: &Target, outbox: &Outbox, stop: &AtomicBool, driver:D3D_DR
         let software_recovery=driver==D3D_DRIVER_TYPE_WARP;
         description["softwareRecovery"]=json!(software_recovery);
         if let Some(failure)=hardware_failure {description["hardwareFailure"]=json!(failure);}
+        if let Some(admission)=target.capture_device.lock().unwrap().as_ref().and_then(|value|value.get("itemAdmission")).cloned() {
+            description["itemAdmission"]=admission;
+        }
         *target.capture_device.lock().unwrap() = Some(description);
         let dxgi: IDXGIDevice = device.cast().map_err(error)?;
         let runtime: IDirect3DDevice = CreateDirect3D11DeviceFromDXGIDevice(&dxgi)
