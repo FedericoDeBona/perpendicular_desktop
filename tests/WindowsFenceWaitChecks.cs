@@ -101,7 +101,7 @@ public static class PerpendicularFenceWait {
             Check(Method<CreateQuery>(a,24)(a,ref desc,out q));
             var value=Method<FenceValue>(fa,8);
             r["initialFenceValue"]=value(fa);
-            
+
             var td=new TexDesc{Width=64,Height=64,Mips=1,Arrays=1,Format=87,Count=1,Bind=0x20};
             Check(Method<MakeTexture>(a,5)(a,ref td,IntPtr.Zero,out tex));
             Check(Method<MakeRTV>(a,9)(a,tex,IntPtr.Zero,out rtv));
@@ -121,7 +121,7 @@ public static class PerpendicularFenceWait {
             r["beforeSignalQueryHr"]=queryHr;r["beforeSignalQueryValue"]=queryValue;
             r["beforeSignalMilliseconds"]=elapsed;r["beforeSignalFenceValue"]=value(fa);
             r["prematureCompletion"]=queryHr==0 && queryValue!=0 && value(fa)==0;
-            
+
             // Release from independent B even if the correct driver blocks Map.
             // Fence values, rather than timing alone, establish ordering.
             releaser=new Thread(delegate() {
