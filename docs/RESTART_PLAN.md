@@ -74,13 +74,13 @@ Non vincolare l'aumento della risoluzione al completamento dell'accelerazione 3D
 
 ### Drag, resize e comportamento delle finestre
 
-Far corrispondere posizione e dimensioni di ogni finestra Mac alla relativa finestra Windows. Il Mac risponde immediatamente al gesto; Windows segue con aggiornamenti controllati, senza salti, doppio movimento o cicli di feedback. Aggiornare il contenuto durante il resize e rispettare i minimi e le dimensioni realmente accettate dall'app.
+Far corrispondere posizione e dimensioni di ogni finestra Mac alla relativa finestra Windows. Il Mac risponde immediatamente al gesto. Per il resize vale la richiesta aggiornata del 23 ottobre: anteprima locale delle sole dimensioni, contenuto e finestra conservati, unico invio a Windows al rilascio; applicare il risultato quando arriva il frame della geometria confermata. Per il movimento restano gli aggiornamenti controllati durante il gesto. Rispettare i minimi e le dimensioni realmente accettate dall'app.
 
 Durante il gesto mantenere utilizzabile il contenitore Mac; al termine riconciliare la geometria con quella accettata da Windows. Una risposta in ritardo o appartenente a una connessione precedente non deve annullare il movimento più recente. Se un'operazione fallisce, terminare il gesto, rilasciare i pulsanti e tornare a uno stato utilizzabile, mostrando l'eventuale errore.
 
 Conservare i controlli Windows delle finestre principali. Menu, tooltip e popup rimangono associati al proprietario; i veri dialoghi conservano i controlli Mac previsti. Mouse e tastiera devono restare utilizzabili dopo drag, resize, cambio focus e riconnessione. Il desktop completo rimane raggiungibile per manutenzione e recupero.
 
-Evolvere la base attuale senza revert indiscriminati: conservare recupero dell'input, classificazione delle superfici e controlli utili. Sostituire i limiti provvisori di geometria e il resize applicato soltanto al rilascio quando il nuovo percorso funziona.
+Evolvere la base attuale senza revert indiscriminati: conservare recupero dell'input, classificazione delle superfici e controlli utili. Superare i limiti provvisori di geometria, rispettando la successiva scelta esplicita del resize al rilascio con anteprima locale.
 
 ### Grafica e riuso del vecchio progetto
 
@@ -489,3 +489,10 @@ WinUI parziale e sessioni senza primo callback restano aperti. Tornare alla prim
 Richiesta dell'utente: installare e verificare la coppia sul Mac locale, rimandando la discussione dei prossimi passi. I binari privati dell'altra macchina non erano disponibili. Ricostruito il renderer cf5/f510 a partire dal profilo window-recovery locale con inventario esplicito, protocollo peer verificato e patch correnti; conservati QEMU/backend locali. È una build distinta dalla precedente qualifica IoT. Driver firmato v0.4 installato, nuovo guest collegato e moduli effettivi nel worker verificati contro gli hash della release. Dettagli e ricetta in VERIFICATION.md e graphics/renderer/README.md.
 
 Controllo EVENT passato, Blocco note hardware leggibile con input, recupero dello stesso testo dopo riconnessione e resize Retina2:1. Area utile allineata soltanto dopo la riapertura del frontend; un dialogo intermedio apparso vuoto rimane un limite. Arresto iniziale dopo il cambio driver non completato né via ACPI né via comando Windows: uscita QMP autenticata necessaria, checkpoint offline precedente e stato post-installazione conservati. App lasciata aperta; nessuna affidabilità generale o soluzione WinUI dichiarata, nessuna ulteriore indagine iniziata.
+
+
+### Resize con anteprima locale — richiesta aggiornata del 23 ottobre
+
+L’utente ha respinto le prove di resize continuo: miglioramento iniziale del gesto, seguito da spostamenti, sparizioni e grandi aree trasparenti; anche gli aggiustamenti di ancoraggio/cattura non hanno prodotto un risultato accettabile. Abbandonare questa direzione. Richiesta sostitutiva: durante il trascinamento mostrare soltanto una selezione rettangolare Mac elegante, con bordo sottile e riempimento tenue; conservare dimensioni, posizione e immagine della finestra originale. Inviare un solo resize a Windows al mouse up e applicare il nuovo contenuto insieme alla geometria confermata quando il frame è disponibile.
+
+Rimosse le modifiche sperimentali a scala, renderer e cattura guest. Il movimento ordinario conserva il proprio comportamento. Questa scelta evita di ripetere le varianti realtime fallite; non attribuisce una soluzione generale dei difetti WinUI al nuovo gesto. Evidenze puntuali e limiti in VERIFICATION.md.

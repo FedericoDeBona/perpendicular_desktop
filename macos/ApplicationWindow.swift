@@ -19,6 +19,15 @@ private final class GuestPopupPanel:NSPanel {
     override var canBecomeMain:Bool {false}
 }
 
+@MainActor
+private final class ResizePreviewView:NSView {
+    override func draw(_ dirtyRect:NSRect){
+        let outline=NSBezierPath(roundedRect:bounds.insetBy(dx:0.5,dy:0.5),xRadius:2,yRadius:2)
+        NSColor.controlAccentColor.withAlphaComponent(0.08).setFill();outline.fill()
+        NSColor.controlAccentColor.withAlphaComponent(0.8).setStroke();outline.lineWidth=1;outline.stroke()
+    }
+}
+
 private enum MouseMode {case pending,move,resize(ResizeEdges),remote,zoom,discard}
 private enum WindowInput {
     case input([String:Any])
@@ -74,15 +83,16 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
     private var discardingInput=false
     private var canResize=true
     private var nativeResizing=false
+    private var resizePreview:NSPanel?
+    private var resizePreviewFrame:NSRect?
+    private var resizePreviewPacket:GuestPacket?
+    private var resizePreviewObservedGeometry:NSRect?
+    private var nativeResizeFrame:NSRect?
+    private var nativeResizeFromLeft=false
+    private var nativeResizeFromBottom=false
     private var resizeSerial=0
     private var expectedSize:NSSize?
     private var resizeDeadline:Task<Void,Never>?
-    private var liveResizeTimer:Timer?
-    private var liveResizeSize:NSSize?
-    private var liveResizeInFlight=false
-    private var liveResizeFailed=false
-    private var liveResizeSentSize:NSSize?
-    private var nextLiveResizeAt=0.0
     private var pixelScale=1.0
     private var fallbackPixelScale=1.0
     private var sharedDisplay:SharedDisplay?
@@ -156,8 +166,7 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
         cancelSharedGeometry()
         if nativeResizing || expectedSize != nil {
             resizeSerial+=1;resizeDeadline?.cancel();resizeDeadline=nil
-            liveResizeTimer?.invalidate();liveResizeTimer=nil;liveResizeSize=nil
-            nativeResizing=false;liveResizeInFlight=false;expectedSize=nil
+            nativeResizing=false;expectedSize=nil
             content.suspendedPointer=false;bridge.command("release")
         }
         if inputBlocked || !deferredInput.isEmpty {cancelInput("The display changed before the pending input could be sent.")}
@@ -234,6 +243,15 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
         let first = !hasFrame
         guard let width=packet.header["width"] as? Int,let height=packet.header["height"] as? Int else{return}
         let nextSize=NSSize(width:width,height:height)
+        if resizePreviewFrame != nil {
+            // Keep the original window and image intact until the mouse-up
+            // request is confirmed and a frame of that resulting size arrives.
+            guard !nativeResizing,let expectedSize,expectedSize == nextSize,
+                  geometryInteraction == nil || geometryConfirmed?.size == nextSize else {
+                resizePreviewPacket=packet;return
+            }
+            removeResizePreview()
+        }
         hasFrame=true
         if first {
             fallbackPixelScale=min(1,min(1100/Double(width),800/Double(height)))
@@ -453,71 +471,58 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
                 if up {commitSharedGeometry()}else{updateSharedGeometry()}
             }
         case .resize(let edges):
-            window.setFrame(edges.frame(from:gesture.frame,delta:delta,minimum:window.minSize,maximum:window.maxSize),display:true)
-            if !up {updateLiveResize()}
+            let frame=edges.frame(from:gesture.frame,delta:delta,minimum:window.minSize,maximum:window.maxSize)
+            updateResizePreview(frame)
             if up {commitResize()}
         default:break
         }
         if up,self.gesture === gesture {self.gesture=nil}
         if up {trace("gesture_finished")}
     }
-    private func beginResize(){
-        if sharedDisplay != nil {beginSharedGeometry();nativeResizing=true;return}
+    private func beginResize(preview:Bool=true){
+        if sharedDisplay != nil {
+            beginSharedGeometry();nativeResizing=true
+            if preview {updateResizePreview(window.frame)}
+            return
+        }
         resizeSerial+=1;resizeDeadline?.cancel();expectedSize=nil
-        liveResizeTimer?.invalidate();liveResizeTimer=nil;liveResizeSize=nil
-        liveResizeInFlight=false;liveResizeFailed=false
-        liveResizeSentSize=resizeTargetSize;nextLiveResizeAt=0
         nativeResizing=true;content.suspendedPointer=true;content.clearModifiers()
         bridge.command("cancel_interaction",["window":id])
+        if preview {updateResizePreview(window.frame)}
+    }
+    private func updateResizePreview(_ frame:NSRect){
+        resizePreviewFrame=frame
+        if resizePreview == nil {
+            let panel=GuestPopupPanel(contentRect:frame,styleMask:[.borderless,.nonactivatingPanel],backing:.buffered,defer:false)
+            panel.isOpaque=false;panel.backgroundColor = .clear;panel.hasShadow=false
+            panel.ignoresMouseEvents=true;panel.isReleasedWhenClosed=false
+            panel.isFloatingPanel=false;panel.hidesOnDeactivate=false
+            panel.isExcludedFromWindowsMenu=true
+            panel.contentView=ResizePreviewView(frame:NSRect(origin:.zero,size:frame.size))
+            window.addChildWindow(panel,ordered:.above);resizePreview=panel
+        }
+        resizePreview?.setFrame(frame,display:true);resizePreview?.orderFront(nil)
+        trace("resize_preview_updated")
+    }
+    private func removeResizePreview(){
+        if let panel=resizePreview {window.removeChildWindow(panel);panel.close()}
+        resizePreview=nil;resizePreviewFrame=nil;resizePreviewPacket=nil
+        resizePreviewObservedGeometry=nil
+        nativeResizeFrame=nil
+    }
+    private func presentResizePreviewPacket(){
+        if let packet=resizePreviewPacket {present(packet)}
     }
     private var resizeTargetSize:NSSize {
         // content.bounds can lag behind a programmatic setFrame during tracking.
         // Derive the target from the requested window frame, including dialog chrome.
-        let size=window.contentRect(forFrameRect:window.frame).size
+        let size=window.contentRect(forFrameRect:resizePreviewFrame ?? window.frame).size
         return NSSize(width:max(160,(size.width/pixelScale).rounded()),height:max(100,(size.height/pixelScale).rounded()))
-    }
-    private func updateLiveResize(){
-        if sharedDisplay != nil {
-            if nativeResizing {updateSharedGeometry()}
-            return
-        }
-        guard nativeResizing,canResize,!role.transient,!liveResizeFailed else{return}
-        let size=resizeTargetSize
-        if size == liveResizeSentSize {
-            liveResizeSize=nil;liveResizeTimer?.invalidate();liveResizeTimer=nil;return
-        }
-        liveResizeSize=size
-        guard !liveResizeInFlight,liveResizeTimer == nil else{return}
-        let serial=resizeSerial
-        let delay=max(0,nextLiveResizeAt-ProcessInfo.processInfo.systemUptime)
-        if delay == 0 {sendLiveResize(serial);return}
-        let timer=Timer(timeInterval:delay,repeats:false){[weak self] _ in
-            MainActor.assumeIsolated {
-                guard let self,self.resizeSerial == serial else{return}
-                self.liveResizeTimer=nil;self.sendLiveResize(serial)
-            }
-        }
-        // AppKit tracks native dialog resizes in an event-tracking run loop.
-        // Common modes keep this coalesced sender active during that gesture.
-        liveResizeTimer=timer;RunLoop.main.add(timer,forMode:.common)
-    }
-    private func sendLiveResize(_ serial:Int){
-        guard resizeSerial == serial,nativeResizing,let size=liveResizeSize else{return}
-        liveResizeSize=nil;liveResizeSentSize=size;liveResizeInFlight=true
-        nextLiveResizeAt=ProcessInfo.processInfo.systemUptime+0.045
-        trace("resize_live_requested")
-        bridge.command("resize",["window":id,"width":Int(size.width),"height":Int(size.height)],timeout:.seconds(1)){[weak self] result in
-            guard let self,self.resizeSerial == serial,self.nativeResizing else{return}
-            self.liveResizeInFlight=false
-            if case .failure=result {self.liveResizeFailed=true;return}
-            if self.liveResizeSize != nil {self.updateLiveResize()}
-        }
     }
     private func commitResize(){
         if sharedDisplay != nil {nativeResizing=false;commitSharedGeometry();return}
-        guard canResize,!role.transient else{nativeResizing=false;content.suspendedPointer=false;return}
+        guard canResize,!role.transient else{nativeResizing=false;content.suspendedPointer=false;removeResizePreview();return}
         resizeSerial+=1;let serial=resizeSerial
-        liveResizeTimer?.invalidate();liveResizeTimer=nil;liveResizeSize=nil;liveResizeInFlight=false
         nativeResizing=false;expectedSize = .zero;content.suspendedPointer=true
         let size=resizeTargetSize,width=Int(size.width),height=Int(size.height)
         trace("resize_requested")
@@ -533,6 +538,7 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
                 self.finishResize();self.onError?("Windows could not resize this window.");return
             }
             self.expectedSize=NSSize(width:width,height:height)
+            self.presentResizePreviewPacket()
             if self.frameSize == self.expectedSize {self.finishResize();return}
             // Applications can impose their own minimum size. Confirm the actual
             // geometry instead of waiting forever for an impossible requested size.
@@ -544,21 +550,22 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
                           case .success(let reply)=result,let value=reply["value"] as? [String:Any],
                           let width=value["width"] as? Int,let height=value["height"] as? Int else{return}
                     self.expectedSize=NSSize(width:width,height:height)
+                    self.presentResizePreviewPacket()
                     if self.frameSize == self.expectedSize {self.finishResize()}
                 }
             }
         }
     }
     private func finishResize(){
+        removeResizePreview()
         resizeDeadline?.cancel();resizeDeadline=nil;expectedSize=nil
-        liveResizeTimer?.invalidate();liveResizeTimer=nil;liveResizeSize=nil;liveResizeInFlight=false
         nativeResizing=false;content.suspendedPointer=false
         applyFrameSize();bridge.command("release");onGeometry?()
         trace("resize_finished")
     }
     private var sharedTarget:NSRect? {
         guard let sharedDisplay else{return nil}
-        let frame=sharedDisplay.guestFrame(forMac:window.contentRect(forFrameRect:window.frame))
+        let frame=sharedDisplay.guestFrame(forMac:window.contentRect(forFrameRect:resizePreviewFrame ?? window.frame))
         return NSRect(x:frame.minX.rounded(),y:frame.minY.rounded(),
                       width:max(160,frame.width.rounded()),height:max(100,frame.height.rounded()))
     }
@@ -646,9 +653,20 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
                 self.sourceRect=actual
                 // An async SetWindowPos can still be queued on the app thread.
                 // Old dimensions matching an old frame do not complete a move.
-                self.geometryConfirmed=actual == expected ? actual:nil
+                // A resize can be clamped by the app's own minimum. Confirm
+                // that alternative twice, with a new capture of the same size.
+                let packet=self.resizePreviewPacket
+                let hasNewFrame=(packet?.header["generation"] as? UInt64).map{$0>self.content.generation} == true
+                    && packet?.header["width"] as? Int == Int(actual.width)
+                    && packet?.header["height"] as? Int == Int(actual.height)
+                let acceptedMinimum=self.resizePreviewFrame != nil && hasNewFrame
+                    && self.resizePreviewObservedGeometry == actual
+                self.resizePreviewObservedGeometry=actual
+                self.geometryConfirmed=actual == expected || acceptedMinimum ? actual:nil
                 self.expectedSize=self.geometryConfirmed?.size
-                if actual == expected,self.frameSize == actual.size {self.finishSharedGeometry()}
+                self.presentResizePreviewPacket()
+                guard self.geometryInteraction == interaction else{return}
+                if self.geometryConfirmed != nil,self.frameSize == actual.size {self.finishSharedGeometry()}
                 else {self.readSharedGeometry(interaction)}
             }
         }
@@ -666,6 +684,7 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
         trace("geometry_finished")
     }
     private func cancelSharedGeometry(){
+        removeResizePreview()
         let hadInteraction=geometryInteraction != nil
         geometryInteraction=nil;geometryActive=false;geometryFinishing=false
         geometryInFlight=false;geometryPending=nil;geometrySent=nil
@@ -681,15 +700,17 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
     }
     private func trace(_ event:String){
         guard ProcessInfo.processInfo.environment["PERPENDICULAR_STATE_TRACE"] == "1" else{return}
-        let value:[String:Any]=["type":event,"window":id,
+        var value:[String:Any]=["type":event,"window":id,
+            "uptime":ProcessInfo.processInfo.systemUptime,"mouseButtons":NSEvent.pressedMouseButtons,
             "nativeResizing":nativeResizing,"expectedSize":expectedSize != nil,"inputBlocked":inputBlocked,
             "mac":[window.frame.minX,window.frame.minY,window.frame.width,window.frame.height],
             "guest":[sourceRect.minX,sourceRect.minY,sourceRect.width,sourceRect.height]]
+        if let preview=resizePreviewFrame {value["previewMac"]=[preview.minX,preview.minY,preview.width,preview.height]}
         if let data=try? JSONSerialization.data(withJSONObject:value,options:[.sortedKeys]){try? FileHandle.standardError.write(contentsOf:data+Data([10]))}
     }
     private func toggleZoom(){
         guard canResize,expectedSize == nil else{return}
-        beginResize()
+        beginResize(preview:false)
         if let restore=zoomRestore {window.setFrame(restore,display:true);zoomRestore=nil}
         else if let sharedDisplay {
             zoomRestore=window.frame
@@ -705,8 +726,9 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
             cancelInput("The window lost focus before the pending input could be sent.")
             if geometryInteraction != nil {finishSharedGeometry()}
             if nativeResizing {
-                resizeSerial+=1;liveResizeTimer?.invalidate();liveResizeTimer=nil;liveResizeSize=nil;liveResizeInFlight=false
+                resizeSerial+=1
                 nativeResizing=false;content.suspendedPointer=false;applyFrameSize()
+                removeResizePreview()
             }
         }
     }
@@ -727,8 +749,24 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
         if !applyingSourceGeometry,geometryActive,!nativeResizing {updateSharedGeometry()}
         onGeometry?()
     }
-    func windowDidResize(_ notification:Notification){updateLiveResize();onGeometry?()}
-    func windowWillStartLiveResize(_ notification:Notification){if !role.transient{beginResize()}}
+    func windowDidResize(_ notification:Notification){onGeometry?()}
+    func windowWillStartLiveResize(_ notification:Notification){
+        guard !role.transient else{return}
+        beginResize()
+        nativeResizeFrame=window.frame
+        let mouse=NSEvent.mouseLocation
+        nativeResizeFromLeft=mouse.x<window.frame.midX
+        nativeResizeFromBottom=mouse.y<window.frame.midY
+    }
+    func windowWillResize(_ sender:NSWindow,to frameSize:NSSize)->NSSize{
+        guard nativeResizing,let original=nativeResizeFrame else{return frameSize}
+        let size=NSSize(width:min(window.maxSize.width,max(window.minSize.width,frameSize.width)),
+                        height:min(window.maxSize.height,max(window.minSize.height,frameSize.height)))
+        updateResizePreview(NSRect(x:nativeResizeFromLeft ? original.maxX-size.width:original.minX,
+                                   y:nativeResizeFromBottom ? original.maxY-size.height:original.minY,
+                                   width:size.width,height:size.height))
+        return original.size
+    }
     func windowDidEndLiveResize(_ notification:Notification){if !role.transient{commitResize()}}
     func windowShouldZoom(_ window:NSWindow,toFrame newFrame:NSRect)->Bool{toggleZoom();return false}
 }
