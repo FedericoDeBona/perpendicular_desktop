@@ -348,3 +348,8 @@ Dopo10s senza presentazione o dopo un errore noto, l’anello si ferma e compaio
 ResizeEdges espone le stesse otto regioni sia al gesto sia a resetCursorRects: bordi6punti e angoli14punti, con coordinate AppKit convertite nella vista flipped. macOS15+ usa NSCursor.frameResize per il bordo/angolo corretto; macOS14 conserva i cursori orizzontale/verticale e una diagonale disegnata localmente. I dialoghi mantengono il resize nativo AppKit. Il cursore non aggiunge hit-test Windows o richieste di rete oltre al normale input pointer già esistente.
 
 Riferimenti: [presentazione del drawable Metal](https://developer.apple.com/documentation/metal/mtldrawable/addpresentedhandler(_:)), [cursori frameResize](https://developer.apple.com/documentation/appkit/nscursor/frameresize(position:directions:)).
+
+
+## Diagnostica dei frame respinti
+
+`PERPENDICULAR_CAPTURE_DIAGNOSTIC=1` conserva anche i primi tre pacchetti immagine respinti dalla singola ApplicationWindow, prima della presentazione Metal. Per ciascuno salva PNG, byte BGRA originali (incluse le righe padded descritte dallo stride) e header JSON nel QA privato. I nomi includono identità finestra, numero del campione e sequence; `diagnosticStage=received-before-presentation` e `transitionAccepted=false` distinguono questi file dai vecchi campioni accettati. Il PNG serve alla lettura visiva; il file `.bgra` conserva anche RGB sotto alpha zero, che la conversione PNG può perdere. Il pacchetto/surface resta vivo fino alla scrittura. Nessuna raccolta senza opt-in, nessuna cattura GPU o modifica dei pixel nel presenter. Le prime tre immagini accettate mantengono il diagnostico precedente. Il limite è per finestra, non un budget globale di una sessione diagnostica con molte finestre.

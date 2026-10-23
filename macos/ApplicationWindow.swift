@@ -78,6 +78,7 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
     private var sourceClosed=false
     private var closing=false
     private var hasFrame=false
+    private var rejectedDiagnosticFrames=0
     private var frameSize=NSSize.zero
     private var sourceRect=NSRect.zero
     private var minimized=false
@@ -346,6 +347,7 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
         let changed=nextSize != frameSize
         if first || changed {beginFrameTransition("Aggiornamento della finestra…")}
         guard content.present(packet,requireSolidFrame:transitionActive && !allowTransparentFrame && !role.transient) else {
+            recordRejectedDiagnostic(packet)
             rejectedTransitionPacket=packet;trace("frame_transition_rejected");return
         }
         hasFrame=true
@@ -371,6 +373,42 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
             var metadata=packet.header;metadata["title"]=window.title;metadata["role"]=role.rawValue
             if let bytes=try? JSONSerialization.data(withJSONObject:metadata,options:[.prettyPrinted]){try? bytes.write(to:directory.appendingPathComponent(name+".json"))}
         }
+    }
+    /// Accepted-frame diagnostics above cannot explain an image rejected by
+    /// the transition gate. Preserve up to three raw rejected packets as well;
+    /// never substitute the last accepted image or a composited Mac screenshot.
+    private func recordRejectedDiagnostic(_ packet:GuestPacket){
+        guard ProcessInfo.processInfo.environment["PERPENDICULAR_CAPTURE_DIAGNOSTIC"]=="1",
+              rejectedDiagnosticFrames<3,
+              let width=packet.header["width"] as? Int,let height=packet.header["height"] as? Int,
+              width>0,height>0,width<=16_384,height<=16_384,width<=8_388_608/height else{return}
+        let stride=packet.header["stride"] as? Int ?? width*4
+        guard stride>=width*4,stride<=34*1024*1024/height else{return}
+        let image:CGImage?
+        if let surface=packet.surface {
+            guard surface.width==width,surface.height==height,surface.stride==stride else{return}
+            image=surface.makeImage()
+        }else{
+            guard packet.pixels.count==stride*height,let provider=CGDataProvider(data:packet.pixels as CFData) else{return}
+            image=CGImage(width:width,height:height,bitsPerComponent:8,bitsPerPixel:32,bytesPerRow:stride,
+                space:CGColorSpaceCreateDeviceRGB(),bitmapInfo:[.byteOrder32Little,CGBitmapInfo(rawValue:CGImageAlphaInfo.premultipliedFirst.rawValue)],
+                provider:provider,decode:nil,shouldInterpolate:false,intent:.defaultIntent)
+        }
+        guard let image else{return}
+        rejectedDiagnosticFrames+=1
+        let directory=FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/Perpendicular Restart/QA")
+        try? FileManager.default.createDirectory(at:directory,withIntermediateDirectories:true,attributes:[.posixPermissions:0o700])
+        let sequence=(packet.header["sequence"] as? NSNumber)?.uint64Value ?? 0
+        let name=id.replacingOccurrences(of:":",with:"-")+"-rejected-\(rejectedDiagnosticFrames)-frame-\(sequence)"
+        try? NSBitmapImageRep(cgImage:image).representation(using:.png,properties:[:])?.write(to:directory.appendingPathComponent(name+".png"))
+        // PNG conversion may discard RGB stored under alpha zero. Keep the
+        // original padded BGRA bytes for an exact comparison with GPU memory.
+        let raw=packet.surface.map{Data(bytesNoCopy:$0.contents,count:$0.byteCount,deallocator:.none)} ?? packet.pixels
+        withExtendedLifetime(packet.surface){try? raw.write(to:directory.appendingPathComponent(name+".bgra"))}
+        var metadata=packet.header;metadata["title"]=window.title;metadata["role"]=role.rawValue
+        metadata["diagnosticPixelFormat"]="BGRA8-premultiplied"
+        metadata["diagnosticStage"]="received-before-presentation";metadata["transitionAccepted"]=false
+        if let bytes=try? JSONSerialization.data(withJSONObject:metadata,options:[.prettyPrinted]){try? bytes.write(to:directory.appendingPathComponent(name+".json"))}
     }
     func retire(){sourceClosed=true;window.close()}
     private func requestClose(){if windowShouldClose(window){window.close()}}
