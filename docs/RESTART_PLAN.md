@@ -515,3 +515,14 @@ Il mascheramento non costituisce una correzione del rendering WinUI. Le verifich
 ### Dimensione Mac immediata al rilascio —23 ottobre
 
 Richiesta successiva dell’utente: invertire il verso dello spinner e, al mouse up, portare subito la finestra Mac alla geometria scelta, mostrando icona e spinner nella nuova area fino al frame Windows. Questo aggiorna la precedente attesa alla vecchia dimensione. Durante il trascinamento resta soltanto il rettangolo di anteprima. Conservare conferma della geometria, filtro dei frame e presentazione effettiva prima di scoprire il contenuto; nessun invio intermedio di resize.
+
+
+### Ripresa grafica e drawable Metal temporaneamente assente —23 ottobre
+
+Richiesta rinnovata: migliorare driver, accelerazione3D e presentazione dei frame su Mac, ancora instabili. Obiettivo attivo registrato anche nella chat. REA su Parallels e debug GPU Xcode sono strumenti autorizzati quando rispondono a una domanda concreta; le catture Xcode precedenti rimangono evidenza circoscritta, non una soluzione dimostrata.
+
+Primo incremento sul presenter: quando nextDrawable restituisce nil senza un frame successivo, il codice precedente lasciava l'immagine statica in attesa indefinita. Ora riprova la sola acquisizione dello stesso contenuto al massimo tre volte, con attese50/100/200ms dopo il fallimento; poi segnala un errore. clear cancella il tentativo pendente. Non richiede repaint, altra cattura o copie di pixel Windows. Controllo con nil indotto su copie private, GPU/presentazione reali: prima nessun completamento, dopo presentazione senza nuovo frame; indisponibilità persistente produce errore e clear cancella il retry. Il tentativo preliminare di esaurire il pool reale non ha riprodotto nil ed è stato scartato. Nessuna frequenza reale di questo guasto è stata misurata.
+
+Pacchetto finale compilato e verificato con Blocco note classico hardware: avvio, input e resize2378×1400→2178×1300 completi. Riconnessione eseguita con un dialogo guest incompleto già presente: main inizialmente differito, recuperato dopo Mostra comunque/Escape sul dialogo. Non qualificare questo come riconnessione trasparente o soluzione dei dialoghi. Nessun cambio driver/guest/runtime né reboot. Dettagli e fallimenti in VERIFICATION.md.
+
+WinUI parziale, sessioni senza callback e affidabilità generale restano aperti. Il prossimo intervento grafico sostanziale rimane confrontare la superficie per finestra prima del readback con i pixel ricevuti nella stessa transizione che perde contenuto, usando una cattura GPU delimitata solo se necessaria. Non ripetere A8/query/readback o boot già esclusi; non attribuire questo recupero del drawable ai difetti del rendering guest.

@@ -39,7 +39,8 @@ final class WindowRenderer {
     private var uploaded:UInt64=0
     private var drawing=false
     private var dirty=false
-    private var changes:UInt64=0
+    private var drawableRetry:Task<Void,Never>?
+    private var drawableFailures=0
     private var presentationID:UInt64=0
     private var targetDrawableSize=CGSize.zero
     private var targetScale=1.0
@@ -97,49 +98,63 @@ final class WindowRenderer {
         let next=CGSize(width:max(1,(bounds.width*scale).rounded()),height:max(1,(bounds.height*scale).rounded()))
         guard targetDrawableSize != next || targetScale != scale else{return}
         targetDrawableSize=next;targetScale=scale
-        changes &+= 1
         dirty=true;draw()
     }
     func present(_ pixels:Data,width:Int,height:Int,stride:Int?=nil,presentationID:UInt64=0){
         self.presentationID=presentationID
         external=nil;shared=nil;nativeCache=false
         self.pixels=pixels;pixelStride=stride ?? width*4;size=NSSize(width:width,height:height)
-        revision &+= 1;changes &+= 1;dirty=true;draw()
+        revision &+= 1;dirty=true;draw()
     }
     func present(_ surface:GuestFrameSurface,presentationID:UInt64=0){
         self.presentationID=presentationID
         guard surface.texture.device.registryID == device.registryID else{onError?("The graphics devices do not match.");return}
         external=nil;nativeCache=false;pixels=Data();texture=nil;shared=surface
         size=NSSize(width:surface.width,height:surface.height)
-        changes &+= 1
         dirty=true;draw()
     }
     func present(_ frame:NativeDisplayFrame){
         guard frame.texture.device.registryID == device.registryID else{onError?("The graphics devices do not match.");return}
         external=frame;shared=nil;pixels=Data();size=NSSize(width:frame.texture.width,height:frame.texture.height)
-        changes &+= 1
         dirty=true;draw()
     }
-    func clear(){changes &+= 1;external=nil;shared=nil;nativeCache=false;pixels=Data();size = .zero;texture=nil;dirty=false}
+    func clear(){drawableRetry?.cancel();drawableRetry=nil;drawableFailures=0;external=nil;shared=nil;nativeCache=false;pixels=Data();size = .zero;texture=nil;dirty=false}
     func draw(){
         // Acquisition and GPU work share one slot. New arrivals only replace
         // the latest source while nextDrawable waits away from the main actor.
         guard dirty,!drawing,(shared != nil || external != nil || nativeCache || !pixels.isEmpty),size.width>0,size.height>0,
               targetDrawableSize.width>0,targetDrawableSize.height>0 else{return}
+        drawableRetry?.cancel();drawableRetry=nil
         if layer.contentsScale != targetScale {layer.contentsScale=targetScale}
         if layer.drawableSize != targetDrawableSize {layer.drawableSize=targetDrawableSize}
         drawing=true
-        let requestedChange=changes
         drawableAccess.request { [weak self] drawable in
             guard let self else{return}
             guard let drawable else{
                 self.drawing=false
-                // An event arriving during the wait would have retried after
-                // the old synchronous call. Retry only that newer state.
-                if self.dirty,self.changes != requestedChange {self.draw()}
+                self.retryDrawable()
                 return
             }
+            self.drawableFailures=0
             self.render(drawable)
+        }
+    }
+    private func retryDrawable(){
+        guard dirty else{return}
+        // A static window may never send another frame. Retry acquisition of
+        // its retained image, without requesting guest repaint or more pixels.
+        // Bound the retries so an unavailable layer has an explicit outcome.
+        drawableFailures+=1
+        guard drawableFailures<=3 else{
+            if drawableFailures==4 {onError?("Metal could not obtain a display surface for this window.")}
+            return
+        }
+        let delay=50 * (1 << (drawableFailures-1))
+        drawableRetry=Task { @MainActor [weak self] in
+            do {try await Task.sleep(for:.milliseconds(delay))} catch{return}
+            guard let self else{return}
+            self.drawableRetry=nil
+            self.draw()
         }
     }
     private func render(_ drawable:any CAMetalDrawable){
