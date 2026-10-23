@@ -1,0 +1,19 @@
+--- a/src/d3d11/d3d11_texture_device.cpp
++++ b/src/d3d11/d3d11_texture_device.cpp
+@@ -317,6 +317,16 @@
+     /* Legacy-handle semantics: the same POD pointer every call, valid for
+      * the texture's lifetime, never closed by the caller. */
+     if (shm_pod_.magic == DXMT_SHARED_TEXTURE_MAGIC) {
++      // The peer can write this shared storage as soon as the handle escapes.
++      // Complete our queued initialization before publishing it; flushing on
++      // a later local read could otherwise erase the peer's completed writes.
++      *pSharedHandle = nullptr;
++      auto &initializer = this->m_parent->GetDXMTDevice().queue().initializer;
++      auto initialized = initializer.flushToWait();
++      if (initialized && !MTLSharedEvent_waitUntilSignaledValue(initializer.event().handle, initialized, 1000)) {
++        ERR("GetSharedHandle: shared texture initialization did not complete");
++        return E_FAIL;
++      }
+       *pSharedHandle = reinterpret_cast<HANDLE>(&shm_pod_);
+       return S_OK;
+     }
