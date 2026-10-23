@@ -21,6 +21,10 @@ RENDERER = 'cf5af71359b224a9a482e9b5a67f8160497dc951'
 BASE_SHA = 'e024bfbbac6f8dfc7040c08ca35121557f4f539fa2d2bee50d0d7f8201062c7e'
 RENDERER_SHA = '7610c0d9eca1ab12f9548661ef8577fd06602d1743c99c1e974eb77826a06d3b'
 NATIVE_SHA = '00a1111d3a27e92f819874d4f47d389e38977c897f86b7ef03807d78cbd0d9c3'
+NATIVE_PROFILES = {
+    'sync-channel-20261019': NATIVE_SHA,
+    'window-recovery-20261020': '741c50e71c63911632a97811757a9a5f6638eb9046cd6c2f03ec7c5816e8caf5',
+}
 # Names plus Git blob hashes of all 311 generated files in the released peer:
 # osy/virtio-win-mesa bf536bba65454900d782fa7417bc95c1608d7483.
 PEER_SHA = 'cf25a3e304a5adf97c5f7d189839785807e4fcdcf0ddfbe8a408cf654827ee68'
@@ -81,6 +85,9 @@ def main():
     parser.add_argument('--renderer-archive', type=Path, required=True)
     parser.add_argument('--protocol', type=Path, required=True)
     parser.add_argument('--reference', type=Path, required=True, help='Pinned Wire1 renderer build profile')
+    parser.add_argument('--reference-profile', choices=tuple(NATIVE_PROFILES),
+                        default='sync-channel-20261019',
+                        help='Exact native-source inventory to preserve; neither profile qualifies a runtime')
     parser.add_argument('--output', type=Path, required=True, help='Fresh private directory')
     args = parser.parse_args()
     output = args.output.resolve()
@@ -96,7 +103,8 @@ def main():
     profile = args.reference.resolve(strict=True)
     reference = profile / 'src/virglrenderer'
     native_inputs = {name: digest(reference / name) for name in CHANGED + ADDED}
-    require(inventory_digest(native_inputs) == NATIVE_SHA, 'Different native transport reference')
+    require(inventory_digest(native_inputs) == NATIVE_PROFILES[args.reference_profile],
+            'Different native transport reference')
     output.mkdir(parents=True)
     logs = output / 'logs'
     logs.mkdir()
