@@ -3,7 +3,7 @@ use serde_json::{Value, json};
 use windows::Win32::{
     Foundation::{HWND, LPARAM, POINT, RECT, WPARAM},
     Graphics::Gdi::ClientToScreen,
-    UI::WindowsAndMessaging::*,
+    UI::{HiDpi::{GetDpiForWindow, GetSystemMetricsForDpi}, WindowsAndMessaging::*},
 };
 
 fn work_area() -> RECT {
@@ -22,6 +22,52 @@ fn work_area() -> RECT {
         }
         area
     }
+}
+
+/// Ask only admitted app windows, with a bounded cross-process system message.
+/// MINMAXINFO describes the outer HWND; the host displays the captured surface.
+pub fn minimum_size(hwnd: HWND, full: bool) -> Option<(i32, i32)> {
+    unsafe {
+        let dpi = GetDpiForWindow(hwnd).max(96);
+        let area = work_area();
+        let mut info = MINMAXINFO {
+            ptMaxPosition: POINT { x: area.left, y: area.top },
+            ptMaxSize: POINT { x: area.right-area.left, y: area.bottom-area.top },
+            ptMinTrackSize: POINT {
+                x: GetSystemMetricsForDpi(SM_CXMINTRACK, dpi),
+                y: GetSystemMetricsForDpi(SM_CYMINTRACK, dpi),
+            },
+            ptMaxTrackSize: POINT {
+                x: GetSystemMetricsForDpi(SM_CXMAXTRACK, dpi),
+                y: GetSystemMetricsForDpi(SM_CYMAXTRACK, dpi),
+            },
+            ..Default::default()
+        };
+        if SendMessageTimeoutW(hwnd, WM_GETMINMAXINFO, WPARAM(0),
+            LPARAM((&mut info as *mut MINMAXINFO) as isize),
+            SMTO_ABORTIFHUNG | SMTO_BLOCK | SMTO_ERRORONEXIT, 25, None).0 == 0 {
+            return None;
+        }
+        let mut outer = RECT::default();
+        GetWindowRect(hwnd, &mut outer).ok()?;
+        let surface = if full { catalogue::frame_bounds(hwnd)? } else {
+            let mut client = RECT::default();
+            GetClientRect(hwnd, &mut client).ok()?;
+            client
+        };
+        let width = info.ptMinTrackSize.x - ((outer.right-outer.left)-(surface.right-surface.left));
+        let height = info.ptMinTrackSize.y - ((outer.bottom-outer.top)-(surface.bottom-surface.top));
+        ((1..=32768).contains(&width) && (1..=32768).contains(&height)).then_some((width,height))
+    }
+}
+
+pub fn describe_minimum(metadata: &mut Value) {
+    let minimum = if metadata["resizable"] == true && !catalogue::transient(metadata) {
+        metadata["hwnd"].as_u64().and_then(|raw|
+            minimum_size(HWND(raw as usize as *mut _), metadata["role"] != "dialog"))
+    } else { None };
+    metadata["minWidth"] = minimum.map(|m| json!(m.0)).unwrap_or(Value::Null);
+    metadata["minHeight"] = minimum.map(|m| json!(m.1)).unwrap_or(Value::Null);
 }
 
 pub fn limits(hwnd: HWND, full: bool) -> (i32, i32) {
@@ -56,12 +102,14 @@ pub fn limits(hwnd: HWND, full: bool) -> (i32, i32) {
 
 pub fn state(target: &Target) -> Result<Value, String> {
     let hwnd = HWND(target.hwnd as *mut _);
-    let details =
+    let mut details =
         catalogue::details(target.hwnd, &target.sid, target.session).ok_or("Window retired")?;
+    describe_minimum(&mut details);
     let (max_width, max_height) = limits(hwnd, target.full_frame);
     Ok(json!({"x":details["x"],"y":details["y"],
         "width":details["width"],"height":details["height"],
-        "maxWidth":max_width,"maxHeight":max_height}))
+        "maxWidth":max_width,"maxHeight":max_height,
+        "minWidth":details["minWidth"],"minHeight":details["minHeight"]}))
 }
 
 /// Coordinates describe the captured surface: DWM frame for main windows and

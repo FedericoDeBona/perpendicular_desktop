@@ -64,6 +64,7 @@ struct Worker {
     activation_results: mpsc::Receiver<ActivationResult>,
     activation_serial: u64,
     next_process_scan: Instant,
+    next_minimum_scan: Instant,
     serial: u64,
     pressed: HashSet<u16>,
     pending_unicode: Option<u16>,
@@ -163,6 +164,7 @@ pub fn run(path: &Path) -> Result<(), String> {
         activation_results,
         activation_serial: 0,
         next_process_scan: Instant::now(),
+        next_minimum_scan: Instant::now(),
         serial: 0,
         pressed: HashSet::new(),
         pending_unicode: None,
@@ -237,7 +239,8 @@ impl Worker {
         self.release();
         self.finish_activations(&outbox);
         let restored: Vec<_> = self.windows.iter().filter_map(|(id, window)| {
-            let details = catalogue::details(window.target.hwnd, &self.sid, self.session)?;
+            let mut details = catalogue::details(window.target.hwnd, &self.sid, self.session)?;
+            window_control::describe_minimum(&mut details);
             Some((id.clone(), self.application_surface(details, &window.app)))
         }).collect();
         for (id, metadata) in restored {
@@ -894,8 +897,15 @@ impl Worker {
             let details = catalogue::details(window.target.hwnd, &self.sid, self.session)?;
             Some((id.clone(), self.application_surface(details, &window.app)))
         }).collect();
+        let refresh_minimum = Instant::now() >= self.next_minimum_scan;
+        if refresh_minimum { self.next_minimum_scan = Instant::now() + Duration::from_secs(2); }
         for (id, mut details) in updated {
             if let Some(window) = self.windows.get_mut(&id) {
+                if refresh_minimum { window_control::describe_minimum(&mut details); }
+                else {
+                    details["minWidth"] = window.metadata["minWidth"].clone();
+                    details["minHeight"] = window.metadata["minHeight"].clone();
+                }
                 details["z"] = json!(
                     visible
                         .iter()
@@ -947,7 +957,7 @@ impl Worker {
         if self.windows.values().any(|w| w.target.hwnd == raw) || self.windows.len() >= 16 {
             return changed;
         }
-        let metadata = self.application_surface(metadata, &app);
+        let mut metadata = self.application_surface(metadata, &app);
         let transient = catalogue::transient(&metadata);
         if !transient && self.document_count() >= 4 {
             return changed;
@@ -970,6 +980,7 @@ impl Worker {
         else {
             return changed;
         };
+        window_control::describe_minimum(&mut metadata);
         let first_document = !transient && !self.windows.values().any(|w| w.app == app && !catalogue::transient(&w.metadata));
         if let Some(content) = &hosted {
             self.remember_process(&app, content.pid, content.creation);
@@ -1037,7 +1048,8 @@ impl Worker {
                 "parent":w.parent,"role":w.metadata["role"],"x":w.metadata["x"],"y":w.metadata["y"],
                 "z":w.metadata["z"],"visible":w.metadata["visible"],"minimized":w.metadata["minimized"],
                 "class":w.metadata["class"],"style":w.metadata["style"],"exStyle":w.metadata["exStyle"],
-                "maxWidth":w.metadata["maxWidth"],"maxHeight":w.metadata["maxHeight"],"resizable":w.metadata["resizable"]})
+                "maxWidth":w.metadata["maxWidth"],"maxHeight":w.metadata["maxHeight"],
+                "minWidth":w.metadata["minWidth"],"minHeight":w.metadata["minHeight"],"resizable":w.metadata["resizable"]})
         }).collect();
         outbox.control(json!({"type":"windows","windows":windows,"epoch":self.epoch}));
     }

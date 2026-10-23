@@ -139,6 +139,10 @@ final class VirtualMachineController {
     }
     func closeDesktop(){desktop?.stop();desktop?.window.close();desktop=nil}
     func synchronizePrimaryDisplay(){
+        // The v0.4 native driver keeps the modes advertised at boot. Sending
+        // a new RFB preferred size while connected can select a smaller default
+        // instead of adding that mode. The native boot already seeds the raster.
+        guard !nativeGraphicsEnabled else{return}
         guard virtualDisplayEnabled,let launch=desktopLaunch(),let host=HostDisplay.current().first else{return}
         let size=host.guestPixelSize
         let width=Int(size.width),height=Int(size.height)

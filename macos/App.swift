@@ -60,7 +60,6 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
     private var displaySetupID=UUID()
     private var displayEpoch:String?
     private var displayRevision=0
-    private var displayWorkAreaRepairs=0
     private var displayReadable=false
     private var displayConfigurable=false
     private var sharedGeometryCapable=false
@@ -346,7 +345,8 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
             localResponse(["ok":false,"error":"Windows reconnected while reading geometry."],reply:reply);return
         }
         guard let id=ids.first else {
-            localResponse(["ok":true,"result":["windows":rows,"primaryMatchesHost":sharedDisplay != nil]],reply:reply);return
+            localResponse(["ok":true,"result":["windows":rows,"primaryMatchesHost":sharedDisplay != nil,
+                "hostDisplays":HostDisplay.current().map(\.description)]],reply:reply);return
         }
         guard let controller=windows[id] else {
             localGeometrySnapshot(ids.dropFirst(),rows:rows,epoch:epoch,reply:reply);return
@@ -354,6 +354,8 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
         let frame=controller.window.frame
         let content=controller.window.contentRect(forFrameRect:frame)
         let row:[String:Any]=["id":id,"title":controller.window.title,"role":controller.role.rawValue,
+            "macMinimumFramePoints":["width":controller.window.minSize.width,"height":controller.window.minSize.height],
+            "macMaximumFramePoints":["width":controller.window.maxSize.width,"height":controller.window.maxSize.height],
             "macContentPoints":["x":content.minX,"y":content.minY,"width":content.width,"height":content.height],
             "macFramePoints":["x":frame.minX,"y":frame.minY,"width":frame.width,"height":frame.height]]
         bridge.command("geometry",["window":id],timeout:.seconds(2)){[weak self] result in
@@ -628,7 +630,6 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
         for window in windows.values {window.setSharedDisplay(nil)}
     }
     @objc private func hostDisplaysChanged(){
-        displayWorkAreaRepairs=0
         displaySetupTask?.cancel();displaySetupTask=nil
         displaySetupID=UUID()
         invalidateDisplay("Checking Windows display…")
@@ -641,7 +642,7 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
         guard displayConfigurable,machine.virtualDisplayEnabled,let host=HostDisplay.current().first(where:\.primary) else{return}
         let size=host.guestPixelSize
         let width=Int(size.width),height=Int(size.height)
-        configureDisplay(width:width,height:height,workArea:host.guestWorkArea,epoch:displayEpoch)
+        configureDisplay(width:width,height:height,epoch:displayEpoch)
     }
     private func readDisplay(){
         guard connected,displayReadable,let epoch=displayEpoch else{return}
@@ -665,23 +666,13 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
                 let dpi=primary["dpi"] as? Int {
             displayStatus="Windows display: \(width) × \(height), \(Int((Double(dpi)*100/96).rounded()))% scale."
         }else {displayStatus="Windows display is unavailable."}
-        // Explorer may replace our work area after startup or a DPI change.
-        // Repair only a confirmed matching mode, at most twice per connection;
-        // never create an endless display-change/configure feedback loop.
-        if confirmed == nil,displaySetupTask == nil,displayWorkAreaRepairs<2,
-           let primaryHost=host.first(where:\.primary),
-           let primary=(snapshot["displays"] as? [[String:Any]])?.first(where:{$0["primary"] as? Bool == true}),
-           primary["width"] as? Int == Int(primaryHost.guestPixelSize.width),
-           primary["height"] as? Int == Int(primaryHost.guestPixelSize.height) {
-            displayWorkAreaRepairs+=1;prepareDisplay()
-        }
         if ProcessInfo.processInfo.environment["PERPENDICULAR_STATE_TRACE"] == "1",
            let data=try? JSONSerialization.data(withJSONObject:["type":"display_info","guest":snapshot,
                 "host":host.map(\.description),"primaryMatchesHost":sharedDisplay != nil],options:[.sortedKeys]) {
             try? FileHandle.standardError.write(contentsOf:data+Data([10]))
         }
     }
-    private func configureDisplay(width:Int,height:Int,workArea:NSRect,epoch:String?,attempt:Int=0){
+    private func configureDisplay(width:Int,height:Int,epoch:String?,attempt:Int=0){
         displaySetupTask?.cancel()
         displaySetupID=UUID();let setupID=displaySetupID
         displaySetupTask=Task{@MainActor [weak self] in
@@ -691,15 +682,14 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
             guard !Task.isCancelled,let self,self.connected,self.displayEpoch == epoch,self.displaySetupID == setupID else{return}
             self.invalidateDisplay("Preparing Windows display…")
             let revision=self.displayRevision
-            let area:[String:Int]=["x":Int(workArea.minX),"y":Int(workArea.minY),"width":Int(workArea.width),"height":Int(workArea.height)]
-            self.bridge.command("display_configure",["width":width,"height":height,"workArea":area],timeout:.seconds(5)){[weak self] result in
+            self.bridge.command("display_configure",["width":width,"height":height],timeout:.seconds(5)){[weak self] result in
                 guard let self,self.connected,self.displayEpoch == epoch,self.displaySetupID == setupID else{return}
                 self.displaySetupTask=nil
                 // Windows broadcasts its mode change while this request is in
                 // flight. Read once more instead of publishing an older snapshot.
                 guard self.displayRevision == revision else{self.readDisplay();return}
                 if case .failure=result {
-                    if attempt<2 {self.configureDisplay(width:width,height:height,workArea:workArea,epoch:epoch,attempt:attempt+1)}
+                    if attempt<2 {self.configureDisplay(width:width,height:height,epoch:epoch,attempt:attempt+1)}
                     else {self.status="Windows could not match the Mac display size.";self.readDisplay()}
                     return
                 }
@@ -721,7 +711,6 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
         }
         switch value["type"] as? String{
         case "hello":
-            displayWorkAreaRepairs=0
             machine.synchronizePrimaryDisplay()
             displayEpoch=value["epoch"] as? String
             invalidateDisplay("Checking Windows display…")

@@ -38,17 +38,13 @@ struct HostDisplay {
         guard value.isFinite,(10...2550).contains(value) else{return nil}
         return Int(value.rounded())
     }
-    /// Match the Mac backing pixels so Retina presentation preserves detail.
+    /// The guest desktop fits the area available to ordinary Mac windows.
+    /// Windows reserves its own taskbar inside this raster independently.
     /// SharedDisplay converts these pixels back to Mac points for geometry.
     var guestPixelSize:NSSize {
-        let width=min(4096,max(640,Int((frame.width*scale).rounded())))
-        let height=min(4096,8_388_608/width,max(480,Int((frame.height*scale).rounded())))
+        let width=min(4096,max(640,Int((workArea.width*scale).rounded())))
+        let height=min(4096,8_388_608/width,max(480,Int((workArea.height*scale).rounded())))
         return NSSize(width:width,height:height)
-    }
-    var guestWorkArea:NSRect {
-        let area=workArea.intersection(frame)
-        return NSRect(x:(area.minX-frame.minX)*scale,y:(frame.maxY-area.maxY)*scale,
-                      width:area.width*scale,height:area.height*scale)
     }
     var description:[String:Any]{
         var value:[String:Any]=["id":id,"primary":primary,"scale":Double(scale),

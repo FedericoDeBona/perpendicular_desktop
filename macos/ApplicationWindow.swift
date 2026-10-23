@@ -99,6 +99,7 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
     private var applyingSourceGeometry=false
     private var adjustedInitialPlacement=false
     private var maximumPixels=NSSize(width:4096,height:4096)
+    private var minimumPixels=NSSize(width:160,height:100)
     private var geometryInteraction:String?
     private var geometrySerial=0
     private var geometryActive=false
@@ -179,9 +180,11 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
     }
     private func applySizeLimits(){
         guard !role.transient else{return}
-        window.minSize=window.frameRect(forContentRect:NSRect(x:0,y:0,width:160*pixelScale,height:100*pixelScale)).size
+        window.minSize=window.frameRect(forContentRect:NSRect(origin:.zero,
+            size:NSSize(width:minimumPixels.width*pixelScale,height:minimumPixels.height*pixelScale))).size
         window.maxSize=window.frameRect(forContentRect:NSRect(origin:.zero,
-            size:NSSize(width:maximumPixels.width*pixelScale,height:maximumPixels.height*pixelScale))).size
+            size:NSSize(width:max(minimumPixels.width,maximumPixels.width)*pixelScale,
+                        height:max(minimumPixels.height,maximumPixels.height)*pixelScale))).size
     }
     func update(_ item:[String:Any]){
         window.title=item["title"] as? String ?? ""
@@ -196,9 +199,14 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
             sourceRect=next
         }
         canResize=item["resizable"] as? Bool ?? true
+        if let width=item["minWidth"] as? Double,let height=item["minHeight"] as? Double,
+           width.isFinite,height.isFinite,(1...32768).contains(width),(1...32768).contains(height) {
+            minimumPixels=NSSize(width:max(160,width),height:max(100,height))
+        }else {minimumPixels=NSSize(width:160,height:100)}
         if let maxWidth=item["maxWidth"] as? Double,let maxHeight=item["maxHeight"] as? Double,maxWidth>=160,maxHeight>=100 {
-            maximumPixels=NSSize(width:maxWidth,height:maxHeight);applySizeLimits()
+            maximumPixels=NSSize(width:maxWidth,height:maxHeight)
         }
+        applySizeLimits()
         if !role.transient && role != .main {
             if canResize {window.styleMask.insert(.resizable)}else{window.styleMask.remove(.resizable)}
         }

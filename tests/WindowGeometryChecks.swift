@@ -17,18 +17,31 @@ struct WindowGeometryChecks {
             == NSRect(x:-100,y:200,width:600,height:300),"Dragging the left edge must keep the right edge fixed")
         let host=HostDisplay(id:1,frame:NSRect(x:100,y:-80,width:1470,height:956),
             workArea:NSRect(x:100,y:-80,width:1470,height:923),scale:2,primary:true)
-        var monitor:[String:Any]=["primary":true,"x":0,"y":0,"width":2940,"height":1912,"dpi":192,
-            "workArea":["x":0,"y":66,"width":2940,"height":1750]]
+        precondition(host.guestPixelSize == NSSize(width:2940,height:1846),"The guest raster must exclude the Mac menu bar")
+        var monitor:[String:Any]=["primary":true,"x":0,"y":0,"width":2940,"height":1846,"dpi":192,
+            "workArea":["x":0,"y":0,"width":2940,"height":1750]]
         let mapping=SharedDisplay.primary(host:host,snapshot:["displays":[monitor]])!
         let guest=NSRect(x:240,y:180,width:1600,height:1200)
-        precondition(mapping.pixelScale == 0.5 && mapping.macFrame(forGuest:guest) == NSRect(x:220,y:186,width:800,height:600))
+        precondition(mapping.pixelScale == 0.5 && mapping.macFrame(forGuest:guest) == NSRect(x:220,y:153,width:800,height:600))
+        precondition(mapping.macFrame(forGuest:mapping.guestFrame) == host.workArea,"The whole guest raster must fit the usable Mac rectangle")
         precondition(mapping.guestFrame(forMac:mapping.macFrame(forGuest:guest)) == guest,"Geometry must round-trip across origins")
         monitor["dpi"]=240
         precondition(SharedDisplay.primary(host:host,snapshot:["displays":[monitor]]) != nil,"DPI changes UI size, not physical coordinates")
         monitor["width"]=1470;monitor["height"]=956
         precondition(SharedDisplay.primary(host:host,snapshot:["displays":[monitor]]) == nil,"The previous low resolution must not enable the Retina mapping")
-        monitor["width"]=2940;monitor["height"]=1912;monitor["workArea"]=["x":0,"y":0,"width":2940,"height":1816]
-        precondition(SharedDisplay.primary(host:host,snapshot:["displays":[monitor]]) == nil,"The menu bar must be reserved on both sides")
+        monitor["width"]=2940;monitor["height"]=1912
+        precondition(SharedDisplay.primary(host:host,snapshot:["displays":[monitor]]) == nil,"A full-screen raster must not enable the usable-area mapping")
+        monitor["height"]=1846;monitor["workArea"]=["x":0,"y":0,"width":2940,"height":1846]
+        precondition(SharedDisplay.primary(host:host,snapshot:["displays":[monitor]]) != nil,"Windows can reclaim its own taskbar area independently")
+        let dock=HostDisplay(id:1,frame:NSRect(x:0,y:0,width:1440,height:900),
+            workArea:NSRect(x:70,y:0,width:1370,height:870),scale:2,primary:true)
+        precondition(dock.guestPixelSize == NSSize(width:2740,height:1740),"A side Dock must reduce the guest width")
+        let dockMapping=SharedDisplay.primary(host:dock,snapshot:["displays":[[
+            "primary":true,"x":0,"y":0,"width":2740,"height":1740,"dpi":192,
+            "workArea":["x":0,"y":0,"width":2740,"height":1644]]]])!
+        precondition(dockMapping.macFrame(forGuest:dockMapping.guestFrame) == dock.workArea,"A side Dock must shift the guest origin")
+        precondition(ResizeEdges.right.frame(from:original,delta:NSPoint(x:-999,y:0),
+            minimum:NSSize(width:322,height:100),maximum:maximum).width == 322,"The preview must respect the Windows app minimum")
         print("Window geometry: resize and shared coordinate checks passed")
     }
 }

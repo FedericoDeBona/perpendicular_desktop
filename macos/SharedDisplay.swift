@@ -10,9 +10,9 @@ struct SharedDisplay:Equatable {
     let guestWorkArea: NSRect?
 
     private init(host: HostDisplay, guestFrame: NSRect, guestWorkArea: NSRect?) {
-        pixelScale = host.frame.width / guestFrame.width
+        pixelScale = host.workArea.width / guestFrame.width
         self.guestFrame = guestFrame
-        hostFrame = host.frame
+        hostFrame = host.workArea
         self.guestWorkArea = guestWorkArea
     }
 
@@ -20,7 +20,7 @@ struct SharedDisplay:Equatable {
     /// DPI controls text/control sizes inside Windows; it does not change the
     /// physical coordinates reported by our per-monitor-aware guest worker.
     static func primary(host: HostDisplay, snapshot: [String: Any]) -> SharedDisplay? {
-        guard host.primary, valid(host.frame), host.scale.isFinite, host.scale > 0,
+        guard host.primary, valid(host.workArea),host.frame.contains(host.workArea), host.scale.isFinite, host.scale > 0,
               let displays = snapshot["displays"] as? [[String: Any]],
               !displays.isEmpty, displays.count <= 16 else { return nil }
         let primaryFlags = displays.compactMap { boolean($0["primary"]) }
@@ -31,7 +31,7 @@ struct SharedDisplay:Equatable {
         guard let frame = rectangle(monitor),
               let dpi = integer(monitor["dpi"]), dpi > 0,
               frame.size == host.guestPixelSize,
-              host.frame.width / frame.width == host.frame.height / frame.height else { return nil }
+              host.workArea.width / frame.width == host.workArea.height / frame.height else { return nil }
 
         var workArea: NSRect?
         if let value = monitor["workArea"] {
@@ -40,8 +40,8 @@ struct SharedDisplay:Equatable {
             workArea = area
         }
         let mapping=SharedDisplay(host: host, guestFrame: frame, guestWorkArea: workArea)
-        // Reserve the Mac menu bar in Windows too. Otherwise AppKit silently
-        // shifts a window at guest y=0 and both sides disagree immediately.
+        // The entire guest raster already fits inside the Mac's usable area.
+        // The remaining work-area inset belongs to the Windows taskbar.
         guard let workArea,host.workArea.contains(mapping.macFrame(forGuest:workArea)) else{return nil}
         return mapping
     }
