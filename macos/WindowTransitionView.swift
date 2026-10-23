@@ -95,7 +95,7 @@ private final class WaitingRing:NSView {
         stop()
         guard !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else{return}
         let rotation=CABasicAnimation(keyPath:"transform.rotation.z")
-        rotation.fromValue=0;rotation.toValue=Double.pi*2;rotation.duration=1.05;rotation.repeatCount = .infinity
+        rotation.fromValue=0;rotation.toValue = -Double.pi*2;rotation.duration=1.05;rotation.repeatCount = .infinity
         stroke.add(rotation,forKey:"turn")
         let sweep=CAKeyframeAnimation(keyPath:"strokeEnd")
         sweep.values=[0.18,0.82,0.18];sweep.keyTimes=[0,0.5,1]

@@ -595,9 +595,13 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
         resizePreview?.setFrame(frame,display:true);resizePreview?.orderFront(nil)
         trace("resize_preview_updated")
     }
-    private func removeResizePreview(){
+    private func closeResizePreviewPanel(){
         if let panel=resizePreview {window.removeChildWindow(panel);panel.close()}
-        resizePreview=nil;resizePreviewFrame=nil;resizePreviewPacket=nil
+        resizePreview=nil
+    }
+    private func removeResizePreview(){
+        closeResizePreviewPanel()
+        resizePreviewFrame=nil;resizePreviewPacket=nil
         resizePreviewObservedGeometry=nil
         nativeResizeFrame=nil
     }
@@ -617,6 +621,16 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
             return
         }
         beginFrameTransition("Aggiornamento della finestra…")
+        // Commit the Mac container immediately under the cover. Retain the
+        // requested geometry and packet gate until Windows confirms its frame.
+        nativeResizing=false;nativeResizeFrame=nil
+        closeResizePreviewPanel()
+        if let frame=resizePreviewFrame {
+            applyingSourceGeometry=true
+            window.setFrame(frame,display:true)
+            applyingSourceGeometry=false
+            trace("resize_mac_committed")
+        }
         if sharedDisplay != nil {nativeResizing=false;commitSharedGeometry();return}
         guard canResize,!role.transient else{nativeResizing=false;content.suspendedPointer=false;removeResizePreview();return}
         resizeSerial+=1;let serial=resizeSerial

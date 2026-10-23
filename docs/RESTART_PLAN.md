@@ -74,7 +74,7 @@ Non vincolare l'aumento della risoluzione al completamento dell'accelerazione 3D
 
 ### Drag, resize e comportamento delle finestre
 
-Far corrispondere posizione e dimensioni di ogni finestra Mac alla relativa finestra Windows. Il Mac risponde immediatamente al gesto. Per il resize vale la richiesta aggiornata del 23 ottobre: anteprima locale delle sole dimensioni, contenuto e finestra conservati, unico invio a Windows al rilascio; applicare il risultato quando arriva il frame della geometria confermata. Per il movimento restano gli aggiornamenti controllati durante il gesto. Rispettare i minimi e le dimensioni realmente accettate dall'app.
+Far corrispondere posizione e dimensioni di ogni finestra Mac alla relativa finestra Windows. Il Mac risponde immediatamente al gesto. Per il resize vale la richiesta aggiornata del 23 ottobre: anteprima locale delle sole dimensioni durante il gesto, unico invio a Windows al rilascio; al rilascio il contenitore Mac assume subito le dimensioni scelte sotto la copertura con icona e spinner, e mostra il contenuto quando è presentato il frame della geometria confermata. Per il movimento restano gli aggiornamenti controllati durante il gesto. Rispettare i minimi e le dimensioni realmente accettate dall'app.
 
 Durante il gesto mantenere utilizzabile il contenitore Mac; al termine riconciliare la geometria con quella accettata da Windows. Una risposta in ritardo o appartenente a una connessione precedente non deve annullare il movimento più recente. Se un'operazione fallisce, terminare il gesto, rilasciare i pulsanti e tornare a uno stato utilizzabile, mostrando l'eventuale errore.
 
@@ -510,3 +510,8 @@ Comunicare inoltre il minimo della singola finestra Windows al contenitore Mac, 
 Richiesta corrente: coprire gli aggiornamenti visivamente incompleti durante avvio delle app, cambio risoluzione e operazioni che richiedono un nuovo frame. UI Mac con materiale sfocato, icona reale dell’app e indicatore ad anello ispirato a Windows11, rimossa quando il presenter ha mostrato il frame necessario. Non introdurre un ritardo fisso o scambiare la ricezione del pacchetto per presentazione. L’attesa prolungata deve avere un esito esplicito e accesso al desktop Windows. Conservare l’anteprima di sole dimensioni durante il drag; la copertura del resize inizia al rilascio. Aggiungere cursori Mac sui bordi e sugli angoli delle finestre principali, coerenti con le regioni effettivamente ridimensionabili.
 
 Il mascheramento non costituisce una correzione del rendering WinUI. Le verifiche di avvio, resize normale e ritardo simulato sono riportate in VERIFICATION.md. Nessun cambio guest/driver o ampliamento delle prove GPU richiesto da questa UI.
+
+
+### Dimensione Mac immediata al rilascio —23 ottobre
+
+Richiesta successiva dell’utente: invertire il verso dello spinner e, al mouse up, portare subito la finestra Mac alla geometria scelta, mostrando icona e spinner nella nuova area fino al frame Windows. Questo aggiorna la precedente attesa alla vecchia dimensione. Durante il trascinamento resta soltanto il rettangolo di anteprima. Conservare conferma della geometria, filtro dei frame e presentazione effettiva prima di scoprire il contenuto; nessun invio intermedio di resize.
