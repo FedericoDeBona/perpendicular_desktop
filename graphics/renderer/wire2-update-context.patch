@@ -1,0 +1,58 @@
+--- a/src/neptune/npt_transport_defs.h
++++ b/src/neptune/npt_transport_defs.h
+@@ -263,4 +263,5 @@
+-   /* Explicit pad matches the trailing padding the header's uint64_t
+-    * forces on this struct.  Without it the host body decode (which
+-    * excludes the header) under-reads by 4 bytes versus guest sizeof. */
+-   uint32_t pad;
++   /* Explicit so the body has no implicit padding before context_id. */
++   uint32_t pad;
++   /* Wire2 guest update ABI: zero uses the resource's immediate context;
++    * otherwise record on this registered D3D11 context. D3D12 sends zero. */
++   uint64_t context_id;
+--- a/src/neptune/npt_resource.h
++++ b/src/neptune/npt_resource.h
+@@ -29 +29 @@
+-                    uint64_t resource_id, uint32_t subresource,
++                    uint64_t resource_id, uint64_t context_id, uint32_t subresource,
+--- a/src/neptune/npt_resource.c
++++ b/src/neptune/npt_resource.c
+@@ -29 +29 @@
+-                    uint64_t resource_id, uint32_t subresource,
++                    uint64_t resource_id, uint64_t context_id, uint32_t subresource,
+@@ -37,2 +37,2 @@
+-   /* Recover the device and immediate context from the resource.
+-    * Both calls add refs that we release after UpdateSubresource. */
++   /* Resolve the resource and retain the selected D3D11 context for the
++    * update. A nonzero context id must preserve deferred recording. */
+@@ -53,0 +54,4 @@
++      if (context_id) {
++         npt_log("resource_update: D3D12 update cannot name a D3D11 context");
++         return;
++      }
+@@ -104,5 +108,12 @@
+-   PFN_ID3D11Device_GetImmediateContext get_ctx =
+-      NPT_COM_VTBL_FUNC(PFN_ID3D11Device_GetImmediateContext,
+-                        npt_com_vtable(device),
+-                        NPT_VTBL_ID3D11Device_GetImmediateContext);
+-   get_ctx(device, &imm_ctx);
++   if (context_id) {
++      imm_ctx = npt_context_lookup_object(ctx, NULL, context_id,
++                                          NPT_OBJECT_TYPE_ID3D11DEVICECONTEXT);
++      if (imm_ctx)
++         npt_com_add_ref(imm_ctx);
++   } else {
++      PFN_ID3D11Device_GetImmediateContext get_ctx =
++         NPT_COM_VTBL_FUNC(PFN_ID3D11Device_GetImmediateContext,
++                           npt_com_vtable(device),
++                           NPT_VTBL_ID3D11Device_GetImmediateContext);
++      get_ctx(device, &imm_ctx);
++   }
+@@ -110 +121 @@
+-      npt_log("resource_update: GetImmediateContext returned NULL");
++      npt_log("resource_update: no matching D3D11 context");
+--- a/src/neptune/npt_dispatch.c
++++ b/src/neptune/npt_dispatch.c
+@@ -234 +234 @@
+-   npt_resource_update(ctx, header->object_id, cmd.subresource,
++   npt_resource_update(ctx, header->object_id, cmd.context_id, cmd.subresource,

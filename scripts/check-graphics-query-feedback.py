@@ -6,6 +6,7 @@ one query, then releases both. Does not install or configure anything. A pass
 only establishes agreement after known completion, not correct early-completion
 ordering, rendering compatibility, or general GPU reliability.
 """
+import argparse
 import json
 from pathlib import Path
 import subprocess
@@ -107,11 +108,16 @@ public static class PerpendicularQueryFeedback {
 
 
 def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--socket', type=Path,
+                        help='Private control socket of the VM being qualified')
+    options = parser.parse_args()
     control = Path(__file__).resolve().with_name('control_guest.py')
     script = ("$ErrorActionPreference='Stop'; Add-Type -TypeDefinition @'\n"
               + SOURCE + "\n'@; [PerpendicularQueryFeedback]::Run() | ConvertTo-Json -Depth 6")
+    target = ['--socket', str(options.socket)] if options.socket else []
     result = subprocess.run([
-        sys.executable, str(control), 'execute', '--timeout-seconds', '20',
+        sys.executable, str(control), *target, 'execute', '--timeout-seconds', '20',
         r'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe',
         '--', '-NoProfile', '-Command', script,
     ], capture_output=True, text=True, timeout=30)

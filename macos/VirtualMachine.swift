@@ -236,7 +236,11 @@ final class VirtualMachineController {
             // Retina window capture needs contiguous 16 MiB driver pools. The
             // measured 256 MiB aperture fragmented below that size with two
             // ordinary apps; use the next PCI BAR size for this local 3D path.
-            arguments += ["-device","virtio-ramfb-gl,id=display0,addr=0x8,disable-legacy=on,neptune=on,blob=on,hostmem=512M,max_outputs=1,xres=1280,yres=800"]
+            // The signed v0.4 driver deduplicates connected->connected
+            // notifications, so a later RFB resize may not refresh its modes.
+            // Seed the single monitor with the Mac's bounded Retina raster.
+            let initialDisplay=HostDisplay.current().first?.guestPixelSize ?? NSSize(width:1280,height:800)
+            arguments += ["-device","virtio-ramfb-gl,id=display0,addr=0x8,disable-legacy=on,neptune=on,blob=on,hostmem=512M,max_outputs=1,xres=\(Int(initialDisplay.width)),yres=\(Int(initialDisplay.height))"]
         }else{arguments += ["-device","ramfb"]}
         machine = try launch("qemu-system-aarch64",arguments,log:"qemu.log",executable:native?.executable,
             environment:native?.environment(directory:displayDirectory,session:session,primary:HostDisplay.current().first(where:\.primary)))

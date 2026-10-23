@@ -73,4 +73,26 @@ Un risultato positivo non rileva necessariamente un completamento prematuro cond
 Non allineare soltanto il contatore host a Begin: questo lascerebbe riutilizzabile il risultato precedente delle query End-only. La correzione deve mantenere invalidazione guest e pubblicazione host coerenti. Il pacchetto ufficiale v0.4 ARM64 è un candidato distinto: il suo binario richiede Wire2 e non può sostituire soltanto il driver nel runtime Wire1 attuale. Niente sostituzione di DLL firmati, test-signing o dichiarazione artificiosa di compatibilità del protocollo.
 
 
-Il candidato v0.4/Wire2 è stato successivamente provato e ritirato: il numero Wire comune non basta. Il guest invia RESOURCE_UPDATE con header80byte/context_id a offset72, mentre la base host selezionata ne decodifica72. Anche correggendo quel campo e preservando il contesto D3D11 richiesto, il boot reale fallisce ancora durante la decodifica. I due candidati e le patch sperimentali rimangono privati; il pacchetto ordinario conserva Wire1. Prima di un altro tentativo occorre identificare opcode e byte consumati al punto del guasto. VERIFICATION.md registra anche i due arresti ordinari falliti, il recupero da checkpoint e la successiva finestra hardware leggibile; nessuna qualificazione v0.4 viene dichiarata.
+I primi due candidati v0.4/Wire2 sono stati provati e ritirati: il numero Wire comune non basta. Il guest invia RESOURCE_UPDATE con header80byte/context_id a offset72, mentre la base host selezionata ne decodifica72. Anche correggendo quel campo e preservando il contesto D3D11 richiesto, il boot reale fallisce ancora durante la decodifica. I due candidati e le patch sperimentali rimangono privati; il pacchetto ordinario conserva Wire1. Prima di un altro tentativo occorre identificare opcode e byte consumati al punto del guasto. VERIFICATION.md registra anche i due arresti ordinari falliti, il recupero da checkpoint e la successiva finestra hardware leggibile; nessuna qualificazione v0.4 viene dichiarata.
+
+
+## Protocollo corrispondente al driver v0.4
+
+La prova isolata successiva identifica il secondo confine errato: `ID3D11Device::CheckFeatureSupport`/`0xff00571e`,48byte dichiarati contro32consumati. Il guest trasmette il buffer sia in ingresso sia in uscita; il vecchio decoder lo considerava solo output. Non basta allargare RESOURCE_UPDATE o scartare i16byte residui: si perderebbe anche il formato richiesto dal chiamante.
+
+Il generatore esatto è [osy/neptune-protocol f510a6e](https://github.com/osy/neptune-protocol/commit/f510a6e41ea89a6d626de4da9d9b02978a770e37), indicato anche dal file guest generato. Tutti i311file guest/client/comuni generati coincidono byte per byte con [virtio-win-mesa bf536bb](https://github.com/osy/virtio-win-mesa/tree/bf536bba65454900d782fa7417bc95c1608d7483/src/virtio/neptune/neptune-protocol). Il decoder host viene rigenerato interamente dalla medesima sorgente, sopra il renderer `cf5af71359b224a9a482e9b5a67f8160497dc951`. Il controllo circoscritto sul vero codec, prima del framing, passa48→48 e conserva `DXGI_FORMAT_A8_UNORM=65`; prima48→32 e formato0. Il nuovo framing del generatore non è la prova della correzione del contenuto.
+
+`prepare-native-wire2.py` riproduce la preparazione su copie private: controlla i due archivi, i23input del trasporto nativo e il checkout Git pulito del generatore, applica le cinque patch di durata/ammissione/scanout, aggiunge `wire2-update-context.patch` e verifica l'inventario completo del peer. Rigenera i file host/comuni, conserva log e ricevuta e non installa né qualifica runtime. La patch RESOURCE_UPDATE richiede soltanto Wire2, conserva il contesto D3D11 nominato dal guest e non va applicata al runtime Wire1. La diagnostica temporanea del decoder è esclusa.
+
+Esempio con percorsi privati già predisposti, usando Python con PyYAML6.0.3, Mako1.3.10 e MarkupSafe3.0.3:
+
+```sh
+python scripts/prepare-native-wire2.py \
+  --base-archive /private/qa/upstream-base.tar.gz \
+  --renderer-archive /private/qa/upstream-wire2.tar.gz \
+  --protocol /private/qa/protocol-f510 \
+  --reference /private/tools/graphics-rebuild-sync-channel-20261019 \
+  --output /private/qa/new-source
+```
+
+Il source preparato è stato compilato con Meson sul profilo privato e2job. Il candidato con diagnostica passa il controllo EVENT anche tramite `--socket` della VM separata, apre il documento e Settings in hardware. WinUI/HDR conserva etichette mancanti; non è risolto. Il runtime finale senza diagnostica è compilato e firmato ma non ancora avviato. Il pacchetto ordinario resta Wire1: prove, hash e prossimo passaggio in VERIFICATION.md e RESTART_PLAN.md.
