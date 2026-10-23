@@ -1,0 +1,103 @@
+--- a/src/dxmt/dxmt_command_queue.cpp
++++ b/src/dxmt/dxmt_command_queue.cpp
+@@ -23,10 +23,79 @@
+ #include "util_env.hpp"
+ #include "util_win32_compat.h"
+ #include <atomic>
++#ifndef _WIN32
++#include <fcntl.h>
++#include <sys/stat.h>
++#include <unistd.h>
++#endif
+ 
+ #define ASYNC_ENCODING 1
+ 
+ namespace dxmt {
++
++#ifndef _WIN32
++/* Private diagnostic: one process, at most four command buffers or two seconds.
++ * No work unless explicitly enabled and armed in the owner's private directory.
++ * Process lifetime owns this state; detached deadline threads never touch a
++ * CommandQueue object that could already have been destroyed. */
++static void NativeCaptureChunk(WMT::Device device) {
++  struct State {
++    std::mutex mutex;
++    std::string directory = env::getEnvVar("DXMT_NATIVE_CAPTURE_DIR");
++    bool active = false;
++    bool done = false;
++    unsigned remaining = 0;
++  };
++  static State *state = new State();
++  if (state->directory.empty()) return;
++  std::lock_guard<std::mutex> guard(state->mutex);
++  if (state->done) return;
++  auto stop = [](State *s, const char *reason) {
++    if (!s->active) return;
++    auto pool = WMT::MakeAutoreleasePool();
++    WMT::CaptureManager::sharedCaptureManager().stopCapture();
++    s->active = false;
++    s->done = true;
++    WARN("native capture: stopped pid=", getpid(), " reason=", reason);
++  };
++  if (state->active) {
++    if (state->remaining) { --state->remaining; return; }
++    stop(state, "four command buffers");
++    return;
++  }
++  struct stat directory;
++  if (lstat(state->directory.c_str(), &directory) != 0 || !S_ISDIR(directory.st_mode) ||
++      directory.st_uid != getuid() || (directory.st_mode & 0777) != 0700) return;
++  const std::string arm = state->directory + "/" + std::to_string(getpid()) + ".arm";
++  int fd = open(arm.c_str(), O_RDONLY | O_NOFOLLOW | O_CLOEXEC);
++  if (fd < 0) return;
++  struct stat file;
++  const bool valid = fstat(fd, &file) == 0 && S_ISREG(file.st_mode) &&
++    file.st_uid == getuid() && (file.st_mode & 0777) == 0600 && file.st_size == 0;
++  close(fd);
++  if (!valid) { state->done = true; return; }
++  if (unlink(arm.c_str()) != 0) return;
++  const std::string output = state->directory + "/pid-" + std::to_string(getpid()) + ".gputrace";
++  struct stat existing;
++  if (lstat(output.c_str(), &existing) == 0) { state->done = true; return; }
++  WMTCaptureInfo info;
++  info.capture_object = device;
++  info.destination = WMTCaptureDestinationGPUTraceDocument;
++  info.output_url.set(output.c_str());
++  const bool started = WMT::CaptureManager::sharedCaptureManager().startCapture(info);
++  // Always attempt stop after an explicit request, including a failed start.
++  // An incorrect wrapper result must never leave a live capture unbounded.
++  state->active = true;
++  state->remaining = 3;
++  WARN("native capture: started pid=", getpid(), " start_result=", started, " max_buffers=4 deadline_ms=2000");
++  std::thread([stop]() {
++    std::this_thread::sleep_for(std::chrono::seconds(2));
++    std::lock_guard<std::mutex> deadline_guard(state->mutex);
++    stop(state, "two second deadline");
++  }).detach();
++}
++#endif
++
+ 
+ void *
+ CommandChunk::allocate_cpu_heap(size_t size, size_t alignment) {
+@@ -121,6 +190,9 @@
+ CommandQueue::CommitChunkInternal(CommandChunk &chunk, uint64_t seq) {
+ 
+   auto pool = WMT::MakeAutoreleasePool();
++#ifndef _WIN32
++  NativeCaptureChunk(device);
++#endif
+ 
+   switch (capture_state.getNextAction(chunk.frame_)) {
+   case CaptureState::NextAction::StartCapture: {
+--- a/src/winemetal/unix/winemetal_unix.c
++++ b/src/winemetal/unix/winemetal_unix.c
+@@ -1405,7 +1405,7 @@
+   NSString *path_str = [[NSString alloc] initWithCString:info->output_url.ptr encoding:NSUTF8StringEncoding];
+   NSURL *url = [[NSURL alloc] initFileURLWithPath:path_str];
+   desc.outputURL = url;
+-  [(MTLCaptureManager *)params->capture_manager startCaptureWithDescriptor:desc error:nil];
++  params->ret = [(MTLCaptureManager *)params->capture_manager startCaptureWithDescriptor:desc error:nil];
+   [url release];
+   [path_str release];
+   [desc release];
