@@ -601,7 +601,7 @@ unsafe fn run(target: &Target, outbox: &Outbox, stop: &AtomicBool, driver:D3D_DR
                 // CPU read and Unmap, so the next GPU copy can run while we
                 // read the other slot. All bands belong to this retained WGC
                 // frame; there are no inter-frame leases or waits for reuse.
-                let mut submit_band=|band:usize| -> Result<(),String> {
+                let mut submit_band=|band:usize, flush:bool| -> Result<(),String> {
                     let backing=staging[band % staging_count].as_ref().ok_or("Missing readback resource")?;
                     let first_row=band*readback_rows;
                     let rows=readback_rows.min(height as usize-first_row);
@@ -609,11 +609,13 @@ unsafe fn run(target: &Target, outbox: &Outbox, stop: &AtomicBool, driver:D3D_DR
                         right:(x + width) as u32, bottom:y as u32 + first_row as u32 + rows as u32, back:1 };
                     let submitted = Instant::now();
                     context.CopySubresourceRegion(backing, 0, 0, 0, 0, &texture, 0, Some(&region));
-                    context.Flush();
+                    if flush {context.Flush();}
                     copy_submit_ms += submitted.elapsed().as_secs_f64() * 1000.0;
                     Ok(())
                 };
-                for band in 0..staging_count {submit_band(band)?;}
+                // Submit the primed pair together. Refilled slots still flush
+                // immediately to overlap GPU copies with the other CPU read.
+                for band in 0..staging_count {submit_band(band, band+1==staging_count)?;}
                 for band in 0..band_count {
                     let first_row=band*readback_rows;
                     let rows=readback_rows.min(height as usize-first_row);
@@ -650,7 +652,7 @@ unsafe fn run(target: &Target, outbox: &Outbox, stop: &AtomicBool, driver:D3D_DR
                     context.Unmap(backing, 0);
                     unmap_ms += unmapping.elapsed().as_secs_f64() * 1000.0;
                     if !valid { break; }
-                    if band+staging_count<band_count {submit_band(band+staging_count)?;}
+                    if band+staging_count<band_count {submit_band(band+staging_count,true)?;}
                 }
                 // Every pixel and padding byte is initialized before publication.
                 if valid { pixels.set_len(total); }
