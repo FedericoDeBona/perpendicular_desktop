@@ -249,10 +249,11 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
             else if changed && !role.transient && !nativeResizing && self.expectedSize == nil {applyFrameSize()}
         }
         if first || changed {onGeometry?()}
-        if first,ProcessInfo.processInfo.environment["PERPENDICULAR_CAPTURE_DIAGNOSTIC"]=="1",let image=content.currentImage{
+        let diagnosticSequence=(packet.header["sequence"] as? NSNumber)?.uint64Value ?? 0
+        if (first || (1...3).contains(diagnosticSequence)),ProcessInfo.processInfo.environment["PERPENDICULAR_CAPTURE_DIAGNOSTIC"]=="1",let image=content.currentImage{
             let directory=FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/Perpendicular Restart/QA")
             try? FileManager.default.createDirectory(at:directory,withIntermediateDirectories:true,attributes:[.posixPermissions:0o700])
-            let name=id.replacingOccurrences(of:":",with:"-")
+            let name=id.replacingOccurrences(of:":",with:"-")+(first ? "":"-frame-\(diagnosticSequence)")
             try? NSBitmapImageRep(cgImage:image).representation(using:.png,properties:[:])?.write(to:directory.appendingPathComponent(name+".png"))
             var metadata=packet.header;metadata["title"]=window.title;metadata["role"]=role.rawValue
             if let bytes=try? JSONSerialization.data(withJSONObject:metadata,options:[.prettyPrinted]){try? bytes.write(to:directory.appendingPathComponent(name+".json"))}

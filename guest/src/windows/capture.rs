@@ -21,7 +21,7 @@ use windows::{
             Direct3D11::*,
             Dwm::{DWMWA_EXTENDED_FRAME_BOUNDS, DwmGetWindowAttribute},
             Dxgi::{Common::DXGI_FORMAT_B8G8R8A8_UNORM, IDXGIDevice},
-            Gdi::ClientToScreen,
+            Gdi::{ClientToScreen, RedrawWindow, RDW_INVALIDATE, RDW_ERASE, RDW_ALLCHILDREN},
         },
         System::WinRT::{
             Direct3D11::{CreateDirect3D11DeviceFromDXGIDevice, IDirect3DDxgiInterfaceAccess},
@@ -297,6 +297,8 @@ unsafe fn run(target: &Target, outbox: &Outbox, stop: &AtomicBool, driver:D3D_DR
             let mut sequence = target.capture_frames.load(Ordering::Acquire);
             let mut generation = target.geometry.lock().unwrap().0.max(1);
             let mut recovery_reported=false;
+            let mut inspect_initial_dialog = !target.full_frame && catalogue::window_class(target.hwnd)=="#32770";
+            let mut initial_dialog_repaint:Option<bool> = None;
             let mut previous = [0; 6];
             let mut staging: Option<ID3D11Texture2D> = None;
             let mut staging_size = (0, 0);
@@ -495,6 +497,18 @@ unsafe fn run(target: &Target, outbox: &Outbox, stop: &AtomicBool, driver:D3D_DR
                 if stop.load(Ordering::Acquire) || !outbox.connected.load(Ordering::Acquire) {
                     break;
                 }
+                // An admitted classic dialog can deliver one entirely empty
+                // WGC frame and no later update, even though its controls exist.
+                // Invalidate just this authenticated HWND once; let its own UI
+                // thread repaint asynchronously. Preserve the empty frame and
+                // the request result rather than treating a retry as new data.
+                if inspect_initial_dialog {
+                    inspect_initial_dialog=false;
+                    if pixels.iter().all(|byte| *byte==0) && target.valid() && IsWindowVisible(hwnd).as_bool() {
+                        initial_dialog_repaint=Some(RedrawWindow(Some(hwnd),None,None,
+                            RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN).as_bool());
+                    }
+                }
                 target.set_phase(Phase::Publishing);
                 sequence += 1;
                 let bounds = catalogue::frame_bounds(hwnd).ok_or("Window geometry unavailable")?;
@@ -516,6 +530,7 @@ unsafe fn run(target: &Target, outbox: &Outbox, stop: &AtomicBool, driver:D3D_DR
                 }
                 outbox.frame(&target.id,json!({"type":"frame","window":target.id,"sequence":sequence,"generation":generation,
                     "width":width,"height":height,"stride":stride,"bytes":pixels.len(),"capture":if software_recovery {"wgc-software-recovery"} else {"wgc-hardware-readback"},
+                    "guestInitialDialogRepaint":initial_dialog_repaint,
                     "guestBufferReused":u8::from(buffer_reused),
                     "guestReadbackMilliseconds":readback_milliseconds,
                     "guestCopySubmitMilliseconds":copy_submit_ms,"guestMapMilliseconds":map_ms,
