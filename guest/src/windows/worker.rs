@@ -21,7 +21,8 @@ use std::{
 use windows::Win32::{
     Foundation::{HWND, LPARAM, POINT, WPARAM},
     Graphics::Gdi::ClientToScreen,
-    System::Com::{COINIT_APARTMENTTHREADED, CoCreateGuid, CoInitializeEx},
+    System::{Com::{COINIT_APARTMENTTHREADED, CoCreateGuid, CoInitializeEx},
+        Power::{EXECUTION_STATE,ES_CONTINUOUS,ES_DISPLAY_REQUIRED,SetThreadExecutionState}},
     UI::{
         HiDpi::{DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, SetThreadDpiAwarenessContext},
         Input::KeyboardAndMouse::*,
@@ -111,6 +112,26 @@ fn activate_window(hwnd: HWND) -> Result<(), String> {
     }
 }
 
+// Viewing a streamed window does not count as guest user input. Keep the
+// display available before starting WGC, including after an idle disconnect.
+// This guard lives on the connected worker thread, which owns the request.
+// Do not change the power plan, block screen locking or request system sleep
+// prevention. Restore this thread's previous requirements on every exit.
+struct ConnectedDisplay(EXECUTION_STATE);
+impl ConnectedDisplay {
+    fn acquire()->Option<Self> {
+        let previous=unsafe {SetThreadExecutionState(ES_CONTINUOUS|ES_DISPLAY_REQUIRED)};
+        if previous.0==0 {log("Display request unavailable for host connection");None}
+        else {log("Display required for host connection");Some(Self(previous))}
+    }
+}
+impl Drop for ConnectedDisplay {
+    fn drop(&mut self) {
+        let restored=unsafe {SetThreadExecutionState(self.0|ES_CONTINUOUS)}.0!=0;
+        log(format!("Host display request released restored={restored}"));
+    }
+}
+
 pub fn run(path: &Path) -> Result<(), String> {
     let config: Configuration =
         serde_json::from_slice(&std::fs::read(path).map_err(error)?).map_err(error)?;
@@ -182,6 +203,7 @@ pub fn run(path: &Path) -> Result<(), String> {
 
 impl Worker {
     fn connected(&mut self, mut stream: TcpStream, config: &Configuration) -> Result<(), String> {
+        let _display=ConnectedDisplay::acquire();
         stream.set_nodelay(true).map_err(error)?;
         stream
             .set_read_timeout(Some(Duration::from_secs(8)))
