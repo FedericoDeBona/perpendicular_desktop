@@ -3,7 +3,7 @@ use serde_json::{Value, json};
 use std::{
     sync::{
         Arc, Mutex,
-        atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering},
+        atomic::{AtomicBool, AtomicU8, AtomicU32, AtomicU64, Ordering},
         mpsc,
     },
     time::{Duration, Instant},
@@ -33,7 +33,7 @@ use windows::{
             HiDpi::{DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, SetThreadDpiAwarenessContext, GetDpiForWindow},
             WindowsAndMessaging::{GetClientRect, GetWindowRect, IsIconic, IsWindowVisible,
                 GetAncestor, GetWindow, GetWindowDisplayAffinity, GetWindowLongPtrW, SetWindowLongPtrW,
-                GetWindowThreadProcessId, GetForegroundWindow,
+                GetWindowThreadProcessId, GetForegroundWindow, GetLastActivePopup,
                 GA_ROOT, GW_OWNER, GWL_EXSTYLE, GWL_STYLE, WS_CAPTION, WS_CHILD,
                 WS_EX_APPWINDOW, WS_EX_TOOLWINDOW, WS_EX_NOACTIVATE},
         },
@@ -45,6 +45,30 @@ use windows::{
 pub enum Phase {
     Starting, Validating, Waiting, Reading, Mapping, Publishing,
     Recreating, Closing, Ended, Error, Invalidated, Backpressure,
+}
+
+// Per-run observations; callbacks never lock the capture or control thread.
+#[derive(Default)]
+pub struct Progress {
+    starts: AtomicU64,
+    callbacks: AtomicU64,
+    acquired: AtomicU64,
+    recreates: AtomicU64,
+    // Observation only: an empty pool returns null; code 0 is not a GPU fault.
+    dequeue_hresult: AtomicU32,
+    enabled_at_start: AtomicBool,
+    deferred_for_modal: AtomicBool,
+}
+impl Progress {
+    pub fn snapshot(&self)->Value {
+        json!({"sessionStarts":self.starts.load(Ordering::Relaxed),
+            "callbacks":self.callbacks.load(Ordering::Relaxed),
+            "acquired":self.acquired.load(Ordering::Relaxed),
+            "poolRecreates":self.recreates.load(Ordering::Relaxed),
+            "lastDequeueFailureHRESULT":format!("{:#010x}",self.dequeue_hresult.load(Ordering::Relaxed)),
+            "enabledAtStart":self.enabled_at_start.load(Ordering::Relaxed),
+            "deferredForModal":self.deferred_for_modal.load(Ordering::Relaxed)})
+    }
 }
 
 pub struct Target {
@@ -61,6 +85,7 @@ pub struct Target {
     pub item_creation: Arc<Mutex<()>>,
     pub capture_phase: AtomicU8,
     pub capture_frames: AtomicU64,
+    pub progress: Arc<Progress>,
     pub capture_device: Mutex<Option<Value>>,
     pub readback_device_lost: AtomicBool,
     // Generation, dimensions, and image origin relative to the Windows client origin.
@@ -77,6 +102,7 @@ impl Target {
             item_creation:self.item_creation.clone(),
             capture_phase: AtomicU8::new(Phase::Starting as u8),
             capture_frames: AtomicU64::new(0),
+            progress: Arc::new(Progress::default()),
             capture_device: Mutex::new(None),
             readback_device_lost: AtomicBool::new(false),
             geometry: Mutex::new((0, 0, 0, 0, 0)),
@@ -294,6 +320,28 @@ unsafe fn run(target: &Target, outbox: &Outbox, stop: &AtomicBool, driver:D3D_DR
             }
             std::thread::sleep(Duration::from_millis(75));
         }
+        // A new WGC session on a main disabled by an existing classic modal
+        // dialog can start successfully yet never receive FrameArrived, even
+        // after that dialog closes. Wait for that authenticated modal to end
+        // before allocating the device/pool. Do not enable or close windows,
+        // restart a running capture, or defer arbitrary disabled windows.
+        let hwnd=HWND(target.hwnd as *mut _);
+        while target.full_frame && !IsWindowEnabled(hwnd).as_bool() {
+            if stop.load(Ordering::Acquire) || !outbox.connected.load(Ordering::Acquire) || !target.valid() {
+                return Ok(());
+            }
+            let popup=GetLastActivePopup(hwnd);
+            if popup==hwnd || popup.0.is_null() || !IsWindowVisible(popup).as_bool()
+                || GetWindow(popup,GW_OWNER).unwrap_or_default()!=hwnd
+                || catalogue::window_class(popup.0 as usize)!="#32770"
+                || identity::owner(popup,&target.sid,target.session)!=Some((target.pid,target.creation)) {
+                break;
+            }
+            target.progress.deferred_for_modal.store(true,Ordering::Relaxed);
+            target.set_phase(Phase::Waiting);
+            std::thread::sleep(Duration::from_millis(75));
+        }
+        target.set_phase(Phase::Starting);
         let item = create_item(target, &interop)?;
         if stop.load(Ordering::Acquire) || !outbox.connected.load(Ordering::Acquire) || !target.valid() {
             return Ok(());
@@ -353,10 +401,14 @@ unsafe fn run(target: &Target, outbox: &Outbox, stop: &AtomicBool, driver:D3D_DR
         // and real dialogs must not also be baked into the document's pixels.
         let _ = session.SetIncludeSecondaryWindows(false);
         let (arrived, ready) = mpsc::sync_channel(1);
+        let progress=target.progress.clone();
         let registration = pool.FrameArrived(&TypedEventHandler::new(move |_,_| {
+            progress.callbacks.fetch_add(1,Ordering::Relaxed);
             let _ = arrived.try_send(()); Ok(())
         })).map_err(error)?;
+        target.progress.enabled_at_start.store(IsWindowEnabled(HWND(target.hwnd as *mut _)).as_bool(),Ordering::Relaxed);
         session.StartCapture().map_err(|e| gpu_error(&device, "StartCapture", e))?;
+        target.progress.starts.fetch_add(1,Ordering::Relaxed);
         let result = (|| -> Result<(), String> {
             let mut sequence = target.capture_frames.load(Ordering::Acquire);
             let mut generation = target.geometry.lock().unwrap().0.max(1);
@@ -382,13 +434,18 @@ unsafe fn run(target: &Target, outbox: &Outbox, stop: &AtomicBool, driver:D3D_DR
                 target.set_phase(Phase::Waiting);
                 let _ = ready.recv_timeout(Duration::from_millis(100));
                 target.set_phase(Phase::Reading);
-                let Ok(mut frame) = pool.TryGetNextFrame() else {
-                    continue;
+                let mut frame = match pool.TryGetNextFrame() {
+                    Ok(frame)=>{target.progress.acquired.fetch_add(1,Ordering::Relaxed);frame},
+                    Err(error)=>{
+                        target.progress.dequeue_hresult.store(error.code().0 as u32,Ordering::Relaxed);
+                        continue;
+                    }
                 };
                 // The pool has two slots. Prefer its newest available frame,
                 // rather than spending readback and network time on an old one.
                 for _ in 0..2 {
                     let Ok(newer) = pool.TryGetNextFrame() else {break};
+                    target.progress.acquired.fetch_add(1,Ordering::Relaxed);
                     let _ = frame.Close(); frame = newer;
                 }
                 // Keep this GPU frame until the replaceable network slot is
@@ -403,6 +460,7 @@ unsafe fn run(target: &Target, outbox: &Outbox, stop: &AtomicBool, driver:D3D_DR
                 let backpressure_milliseconds = waiting.elapsed().as_secs_f64() * 1000.0;
                 for _ in 0..2 {
                     let Ok(newer) = pool.TryGetNextFrame() else {break};
+                    target.progress.acquired.fetch_add(1,Ordering::Relaxed);
                     let _ = frame.Close(); frame = newer;
                 }
                 target.set_phase(Phase::Reading);
@@ -423,6 +481,7 @@ unsafe fn run(target: &Target, outbox: &Outbox, stop: &AtomicBool, driver:D3D_DR
                     generation += 1;
                     staging = [None,None];
                     target.set_phase(Phase::Recreating);
+                    target.progress.recreates.fetch_add(1,Ordering::Relaxed);
                     pool.Recreate(
                         &runtime,
                         DirectXPixelFormat::B8G8R8A8UIntNormalized,
@@ -443,6 +502,7 @@ unsafe fn run(target: &Target, outbox: &Outbox, stop: &AtomicBool, driver:D3D_DR
                     frame.Close().map_err(error)?;
                     staging = [None,None];
                     target.set_phase(Phase::Recreating);
+                    target.progress.recreates.fetch_add(1,Ordering::Relaxed);
                     pool.Recreate(
                         &runtime,
                         DirectXPixelFormat::B8G8R8A8UIntNormalized,

@@ -556,6 +556,7 @@ impl Worker {
                         let mut state = window_control::state(&target)?;
                         state["capturePhase"] = json!(target.capture_phase_name());
                         state["captureFrames"] = json!(target.capture_frames.load(Ordering::Acquire));
+                        state["captureProgress"] = target.progress.snapshot();
                         state["captureDevice"] = json!(*target.capture_device.lock().unwrap());
                         state["captureStopped"] = json!(window.stop.as_ref()
                             .map(|stop| stop.load(Ordering::Acquire)).unwrap_or(true));
@@ -967,6 +968,7 @@ impl Worker {
             item_creation: Arc::new(Mutex::new(())),
             capture_phase: AtomicU8::new(capture::Phase::Starting as u8),
             capture_frames: AtomicU64::new(0),
+            progress: Arc::new(capture::Progress::default()),
             capture_device: Mutex::new(None),
             readback_device_lost: AtomicBool::new(false),
             geometry: Mutex::new((0, 0, 0, 0, 0)),
@@ -1106,6 +1108,7 @@ impl Worker {
                 item_creation: Arc::new(Mutex::new(())),
                 capture_phase: AtomicU8::new(capture::Phase::Starting as u8),
                 capture_frames: AtomicU64::new(0),
+                progress: Arc::new(capture::Progress::default()),
                 capture_device: Mutex::new(None),
             readback_device_lost: AtomicBool::new(false),
                 geometry: Mutex::new((0, 0, 0, 0, 0)),
