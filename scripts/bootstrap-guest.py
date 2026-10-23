@@ -13,6 +13,7 @@ parser=argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--graphics-driver-dir',type=Path,help='Stage the pinned ARM64 graphics driver in addition to guest tools')
 parser.add_argument('--network-driver-dir',type=Path,help='Stage the pinned ARM64 NetKVM driver for a fresh Windows install')
 parser.add_argument('--remove-legacy',action='store_true',help='Stage the explicit one-time removal of previous Perpendicular agents and sharing')
+parser.add_argument('--dry-run',action='store_true',help='Verify inputs without creating or attaching a setup CD')
 arguments=parser.parse_args()
 
 repo=Path(__file__).resolve().parent.parent
@@ -37,6 +38,15 @@ if arguments.network_driver_dir:
 if arguments.graphics_driver_dir:
     sources += [repo/'guest/install-graphics.ps1',repo/'guest/install-graphics.cmd',repo/'guest/graphics-driver.json']
     manifest=json.loads((repo/'guest/graphics-driver.json').read_text())
+    # The signed UMD and native host must speak the same qualified protocol.
+    # Check the final app's runtime before creating media or changing the VM.
+    runtime_path=repo/'.build/Perpendicular.app/Contents/Resources/Native3D/runtime.json'
+    if not runtime_path.is_file():
+        raise RuntimeError('Build the matching Native3D app before preparing its graphics driver.')
+    runtime=json.loads(runtime_path.read_text())
+    for field,expected in manifest['native_runtime'].items():
+        if runtime.get(field)!=expected:
+            raise RuntimeError('Graphics driver requires a different packaged Native3D runtime: '+field)
     for name,expected in manifest['members'].items():
         path=arguments.graphics_driver_dir/name
         if path.name != name or hashlib.sha256(path.read_bytes()).hexdigest()!=expected:
@@ -50,6 +60,9 @@ for source in drivers:
 for source in network_drivers:
     digest.update(source.read_bytes())
 digest.update(configuration['token'].encode())
+if arguments.dry_run:
+    print('Setup inputs verified. No CD created or attached.')
+    raise SystemExit(0)
 setup=root/'Bootstrap'/digest.hexdigest()[:16]
 setup.mkdir(parents=True,exist_ok=True,mode=0o700)
 for source in sources:

@@ -1,18 +1,23 @@
 {
   "schema_version": 1,
-  "release": "https://github.com/osy/kvm-guest-drivers-windows/releases/tag/v0.3",
-  "archive_sha256": "af976d1fc6cbd1c8462ba06a45f860ae1638d9a6a007e2bfe95bb9b235251c5d",
+  "release": "https://github.com/osy/kvm-guest-drivers-windows/releases/tag/v0.4",
+  "archive_sha256": "512da8ef87eaf4f65282e2535bf1dc2b32b0b0f825508093532fbb1ab0b09116",
   "members": {
-    "neptune_umd.dll": "bb181fe8c67c18b597ca9a34078195a6d506e282e72c18ed9da49c151c19257f",
-    "neptune_umd_arm64.dll": "8fbb509b3b5e2a06b67392fe6b711832227e1ab802e096bf7d723ace6c66b437",
-    "neptune_umd_ec.dll": "1171ecf0c7725425589f997202cfcc7cbfb7338886b87e71f34b4335e9ced941",
-    "neptune_umd_x86.dll": "7547e89f6a8dfae5f9c4f078b32328901cc09047adaafdbbef00191b48673d90",
-    "vgpusrv.exe": "abbab0a9cbfe79eecbe18af302a5ca78283a5b07337034fde39bed1306def876",
-    "viogpu3d.cat": "19d04aa184b1f9ee63c41bf514005cc1460d9ac21edbbd2dd974283e6d0f1643",
-    "viogpu3d.inf": "e66a4afc07d4232b2dfb4a1788801c8e4cbf478a36d5c32d47eda2c628972423",
-    "viogpu3d.sys": "25d2a877fdf23394b927d924e0315375f1da9db29c00bfb550048b1811d5a332",
-    "viogpuap.exe": "7160026ba8bf717580818f4fffc10c816b93fad6b85959668ef1f2a34f0c4853",
+    "neptune_umd.dll": "cf7cd403a6b89b519bbffc43c43f42d8da5ba97259fe7b5a6e489628d8c8a05a",
+    "neptune_umd_arm64.dll": "b62f463ec4e4bea8ee75b9c6d5ca59d1c9faa9a62273d9fdf7dc75e4f593af36",
+    "neptune_umd_ec.dll": "d03a3a342ee0952f3d6315c008970a4507746de295b1891cede56efb567c46f3",
+    "neptune_umd_x86.dll": "b1581a53d4db0ce7247180e66017cd84d9a8d17a2767b3a39982012e85d3f9dc",
+    "vgpusrv.exe": "a513558b2b9b438880b3a3fc38a1fa0b1a9f471a59408b5c0f80346035bb4781",
+    "viogpu3d.cat": "a2060c06f56d06431c71c1c3e4aac06401d70d0c86be76e76ef38727e7e243b0",
+    "viogpu3d.inf": "22dca43cb82e02eb1467effa0ea8e3288da0c8a07b99c6e3bd95a79b98f92545",
+    "viogpu3d.sys": "cfbc713754c7f0dcae4803017af3a0ebfc781d37fd57604f8ee8f2cfdad306c4",
+    "viogpuap.exe": "96650501230dfa97a5320b25346685af50b7c8eb935c566987d4802046ff2adf",
     "virtio_icd.json": "7a215445f88230a5d3d7b44f007bbffdc79f0829d54d4ae72984686faed1ce14",
-    "vulkan_virtio.dll": "424a0bfd7309df750ed2415c7c2fab48f96f91bd0b4a5fcfa34f9e567f8976dd"
+    "vulkan_virtio.dll": "d4a5f7d6b28b6f1d3faaf70ccbc5cda42bc3340d9d8bd0f89f4e7202e824fd13"
+  },
+  "native_runtime": {
+    "guest_wire_version": 2,
+    "renderer_source_pin": "cf5af71359b224a9a482e9b5a67f8160497dc951",
+    "protocol_source_pin": "f510a6e41ea89a6d626de4da9d9b02978a770e37"
   }
 }
