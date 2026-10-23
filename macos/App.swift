@@ -355,6 +355,7 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
         let frame=controller.window.frame
         let content=controller.window.contentRect(forFrameRect:frame)
         let row:[String:Any]=["id":id,"title":controller.window.title,"role":controller.role.rawValue,
+            "presentation":controller.presentationState,
             "macMinimumFramePoints":["width":controller.window.minSize.width,"height":controller.window.minSize.height],
             "macMaximumFramePoints":["width":controller.window.maxSize.width,"height":controller.window.maxSize.height],
             "macContentPoints":["x":content.minX,"y":content.minY,"width":content.width,"height":content.height],

@@ -432,6 +432,7 @@ unsafe fn run(target: &Target, outbox: &Outbox, stop: &AtomicBool, driver:D3D_DR
             let classic_dialog = !target.full_frame && catalogue::window_class(target.hwnd)=="#32770";
             let mut inspect_initial_frame = target.full_frame || classic_dialog;
             let mut initial_frame_repaint:Option<bool> = None;
+            let mut initial_frame_opaque_percent:Option<usize> = None;
             let mut previous = [0; 6];
             let mut staging: [Option<ID3D11Texture2D>;2] = [None,None];
             let mut staging_size = (0, 0);
@@ -665,14 +666,25 @@ unsafe fn run(target: &Target, outbox: &Outbox, stop: &AtomicBool, driver:D3D_DR
                 if stop.load(Ordering::Acquire) || !outbox.connected.load(Ordering::Acquire) {
                     break;
                 }
-                // A new WGC session can deliver one entirely empty frame on
-                // a main or classic dialog and no later update until input.
+                // A new WGC session can deliver an empty or partly missing
+                // first frame and no later update until input. Use the same
+                // rectangular-window coverage threshold as the Mac transition
+                // gate; this is a one-time invalidation, not a pixel repair or
+                // a claim that the producer's GPU synchronization is correct.
                 // Invalidate just this authenticated HWND once; let its own UI
-                // thread repaint asynchronously. Preserve the empty frame and
+                // thread repaint asynchronously. Preserve the partial frame and
                 // the request result rather than treating a retry as new data.
                 if inspect_initial_frame {
                     inspect_initial_frame=false;
-                    if pixels.iter().all(|byte| *byte==0) && target.valid() && IsWindowVisible(hwnd).as_bool() {
+                    let (mut opaque,mut sampled)=(0usize,0usize);
+                    for row in (0..height as usize).step_by((height as usize/24).max(1)) {
+                        for column in (0..width as usize).step_by((width as usize/32).max(1)) {
+                            sampled+=1;
+                            if pixels[row*stride+column*4+3]>=224 {opaque+=1;}
+                        }
+                    }
+                    initial_frame_opaque_percent=Some(opaque*100/sampled);
+                    if opaque*100<sampled*85 && target.valid() && IsWindowVisible(hwnd).as_bool() {
                         let mut flags=RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN;
                         if target.full_frame {flags |= RDW_FRAME;}
                         initial_frame_repaint=Some(RedrawWindow(Some(hwnd),None,None,flags).as_bool());
@@ -700,6 +712,7 @@ unsafe fn run(target: &Target, outbox: &Outbox, stop: &AtomicBool, driver:D3D_DR
                 outbox.frame(&target.id,json!({"type":"frame","window":target.id,"sequence":sequence,"generation":generation,
                     "width":width,"height":height,"stride":stride,"bytes":pixels.len(),"capture":if software_recovery {"wgc-software-recovery"} else {"wgc-hardware-readback"},
                     "guestInitialFrameRepaint":initial_frame_repaint,
+                    "guestInitialFrameOpaquePercent":initial_frame_opaque_percent,
                     "guestInitialDialogRepaint":if classic_dialog {initial_frame_repaint} else {None},
                     "guestDirtyRegionMode":frame_dirty_mode,"guestDirtyRegionCount":dirty_regions,
                     "guestReadbackSlots":staging_count,"guestReadbackBands":band_count,

@@ -69,6 +69,9 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
     private var transitionActive=false
     private var transitionID=UUID()
     private var transitionAfterPresentation:UInt64=0
+    private var lastPresentedID:UInt64=0
+    private var receivedSequence:UInt64=0
+    private var acceptedSequence:UInt64=0
     private var transitionTimeout:Task<Void,Never>?
     private var displayUpdating=false
     private var displayPriorRaster:NSSize?
@@ -196,6 +199,7 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
             // Re-present its valid image only when the raster is unchanged.
             content.redrawCurrentFrame()
         }
+        trace(updating ? "frame_display_wait":"frame_display_ready")
     }
     private func beginFrameTransition(_ message:String){
         guard !role.transient,!transitionActive else{return}
@@ -222,6 +226,8 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
         trace("frame_transition_stalled")
     }
     private func frameWasPresented(_ id:UInt64){
+        lastPresentedID=max(lastPresentedID,id)
+        if transitionActive {trace("frame_transition_presented")}
         guard transitionActive,id>=transitionAfterPresentation,!displayUpdating,
               !geometryFinishing,expectedSize == nil,!nativeResizing else{return}
         endFrameTransition()
@@ -334,6 +340,7 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
     func present(_ packet:GuestPacket){
         let first = !hasFrame
         guard let width=packet.header["width"] as? Int,let height=packet.header["height"] as? Int else{return}
+        receivedSequence=(packet.header["sequence"] as? NSNumber)?.uint64Value ?? 0
         let nextSize=NSSize(width:width,height:height)
         if resizePreviewFrame != nil {
             // Keep the original window and image intact until the mouse-up
@@ -350,6 +357,7 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
             recordRejectedDiagnostic(packet)
             rejectedTransitionPacket=packet;trace("frame_transition_rejected");return
         }
+        acceptedSequence=receivedSequence
         hasFrame=true
         if first {
             fallbackPixelScale=min(1,min(1100/Double(width),800/Double(height)))
@@ -364,6 +372,7 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
             else if changed && !role.transient && !nativeResizing && self.expectedSize == nil {applyFrameSize()}
         }
         if first || changed {onGeometry?()}
+        if transitionActive {trace("frame_transition_accepted")}
         let diagnosticSequence=(packet.header["sequence"] as? NSNumber)?.uint64Value ?? 0
         if (first || (1...3).contains(diagnosticSequence)),ProcessInfo.processInfo.environment["PERPENDICULAR_CAPTURE_DIAGNOSTIC"]=="1",let image=content.currentImage{
             let directory=FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/Perpendicular Restart/QA")
@@ -521,7 +530,14 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
         applyingSourceGeometry=true
         window.setFrame(frame,display:true)
         applyingSourceGeometry=false
-        if !role.transient,hasFrame,window.isVisible,window.frame != frame,!adjustedInitialPlacement {
+        // AppKit rounds titled windows to whole points. An odd guest height
+        // at 2:1 scale can therefore differ by half a point without moving
+        // the window. Sending that rounding back to a fixed-size dialog asks
+        // Windows for an impossible resize and strands its first-frame gate.
+        let placed=window.frame
+        let roundedPlacement=abs(placed.minX-frame.minX)<=0.5 && abs(placed.minY-frame.minY)<=0.5
+            && abs(placed.maxX-frame.maxX)<=0.5 && abs(placed.maxY-frame.maxY)<=0.5
+        if !role.transient,hasFrame,window.isVisible,!roundedPlacement,!adjustedInitialPlacement {
             // Reconcile AppKit's placement only after the window is visible
             // with an image. An unsuccessful correction must not restart on
             // every snapshot and keep input suspended indefinitely.
@@ -847,11 +863,21 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
             content.clearModifiers();bridge.command("release")
         }
     }
+    var presentationState:[String:Any] {
+        ["transitionActive":transitionActive,"displayUpdating":displayUpdating,
+         "requiredPresentationID":transitionAfterPresentation,"presentedID":lastPresentedID,
+         "submittedID":content.presentationID,"hasFrame":hasFrame,
+         "receivedSequence":receivedSequence,"acceptedSequence":acceptedSequence,
+         "framePixels":[frameSize.width,frameSize.height],
+         "geometryFinishing":geometryFinishing,"nativeResizing":nativeResizing,
+         "expectedSize":expectedSize != nil]
+    }
     private func trace(_ event:String){
         guard ProcessInfo.processInfo.environment["PERPENDICULAR_STATE_TRACE"] == "1" else{return}
         var value:[String:Any]=["type":event,"window":id,
             "uptime":ProcessInfo.processInfo.systemUptime,"mouseButtons":NSEvent.pressedMouseButtons,
             "nativeResizing":nativeResizing,"expectedSize":expectedSize != nil,"inputBlocked":inputBlocked,
+            "presentation":presentationState,
             "mac":[window.frame.minX,window.frame.minY,window.frame.width,window.frame.height],
             "guest":[sourceRect.minX,sourceRect.minY,sourceRect.width,sourceRect.height]]
         if let preview=resizePreviewFrame {value["previewMac"]=[preview.minX,preview.minY,preview.width,preview.height]}
