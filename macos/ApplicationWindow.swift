@@ -65,6 +65,15 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
     let role:WindowRole
     let window:NSWindow
     let content=ApplicationContent(frame:NSRect(x:0,y:0,width:640,height:480))
+    private let transitionView=WindowTransitionView(frame:.zero)
+    private var transitionActive=false
+    private var transitionID=UUID()
+    private var transitionAfterPresentation:UInt64=0
+    private var transitionTimeout:Task<Void,Never>?
+    private var displayUpdating=false
+    private var displayPriorRaster:NSSize?
+    private var allowTransparentFrame=false
+    private var rejectedTransitionPacket:GuestPacket?
     private let bridge:GuestBridge
     private var sourceClosed=false
     private var closing=false
@@ -121,6 +130,7 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
     var onClose:(()->Void)?
     var onGeometry:(()->Void)?
     var onPointerExit:(()->Void)?
+    var onRecovery:(()->Void)?
     var activateOnFirstShow=true
 
     init(id:String,title:String,role:WindowRole,bridge:GuestBridge){
@@ -142,7 +152,11 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
             window=NSWindow(contentRect:rect,styleMask:[.titled,.closable,.resizable,.miniaturizable],backing:.buffered,defer:false)
         }
         super.init()
-        window.title=title;window.contentView=content;window.delegate=self;window.isReleasedWhenClosed=false
+        let container=NSView(frame:rect)
+        content.frame=container.bounds;content.autoresizingMask=[.width,.height];container.addSubview(content)
+        transitionView.frame=container.bounds;transitionView.autoresizingMask=[.width,.height]
+        if !role.transient {container.addSubview(transitionView)}
+        window.title=title;window.contentView=container;window.delegate=self;window.isReleasedWhenClosed=false
         // Dialogs use native Mac chrome, which needs a solid backing rather
         // than showing the owner's pixels through the title bar.
         window.isOpaque = role == .dialog
@@ -157,8 +171,72 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
         }
         if role == .main {content.leftMouse={ [weak self] event,value in self?.receive(.leftMouse(event,value)) }}
         content.pointerExited={ [weak self] in self?.onPointerExit?() }
+        content.onFramePresented={ [weak self] id in self?.frameWasPresented(id) }
+        content.onRenderError={ [weak self] message in self?.failFrameTransition();self?.onError?(message) }
+        transitionView.recovery={ [weak self] in self?.onRecovery?() }
+        transitionView.reveal={ [weak self] in
+            guard let self else{return};self.allowTransparentFrame=true
+            if let packet=self.rejectedTransitionPacket {self.rejectedTransitionPacket=nil;self.present(packet)}
+            else {self.endFrameTransition()}
+        }
         (window as? GuestDocumentWindow)?.closeRequested={ [weak self] in self?.requestClose() }
         if role == .main {NSApp.addWindowsItem(window,title:title,filename:false)}
+        beginFrameTransition("Preparazione della finestra…")
+    }
+    func identifyApplication(name:String,icon:NSImage?){transitionView.identify(name:name,icon:icon)}
+    func setDisplayUpdating(_ updating:Bool){
+        if updating,!displayUpdating {displayPriorRaster=sharedDisplay?.guestFrame.size}
+        displayUpdating=updating
+        if updating {beginFrameTransition("Connessione a Windows…")}
+        else if transitionActive,hasFrame,sourceRect.size == frameSize,
+                content.presentationID>=transitionAfterPresentation
+                    || (displayPriorRaster != nil && displayPriorRaster == sharedDisplay?.guestFrame.size) {
+            // A settings notification need not repaint an unchanged window.
+            // Re-present its valid image only when the raster is unchanged.
+            content.redrawCurrentFrame()
+        }
+    }
+    private func beginFrameTransition(_ message:String){
+        guard !role.transient,!transitionActive else{return}
+        if hasFrame {content.clearModifiers();bridge.command("release")}
+        transitionActive=true;transitionID=UUID();allowTransparentFrame=false
+        content.inputSuspended=true
+        transitionAfterPresentation=content.presentationID+1
+        content.resizeEnabled=false;transitionView.begin(message)
+        transitionTimeout?.cancel();let identity=transitionID
+        transitionTimeout=Task{@MainActor [weak self] in
+            try? await Task.sleep(for:.seconds(10))
+            guard !Task.isCancelled,let self,self.transitionID == identity,self.transitionActive else{return}
+            self.failFrameTransition("Windows sta impiegando più tempo.")
+        }
+        trace("frame_transition_started")
+        onGeometry?()
+    }
+    func failFrameTransition(_ message:String="La finestra non è ancora pronta."){
+        guard !role.transient else{return}
+        if !transitionActive {beginFrameTransition(message)}
+        transitionTimeout?.cancel();transitionTimeout=nil
+        transitionAfterPresentation=content.presentationID+1
+        transitionView.stalled(message,canReveal:hasFrame || rejectedTransitionPacket != nil)
+        trace("frame_transition_stalled")
+    }
+    private func frameWasPresented(_ id:UInt64){
+        guard transitionActive,id>=transitionAfterPresentation,!displayUpdating,
+              !geometryFinishing,expectedSize == nil,!nativeResizing else{return}
+        endFrameTransition()
+    }
+    private func endFrameTransition(){
+        content.clearModifiers();content.inputSuspended=false
+        transitionActive=false;transitionTimeout?.cancel();transitionTimeout=nil;rejectedTransitionPacket=nil
+        content.resizeEnabled=role == .main && canResize
+        if window.isKeyWindow {window.makeFirstResponder(content)}
+        let identity=transitionID
+        transitionView.finish{[weak self] in
+            guard let self,self.transitionID == identity,!self.transitionActive else{return}
+            self.transitionView.isHidden=true
+        }
+        trace("frame_transition_finished")
+        onGeometry?()
     }
     /// Only a display snapshot confirmed by the frontend can enable shared
     /// placement. Removing that snapshot invalidates every outstanding gesture.
@@ -196,9 +274,13 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
         if !nextMinimized,let x=item["x"] as? Double,let y=item["y"] as? Double,
            let width=item["width"] as? Double,let height=item["height"] as? Double,width>0,height>0 {
             let next=NSRect(x:x,y:y,width:width,height:height)
+            if next.size != sourceRect.size,next.size != frameSize,!nativeResizing {
+                beginFrameTransition("Aggiornamento della finestra…")
+            }
             sourceRect=next
         }
         canResize=item["resizable"] as? Bool ?? true
+        content.resizeEnabled=role == .main && canResize && !transitionActive
         if let width=item["minWidth"] as? Double,let height=item["minHeight"] as? Double,
            width.isFinite,height.isFinite,(1...32768).contains(width),(1...32768).contains(height) {
             minimumPixels=NSSize(width:max(160,width),height:max(100,height))
@@ -228,6 +310,7 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
             window.parent?.removeChildWindow(window)
             owner.window.addChildWindow(window,ordered:.above)
         }
+        if role.transient,owner.transitionActive {window.orderOut(nil);return}
         guard !sourceRect.isEmpty,!owner.sourceRect.isEmpty else{return}
         if role.transient || (role == .dialog && sharedDisplay == nil && !placedDialog) {
             let scale=owner.content.imageScale
@@ -260,14 +343,18 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
             }
             removeResizePreview()
         }
+        let changed=nextSize != frameSize
+        if first || changed {beginFrameTransition("Aggiornamento della finestra…")}
+        guard content.present(packet,requireSolidFrame:transitionActive && !allowTransparentFrame && !role.transient) else {
+            rejectedTransitionPacket=packet;trace("frame_transition_rejected");return
+        }
         hasFrame=true
         if first {
             fallbackPixelScale=min(1,min(1100/Double(width),800/Double(height)))
             pixelScale=sharedDisplay.map{Double($0.pixelScale)} ?? fallbackPixelScale
             applySizeLimits()
         }
-        let changed=nextSize != frameSize
-        frameSize=nextSize;content.present(packet)
+        frameSize=nextSize
         if let failure=content.renderFailure {onError?(failure)}
         if geometryFinishing,geometryConfirmed != nil,let expectedSize,expectedSize == nextSize {finishSharedGeometry()}
         else if geometryInteraction == nil {
@@ -295,6 +382,7 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
         return false
     }
     func windowWillClose(_ notification:Notification){
+        transitionTimeout?.cancel();transitionTimeout=nil
         if !role.transient {cancelInput()}
         cancelSharedGeometry()
         if role == .main {NSApp.removeWindowsItem(window)}
@@ -313,6 +401,7 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
         }else {deliver(value)}
     }
     private func deliver(_ value:WindowInput){
+        guard !transitionActive else{return}
         switch value {
         case .input(let packet):
             if packet["event"] as? String == "clipboard",let action=packet["action"] as? String {transferClipboard(action)}
@@ -415,14 +504,7 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
             guard expectedSize == nil,!nativeResizing else{bridge.command("release");return}
             let next=MouseGesture(point:point,frame:window.frame,down:value,clicks:event.clickCount)
             gesture=next
-            var edges:ResizeEdges=[]
-            if canResize {
-                let local=event.locationInWindow
-                if local.x<6 {edges.insert(.left)}
-                if local.x>window.frame.width-6 {edges.insert(.right)}
-                if local.y<6 {edges.insert(.bottom)}
-                if local.y>window.frame.height-6 {edges.insert(.top)}
-            }
+            let edges=canResize ? ResizeEdges(point:event.locationInWindow,bounds:NSRect(origin:.zero,size:window.frame.size)):[]
             if !edges.isEmpty {resolve(next,.resize(edges));return}
             var query=value;query["window"]=id
             inputBlocked=true
@@ -479,6 +561,7 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
                 if up {commitSharedGeometry()}else{updateSharedGeometry()}
             }
         case .resize(let edges):
+            edges.cursor.set()
             let frame=edges.frame(from:gesture.frame,delta:delta,minimum:window.minSize,maximum:window.maxSize)
             updateResizePreview(frame)
             if up {commitResize()}
@@ -528,6 +611,12 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
         return NSSize(width:max(160,(size.width/pixelScale).rounded()),height:max(100,(size.height/pixelScale).rounded()))
     }
     private func commitResize(){
+        if resizeTargetSize == frameSize,(sharedDisplay == nil || sharedTarget == sourceRect) {
+            if sharedDisplay != nil {cancelSharedGeometry()}else{finishResize()}
+            if transitionActive,hasFrame {endFrameTransition()}
+            return
+        }
+        beginFrameTransition("Aggiornamento della finestra…")
         if sharedDisplay != nil {nativeResizing=false;commitSharedGeometry();return}
         guard canResize,!role.transient else{nativeResizing=false;content.suspendedPointer=false;removeResizePreview();return}
         resizeSerial+=1;let serial=resizeSerial
@@ -538,12 +627,12 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
         resizeDeadline=Task{@MainActor [weak self] in
             try? await Task.sleep(for:.seconds(3))
             guard !Task.isCancelled,let self,self.resizeSerial == serial,self.expectedSize != nil else{return}
-            self.finishResize();self.onError?("Windows did not finish resizing the window.")
+            self.finishResize();self.failFrameTransition();self.onError?("Windows did not finish resizing the window.")
         }
         bridge.command("resize",["window":id,"width":width,"height":height],timeout:.seconds(2)){ [weak self] result in
             guard let self,self.resizeSerial == serial,self.expectedSize != nil else{return}
             guard case .success(let reply)=result,let value=reply["value"] as? [String:Any],let width=value["width"] as? Int,let height=value["height"] as? Int else{
-                self.finishResize();self.onError?("Windows could not resize this window.");return
+                self.finishResize();self.failFrameTransition();self.onError?("Windows could not resize this window.");return
             }
             self.expectedSize=NSSize(width:width,height:height)
             self.presentResizePreviewPacket()
@@ -688,7 +777,7 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
         else if let geometryConfirmed {sourceRect=geometryConfirmed}
         cancelSharedGeometry()
         applySourceFrame();bridge.command("release");onGeometry?()
-        if let error {onError?(error)}
+        if let error {failFrameTransition();onError?(error)}
         trace("geometry_finished")
     }
     private func cancelSharedGeometry(){
@@ -718,6 +807,7 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
     }
     private func toggleZoom(){
         guard canResize,expectedSize == nil else{return}
+        beginFrameTransition("Aggiornamento della finestra…")
         beginResize(preview:false)
         if let restore=zoomRestore {window.setFrame(restore,display:true);zoomRestore=nil}
         else if let sharedDisplay {

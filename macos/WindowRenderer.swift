@@ -40,11 +40,13 @@ final class WindowRenderer {
     private var drawing=false
     private var dirty=false
     private var changes:UInt64=0
+    private var presentationID:UInt64=0
     private var targetDrawableSize=CGSize.zero
     private var targetScale=1.0
     private lazy var drawableAccess=DrawableAccess(layer)
     private var reportedSources=Set<String>()
     var onError:((String)->Void)?
+    var onPresented:((UInt64)->Void)?
 
     // Device and pipeline are immutable and shared by all window presenters.
     // Keep command queues per presenter so a slow window does not change the
@@ -98,12 +100,14 @@ final class WindowRenderer {
         changes &+= 1
         dirty=true;draw()
     }
-    func present(_ pixels:Data,width:Int,height:Int,stride:Int?=nil){
+    func present(_ pixels:Data,width:Int,height:Int,stride:Int?=nil,presentationID:UInt64=0){
+        self.presentationID=presentationID
         external=nil;shared=nil;nativeCache=false
         self.pixels=pixels;pixelStride=stride ?? width*4;size=NSSize(width:width,height:height)
         revision &+= 1;changes &+= 1;dirty=true;draw()
     }
-    func present(_ surface:GuestFrameSurface){
+    func present(_ surface:GuestFrameSurface,presentationID:UInt64=0){
+        self.presentationID=presentationID
         guard surface.texture.device.registryID == device.registryID else{onError?("The graphics devices do not match.");return}
         external=nil;nativeCache=false;pixels=Data();texture=nil;shared=surface
         size=NSSize(width:surface.width,height:surface.height)
@@ -146,6 +150,7 @@ final class WindowRenderer {
         guard dirty,(shared != nil || external != nil || nativeCache || !pixels.isEmpty),size.width>0,size.height>0,
               targetDrawableSize.width>0,targetDrawableSize.height>0 else{return}
         let width=Int(size.width),height=Int(size.height)
+        let presentedID=presentationID,renderedScale=targetScale
         let drawableSize=CGSize(width:drawable.texture.width,height:drawable.texture.height)
         let lease=external
         let frameSurface=shared
@@ -196,6 +201,13 @@ final class WindowRenderer {
         encoder.endEncoding()
         if lease != nil {nativeCache=true;external=nil}
         dirty=drawableSize != targetDrawableSize || layer.contentsScale != targetScale
+        drawable.addPresentedHandler { [weak self] _ in
+            Task{@MainActor [weak self] in
+                guard let self,self.size == NSSize(width:width,height:height),
+                      self.targetDrawableSize == drawableSize,self.targetScale == renderedScale else{return}
+                self.onPresented?(presentedID)
+            }
+        }
         command.present(drawable)
         command.addCompletedHandler { [weak self,lease,frameSurface] buffer in
             // The producer image has been copied into our own texture and every

@@ -15,6 +15,11 @@ struct WindowGeometryChecks {
             == NSRect(x:100,y:200,width:800,height:552),"Resize must stay within the current guest display")
         precondition(ResizeEdges.left.frame(from:original,delta:NSPoint(x:-200,y:0),minimum:minimum,maximum:maximum)
             == NSRect(x:-100,y:200,width:600,height:300),"Dragging the left edge must keep the right edge fixed")
+        let hitBounds=NSRect(x:0,y:0,width:400,height:300)
+        precondition(ResizeEdges(point:NSPoint(x:10,y:290),bounds:hitBounds) == [.left,.top],"The top-left cursor and gesture must agree")
+        precondition(ResizeEdges(point:NSPoint(x:390,y:10),bounds:hitBounds) == [.right,.bottom],"The bottom-right cursor and gesture must agree")
+        precondition(ResizeEdges(point:NSPoint(x:399,y:150),bounds:hitBounds) == .right,"The right border must resize horizontally")
+        precondition(ResizeEdges(point:NSPoint(x:20,y:20),bounds:hitBounds).isEmpty,"The interior must keep normal app input")
         let host=HostDisplay(id:1,frame:NSRect(x:100,y:-80,width:1470,height:956),
             workArea:NSRect(x:100,y:-80,width:1470,height:923),scale:2,primary:true)
         precondition(host.guestPixelSize == NSSize(width:2940,height:1846),"The guest raster must exclude the Mac menu bar")

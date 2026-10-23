@@ -6,7 +6,12 @@ final class ApplicationContent:NSView {
     var pointerExited:(()->Void)?
     var transient=false
     var suspendedPointer=false
+    var inputSuspended=false
     var leftMouse:((NSEvent,[String:Any])->Void)?
+    var onFramePresented:((UInt64)->Void)?
+    var onRenderError:((String)->Void)?
+    var resizeEnabled=false {didSet{if oldValue != resizeEnabled {window?.invalidateCursorRects(for:self)}}}
+    private(set) var presentationID:UInt64=0
     private(set) var generation:UInt64=0
     private var renderer:WindowRenderer?
     private var latestPixels=Data()
@@ -44,7 +49,10 @@ final class ApplicationContent:NSView {
         super.init(frame:frame);wantsLayer=true
         do {
             let renderer=try WindowRenderer();self.renderer=renderer;layer=renderer.layer
-            renderer.onError={ [weak self] message in self?.renderFailure=message }
+            renderer.onError={ [weak self] message in self?.renderFailure=message;self?.onRenderError?(message) }
+            renderer.onPresented={ [weak self] id in
+                self?.onFramePresented?(id)
+            }
         }catch {
             renderFailure="Metal is unavailable: \(error.localizedDescription)"
             layer?.backgroundColor=NSColor.clear.cgColor;layer?.contentsGravity = .resizeAspect
@@ -62,25 +70,58 @@ final class ApplicationContent:NSView {
         let area=NSTrackingArea(rect:.zero,options:[.mouseMoved,.mouseEnteredAndExited,.activeAlways,.inVisibleRect],owner:self)
         addTrackingArea(area);tracking=area;super.updateTrackingAreas()
     }
-    func present(_ packet:GuestPacket){
+    override func resetCursorRects(){
+        guard resizeEnabled else{addCursorRect(bounds,cursor:.arrow);return}
+        for (edges,rect) in ResizeEdges.regions(in:bounds) {
+            let flipped=NSRect(x:rect.minX,y:bounds.maxY-rect.maxY,width:rect.width,height:rect.height)
+            addCursorRect(flipped,cursor:edges.cursor)
+        }
+    }
+    @discardableResult func present(_ packet:GuestPacket,requireSolidFrame:Bool=false)->Bool{
         guard let width=packet.header["width"] as? Int,let height=packet.header["height"] as? Int,
               let generation=packet.header["generation"] as? UInt64,
-              width>0,height>0,width<=8_388_608/height else{return}
+              width>0,height>0,width<=8_388_608/height else{return false}
         let stride=packet.header["stride"] as? Int ?? width*4
-        guard stride>=width*4,stride<=34*1024*1024/height else{return}
+        guard stride>=width*4,stride<=34*1024*1024/height else{return false}
         if let surface=packet.surface {
-            guard surface.width==width,surface.height==height,surface.stride==stride,surface.byteCount==stride*height else{return}
+            guard surface.width==width,surface.height==height,surface.stride==stride,surface.byteCount==stride*height else{return false}
+            if requireSolidFrame,!Self.hasSolidFrame(surface.contents,width:width,height:height,stride:stride){return false}
             latestSurface=surface;latestPixels=Data()
         }else{
-            guard packet.pixels.count==stride*height else{return}
+            guard packet.pixels.count==stride*height else{return false}
+            if requireSolidFrame,!packet.pixels.withUnsafeBytes({Self.hasSolidFrame($0.baseAddress!,width:width,height:height,stride:stride)}){return false}
             latestSurface=nil;latestPixels=packet.pixels
         }
         self.generation=generation;source=NSSize(width:width,height:height);sourceStride=stride
-        if let renderer {
-            if let latestSurface {renderer.present(latestSurface)}
-            else {renderer.present(latestPixels,width:width,height:height,stride:stride)}
+        redrawCurrentFrame();return true
+    }
+    /// Only a transition gate for rectangular app windows, not a content oracle.
+    /// Allow rounded corners, but don't uncover an empty or mostly missing image.
+    private static func hasSolidFrame(_ pointer:UnsafeRawPointer,width:Int,height:Int,stride:Int)->Bool{
+        let bytes=pointer.assumingMemoryBound(to:UInt8.self)
+        var opaque=0,total=0
+        for row in Swift.stride(from:0,to:height,by:max(1,height/24)) {
+            for column in Swift.stride(from:0,to:width,by:max(1,width/32)) {
+                total+=1;if bytes[row*stride+column*4+3]>=224 {opaque+=1}
+            }
         }
-        else {CATransaction.begin();CATransaction.setDisableActions(true);layer?.contents=currentImage;CATransaction.commit()}
+        return opaque*100>=total*85
+    }
+    @discardableResult func redrawCurrentFrame()->Bool{
+        guard source.width>0,source.height>0 else{return false}
+        presentationID &+= 1
+        if let renderer {
+            if let latestSurface {renderer.present(latestSurface,presentationID:presentationID)}
+            else {renderer.present(latestPixels,width:Int(source.width),height:Int(source.height),stride:sourceStride,presentationID:presentationID)}
+        }else {
+            let id=presentationID
+            CATransaction.begin();CATransaction.setDisableActions(true)
+            CATransaction.setCompletionBlock{[weak self] in Task{@MainActor in
+                guard let self,self.presentationID == id else{return};self.onFramePresented?(id)
+            }}
+            layer?.contents=currentImage;CATransaction.commit()
+        }
+        return true
     }
     private func point(_ event:NSEvent)->[String:Any]?{
         guard source.width>0,source.height>0 else{return nil}
@@ -149,6 +190,7 @@ final class ApplicationContent:NSView {
         value["event"]="scroll";value["delta"]=max(-2400,min(2400,amount));emit(value)
     }
     override func flagsChanged(with event:NSEvent){
+        guard !inputSuspended else{return}
         synchronizeModifiers(event.modifierFlags)
     }
     private func synchronizeModifiers(_ flags:NSEvent.ModifierFlags){
@@ -176,6 +218,7 @@ final class ApplicationContent:NSView {
         keyDown(with:event);return true
     }
     override func keyDown(with event:NSEvent){
+        guard !inputSuspended else{return}
         let flags=event.modifierFlags
         let shift=flags.contains(.shift) ? [0x10]:[]
         if flags.contains(.command),!flags.contains(.control),!flags.contains(.option){

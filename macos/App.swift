@@ -60,6 +60,7 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
     private var displaySetupID=UUID()
     private var displayEpoch:String?
     private var displayRevision=0
+    private var displayUpdating=false
     private var displayReadable=false
     private var displayConfigurable=false
     private var sharedGeometryCapable=false
@@ -579,8 +580,9 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
         if count==0 {iconVisibility.removeValue(forKey:app.id);visibleIcons.remove(app.id)}else{iconVisibility[app.id]=count}
     }
     private func pumpApplicationIcons(){
+        let needed=visibleIcons.union(windowApps.values)
         guard connected,guestCapabilities["appIcon"] == true,loadingIconID == nil,
-              let app=apps.first(where:{visibleIcons.contains($0.id) && applicationIcons[$0.id] == nil && !failedIcons.contains($0.id)}) else{return}
+              let app=apps.first(where:{needed.contains($0.id) && applicationIcons[$0.id] == nil && !failedIcons.contains($0.id)}) else{return}
         let epoch=launcherEpoch;loadingIconID=app.id
         bridge.command("app_icon",["app":app.id],timeout:.seconds(8)){[weak self] result in
             guard let self,self.launcherEpoch == epoch,self.loadingIconID == app.id else{return}
@@ -604,6 +606,9 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
                 }
                 self.applicationIcons[app.id]=NSImage(cgImage:image,size:NSSize(width:width,height:height))
                 self.iconOrder.append(app.id)
+                for (id,window) in self.windows where self.windowApps[id] == app.id {
+                    window.identifyApplication(name:app.name,icon:self.applicationIcons[app.id])
+                }
             }else{self.failedIcons.insert(app.id)}
             self.pumpApplicationIcons()
         }
@@ -626,8 +631,8 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
         }
     }
     private func invalidateDisplay(_ message:String){
-        displayRevision+=1;sharedDisplay=nil;displayStatus=message
-        for window in windows.values {window.setSharedDisplay(nil)}
+        displayRevision+=1;displayUpdating=true;sharedDisplay=nil;displayStatus=message
+        for window in windows.values {window.setDisplayUpdating(true);window.setSharedDisplay(nil)}
     }
     @objc private func hostDisplaysChanged(){
         displaySetupTask?.cancel();displaySetupTask=nil
@@ -650,16 +655,18 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
         bridge.command("display_info",timeout:.seconds(5)){[weak self] result in
             guard let self,self.connected,self.displayEpoch == epoch,self.displayRevision == revision else{return}
             guard case .success(let reply)=result,let snapshot=reply["value"] as? [String:Any] else{
-                self.invalidateDisplay("Windows display could not be checked.");return
+                self.invalidateDisplay("Windows display could not be checked.")
+                for window in self.windows.values {window.failFrameTransition()};return
             }
             self.acceptDisplay(snapshot)
         }
     }
     private func acceptDisplay(_ snapshot:[String:Any]){
+        displayUpdating=false
         let host=HostDisplay.current()
         let confirmed=host.first(where:\.primary).flatMap{SharedDisplay.primary(host:$0,snapshot:snapshot)}
         sharedDisplay=sharedGeometryCapable ? confirmed:nil
-        for window in windows.values {window.setSharedDisplay(sharedDisplay)}
+        for window in windows.values {window.setSharedDisplay(sharedDisplay);window.setDisplayUpdating(false)}
         if confirmed != nil {displayStatus="Windows geometry matches Mac points (Retina presentation)."}
         else if let primary=(snapshot["displays"] as? [[String:Any]])?.first(where:{$0["primary"] as? Bool == true}),
                 let width=primary["width"] as? Int,let height=primary["height"] as? Int,
@@ -680,7 +687,9 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
             // accepts a mode switch. Retry only a few times during this setup.
             try? await Task.sleep(for:.seconds([1,3,8][attempt]))
             guard !Task.isCancelled,let self,self.connected,self.displayEpoch == epoch,self.displaySetupID == setupID else{return}
-            self.invalidateDisplay("Preparing Windows display…")
+            if self.sharedDisplay?.guestFrame.size != NSSize(width:width,height:height) {
+                self.invalidateDisplay("Preparing Windows display…")
+            }
             let revision=self.displayRevision
             self.bridge.command("display_configure",["width":width,"height":height],timeout:.seconds(5)){[weak self] result in
                 guard let self,self.connected,self.displayEpoch == epoch,self.displaySetupID == setupID else{return}
@@ -690,7 +699,10 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
                 guard self.displayRevision == revision else{self.readDisplay();return}
                 if case .failure=result {
                     if attempt<2 {self.configureDisplay(width:width,height:height,epoch:epoch,attempt:attempt+1)}
-                    else {self.status="Windows could not match the Mac display size.";self.readDisplay()}
+                    else {
+                        self.status="Windows could not match the Mac display size.";self.readDisplay()
+                        for window in self.windows.values {window.failFrameTransition()}
+                    }
                     return
                 }
                 if case .success(let reply)=result,let snapshot=reply["value"] as? [String:Any] {self.acceptDisplay(snapshot)}
@@ -785,13 +797,19 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
                     controller.onClose={ [weak self] in self?.windows.removeValue(forKey:id) }
                     controller.onGeometry={ [weak self] in self?.layoutChildren() }
                     controller.onPointerExit={ [weak self] in self?.pointerExited(id) }
+                    controller.onRecovery={ [weak self] in self?.showWindows() }
+                    controller.setDisplayUpdating(displayUpdating && displayReadable)
                     controller.setSharedDisplay(sharedDisplay)
                     windows[id]=controller
+                }
+                if let appID=windowApps[id] {
+                    windows[id]?.identifyApplication(name:apps.first(where:{$0.id == appID})?.name ?? "App Windows",icon:applicationIcons[appID])
                 }
                 windows[id]?.update(item)
                 if let frame=earlyFrames.removeValue(forKey:id){windows[id]?.present(frame);if let app=windowApps[id]{finishOpening(app,appeared:true)}}
             }
             layoutChildren()
+            pumpApplicationIcons()
             if !items.isEmpty,status != "Windows connected" {status="Windows connected"}
         case "frame":
             guard let id=value["window"] as? String else{return}
@@ -811,7 +829,7 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
             guard let id=value["window"] as? String,windows[id] != nil else{return}
             launcherNotice=value["message"] as? String
         case "window_error","launch_error":
-            if let id=value["window"] as? String {failedWindows.insert(id)}
+            if let id=value["window"] as? String {failedWindows.insert(id);windows[id]?.failFrameTransition()}
             refreshApplicationStates()
             // A rejected suggestion is diagnosed per surface in the guest.
             // It does not make its still-running document unavailable.
