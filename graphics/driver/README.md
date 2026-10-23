@@ -1,6 +1,6 @@
 # Esperimento di avvio dei comandi sotto lo scheduler Windows
 
-**Candidata non qualificata e non integrata nel prodotto.** Dopo l’autorizzazione alla prova isolata e il successivo «continua pure», il KMD auto-firmato ora si carica nel clone: versione `100.6.101.58004`, dispositivo con problema 0, servizio Running e firma Valid. La prova sul relativo adattatore hardware scade però dopo 20 secondi durante `D3D11CreateDevice` del primo dispositivo, prima di accodare il Wait. Nessun risultato qualificato sull’ordinamento delle fence, nessun confronto nell’app e nessun miglioramento grafico dimostrato.
+**Candidata non qualificata e non integrata nel prodotto.** Nel seguito autorizzato del24 ottobre sono stati superati caricamento e creazione del dispositivo Direct3D nel clone. La DLL ricompilata abilita ora lo scheduling soltanto nel processo che imposta `PERP_DRIVER_SCHEDULE_TRIAL=1`; occorre anche `NPT_PERF=multi_ring`, perché il ring privato dipende da quella capacità. Con entrambe le opzioni la prova raggiunge Wait/Clear/Copy/Signal, ma query e tutti4096pixel completano ancora con fence0. Quindi la candidata non corregge l’ordinamento e non dimostra un miglioramento grafico.
 
 ## Domanda e modifica candidata
 
@@ -32,3 +32,25 @@ Un ultimo avvio diretto della stessa58004, senza modifiche e senza ripetere la p
 Il successivo problema concreto è l’inizializzazione del dispositivo nel percorso utente, prima della verifica delle fence. Non cambiare Windows o promuovere il pacchetto sulla base del solo KMD caricato. Vedere `docs/VERIFICATION.md` per tentativi, evidenze e limiti.
 
 Le patch sono state controllate mediante applicazione inversa sui sorgenti della candidata compilata. Dischi, variabili UEFI, TPM, certificati, binari, media e log rimangono fuori Git. Nessun cambio di driver o protezioni nella VM ordinaria; nessuna promozione del runtime.
+
+## Seguito autorizzato del24 ottobre: inizializzazione isolata
+
+L’utente ha chiesto nuovamente di proseguire. Confronto nello stesso clone: medesimo codice kernel nativo, DLL ufficiali v0.4; poi DLL ricompilata con scheduling disattivato; infine attivato nel solo processo di verifica.
+
+Il primo pacchetto di confronto, INF58005/SYS58004/DLL58000, è stato installato ma rifiutato con problema31/`0xC0000182`, anche dopo un riavvio effettivo. La risorsa VERSIONINFO esisteva: nessuna nuova attribuzione alla sua assenza. Uniformati file/product version a58000 e INF, mantenendo le sezioni eseguibili del SYS byte per byte identiche, rifatti firma/catalogo e installazione forzata tramite API Windows nella copia: problema0/Running. [Microsoft richiede versioni coerenti fra INF, SYS e DLL](https://learn.microsoft.com/en-us/windows-hardware/drivers/display/wddm-2-1-features#driver-versioning). I due aggiornamenti di pacchetto differiscono anche per il metodo di installazione; il confronto non isola da solo ogni controllo interno del loader.
+
+SYS firmato coerente: `e0929b8c505fc6f5e0182773d762653109da9d9f41bd9fb2150bb3eea52c3dbf`. Con DLL originali `cf7cd403a6b8`/`b62f463ec4e4`, creazione/rilascio di un device esplicitamente VirtIO completati, feature level11.0, hash letti mentre il device è vivo. Arresto ACPI regolare e checkpoint offline223840Z conservati prima della successiva sostituzione.
+
+La nuova DLL ARM64 nativa `155bd647c09394fab4f99d451afa8b95aec6adc6ef2952f143e1fd41a2e9cd17` crea/rilascia il dispositivo con modifica disattivata. Solo `PERP_DRIVER_SCHEDULE_TRIAL=1`, senza multi_ring, produce E_FAIL durante l’inizializzazione; con `NPT_PERF=multi_ring` termina. I messaggi `PERP_DRIVER_INIT_TRACE=1` sono circoscritti alle fasi iniziali; la variante diagnostica `d9ba6f38603c8677198160a8268d21c98c472c6cc628bfeff13aa03d4d5eb2a5` registra inoltre soltanto i primi12invii per dispositivo. La patch include questa osservabilità opt-in e il gating per processo. Le varianti differiscono per diagnostica, non per la logica di ordinamento candidata.
+
+Il controllo fence completo sul pacchetto155b restituisce Wait CPU0,1771ms, query già completata prima del segnale, Map3,5919ms e tutti4096pixel `ff336699` con fence ancora0. La variante diagnostica conferma invii accettati (`hr=0`) su distinti contesti runtime per A/B e sul medesimo contesto Neptune con ring di autorizzazione distinti. Il successivo controllo serve soltanto a correlare eventi Wait/invio di Windows; nessuna finestra reale qualificata sulla candidata, nessuna promozione.
+
+Questo supera il precedente blocco di setup, senza risolvere le fence né spiegare da solo i vecchi errori del ring al boot globale. Non attivare la modifica in DWM o a livello macchina, non ricominciare una matrice di boot o cambiare edizione Windows. Evidenze e media rimangono in `QA/selfsigned-start-gate-20261023/followup-init-20261024`, fuori Git.
+
+La traccia DxgKrnl delimitata registra tre contesti del processo di controllo (trasporto Neptune interno, runtime A e runtime B), invii64byte sul contesto A e il Signal successivo su B. Il primo export XML è stato troncato: scartato e sostituito da estrazioni strutturate complete. Gli eventi estratti non bastano a dichiarare individuato il punto in cui viene persa la dipendenza Wait.
+
+È stata verificata un’ipotesi ulteriore precisa: creazione tramite `D3DWDDM2_0DDI_CORELAYER_DEVICECALLBACKS.pfnCreateContextVirtualCb`, che dispone di ContextTypeFlags, al posto del callback KT generico. Con selettoreALL0 (`ec41df2661a5`) il dispositivo si crea ma il Wait resta violato; anche con maschera esplicita3D/COMPUTE/COPY (`2fa0f89bc6b5`) query e pixel precedono il Signal. Entrambi i tentativi sono conservati nel QA e rimossi dalla patch mantenuta: nessuna correzione verificata su quel confine. La sola differenza di API non dimostra la causa.
+
+I raccoglitori privati di questi seguiti escono0 quando l’esecuzione termina, anche quando la semantica è errata: `fence-outcomes.json` distingue esecuzione riuscita da esito di ordinamento1 per tutte e quattro le DLL provate. Il controllo pubblico esistente continua a distinguere questi esiti.
+
+Chiusura del seguito: arresto ACPI regolare, checkpoint225426Z del tentativo finale conservato; frontend privato chiuso, zero processi della copia e ripristino offline del controllo223840Z. Copia ora spenta e recuperabile, nessuna attivazione globale della candidata. App ordinaria SHA70e1691ac09f e firma profonda/stretta riconfermati invariati, ordinario lasciato spento come all’inizio. Il risultato utile di questo seguito è una catena di build/caricamento/inizializzazione interpretabile e un esperimento isolato per processo; la correzione dell’ordinamento resta da progettare sul confine effettivamente osservato. Nessun altro boot o cambio di Windows giustificato da questi risultati.
