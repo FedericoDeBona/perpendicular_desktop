@@ -365,3 +365,12 @@ Mantenere questo percorso utilizzabile. Restano etichette/testi WinUI inizialmen
 ### Confronto WinUI dopo il margine BAR —23 ottobre
 
 Nella stessa esecuzione hardware512MiB, la pagina HDR di Settings manca delle etichette della sidebar sia nella finestra individuale sia in Show Windows. La seconda pressione durante il cambio pagina ha aperto HDR; nessuna impostazione HDR cambiata. Questo caso non è esclusivo del readback individuale: rivalutare la produzione/composizione WinUI e il backend effettivo prima di introdurre altri adattamenti WGC. Non annulla il precedente caso Display completa sul desktop/incompleta nella cattura. Nessuna causa di blending, simbolo opzionale o decoder ancora provata; desktop richiuso, percorso hardware e documento conservati. Dettagli in VERIFICATION.md.
+
+
+### WinUI senza WGC e messaggi del frontend driver —23 ottobre
+
+Vista desktop indipendente e visibile costruita con i componenti correnti, senza GuestBridge: dopo Quit and Keep Windows il worker non si ricollega e le catture rilasciano circa19MiB mappati. La nuova Settings aperta da Explorer appare completa su Display ma perde etichette passando a HDR, ancora senza WGC. Questo è contenuto nuovo, non solo un frame vecchio. Pacchetto normale ripristinato, documento conservato e catture hardware operative; nessun boot o cambio di driver. Dettagli e tentativi non conclusivi in VERIFICATION.md.
+
+REA del DLL installato conferma rotazione delle risorse, ricreazione viste e callback dei binding; non è assenza dell'intero passaggio e non prova che le sue singole operazioni riescano. I messaggi Triton usano OutputDebugStringA, distinto dallo stderr Neptune. Collector DBWIN temporaneo e limitato, rifiuto di lettori già presenti, una nuova Settings osservata per30s:62messaggi selezionati, marker di controllo riuscito, nessun errore/STUB in quelle righe. Le superfici condivise a un byte vengono confermate A8_UNORM nel log host; non attribuite automaticamente al testo mancante.
+
+Prossimo passo: identificare le funzioni dei tre errori generici Not implemented nel backend reale, con diagnostica una tantum per operazione; poi correggere soltanto un comportamento dimostrato pertinente. Tenere distinta questa evidenza dalla mancata emissione di STUB Triton. Niente adattamenti WGC, aumento memoria o cambio indiscriminato di driver; le A8 condivise e la conservazione degli aggiornamenti restano una domanda precisa. Nessun collector o viewer diagnostico lasciato attivo, percorso ordinario hardware conservato.
