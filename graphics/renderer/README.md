@@ -68,12 +68,12 @@ Wire1 non basta a certificare l'accordo sul feedback delle query: il DLL ARM64 v
 
 `python3 scripts/check-graphics-query-feedback.py` controlla questa specifica proprietà attraverso il bridge già aperto. Crea un solo device hardware e una sola EVENT, esegue il primo End e due riusi e rilascia entrambi. Per ogni fase attende GetData ordinario al massimo500ms, poi verifica DONOTFLUSH al massimo100ms. Non installa componenti o cambia impostazioni. Restituisce0 per accordo nelle tre fasi,1 per discrepanza e2 per mancata esecuzione del controllo. Non è eseguito automaticamente a ogni connessione o durante la cattura ordinaria.
 
-Un risultato positivo non rileva necessariamente un completamento prematuro condiviso da entrambe le chiamate: non certifica ordinamento GPU, tutte le query o WinUI. È un criterio necessario e circoscritto per qualificare una futura coppia guest/host; una coppia che fallisce non è qualificata dalla sola creazione riuscita del device. La coppia corrente fallisce; il controllo non applica una correzione.
+Un risultato positivo non rileva necessariamente un completamento prematuro condiviso da entrambe le chiamate: non certifica ordinamento GPU, tutte le query o WinUI. È un criterio necessario e circoscritto per qualificare una futura coppia guest/host; una coppia che fallisce non è qualificata dalla sola creazione riuscita del device. La coppia v0.3/Wire1 fallisce; il controllo non applica una correzione.
 
 Non allineare soltanto il contatore host a Begin: questo lascerebbe riutilizzabile il risultato precedente delle query End-only. La correzione deve mantenere invalidazione guest e pubblicazione host coerenti. Il pacchetto ufficiale v0.4 ARM64 è un candidato distinto: il suo binario richiede Wire2 e non può sostituire soltanto il driver nel runtime Wire1 attuale. Niente sostituzione di DLL firmati, test-signing o dichiarazione artificiosa di compatibilità del protocollo.
 
 
-I primi due candidati v0.4/Wire2 sono stati provati e ritirati: il numero Wire comune non basta. Il guest invia RESOURCE_UPDATE con header80byte/context_id a offset72, mentre la base host selezionata ne decodifica72. Anche correggendo quel campo e preservando il contesto D3D11 richiesto, il boot reale fallisce ancora durante la decodifica. I due candidati e le patch sperimentali rimangono privati; il pacchetto ordinario conserva Wire1. Prima di un altro tentativo occorre identificare opcode e byte consumati al punto del guasto. VERIFICATION.md registra anche i due arresti ordinari falliti, il recupero da checkpoint e la successiva finestra hardware leggibile; nessuna qualificazione v0.4 viene dichiarata.
+I primi due candidati v0.4/Wire2 sono stati provati e ritirati: il numero Wire comune non basta. Il guest invia RESOURCE_UPDATE con header80byte/context_id a offset72, mentre la base host selezionata ne decodifica72. Anche correggendo quel campo e preservando il contesto D3D11 richiesto, il boot reale fallisce ancora durante la decodifica. In quel passaggio i due candidati e le patch sperimentali rimangono privati e il pacchetto ordinario conserva Wire1. Prima di un altro tentativo occorre identificare opcode e byte consumati al punto del guasto. VERIFICATION.md registra anche i due arresti ordinari falliti, il recupero da checkpoint e la successiva finestra hardware leggibile; nessuna qualificazione v0.4 viene dichiarata.
 
 
 ## Protocollo corrispondente al driver v0.4
@@ -96,3 +96,19 @@ python scripts/prepare-native-wire2.py \
 ```
 
 Il source preparato è stato compilato con Meson sul profilo privato e2job. Il candidato con diagnostica passa il controllo EVENT anche tramite `--socket` della VM separata, apre il documento e Settings in hardware. WinUI/HDR conserva etichette mancanti; non è risolto. Il runtime finale senza diagnostica è compilato e firmato ma non ancora avviato. Il pacchetto ordinario resta Wire1: prove, hash e prossimo passaggio in VERIFICATION.md e RESTART_PLAN.md.
+
+
+## Confezionamento della coppia finale
+
+`package-native-wire2.py` confeziona il build privato verificato senza avviare Windows. Controlla hash di renderer/server non rilocati e ricevuta dei sorgenti, corrispondenza delle patch correnti e inventario del runtime di partenza. Conserva QEMU69c236476db8, backend1a704afafdb1 e le capacità di durata/ammissione/import/scanout. Riloca e firma soltanto renderer/server; gli hash finali devono coincidere con il candidato qualificato, a93c2e5e34a8 e0869b34035ac. Esclude la diagnostica temporanea e registra il contratto Wire2/f510. Non è un compilatore universale: richiede gli esatti output del profilo privato verificato. La ricetta Meson locale è conservata con quel build; una ricompilazione che produce binari diversi richiede una propria qualificazione e l'aggiornamento esplicito dei pin.
+
+```sh
+python3 scripts/package-native-wire2.py \
+  --build /private/qa/repro-f510-relocated \
+  --runtime /private/runtime/Native3D \
+  --output /private/qa/Native3D-wire2
+```
+
+Il pacchetto non aggiorna VM o app e mantiene `runtime_verified=false` nella ricevuta: le prove reali sono documentate in VERIFICATION.md. Il runtime precedente va conservato intero insieme al checkpoint pre-installazione del driver; Wire1/v0.3 e Wire2/v0.4 sono coppie distinte. Il frontend accetta Wire2 soltanto con il renderer/protocollo/capacità specifici verificati, mantenendo il trasporto Mac3/descriptor2. Il semplice numero Wire2 non diventa un criterio sufficiente.
+
+La successiva promozione del23ottobre ha portato questa coppia anche nel pacchetto ordinario: query EVENT coerente nelle tre fasi, documento e Settings hardware, Retina2940×1912/200%. Il vecchio v0.3/Wire1 è conservato per rollback con il proprio stato Windows. Settings/HDR conserva parti mancanti e l'ammissione WGC resta intermittente; non sono una capacità risolta dalla correzione delle query. Le evidenze finali e la portata della qualifica sono in VERIFICATION.md.

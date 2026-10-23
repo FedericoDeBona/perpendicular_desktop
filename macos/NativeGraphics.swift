@@ -11,7 +11,12 @@ struct NativeGraphics {
         self.root=root
         let bytes=try Data(contentsOf:root.appendingPathComponent("runtime.json"))
         guard bytes.count<=65536,let value=try JSONSerialization.jsonObject(with:bytes) as? [String:Any],
-              value["schema"] as? Int == 1,value["guest_wire_version"] as? Int == 1,
+              value["schema"] as? Int == 1,let wire=value["guest_wire_version"] as? Int,
+              (wire == 1 || (wire == 2 &&
+                value["renderer_source_pin"] as? String == "cf5af71359b224a9a482e9b5a67f8160497dc951" &&
+                value["protocol_source_pin"] as? String == "f510a6e41ea89a6d626de4da9d9b02978a770e37" &&
+                value["paired_guest_protocol_files"] as? Int == 311 &&
+                value["query_feedback_end_generation"] as? Int == 1 && value["resource_update_context"] as? Int == 1)),
               value["host_transport_version"] as? Int == 3,value["native_descriptor_version"] as? Int == 2,
               value["input_backpressure"] as? Bool == true,
               [1,2,3].contains(value["renderer_control_version"] as? Int ?? 1),
