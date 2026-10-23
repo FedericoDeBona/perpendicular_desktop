@@ -1,0 +1,21 @@
+--- a/src/d3d11/d3d11_context_impl.cpp
++++ b/src/d3d11/d3d11_context_impl.cpp
+@@ -1275 +1275 @@
+-    ERR_ONCE("Not implemented");
++    ERR_ONCE("ID3D11DeviceContext::DiscardResource: Not implemented");
+@@ -1287 +1287 @@
+-    ERR_ONCE("Not implemented");
++    ERR_ONCE("ID3D11DeviceContext1::DiscardView1: Not implemented");
+--- a/src/d3d11/d3d11_device.cpp
++++ b/src/d3d11/d3d11_device.cpp
+@@ -722 +722 @@
+-    ERR("Not implemented");
++    ERR("ID3D11Device::SetExceptionMode: Not implemented");
+@@ -727 +727 @@
+-    ERR("Not implemented");
++    ERR("ID3D11Device::GetExceptionMode: Not implemented");
+--- a/src/d3d11/d3d11_swapchain.cpp
++++ b/src/d3d11/d3d11_swapchain.cpp
+@@ -707 +707 @@
+-    ERR("Not implemented");
++    ERR("IDXGISwapChain1::GetCoreWindow: Not implemented");
