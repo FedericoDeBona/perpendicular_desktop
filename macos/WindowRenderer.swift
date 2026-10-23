@@ -46,12 +46,13 @@ final class WindowRenderer {
     private var reportedSources=Set<String>()
     var onError:((String)->Void)?
 
-    init(opaque:Bool=false) throws {
-        self.opaque=opaque
-        guard let device=MTLCreateSystemDefaultDevice(),let queue=device.makeCommandQueue() else {
-            throw CocoaError(.featureUnsupported)
-        }
-        self.device=device;self.queue=queue
+    // Device and pipeline are immutable and shared by all window presenters.
+    // Keep command queues per presenter so a slow window does not change the
+    // ordering or retirement of another window's frames. Cache only success.
+    private static var metalResources:(device:any MTLDevice,pipeline:any MTLRenderPipelineState)?
+    private static func resources() throws -> (device:any MTLDevice,pipeline:any MTLRenderPipelineState) {
+        if let metalResources {return metalResources}
+        guard let device=MTLCreateSystemDefaultDevice() else {throw CocoaError(.featureUnsupported)}
         let source="""
         #include <metal_stdlib>
         using namespace metal;
@@ -74,7 +75,16 @@ final class WindowRenderer {
         descriptor.vertexFunction=library.makeFunction(name:"window_vertex")
         descriptor.fragmentFunction=library.makeFunction(name:"window_fragment")
         descriptor.colorAttachments[0].pixelFormat = .bgra8Unorm
-        pipeline=try device.makeRenderPipelineState(descriptor:descriptor)
+        let pipeline=try device.makeRenderPipelineState(descriptor:descriptor)
+        let resources=(device:device,pipeline:pipeline)
+        metalResources=resources
+        return resources
+    }
+    init(opaque:Bool=false) throws {
+        self.opaque=opaque
+        let resources=try Self.resources()
+        guard let queue=resources.device.makeCommandQueue() else {throw CocoaError(.featureUnsupported)}
+        device=resources.device;pipeline=resources.pipeline;self.queue=queue
         layer.device=device;layer.pixelFormat = .bgra8Unorm
         layer.framebufferOnly=true;layer.isOpaque=false
         layer.backgroundColor=NSColor.clear.cgColor
