@@ -233,7 +233,10 @@ final class VirtualMachineController {
         if nativeGraphicsEnabled {
             // First qualify the reference backend's single scanout. Additional
             // monitor outputs require their own topology/capture integration.
-            arguments += ["-device","virtio-ramfb-gl,id=display0,addr=0x8,disable-legacy=on,neptune=on,blob=on,hostmem=256M,max_outputs=1,xres=1280,yres=800"]
+            // Retina window capture needs contiguous 16 MiB driver pools. The
+            // measured 256 MiB aperture fragmented below that size with two
+            // ordinary apps; use the next PCI BAR size for this local 3D path.
+            arguments += ["-device","virtio-ramfb-gl,id=display0,addr=0x8,disable-legacy=on,neptune=on,blob=on,hostmem=512M,max_outputs=1,xres=1280,yres=800"]
         }else{arguments += ["-device","ramfb"]}
         machine = try launch("qemu-system-aarch64",arguments,log:"qemu.log",executable:native?.executable,
             environment:native?.environment(directory:displayDirectory,session:session,primary:HostDisplay.current().first(where:\.primary)))
