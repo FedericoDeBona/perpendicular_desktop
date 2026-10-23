@@ -1,0 +1,39 @@
+--- a/src/perp-sync/proxy-broker.c
++++ b/src/perp-sync/proxy-broker.c
+@@ -374,7 +374,11 @@
+     }
+     for(unsigned i=0;i<LIVE_MAX_PENDING;i++)if(frames[i].used && !frames[i].leased && ready(&frames[i])) {
+         LiveWorker *source=worker(frames[i].header.context_id);
+-        if((current && desired!=current) || !resource(frames[i].header.resource_id) ||
++        /* A ready copy of an old scanout cannot be taken after selection
++         * moves to another resource, even when its writer stays the same.
++         * Retire it here instead of waiting for an ACK of the new surface,
++         * whose snapshot budget may still be held by these old copies. */
++        if(frames[i].header.resource_id!=selected || (current && desired!=current) || !resource(frames[i].header.resource_id) ||
+            (source && frames[i].header.status<=source->retired_batch))retire(&frames[i],false);
+     }
+     if(current && desired!=current && !current->revoking) {
+@@ -483,5 +487,21 @@
+     char *stats=NULL;
+     asprintf(&stats,"%.*s,\"resource_registrations\":%llu,\"resource_retirements\":%llu,\"resource_live\":%u,\"resource_destroyed\":%u,\"resource_peak\":%u,\"resource_granted_retirements\":%llu}",
+         (int)strlen(full)-1,full,(unsigned long long)resource_registrations,(unsigned long long)resource_retirements,live,destroyed,resource_peak,(unsigned long long)resource_granted_retirements);
+-    free(full);return stats;
+-}
++    free(full);
++    /* A bounded read-only view: poll never consumes the producer event or
++     * changes a lease. Counts alone cannot diagnose a stalled desktop. */
++    char *detail=strdup("[");unsigned listed=0;uint64_t clock_now=now();
++    for(unsigned i=0;i<LIVE_MAX_PENDING;i++)if(frames[i].used) {
++        LiveFrame *f=&frames[i];PerpBrokerHeader *h=&f->header;
++        bool matching=target && h->resource_id==selected && h->context_id==target->context &&
++            h->worker_epoch==target->worker_epoch && h->resource_epoch==target->epoch && h->blob_id==target->blob;
++        char *next=NULL;asprintf(&next,"%s%s{\"resource\":%u,\"context\":%u,\"worker_epoch\":%llu,\"resource_epoch\":%llu,\"generation\":%u,\"batch\":%u,\"ready\":%s,\"leased\":%s,\"matches_selection\":%s,\"age_ms\":%llu}",
++            detail,listed++?",":"",h->resource_id,h->context_id,(unsigned long long)h->worker_epoch,
++            (unsigned long long)h->resource_epoch,h->snapshot_generation,h->status,ready(f)?"true":"false",
++            f->leased?"true":"false",matching?"true":"false",
++            (unsigned long long)((clock_now>=f->received?clock_now-f->received:0)/1000000ull));
++        free(detail);detail=next;
++    }
++    char *result_frames=NULL;asprintf(&result_frames,"%.*s,\"pending_frames\":%s]}",(int)strlen(stats)-1,stats,detail);
++    free(detail);free(stats);return result_frames;
++}

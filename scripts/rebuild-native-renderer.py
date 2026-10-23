@@ -32,7 +32,7 @@ def main():
     parser.add_argument('--reference', type=Path, required=True,
                         help='Matching Wire1 host-v3 renderer build profile')
     parser.add_argument('--runtime', type=Path, required=True,
-                        help='Unmodified, hash-matched Native3D runtime')
+                        help='Hash-verified compatible Native3D runtime; preserve its QEMU/backend')
     parser.add_argument('--output', type=Path, required=True,
                         help='New private output directory')
     parser.add_argument('--shared-handle-diagnostics', action='store_true',
@@ -101,6 +101,8 @@ def main():
     run(['patch', '-p1', '--forward', '--batch', '-i', import_patch], copied)
     import_header = REPO / 'graphics/renderer/import-marker.h'
     shutil.copy2(import_header, private / import_header.name)
+    selection_patch = REPO / 'graphics/renderer/scanout-selection.patch'
+    run(['patch', '-p1', '--forward', '--batch', '-i', selection_patch], copied)
     changed = ['src/perp-sync/proxy-broker.c', 'src/proxy/proxy_context.c',
                'src/proxy/proxy_client.c', 'server/render_client.c', 'server/render_worker.c',
                'src/perp-sync/snapshot.c']
@@ -133,6 +135,10 @@ def main():
     run([*admission_command, '-UNDEBUG', REPO / 'graphics/renderer/check-resource-retirement.c',
          '-o', resource_check], reference / 'build')
     run([resource_check])
+    selection_check = work / 'check-scanout-selection'
+    run([*admission_command, '-UNDEBUG', REPO / 'graphics/renderer/check-scanout-selection.c',
+         '-o', selection_check], reference / 'build')
+    run([selection_check])
     import_check = work / 'check-import-lifetime'
     run([*admission_command, '-UNDEBUG', '-I' + str(REPO / 'graphics/renderer'),
          REPO / 'graphics/renderer/check-import-lifetime.c', '-o', import_check], reference / 'build')
@@ -182,6 +188,7 @@ def main():
     manifest['context_admission'] = 1
     manifest['resource_retirement'] = 1
     manifest['import_lifetime'] = 1
+    manifest['scanout_selection_retirement'] = 1
     # Both binaries are rebuilt from the pinned base, not copied from the input.
     # Do not inherit a diagnostic capability that this build did not compile.
     manifest.pop('shared_handle_diagnostics', None)
@@ -212,6 +219,12 @@ def main():
         'patch_sha256': digest(import_patch), 'header_sha256': digest(import_header),
         'host_private_random_key': True, 'retained_import_references': 0,
         'runtime_verified': False,
+    }, indent=2) + '\n')
+    shutil.copy2(selection_patch, notices / selection_patch.name)
+    (notices / 'scanout-selection.json').write_text(json.dumps({
+        'patch_sha256': digest(selection_patch), 'resource_limit': 256,
+        'completed_unleased_old_scanouts_only': True,
+        'pending_frame_diagnostics': True, 'runtime_verified': False,
     }, indent=2) + '\n')
     if args.shared_handle_diagnostics:
         manifest['shared_handle_diagnostics'] = 1
