@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Patch two matching QEMU units into a fresh private Native3D runtime.
+"""Patch monitor metadata or scanout demand in a matching private QEMU runtime.
 
 Reads the reference only. Never starts a VM or changes an app, renderer, driver,
 machine configuration or reference build. Outputs must remain under .build.
@@ -26,6 +26,20 @@ PINS = {
     'source/perp-flexible-monitor.h': 'cfe73665d93fe85418651eea8c4e09280539bd085547fda6746dd4a038f9b80e',
 }
 COMMANDS_SHA = 'c3425f1ba771f9435e79ef909f9d6181681f5cce30d6baf99763b423cfa00f16'
+DEMAND_QEMU_SHA = '4d0708b9e352638b80569b79f7a6f151c9a3068f81eec7bfb18e958180237e39'
+DEMAND_COMPILE = '../graphics-rebuild-headless-single-cross-20261019/logs/compile-qemu-native-sync.m-1792400867485679000.log'
+DEMAND_COMPILE_SHA = 'd0931c8c47eb8536205a7ab4943475d4a8c510ba2ac957865be876b8928a2e86'
+DEMAND_SOURCES = {
+    'qemu-native-sync.m': '6a86d0064dc4fcdc58eafebd26463885fe2933b7c935a84452d988adaf89a401',
+    'publisher.h': '664bea100ff617432036a0dbfdb8fb14037ca5c1496030c44a1065e1b17ad452',
+    'publisher.m': 'be58906ae39307ba42cd5dafa757e16e4d1360f0189f60ce01ef2bc810ea1a69',
+    'qemu-live.h': 'c5b94d655f3b353408bba19a297f77a45b7ba258f039ade5f0e0a7da352547c9',
+    'live.h': '46a317ca7a9b2175151496bac0cd1439bead0b4906c076cff6d7e6c783c13c31',
+    'ndt.h': '04e32cb87fa643fb1c14f55fe416d3dde3a047ca73cabb2da19250a4b1725895',
+    'broker.h': 'd0dffeffdeb833063623f059ed09f68d1215f44e9540589d756944187533ba3c',
+    'wire1-layout.h': '16965548dcb8253c640ad4739067a1b007a01c2c6910521a5672b8178894f32e',
+}
+
 
 
 def digest(path):
@@ -59,6 +73,8 @@ def main():
     parser.add_argument('--qemu', required=True, type=Path, help='Matching graphics-rebuild-qemu profile')
     parser.add_argument('--runtime', required=True, type=Path)
     parser.add_argument('--output', required=True, type=Path, help='New directory beneath this repo .build')
+    parser.add_argument('--consumer-demand', action='store_true',
+                        help='Rebuild only native scanout demand, preserving monitor behavior')
     args = parser.parse_args()
     reference = args.reference.resolve(strict=True)
     profile = args.qemu.resolve(strict=True)
@@ -91,6 +107,15 @@ def main():
     require(len(link_input_hashes) >= 1000, 'Incomplete pinned link input inventory')
     manifest = json.loads((runtime / 'runtime.json').read_text())
     verify_runtime(runtime, manifest)
+    if args.consumer_demand:
+        require(manifest['files']['bin/qemu-system-aarch64'] == DEMAND_QEMU_SHA,
+                'Consumer-demand patch requires the verified packaged QEMU base')
+        require(digest(reference / DEMAND_COMPILE) == DEMAND_COMPILE_SHA, 'Different scanout compiler recipe')
+        for name, expected in DEMAND_SOURCES.items():
+            require(digest(reference / 'source' / name) == expected, 'Different scanout source: ' + name)
+    else:
+        require(not manifest.get('scanout_consumer_demand'),
+                'Monitor-only rebuild would discard the installed scanout-demand patch')
 
     output.mkdir(parents=True)
     logs = output / 'logs'
@@ -108,61 +133,92 @@ def main():
     result = output / 'Native3D'
     shutil.copytree(runtime, result, symlinks=True)
     source = output / 'source'
-    for name in ('ui/vnc.c', 'ui/vnc.h', 'include/ui/input.h', 'hw/display/virtio-gpu-base.c'):
-        target = source / name
-        target.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(reference / 'source/vm' / name, target)
-    shutil.copy2(reference / 'source/perp-flexible-monitor.h', source)
-    header = REPO / 'graphics/monitor/primary-monitor.h'
-    patch = REPO / 'graphics/monitor/primary-monitor.patch'
-    shutil.copy2(header, source)
-    run('apply-monitor-patch', ['patch', '-p1', '--batch', '--forward', '-i', patch], source)
-
-    # One small check of the exact compiled metadata header, without QEMU/VM.
-    check = output / 'check-monitor.c'
-    check.write_text('''#include <assert.h>
-#include <stdio.h>
-#include "primary-monitor.h"
-int main(void) {
-    assert(setenv("PERP_PRIMARY_MONITOR_WIDTH_MM", "310", 1) == 0);
-    assert(setenv("PERP_PRIMARY_MONITOR_HEIGHT_MM", "200", 1) == 0);
-    assert(setenv("PERP_PRIMARY_MONITOR_ID", "01234567-89ab-cdef-0123-456789abcdef", 1) == 0);
-    PerpPrimaryMonitor first, again;
-    assert(perp_primary_monitor_read(&first));
-    uint16_t width=0, height=0;
-    perp_primary_monitor_seed_size(&width, &height);
-    assert(width == 310 && height == 200);
-    width=400; height=300;
-    perp_primary_monitor_seed_size(&width, &height);
-    assert(width == 400 && height == 300);
-    assert(setenv("PERP_PRIMARY_MONITOR_ID", "01234567-89AB-CDEF-0123-456789ABCDEF", 1) == 0);
-    assert(perp_primary_monitor_read(&again) && first.serial == again.serial);
-    uint8_t edid[128]={0}; edid[75]=0xf7; edid[93]=0xfd;
-    perp_primary_monitor_edid_serial(edid, sizeof(edid), first.serial);
-    unsigned sum=0; for (unsigned i=0;i<128;i++) sum+=edid[i];
-    assert((sum & 255) == 0 && edid[75] == 0xf7 && edid[93] == 0xfd);
-    assert(setenv("PERP_PRIMARY_MONITOR_WIDTH_MM", "-1", 1) == 0);
-    assert(!perp_primary_monitor_read(&again));
-    puts("monitor metadata: physical seed, preserved size, stable serial, EDID checksum and invalid-input rejection passed");
-    return 0;
-}
-''')
-    run('compile-monitor-check', ['cc', '-std=gnu11', '-Wall', '-Wextra', '-Werror', '-I' + str(source), check, '-o', output / 'check-monitor'])
-    run('check-monitor', [output / 'check-monitor'])
-
-    replacements = {}
-    for name in ('ui/vnc.c', 'hw/display/virtio-gpu-base.c'):
-        record = next(r for r in records if r['file'].endswith('/' + name))
-        command = [relocate(a) for a in shlex.split(record['command'])]
-        obj = output / (name.replace('/', '_') + '.o')
-        command[1:1] = ['-I' + str(source), '-iquote', str(source / 'include'),
-                        '-iquote', str(profile / 'src/qemu' / Path(name).parent)]
-        for option, value in (('-c', source / name), ('-o', obj), ('-MF', str(obj) + '.d'), ('-MQ', obj)):
+    if args.consumer_demand:
+        source.mkdir()
+        for name in DEMAND_SOURCES:
+            (source / name).write_text(relocate((reference / 'source' / name).read_text()))
+        header = None
+        patch = REPO / 'graphics/monitor/consumer-demand.patch'
+        run('apply-consumer-demand', ['patch', '-p1', '--batch', '--forward', '-i', patch], source)
+        # Compile the exact production tick/flush with inert boundary functions,
+        # rather than a second implementation of their demand policy.
+        actual = (source / 'qemu-native-sync.m').read_text()
+        body = (actual[actual.index('static struct {'):actual.index('static QEMUTimer *timer;')] +
+                actual[actual.index('static void tick('):actual.index('bool perp_live_qemu_select(')] +
+                actual[actual.index('bool perp_live_qemu_flush('):actual.index('void perp_live_qemu_reset(')])
+        (source / 'qemu-consumer-demand.inc').write_text(body)
+        run('compile-consumer-check', ['cc', '-std=gnu11', '-Wall', '-Wextra', '-Werror',
+            '-I' + str(source), REPO / 'graphics/monitor/check-consumer-demand.c', '-o', output / 'check-consumer-demand'])
+        run('check-consumer-demand', [output / 'check-consumer-demand'])
+        compiled_units = ['qemu-native-sync.m']
+        command_recipe = json.loads((reference / DEMAND_COMPILE).read_text().splitlines()[0])
+        command = [relocate(a) for a in command_recipe['argv']]
+        obj = output / 'qemu-native-sync.m.o'
+        command[1:1] = ['-I' + str(source)]
+        for option, value in (('-c', source / 'qemu-native-sync.m'), ('-o', obj), ('-MF', str(obj) + '.d')):
             command[command.index(option) + 1] = str(value)
-        run('compile-' + name.replace('/', '_'), command, build)
-        matching = [a for a in recipe['argv'] if a.endswith('/vm/' + name + '.o')]
-        require(len(matching) == 1, 'Expected one overlaid QEMU object for ' + name)
-        replacements[matching[0]] = str(obj)
+        run('compile-consumer-demand', command, build)
+        matching = [a for a in recipe['argv'] if a.endswith('/qemu-native-sync.m.o')]
+        require(len(matching) == 1, 'Expected one native scanout object')
+        replacements = {matching[0]: str(obj)}
+    else:
+        for name in ('ui/vnc.c', 'ui/vnc.h', 'include/ui/input.h', 'hw/display/virtio-gpu-base.c'):
+            target = source / name
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(reference / 'source/vm' / name, target)
+        shutil.copy2(reference / 'source/perp-flexible-monitor.h', source)
+        header = REPO / 'graphics/monitor/primary-monitor.h'
+        patch = REPO / 'graphics/monitor/primary-monitor.patch'
+        shutil.copy2(header, source)
+        run('apply-monitor-patch', ['patch', '-p1', '--batch', '--forward', '-i', patch], source)
+
+        # One small check of the exact compiled metadata header, without QEMU/VM.
+        check = output / 'check-monitor.c'
+        check.write_text('''#include <assert.h>
+    #include <stdio.h>
+    #include "primary-monitor.h"
+    int main(void) {
+        assert(setenv("PERP_PRIMARY_MONITOR_WIDTH_MM", "310", 1) == 0);
+        assert(setenv("PERP_PRIMARY_MONITOR_HEIGHT_MM", "200", 1) == 0);
+        assert(setenv("PERP_PRIMARY_MONITOR_ID", "01234567-89ab-cdef-0123-456789abcdef", 1) == 0);
+        PerpPrimaryMonitor first, again;
+        assert(perp_primary_monitor_read(&first));
+        uint16_t width=0, height=0;
+        perp_primary_monitor_seed_size(&width, &height);
+        assert(width == 310 && height == 200);
+        width=400; height=300;
+        perp_primary_monitor_seed_size(&width, &height);
+        assert(width == 400 && height == 300);
+        assert(setenv("PERP_PRIMARY_MONITOR_ID", "01234567-89AB-CDEF-0123-456789ABCDEF", 1) == 0);
+        assert(perp_primary_monitor_read(&again) && first.serial == again.serial);
+        uint8_t edid[128]={0}; edid[75]=0xf7; edid[93]=0xfd;
+        perp_primary_monitor_edid_serial(edid, sizeof(edid), first.serial);
+        unsigned sum=0; for (unsigned i=0;i<128;i++) sum+=edid[i];
+        assert((sum & 255) == 0 && edid[75] == 0xf7 && edid[93] == 0xfd);
+        assert(setenv("PERP_PRIMARY_MONITOR_WIDTH_MM", "-1", 1) == 0);
+        assert(!perp_primary_monitor_read(&again));
+        puts("monitor metadata: physical seed, preserved size, stable serial, EDID checksum and invalid-input rejection passed");
+        return 0;
+    }
+    ''')
+        run('compile-monitor-check', ['cc', '-std=gnu11', '-Wall', '-Wextra', '-Werror', '-I' + str(source), check, '-o', output / 'check-monitor'])
+        run('check-monitor', [output / 'check-monitor'])
+
+        replacements = {}
+        for name in ('ui/vnc.c', 'hw/display/virtio-gpu-base.c'):
+            record = next(r for r in records if r['file'].endswith('/' + name))
+            command = [relocate(a) for a in shlex.split(record['command'])]
+            obj = output / (name.replace('/', '_') + '.o')
+            command[1:1] = ['-I' + str(source), '-iquote', str(source / 'include'),
+                            '-iquote', str(profile / 'src/qemu' / Path(name).parent)]
+            for option, value in (('-c', source / name), ('-o', obj), ('-MF', str(obj) + '.d'), ('-MQ', obj)):
+                command[command.index(option) + 1] = str(value)
+            run('compile-' + name.replace('/', '_'), command, build)
+            matching = [a for a in recipe['argv'] if a.endswith('/vm/' + name + '.o')]
+            require(len(matching) == 1, 'Expected one overlaid QEMU object for ' + name)
+            replacements[matching[0]] = str(obj)
+
+        compiled_units = ['ui/vnc.c', 'hw/display/virtio-gpu-base.c']
 
     binary = result / 'bin/qemu-system-aarch64'
     command = []
@@ -206,43 +262,48 @@ int main(void) {
     entitlement_file = output / 'Hypervisor.entitlements'
     entitlement_file.write_bytes(plistlib.dumps(entitlements))
     run('sign-qemu', ['codesign', '--force', '--sign', '-', '--timestamp=none', '--identifier',
-                      'com.perpendicular.runtime.qemu.primary-monitor', '--entitlements', entitlement_file, binary])
+                      'com.perpendicular.runtime.qemu.' + ('consumer-demand' if args.consumer_demand else 'primary-monitor'), '--entitlements', entitlement_file, binary])
     run('verify-qemu-signature', ['codesign', '--verify', '--strict', binary])
     version = run('qemu-version', [binary, '--version']).decode().strip()
     require('QEMU emulator version 10.0.12' in version, 'Unexpected QEMU version')
 
     manifest['files']['bin/qemu-system-aarch64'] = digest(binary)
-    manifest['primary_monitor_metadata'] = 1
+    manifest['scanout_consumer_demand' if args.consumer_demand else 'primary_monitor_metadata'] = 1
     notice = result / 'Notices/Perpendicular'
     require(notice.resolve().is_relative_to(result), 'Notices must remain inside the output runtime')
     notice.mkdir(parents=True, exist_ok=True)
-    for file in (header, patch):
+    for file in ((patch,) if args.consumer_demand else (header, patch)):
         shutil.copy2(file, notice / file.name)
     receipt = {
         'base_source_receipt_sha256': PINS['build.json'],
         'base_runtime_manifest_sha256': digest(runtime / 'runtime.json'),
         'base_qemu_sha256': json.loads((runtime / 'runtime.json').read_text())['files']['bin/qemu-system-aarch64'],
         'qemu_sha256': manifest['files']['bin/qemu-system-aarch64'],
-        'reference_inputs': PINS, 'compiler_recipes_sha256': COMMANDS_SHA,
+        'reference_inputs': PINS,
+        'compiler_recipes_sha256': DEMAND_COMPILE_SHA if args.consumer_demand else COMMANDS_SHA,
+        'scanout_source_inputs': DEMAND_SOURCES if args.consumer_demand else None,
         'link_inputs_verified': len(link_input_hashes),
         'link_inputs_digest': hashlib.sha256(json.dumps(link_input_hashes, sort_keys=True).encode()).hexdigest(),
-        'patch_sha256': digest(patch), 'header_sha256': digest(header),
-        'compiled_units': ['ui/vnc.c', 'hw/display/virtio-gpu-base.c'],
-        'primary_monitor_metadata': 1, 'guest_wire_version': 1, 'host_transport_version': 3,
+        'patch_sha256': digest(patch), 'header_sha256': digest(header) if header else None,
+        'compiled_units': compiled_units,
+        'scanout_consumer_demand' if args.consumer_demand else 'primary_monitor_metadata': 1, 'guest_wire_version': 1, 'host_transport_version': 3,
         'renderer_control_version': manifest.get('renderer_control_version', 1),
-        'checks': ['metadata header', 'QEMU version', 'signature', 'runtime hashes'],
+        'checks': ['consumer demand' if args.consumer_demand else 'metadata header', 'QEMU version', 'signature', 'runtime hashes'],
         'VM_started': False, 'runtime_verified': False,
     }
-    receipt_path = notice / 'primary-monitor.json'
+    receipt_path = notice / ('consumer-demand.json' if args.consumer_demand else 'primary-monitor.json')
     receipt_path.write_text(json.dumps(receipt, indent=2) + '\n')
-    manifest['primary_monitor_receipt_sha256'] = digest(receipt_path)
+    manifest['consumer_demand_receipt_sha256' if args.consumer_demand else 'primary_monitor_receipt_sha256'] = digest(receipt_path)
     (result / 'runtime.json').write_text(json.dumps(manifest, indent=2) + '\n')
     verify_runtime(result, manifest)
     for name, expected in PINS.items():
         require(digest(reference / name) == expected, 'Reference changed during the build: ' + name)
     print('Prepared:', result)
     print(version.splitlines()[0])
-    print('Two QEMU units rebuilt; renderer/server unchanged. No app or VM changed.')
+    if args.consumer_demand:
+        for name, expected in DEMAND_SOURCES.items():
+            require(digest(reference / 'source' / name) == expected, 'Scanout reference changed: ' + name)
+    print(str(len(compiled_units)) + ' QEMU units rebuilt; renderer/server unchanged. No app or VM changed.')
 
 
 if __name__ == '__main__':

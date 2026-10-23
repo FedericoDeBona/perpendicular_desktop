@@ -1,0 +1,63 @@
+--- a/qemu-native-sync.m
++++ b/qemu-native-sync.m
+@@ -25,7 +25,7 @@
+     uint32_t resource,width,height,x,y,crop_width,crop_height;
+     uint64_t generation;
+     NativeRead *current;
+-    bool failed,refresh_requested;
++    bool failed,refresh_requested,update_pending;
+ } display;
+ static QEMUTimer *timer;
+ static id<MTLCommandQueue> queue;
+@@ -138,7 +138,14 @@
+ static void tick(void *opaque) {
+     (void)opaque;
+     bool refresh=perp_native_display_needs_refresh();
+-    if(refresh && !display.refresh_requested)perp_live_scanout_refresh(display.resource,true);
++    /* Capacity also becomes false while the consumer holds both slots.
++     * Keep one latest update through no consumer/full capacity; ACK handling
++     * and old producer work still run below. Never discard a static update. */
++    if(display.resource && !display.failed && perp_native_display_can_capture() &&
++       (display.update_pending || (refresh && !display.refresh_requested))) {
++        perp_live_scanout_refresh(display.resource,!display.update_pending);
++        display.update_pending=false;
++    }
+     display.refresh_requested=refresh;
+     perp_live_scanout_pump();
+     if (display.resource && !display.current && !display.failed && !hold_read && perp_native_display_can_capture()) {
+@@ -163,6 +170,7 @@
+     if (display.resource != resource || display.width != width || display.height != height || display.x != x ||
+         display.y != y || display.crop_width != crop_width || display.crop_height != crop_height) {
+         display.generation = ++generations; display.current = NULL;
++        display.update_pending = true;
+         if (!display.generation) { display.failed = true; return true; }
+     }
+     display.owner = owner; display.console = console; display.resource = resource;
+@@ -189,14 +197,14 @@
+             resource,display.resource,output,display.owner==owner);
+         display.failed = true; blocked_flushes++; return true;
+     }
+-    perp_live_scanout_refresh(resource,false);
++    display.update_pending = true;
+     tick(NULL); return true;
+ }
+ void perp_live_qemu_reset(void *owner) {
+     if (display.owner != owner) return;
+     display.generation = ++generations; display.current = NULL;
+     display.owner = NULL; display.console = NULL; display.resource = 0;
+-    display.failed = display.refresh_requested = false;
++    display.failed = display.refresh_requested = display.update_pending = false;
+     perp_native_display_reset();
+     perp_live_scanout_select(0);
+     if (timer) timer_del(timer);
+@@ -206,8 +214,8 @@
+ char *perp_live_qemu_stats(void) {
+     char *renderer = perp_live_scanout_stats(), *publisher = perp_native_display_stats();
+     char *result = g_strdup_printf("{\"copies\":%"PRIu64",\"external_submitted\":%"PRIu64",\"external_acked\":%"PRIu64",\"external_abandoned\":%"PRIu64",\"cancelled\":%"PRIu64",\"mappings_released\":%"PRIu64
+-        ",\"blocked_flushes\":%"PRIu64",\"failed\":%s,\"active\":%s,\"publisher_can_capture\":%s,\"renderer\":%s,\"publisher\":%s}",
++        ",\"blocked_flushes\":%"PRIu64",\"failed\":%s,\"active\":%s,\"publisher_can_capture\":%s,\"update_pending\":%s,\"renderer\":%s,\"publisher\":%s}",
+         copies,external_submitted,external_acked,external_abandoned,cancelled, qatomic_read(&mappings_released), blocked_flushes, display.failed ? "true" : "false", display.current ? "true" : "false",
+-        perp_native_display_can_capture() ? "true" : "false", renderer, publisher);
++        perp_native_display_can_capture() ? "true" : "false", display.update_pending ? "true" : "false", renderer, publisher);
+     free(renderer); free(publisher); return result;
+ }

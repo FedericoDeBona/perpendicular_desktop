@@ -31,3 +31,12 @@ Nel nuovo inventario del 21 ottobre i profili richiesti dai preparatori preceden
 L’adattatore verifica sorgenti, provenienza e 1.186 input di link; confronta anche la sezione codice di un relink senza patch col candidato originale. Ricompila due unità QEMU e cinque del renderer, applicando metadati del monitor e ritiro dei contesti. Renderer e server vengono aggiornati insieme al controllo host v2; Wire1, host-v3 e descriptor-v2 restano invariati. Conserva licenze, patch e ricevuta privata `Notices/Perpendicular/local-graphics.json`.
 
 L’output locale `.build/local-graphics-v3/Native3D` ha superato compilazione, due controlli circoscritti degli header, verifica delle firme e dei 27 hash. La ricevuta mantiene `runtime_verified=false`: la preparazione non avvia Windows e non dimostra correttezza grafica, DPI o compatibilità nell’app.
+
+
+## Richieste scanout soltanto con capacità del consumer
+
+Il preparatore accetta `--consumer-demand` per modificare soltanto `qemu-native-sync.m`, preservando monitor, renderer, backend e driver del runtime verificato. Questa modalità è vincolata al QEMU confezionato4d0708b9e352 e al profilo qualified del20ottobre, con tutti i linker input e la ricetta di compilazione originali verificati. Un rebuild dei soli monitor rifiuta un runtime che dichiara già questa patch, per non eliminarla mantenendo un flag falso nel manifest.
+
+`consumer-demand.patch` conserva una sola richiesta pendente durante assenza del client o saturazione dei due slot del publisher. Appena torna capacità invia una richiesta fresca; una nuova connessione a una sorgente statica conserva anche il refresh iniziale. Tick/pump, ACK e lease precedenti continuano a essere gestiti. Reset elimina la domanda della vecchia selezione. Nessun consumer nascosto, attesa del client o protocollo nuovo; il lavoro di rendering delle app Windows e WGC rimane separato.
+
+`check-consumer-demand.c` include le funzioni tick/flush estratte dal sorgente effettivamente compilato, con sole dipendenze di confine inerti. Verifica zero richieste durante assenza/saturazione, accorpamento degli aggiornamenti, consegna finale dopo ritorno di capacità, nuova connessione statica e conservazione di pump/lettura già in corso. Il codice precedente fallisce il primo controllo, quello modificato passa. Non è una prova GPU o della VM. Il manifest dichiara scanout_consumer_demand1 e la diagnostica update_pending; risultati nell'app e limiti in VERIFICATION.md.
