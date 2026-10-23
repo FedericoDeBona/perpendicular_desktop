@@ -125,6 +125,10 @@ pub fn run(path: &Path) -> Result<(), String> {
     }
     let (sid, session) = identity::current()?;
     let epoch = unsafe { format!("{:?}", CoCreateGuid().map_err(error)?) };
+    let _gpu_log=match super::gpu_log::start(&state_path().with_file_name(format!("gpu-driver-{epoch}.log"))) {
+        Ok(sink)=>Some(sink),
+        Err(error)=>{log(format!("GPU stderr diagnostics unavailable: {error}"));None},
+    };
     let (activation_sender, activation_results) = mpsc::sync_channel(8);
     let mut worker = Worker {
         sid,

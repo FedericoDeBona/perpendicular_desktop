@@ -11,7 +11,7 @@ use std::{
 use windows::{
     Foundation::TypedEventHandler,
     Graphics::{
-        Capture::{Direct3D11CaptureFramePool, GraphicsCaptureItem, GraphicsCaptureSession},
+        Capture::{Direct3D11CaptureFramePool, GraphicsCaptureItem, GraphicsCaptureSession, GraphicsCaptureDirtyRegionMode},
         DirectX::{Direct3D11::IDirect3DDevice, DirectXPixelFormat},
     },
     Win32::{
@@ -400,6 +400,22 @@ unsafe fn run(target: &Target, outbox: &Outbox, stop: &AtomicBool, driver:D3D_DR
         // Capture each surface independently: popups may extend beyond the document,
         // and real dialogs must not also be baked into the document's pixels.
         let _ = session.SetIncludeSecondaryWindows(false);
+        // This transport replaces complete images and may drop intermediate
+        // frames; it must never opt into rendering only the dirty rectangles.
+        // Older Windows versions without this property retain the original API.
+        let original_dirty_mode=session.DirtyRegionMode().ok();
+        if original_dirty_mode.is_some_and(|mode| mode!=GraphicsCaptureDirtyRegionMode::ReportOnly) {
+            session.SetDirtyRegionMode(GraphicsCaptureDirtyRegionMode::ReportOnly).map_err(error)?;
+        }
+        let dirty_mode=session.DirtyRegionMode().ok();
+        if dirty_mode.is_some_and(|mode| mode!=GraphicsCaptureDirtyRegionMode::ReportOnly) {
+            return Err("The capture session did not enable complete frames".into());
+        }
+        if let Some(description)=target.capture_device.lock().unwrap().as_mut() {
+            description["wgcSession"]=json!({"originalDirtyRegionMode":original_dirty_mode.map(|mode|mode.0),
+                "dirtyRegionMode":dirty_mode.map(|mode|mode.0),
+                "includeSecondaryWindows":session.IncludeSecondaryWindows().ok()});
+        }
         let (arrived, ready) = mpsc::sync_channel(1);
         let progress=target.progress.clone();
         let registration = pool.FrameArrived(&TypedEventHandler::new(move |_,_| {
@@ -465,6 +481,11 @@ unsafe fn run(target: &Target, outbox: &Outbox, stop: &AtomicBool, driver:D3D_DR
                 }
                 target.set_phase(Phase::Reading);
                 let frame_time_100ns = frame.SystemRelativeTime().ok().map(|time| time.Duration);
+                let frame_dirty_mode=frame.DirtyRegionMode().ok().map(|mode|mode.0);
+                let dirty_regions=frame.DirtyRegions().ok().and_then(|regions|regions.Size().ok());
+                if let Some(description)=target.capture_device.lock().unwrap().as_mut() {
+                    description["wgcFrame"]=json!({"dirtyRegionMode":frame_dirty_mode,"dirtyRegionCount":dirty_regions});
+                }
                 let current = frame.ContentSize().map_err(error)?;
                 if current.Width <= 0
                     || current.Height <= 0
@@ -675,6 +696,7 @@ unsafe fn run(target: &Target, outbox: &Outbox, stop: &AtomicBool, driver:D3D_DR
                 outbox.frame(&target.id,json!({"type":"frame","window":target.id,"sequence":sequence,"generation":generation,
                     "width":width,"height":height,"stride":stride,"bytes":pixels.len(),"capture":if software_recovery {"wgc-software-recovery"} else {"wgc-hardware-readback"},
                     "guestInitialDialogRepaint":initial_dialog_repaint,
+                    "guestDirtyRegionMode":frame_dirty_mode,"guestDirtyRegionCount":dirty_regions,
                     "guestReadbackSlots":staging_count,"guestReadbackBands":band_count,
                     "guestBufferReused":u8::from(buffer_reused),
                     "guestReadbackMilliseconds":readback_milliseconds,

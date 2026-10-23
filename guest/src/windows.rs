@@ -5,6 +5,7 @@ mod clipboard;
 mod display;
 mod drivers;
 mod execute;
+mod gpu_log;
 mod icons;
 mod menu_capture;
 mod identity;
