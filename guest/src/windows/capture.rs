@@ -300,7 +300,7 @@ unsafe fn run(target: &Target, outbox: &Outbox, stop: &AtomicBool, driver:D3D_DR
             let mut inspect_initial_dialog = !target.full_frame && catalogue::window_class(target.hwnd)=="#32770";
             let mut initial_dialog_repaint:Option<bool> = None;
             let mut previous = [0; 6];
-            let mut staging: Option<ID3D11Texture2D> = None;
+            let mut staging: [Option<ID3D11Texture2D>;2] = [None,None];
             let mut staging_size = (0, 0);
             let mut last_pixels = Arc::new(Vec::<u8>::new());
             while !stop.load(Ordering::Acquire) && outbox.connected.load(Ordering::Acquire) {
@@ -357,7 +357,7 @@ unsafe fn run(target: &Target, outbox: &Outbox, stop: &AtomicBool, driver:D3D_DR
                     frame.Close().map_err(error)?;
                     size = current;
                     generation += 1;
-                    staging = None;
+                    staging = [None,None];
                     target.set_phase(Phase::Recreating);
                     pool.Recreate(
                         &runtime,
@@ -377,7 +377,7 @@ unsafe fn run(target: &Target, outbox: &Outbox, stop: &AtomicBool, driver:D3D_DR
                 // Never read rows outside that texture, or end a healthy capture for it.
                 if desc.Width < current.Width as u32 || desc.Height < current.Height as u32 {
                     frame.Close().map_err(error)?;
-                    staging = None;
+                    staging = [None,None];
                     target.set_phase(Phase::Recreating);
                     pool.Recreate(
                         &runtime,
@@ -412,13 +412,20 @@ unsafe fn run(target: &Target, outbox: &Outbox, stop: &AtomicBool, driver:D3D_DR
                 }
                 // Keep each staging allocation bounded independently of the
                 // window. The complete image still uses its original geometry.
-                let readback_rows = (4 * 1024 * 1024 / row_bytes.div_ceil(256).max(1) / 256)
+                let bounded_rows = (4 * 1024 * 1024 / row_bytes.div_ceil(256).max(1) / 256)
                     .max(1).min(height as usize);
+                // Share the existing staging budget between two slots instead
+                // of doubling it. Small surfaces and software recovery keep
+                // their original single-allocation path.
+                let staging_count=if !software_recovery && bounded_rows<height as usize {2}else{1};
+                let readback_rows=(bounded_rows/staging_count).max(1);
                 if staging_size != (width as u32, readback_rows as u32) {
-                    staging = None;
+                    staging = [None,None];
                     staging_size = (width as u32, readback_rows as u32);
                 }
-                if staging.is_none() {
+                let band_count=(height as usize).div_ceil(readback_rows);
+                for slot in staging.iter_mut().take(staging_count) {
+                    if slot.is_some() {continue;}
                     desc.Width = width as u32;
                     desc.Height = readback_rows as u32;
                     desc.Usage = D3D11_USAGE_STAGING;
@@ -430,10 +437,9 @@ unsafe fn run(target: &Target, outbox: &Outbox, stop: &AtomicBool, driver:D3D_DR
                     if desc.Format != DXGI_FORMAT_B8G8R8A8_UNORM || desc.SampleDesc.Count != 1 {
                         return Err("Unsupported capture format".into());
                     }
-                    device.CreateTexture2D(&desc, None, Some(&mut staging))
+                    device.CreateTexture2D(&desc, None, Some(slot))
                         .map_err(|e| gpu_error(&device, "Create readback texture", e))?;
                 }
-                let backing = staging.as_ref().ok_or("Missing readback resource")?;
                 // Never copy the old image or mutate storage still held by the
                 // encoder/writer. Reuse only an exclusively owned allocation;
                 // otherwise allocate the new frame as before, with no waiting.
@@ -445,14 +451,27 @@ unsafe fn run(target: &Target, outbox: &Outbox, stop: &AtomicBool, driver:D3D_DR
                 let readback_started = Instant::now();
                 let mut valid = true;
                 let (mut copy_submit_ms, mut map_ms, mut pixel_copy_ms, mut unmap_ms) = (0.0, 0.0, 0.0, 0.0);
-                for first_row in (0..height as usize).step_by(readback_rows) {
-                    let rows = readback_rows.min(height as usize - first_row);
+                // Prime both bounded textures. Refill a slot only after its
+                // CPU read and Unmap, so the next GPU copy can run while we
+                // read the other slot. All bands belong to this retained WGC
+                // frame; there are no inter-frame leases or waits for reuse.
+                let mut submit_band=|band:usize| -> Result<(),String> {
+                    let backing=staging[band % staging_count].as_ref().ok_or("Missing readback resource")?;
+                    let first_row=band*readback_rows;
+                    let rows=readback_rows.min(height as usize-first_row);
                     let region = D3D11_BOX { left:x as u32, top:y as u32 + first_row as u32, front:0,
                         right:(x + width) as u32, bottom:y as u32 + first_row as u32 + rows as u32, back:1 };
                     let submitted = Instant::now();
                     context.CopySubresourceRegion(backing, 0, 0, 0, 0, &texture, 0, Some(&region));
                     context.Flush();
                     copy_submit_ms += submitted.elapsed().as_secs_f64() * 1000.0;
+                    Ok(())
+                };
+                for band in 0..staging_count {submit_band(band)?;}
+                for band in 0..band_count {
+                    let first_row=band*readback_rows;
+                    let rows=readback_rows.min(height as usize-first_row);
+                    let backing=staging[band % staging_count].as_ref().ok_or("Missing readback resource")?;
                     let map_started = Instant::now();
                     let mut mapped = D3D11_MAPPED_SUBRESOURCE::default();
                     context
@@ -485,6 +504,7 @@ unsafe fn run(target: &Target, outbox: &Outbox, stop: &AtomicBool, driver:D3D_DR
                     context.Unmap(backing, 0);
                     unmap_ms += unmapping.elapsed().as_secs_f64() * 1000.0;
                     if !valid { break; }
+                    if band+staging_count<band_count {submit_band(band+staging_count)?;}
                 }
                 // Every pixel and padding byte is initialized before publication.
                 if valid { pixels.set_len(total); }
@@ -531,6 +551,7 @@ unsafe fn run(target: &Target, outbox: &Outbox, stop: &AtomicBool, driver:D3D_DR
                 outbox.frame(&target.id,json!({"type":"frame","window":target.id,"sequence":sequence,"generation":generation,
                     "width":width,"height":height,"stride":stride,"bytes":pixels.len(),"capture":if software_recovery {"wgc-software-recovery"} else {"wgc-hardware-readback"},
                     "guestInitialDialogRepaint":initial_dialog_repaint,
+                    "guestReadbackSlots":staging_count,"guestReadbackBands":band_count,
                     "guestBufferReused":u8::from(buffer_reused),
                     "guestReadbackMilliseconds":readback_milliseconds,
                     "guestCopySubmitMilliseconds":copy_submit_ms,"guestMapMilliseconds":map_ms,
