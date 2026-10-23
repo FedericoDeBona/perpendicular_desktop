@@ -32,7 +32,10 @@ def main():
     execution = reply.get('result', {})
     if (result.returncode or not reply.get('ok') or execution.get('exitCode') != 0
             or execution.get('timedOut') or execution.get('outputTruncated')):
-        raise RuntimeError('Fence check did not finish: ' + str(
+        reason = ('timed out after 20 seconds' if execution.get('timedOut') else
+                  'output was truncated' if execution.get('outputTruncated') else
+                  'execution failed')
+        raise RuntimeError('Fence check did not finish (' + reason + '): ' + str(
             execution.get('stderr') or reply.get('error') or result.stderr))
     report = json.loads(execution['stdout'])
     if (not report.get('driverModules') or report.get('adapter', {}).get('vendor') != 0x1af4

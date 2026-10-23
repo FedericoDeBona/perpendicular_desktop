@@ -37,6 +37,31 @@ public static class PerpendicularFenceWait {
     delegate int GetAdapter(IntPtr self,out IntPtr adapter);
     [UnmanagedFunctionPointer(CallingConvention.StdCall)]
     delegate int GetAdapterDesc(IntPtr self,out AdapterDesc desc);
+    [DllImport("dxgi.dll")]
+    static extern int CreateDXGIFactory1(ref Guid iid,out IntPtr factory);
+    [UnmanagedFunctionPointer(CallingConvention.StdCall)]
+    delegate int EnumAdapter(IntPtr self,uint index,out IntPtr adapter);
+    static IntPtr TargetAdapter() {
+        // A hot driver install can leave Basic Render as the desktop default.
+        IntPtr factory;
+        var iid=new Guid("770aae78-f26f-4dba-a829-253c83d1b387");
+        Check(CreateDXGIFactory1(ref iid,out factory));
+        try {
+            for(uint index=0;;index++) {
+                IntPtr adapter;
+                int hr=Method<EnumAdapter>(factory,12)(factory,index,out adapter);
+                if(unchecked((uint)hr)==0x887a0002u)break;
+                Check(hr);
+                bool selected=false;
+                try {
+                    AdapterDesc desc;Check(Method<GetAdapterDesc>(adapter,10)(adapter,out desc));
+                    selected=desc.Vendor==0x1af4 && desc.Device==0x1050 && (desc.Flags&2)==0;
+                    if(selected)return adapter;
+                } finally {if(!selected)Drop(adapter);}
+            }
+        } finally {Drop(factory);}
+        throw new InvalidOperationException("Neptune hardware adapter is not available.");
+    }
     static object AdapterInfo(IntPtr device) {
         IntPtr dxgi=IntPtr.Zero,adapter=IntPtr.Zero,adapter1=IntPtr.Zero;
         try {
@@ -79,14 +104,18 @@ public static class PerpendicularFenceWait {
     delegate void UnmapTexture(IntPtr self,IntPtr resource,uint sub);
     public static object Run() {
         var r=new System.Collections.Generic.Dictionary<string,object>();
-        IntPtr a=IntPtr.Zero,b=IntPtr.Zero,ca=IntPtr.Zero,cb=IntPtr.Zero;
+        IntPtr adapter=IntPtr.Zero,a=IntPtr.Zero,b=IntPtr.Zero,ca=IntPtr.Zero,cb=IntPtr.Zero;
         IntPtr a5=IntPtr.Zero,b5=IntPtr.Zero,ca4=IntPtr.Zero,cb4=IntPtr.Zero;
         IntPtr fa=IntPtr.Zero,fb=IntPtr.Zero,shared=IntPtr.Zero,q=IntPtr.Zero;
         bool waitQueued=false; Thread releaser=null; int releaseHr=0; IntPtr tex=IntPtr.Zero,staging=IntPtr.Zero,rtv=IntPtr.Zero;
         try {
             uint levelA,levelB;
-            Check(D3D11CreateDevice(IntPtr.Zero,1,IntPtr.Zero,0x20,IntPtr.Zero,0,7,out a,out levelA,out ca));
-            Check(D3D11CreateDevice(IntPtr.Zero,1,IntPtr.Zero,0x20,IntPtr.Zero,0,7,out b,out levelB,out cb));
+            adapter=TargetAdapter();
+            Console.Error.WriteLine("fence-check: creating Neptune device A");
+            Check(D3D11CreateDevice(adapter,0,IntPtr.Zero,0x20,IntPtr.Zero,0,7,out a,out levelA,out ca));
+            Console.Error.WriteLine("fence-check: creating Neptune device B");
+            Check(D3D11CreateDevice(adapter,0,IntPtr.Zero,0x20,IntPtr.Zero,0,7,out b,out levelB,out cb));
+            Console.Error.WriteLine("fence-check: devices created; creating shared fence and textures");
             r["featureLevels"]=new uint[]{levelA,levelB};
             r["adapter"]=AdapterInfo(a);
             a5=QI(a,"8ffde202-a0e7-45df-9e01-e837801b5ea0");
@@ -108,6 +137,7 @@ public static class PerpendicularFenceWait {
             td.Usage=3;td.Bind=0;td.CPU=0x20000;
             Check(Method<MakeTexture>(a,5)(a,ref td,IntPtr.Zero,out staging));
             var timer=Stopwatch.StartNew();
+            Console.Error.WriteLine("fence-check: submitting Wait and GPU work");
             int hr=Method<FenceOp>(ca4,148)(ca4,fa,1);
             r["waitHr"]=hr;r["waitCpuMilliseconds"]=timer.Elapsed.TotalMilliseconds;Check(hr);
             waitQueued=true;
@@ -130,6 +160,7 @@ public static class PerpendicularFenceWait {
                 Method<Flush>(cb,111)(cb);
             });
             releaser.IsBackground=true;releaser.Start();
+            Console.Error.WriteLine("fence-check: mapping after scheduling the independent Signal");
             timer.Restart();Mapped mapped;
             int mapHr=Method<MapTexture>(ca,14)(ca,staging,0,1,0,out mapped);
             r["mapHr"]=mapHr;r["mapMilliseconds"]=timer.Elapsed.TotalMilliseconds;
@@ -148,6 +179,7 @@ public static class PerpendicularFenceWait {
             r["afterSignalMilliseconds"]=elapsed;r["afterSignalFenceValue"]=value(fa);
             r["scope"]="D3D11 Wait ordering for one GPU clear, staging copy and EVENT behind an initially zero shared fence, released by independent device B";
             r["driverModules"]=DriverModules();
+            Console.Error.WriteLine("fence-check: work completed; releasing temporary objects");
             return r;
         } finally {
             if(waitQueued && cb4!=IntPtr.Zero && fb!=IntPtr.Zero) {
@@ -155,7 +187,7 @@ public static class PerpendicularFenceWait {
                 Method<Flush>(cb,111)(cb);
             }
             if(releaser!=null)releaser.Join(1000);Drop(rtv);Drop(staging);Drop(tex);Drop(q);Drop(fb);Drop(fa);if(shared!=IntPtr.Zero)CloseHandle(shared);
-            Drop(cb4);Drop(ca4);Drop(b5);Drop(a5);Drop(cb);Drop(ca);Drop(b);Drop(a);
+            Drop(cb4);Drop(ca4);Drop(b5);Drop(a5);Drop(cb);Drop(ca);Drop(b);Drop(a);Drop(adapter);
         }
     }
 

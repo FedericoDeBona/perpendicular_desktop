@@ -1,0 +1,117 @@
+--- a/viogpu/viogpu3d/viogpu_adapter.cpp
++++ b/viogpu/viogpu3d/viogpu_adapter.cpp
+@@ -434,6 +434,8 @@
+     RtlZeroMemory(&m_VioDev, sizeof(m_VioDev));
+     RtlZeroMemory(m_vaShadow, sizeof(m_vaShadow));
+     RtlZeroMemory(m_MFenceMap, sizeof(m_MFenceMap));
++    KeInitializeSpinLock(&ScheduledDevicesLock);
++    InitializeListHead(&ScheduledDevices);
+     KeInitializeSpinLock(&m_MFenceMapLock);
+     m_Id = g_InstanceId++;
+     m_PendingWorks = 0;
+@@ -4018,3 +4020,21 @@
+     getHandleData.Flags.DeviceSpecific = 0;
+     return VioGpuResource::FromHandle(m_DxgkInterface.DxgkCbGetHandleData(&getHandleData));
+ }
++
++// Private trial protocol: a release must never address another process.
++bool VioGpuAdapter::CanScheduleContext(VioGpuDevice *source, UINT target)
++{
++    if (!source || !target) return false;
++    bool found = false;
++    KIRQL irql;
++    KeAcquireSpinLock(&ScheduledDevicesLock, &irql);
++    for (LIST_ENTRY *e = ScheduledDevices.Flink; e != &ScheduledDevices; e = e->Flink) {
++        VioGpuDevice *d = CONTAINING_RECORD(e, VioGpuDevice, ScheduledEntry);
++        if (d->OwnerProcess == source->OwnerProcess && !d->m_Context.IsEmpty() &&
++            d->m_Context.GetCapset() == VIRTIO_GPU_CAPSET_NEPTUNE && d->m_Context.GetId() == target) {
++            found = true; break;
++        }
++    }
++    KeReleaseSpinLock(&ScheduledDevicesLock, irql);
++    return found;
++}
+--- a/viogpu/viogpu3d/viogpu_adapter.h
++++ b/viogpu/viogpu3d/viogpu_adapter.h
+@@ -74,6 +74,9 @@
+ class VioGpuAdapter final : public HandleBase<"VIOGADAP"_M, VioGpuAdapter>, IVioGpuPCI
+ {
+   public:
++    LIST_ENTRY ScheduledDevices;
++    KSPIN_LOCK ScheduledDevicesLock;
++    bool CanScheduleContext(VioGpuDevice *source, UINT target);
+     VioGpuCommander commander;
+     VioGpuVidPN vidpn;
+     VioGpuIdr resourceIdr;
+--- a/viogpu/viogpu3d/viogpu_command.cpp
++++ b/viogpu/viogpu3d/viogpu_command.cpp
+@@ -397,6 +397,35 @@
+                     return;
+                 }
+
++            // Private trial 0xB: release the host ring only when THIS runtime
++            // context's packet has passed Windows scheduling (including Wait).
++            case 0xB:
++                {
++                    struct Start { UINT context; UINT value; UINT64 ring; };
++                    if (cmdHdr->size != sizeof(Start)) goto end;
++                    Start start;
++                    RtlCopyMemory(&start, cmdBody, sizeof(start));
++                    if (!start.value || !m_pAdapter->CanScheduleContext(m_pDevice, start.context)) goto end;
++                    // Wire2 transport RING_SUBMIT_VQ_SEQNO, authored here.
++                    struct Release { UINT type, flags; UINT64 object; UINT size, reserved; UINT64 ring; UINT value, pad; };
++                    PBYTE releaseBytes = new (NonPagedPoolNx) BYTE[sizeof(Release)];
++                    Release *release = reinterpret_cast<Release *>(releaseBytes);
++                    if (!release) goto end;
++                    RtlZeroMemory(release, sizeof(*release));
++                    release->type = 0x00010005;
++                    release->size = sizeof(*release);
++                    release->ring = start.ring;
++                    release->value = start.value;
++                    static_assert(sizeof(Release) == 40);
++                    AddPending();
++                    if (!m_pAdapter->ctrlQueue.SubmitCommand(release, sizeof(*release), start.context,
++                            FALSE, 0, VioGpuCommand::QueueRunningCb, this)) {
++                        delete[] releaseBytes;
++                        if (DropPending() == 0) goto end;
++                    }
++                    return;
++                }
++
+             case VIOGPU_CMD_GATE:
+                 {
+                     // Monitored-fence gate: park this packet's DMA completion
+--- a/viogpu/viogpu3d/viogpu_device.cpp
++++ b/viogpu/viogpu3d/viogpu_device.cpp
+@@ -65,10 +65,19 @@
+     DbgPrint(TRACE_LEVEL_VERBOSE, ("<--> %s\n", __FUNCTION__));
+
+     m_pAdapter = pAdapter;
++    OwnerProcess = PsGetCurrentProcessId();
++    KIRQL irql;
++    KeAcquireSpinLock(&m_pAdapter->ScheduledDevicesLock, &irql);
++    InsertTailList(&m_pAdapter->ScheduledDevices, &ScheduledEntry);
++    KeReleaseSpinLock(&m_pAdapter->ScheduledDevicesLock, irql);
+ }
+
+ VioGpuDevice::~VioGpuDevice()
+ {
++    KIRQL irql;
++    KeAcquireSpinLock(&m_pAdapter->ScheduledDevicesLock, &irql);
++    RemoveEntryList(&ScheduledEntry);
++    KeReleaseSpinLock(&m_pAdapter->ScheduledDevicesLock, irql);
+     PAGED_CODE();
+     DbgPrint(TRACE_LEVEL_VERBOSE, ("<--> %s", __FUNCTION__));
+
+--- a/viogpu/viogpu3d/viogpu_device.h
++++ b/viogpu/viogpu3d/viogpu_device.h
+@@ -63,6 +63,8 @@
+
+     CtrlQueue *GetCtrlQueue();
+
++    LIST_ENTRY ScheduledEntry;
++    HANDLE OwnerProcess;
+     VioGpuContext m_Context;
+     VioGpuContext m_Virgl;
+
+--
