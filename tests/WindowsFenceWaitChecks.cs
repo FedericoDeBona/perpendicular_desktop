@@ -6,7 +6,7 @@ using System;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Threading;
-public static class PerpendicularFenceWait {
+public static partial class PerpendicularFenceWait {
     [DllImport("kernel32.dll")] static extern bool CloseHandle(IntPtr handle);
     [UnmanagedFunctionPointer(CallingConvention.StdCall)]
     delegate int CreateFence(IntPtr self, ulong initial, uint flags, ref Guid iid, out IntPtr fence);

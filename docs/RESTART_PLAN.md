@@ -647,3 +647,12 @@ Durante la prima build privata usato per errore App.swift ordinario, con avvio i
 
 
 Il seguito sul flicker conserva una distinzione verificata: Calcolatrice passa da un PNG ricevuto completo a due PNG ricevuti con cifre mancanti prima di Metal. Un nuovo confronto SHA256 opt-in, limitato ai primi3frame per finestra, conferma6pacchetti completi identici prima/dopo LZ4; il caso parziale non ricompare in quei campioni, quindi non è ancora esclusa la compressione per quel caso. Nessuna riparazione dei pixel o variante del driver introdotta. Worker diagnostico temporaneo e frontend nel solo clone, DWM default/desktop visibile; proseguire sulla produzione/readback/completamento della superficie effettiva senza attribuire il difetto a Metal dai soli screenshot o ripetere il Wait già superato.
+
+
+### Completamento del produttore collegato al runtime —24 ottobre
+
+Il Wait corretto non qualificava il Signal di B dopo lavoro GPU: un nuovo caso con texture condivisa restituisce fence1 ma4096pixel ancora neri; dopo readback di B la stessa importazione A è corretta. Conservata anche una successiva riuscita sul vecchio payload, quindi il caso ha una dipendenza dai tempi. Candidata opt-in composta con fence interna D3D11 e GATE sullo stesso contesto Windows dopo gli invii di avvio. Il renderer valida e conserva separatamente i tipi D3D11/12; kernel/versioni invariati. Nessuna Map o attesa CPU introdotta nel driver.
+
+Con effettivo payload3cfc9e5ba157 e renderer06f13705774b, il controllo di pubblicazione e il Wait originale passano su hardware VirtIO, chiamate asincrone e invii GATE verificati. Risolti prima della qualifica gli errori di copia ReadOnly, helper C# duplicati e riuso Windows del vecchio pacchetto con INF identico; non contare i risultati sul payload0836 come prova della nuova candidata. Dettagli e limiti in VERIFICATION.md e graphics/driver/README.md.
+
+Prossimo risultato richiesto: una breve prova reale di Settings/Calcolatrice con worker candidato identificato, distinguendo produttore DWM, cattura e presentazione. Non ripetere i due controlli fence già superati senza una modifica pertinente. Verificare se il flicker/frame parziale migliora; nessuna promozione dall'esito di laboratorio. Drag congelato alla ricezione resta verificato; obiettivo utente ancora incompleto.
