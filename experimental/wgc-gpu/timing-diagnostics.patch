@@ -1,0 +1,51 @@
+--- a/src/perp-sync/proxy-broker.c
++++ b/src/perp-sync/proxy-broker.c
+@@ -370,6 +370,10 @@
+     LiveResource *target=resource(selected);LiveWorker *desired=target && !target->tainted?worker(target->context):NULL;
+     LiveWorker *current=worker(active);
+     for(unsigned i=0;i<LIVE_MAX_PENDING;i++)if(frames[i].used && !frames[i].leased && !ready(&frames[i]) && now()-frames[i].received>1000000000ull) {
++        struct pollfd diagnostic={frames[i].fds[1],POLLIN,0};int polled=poll(&diagnostic,1,0);
++        fprintf(stderr,"wgc-diag: timeout context=%u resource=%u generation=%u batch=%u poll=%d revents=%x age_ms=%llu\n",
++            frames[i].header.context_id,frames[i].header.resource_id,frames[i].header.snapshot_generation,frames[i].header.status,
++            polled,diagnostic.revents,(unsigned long long)((now()-frames[i].received)/1000000ull));
+         LiveWorker *w=worker(frames[i].header.context_id);if(w)fail_worker(w,"producer completion timeout");return;
+     }
+     for(unsigned i=0;i<LIVE_MAX_PENDING;i++)if(frames[i].used && !frames[i].leased && ready(&frames[i])) {
+--- a/src/perp-sync/snapshot.c
++++ b/src/perp-sync/snapshot.c
+@@ -27,6 +27,7 @@
+     bool retired;
+     uint32_t generation;
+     bool busy;
++    uint64_t diagnostic_started;bool diagnostic_reported;
+ } Export;
+ static Export entries[MAX_EXPORTS];
+ static once_flag once=ONCE_FLAG_INIT;
+@@ -213,6 +214,18 @@
+     if(!count)return true; /* Superseded or denied request; authorize no read. */
+     void *writer=chosen[0]->writer;
+     PFN_ID3D11DeviceContext4_Signal original=VTABLE(PFN_ID3D11DeviceContext4_Signal,writer,NPT_VTBL_ID3D11DeviceContext4_Signal);
++    for(unsigned i=0;i<MAX_EXPORTS+GENERATION_SLOTS;i++) {
++        Export *e=i<MAX_EXPORTS?&entries[i]:&generations[i-MAX_EXPORTS];
++        if(e->busy && !e->diagnostic_reported && live_now()-e->diagnostic_started>700000000ull && e->fence) {
++            e->diagnostic_reported=true;
++            struct npt_d3d_library *dlib=npt_renderer_get_library();int fd=dlib->pfn_event_dup_fd(e->event);
++            struct pollfd p={fd,POLLIN,0};int polled=fd>=0?poll(&p,1,0):-1;
++            fprintf(stderr,"wgc-diag: slow-copy context=%u generation=%u expected=%llu completed=%llu poll=%d revents=%x\n",
++                ctx->ctx_id,e->generation,(unsigned long long)e->value,
++                (unsigned long long)VTABLE(PFN_ID3D11Fence_GetCompletedValue,e->fence,NPT_VTBL_ID3D11Fence_GetCompletedValue)(e->fence),polled,p.revents);
++            if(fd>=0)close(fd);
++        }
++    }
+     if(!generation_prepare(chosen,count,entries,MAX_EXPORTS)) {dropped_busy++;goto no_capture;}
+     if(++live_capture_batch==0) {live_fault_locked();goto no_capture;}
+     if(!live_completion_fence || !identical(chosen[0]->owner,live_completion_owner)) {
+@@ -255,7 +268,7 @@
+         VTABLE(PFN_ID3D11DeviceContext_CopyResource,writer,NPT_VTBL_ID3D11DeviceContext_CopyResource)(writer,chosen[i]->snapshot,chosen[i]->texture);
+     for(unsigned i=0;i<count;i++) {
+         Export *e=chosen[i];e->busy=true;e->fence=live_completion_fence;
+-        npt_com_add_ref(e->fence);e->value=completed_value;
++        npt_com_add_ref(e->fence);e->value=completed_value;e->diagnostic_started=live_now();e->diagnostic_reported=false;
+         if(++sequence==0)live_fault_locked();e->generation=sequence;
+     }
+     /* This private marker follows the copy on the same immediate writer.

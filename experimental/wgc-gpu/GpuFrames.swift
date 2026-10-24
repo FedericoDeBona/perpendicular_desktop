@@ -73,7 +73,7 @@ final class ExperimentalGpuFrames:@unchecked Sendable {
                       let p=r.buffer.contents().advanced(by:h*stride).assumingMemoryBound(to:UInt8.self)
                       return (0..<32).map{String(format:"%02x",p[$0])}.joined()==marker
                   }),let output=GuestFrameSurface.allocate(width:w,height:h,stride:stride),
-                  let command=commands?.makeCommandBuffer(),let blit=command.makeBlitCommandEncoder() else{self.fail();ExperimentalGpuTrace.record("gpu-rejected",header);completion(nil,[:]);return}
+                  let command=commands?.makeCommandBuffer(),let blit=command.makeBlitCommandEncoder() else{self.fail();var diagnostic=header;diagnostic["cachedResources"]=resources.map{["width":$0.width,"height":$0.height,"stride":$0.stride]};ExperimentalGpuTrace.record("gpu-rejected",diagnostic);completion(nil,[:]);return}
             blit.copy(from:resource.texture,sourceSlice:0,sourceLevel:0,sourceOrigin:MTLOrigin(x:0,y:0,z:0),sourceSize:MTLSize(width:w,height:h,depth:1),
                       to:output.texture,destinationSlice:0,destinationLevel:0,destinationOrigin:MTLOrigin(x:0,y:0,z:0));blit.endEncoding()
             command.addCompletedHandler{buffer in

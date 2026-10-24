@@ -20,15 +20,19 @@ def main():
  def run(name,args,cwd=None):
   (q/(name+'.command.json')).write_text(json.dumps(list(map(str,args)),indent=2)+'\n')
   r=subprocess.run(list(map(str,args)),cwd=cwd,stdout=subprocess.PIPE,stderr=subprocess.STDOUT);(q/(name+'.log')).write_bytes(r.stdout);assert r.returncode==0,(name,r.stdout.decode(errors='replace')[-1800:])
- record=next(x for x in json.loads((ref/'build/compile_commands.json').read_text()) if x['file'].endswith('/npt_shared.c'))
- command=[x.replace(str(ref),str(q)) for x in shlex.split(record['command'])]
  source=q/'source/src/neptune/npt_shared.c';before=sha(source)
  s=source.read_text();needle='/* OPEN_RES arrives';assert s.count(needle)==1
  s=s.replace(needle,'#include "perp-wgc-export.inc"\n\n'+needle)
  needle='   hr = npt_shared_export_handle(ctx, blob_id, data_res_id, data_off, handle);';assert s.count(needle)==1
  s=s.replace(needle,'   if (!nt_handle) perp_wgc_export(ctx, blob_id, (const void *)(uintptr_t)handle);\n'+needle)
  source.write_text(s);shutil.copy2(HERE/'export.inc',source.parent/'perp-wgc-export.inc')
- run('compile',command,q/'build');run('archive',['ar','r','src/libvirgl.a',record['output']],q/'build')
+ run('diagnostics',['patch','-p1','--forward','--batch','-i',HERE/'timing-diagnostics.patch'],q/'source')
+ records=json.loads((ref/'build/compile_commands.json').read_text());objects=[]
+ for filename in ['npt_shared.c','snapshot.c','proxy-broker.c']:
+  record=next(x for x in records if x['file'].endswith('/'+filename))
+  command=[x.replace(str(ref),str(q)) for x in shlex.split(record['command'])]
+  run('compile-'+filename,command,q/'build');objects.append(record['output'])
+ run('archive',['ar','r','src/libvirgl.a',*objects],q/'build')
  ninja=ref.parent/'venv/bin/ninja'
  for label,target in [('library','src/libvirglrenderer.1.dylib'),('server','server/virgl_render_server')]:
   line=subprocess.check_output([str(ninja),'-C',str(ref/'build'),'-t','commands',target],text=True).splitlines()[-1]
