@@ -6,7 +6,20 @@ import CryptoKit
 /// Private single-window experiment. Only descriptors cross this socket.
 final class ExperimentalGpuFrames:@unchecked Sendable {
     static let shared=ExperimentalGpuFrames()
-    static let socketPath="/tmp/perp-wgc-\(getuid())-\(getpid()).sock"
+    private struct Endpoint:Codable {var socket:String;var qemuPID:Int32;var frontendPID:Int32}
+    private static let trialRoot=FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/Perpendicular IVSHMEM Trial")
+    private static let endpointURL=trialRoot.appendingPathComponent("Control/wgc-export-endpoint.json")
+    private static let machineID="c9f319b7-6689-45ac-8003-b8e5fbaebbb8"
+    private static let qmp="/tmp/perpendicular-\(getuid())-c9f319b7.sock"
+    private static let savedEndpoint:Endpoint? = {
+        var info=stat();guard lstat(endpointURL.path,&info)==0,info.st_uid==getuid(),info.st_mode & 0o777 == 0o600,
+            let data=try? Data(contentsOf:endpointURL),data.count<1024,let e=try? JSONDecoder().decode(Endpoint.self,from:data),
+            e.qemuPID>1,e.frontendPID>1,e.socket.hasPrefix("/tmp/perp-wgc-\(getuid())-"),e.socket.hasSuffix(".sock"),
+            e.socket.dropFirst("/tmp/perp-wgc-\(getuid())-".count).dropLast(5).allSatisfy({$0.isNumber}),
+            (try? MachineControl.execute(socket:qmp,operation:"query-uuid",expectedUUID:machineID,expectedPID:e.qemuPID)) != nil else{return nil}
+        return e
+    }()
+    static let socketPath=savedEndpoint?.socket ?? "/tmp/perp-wgc-\(getuid())-\(getpid()).sock"
     private let queue=DispatchQueue(label:"perpendicular.wgc-gpu")
     private let device=MTLCreateSystemDefaultDevice()!
     private var commands:(any MTLCommandQueue)?
@@ -27,6 +40,13 @@ final class ExperimentalGpuFrames:@unchecked Sendable {
     }
     func start()throws {
         commands=device.makeCommandQueue()
+        if let previous=Self.savedEndpoint {
+            guard kill(previous.frontendPID,0) != 0,errno==ESRCH else{throw CocoaError(.fileWriteFileExists)}
+            var info=stat()
+            if lstat(Self.socketPath,&info)==0 {
+                guard info.st_uid==getuid(),info.st_mode & mode_t(S_IFMT)==mode_t(S_IFSOCK),unlink(Self.socketPath)==0 else{throw CocoaError(.fileWriteNoPermission)}
+            }
+        }
         let fd=Darwin.socket(AF_UNIX,SOCK_DGRAM,0);guard fd>=0 else{throw CocoaError(.fileReadUnknown)}
         var address=sockaddr_un();address.sun_family=sa_family_t(AF_UNIX)
         let path=Array(Self.socketPath.utf8)+[0]
@@ -36,6 +56,14 @@ final class ExperimentalGpuFrames:@unchecked Sendable {
         guard result==0,chmod(Self.socketPath,0o600)==0,fcntl(fd,F_SETFL,O_NONBLOCK)==0 else{Darwin.close(fd);throw CocoaError(.fileReadUnknown)}
         listener=fd;let source=DispatchSource.makeReadSource(fileDescriptor:fd,queue:queue);self.source=source
         source.setEventHandler{[weak self] in self?.receive()};source.resume()
+    }
+    func publishEndpoint()throws {
+        let text=try String(contentsOf:Self.trialRoot.appendingPathComponent("qemu-system-aarch64.pid"),encoding:.utf8)
+        guard let pid=Int32(text.trimmingCharacters(in:.whitespacesAndNewlines)),pid>1 else{throw CocoaError(.fileReadCorruptFile)}
+        _=try MachineControl.execute(socket:Self.qmp,operation:"query-uuid",expectedUUID:Self.machineID,expectedPID:pid)
+        let data=try JSONEncoder().encode(Endpoint(socket:Self.socketPath,qemuPID:pid,frontendPID:getpid()))
+        try data.write(to:Self.endpointURL,options:.atomic)
+        try FileManager.default.setAttributes([.posixPermissions:0o600],ofItemAtPath:Self.endpointURL.path)
     }
     private func receive(){
         for _ in 0..<32 {

@@ -2,13 +2,10 @@
 use super::{capture::Target,wire::Outbox,error,catalogue};
 use serde_json::{Value,json};
 use sha2::{Digest,Sha256};
-use std::{sync::{Mutex,OnceLock,atomic::{AtomicBool,Ordering}},time::{Instant,Duration,SystemTime,UNIX_EPOCH}};
+use std::{sync::{Mutex,OnceLock,atomic::Ordering},time::{Instant,Duration,SystemTime,UNIX_EPOCH}};
 use windows::{core::Interface,Win32::{Foundation::{HWND,POINT},Graphics::{Direct3D11::*,Dxgi::IDXGIResource,Gdi::ClientToScreen}}};
-static DISABLED:AtomicBool=AtomicBool::new(false);
 static OWNER:OnceLock<Mutex<Option<String>>>=OnceLock::new();
-pub fn disable(){DISABLED.store(true,Ordering::Release);}
 pub fn enabled(id:&str)->bool{
- if DISABLED.load(Ordering::Acquire)||std::env::var("PERP_WGC_GPU").as_deref()!=Ok("1"){return false;}
  let mut owner=OWNER.get_or_init(||Mutex::new(None)).lock().unwrap();
  if owner.is_none(){*owner=Some(id.to_owned());}owner.as_deref()==Some(id)
 }

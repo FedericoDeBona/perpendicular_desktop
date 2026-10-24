@@ -1,6 +1,13 @@
 # Single-window WGC GPU trial
 
 Opt-in source overlay; ordinary source, VM and runtime are read-only inputs.
+**Current user-requested mode: GPU frames only.** Manual TCP switching and
+automatic TCP pixel fallback have been removed from this paired build. Guest
+capture waits for GPU negotiation and fails explicitly for unsupported surfaces;
+no CPU frame encoding/publishing or WARP recovery follows a GPU error. The Mac
+rejects non-GPU frames before reading their payload. Control, metadata and ACKs
+still use TCP. The previous fallback/comparison results below are historical.
+See [the GPU-only restart](../../docs/VERIFICATION.md#24-ottobre--richiesta-solo-gpu-rimozione-fallback-e-riavvio-frontend) for the current receipt.
 The paired private worker/frontend/renderer require a separate clone. This is
 not a production transport or a new Windows graphics driver. **A bounded runtime
 trial now passes:** a Classic Notepad WGC window was presented on the Mac, three
@@ -41,11 +48,9 @@ Only the first three GPU frames for a newly allocated surface also read back a
 reference in Windows and compare the SHA256 of packed BGRA rows on the Mac.
 Padding and the marker row are excluded. Subsequent frames do not read pixel
 payloads back to the guest CPU, but still query GPU completion. Those later
-frames are not full-hash proofs. A host source/marker/hash rejection disables
-GPU negotiation for that frontend session; the worker retains ordinary TCP+LZ4.
-The manual application menu also disables the GPU path. Verify actual frame
-recovery before claiming fallback success; control reconnection alone is not
-sufficient. The diagnostic path is negotiated only on the separate frame channel.
+frames are not full-hash proofs. A host source/marker/hash rejection reports an explicit GPU error and withholds
+the receipt; it never negotiates TCP pixels. The menu no longer offers a TCP
+mode. The ordinary product and historical paired build retain their prior paths. The diagnostic path is negotiated only on the separate frame channel.
 
 There are still a guest GPU copy, a Mac GPU copy, metadata/query overhead and
 Metal presentation. No claim of complete zero-copy or repaired WGC source
@@ -64,3 +69,13 @@ manifest and matches the reference compiled code to the packaged baseline, recom
 packages only those changes in a separate runtime. `build-frontend.py --prepared …
 --runtime …` builds/signs a fresh private app using that runtime. It does not boot,
 install or replace anything. Runtime verification belongs in the diary.
+
+Frontend-only restart can reuse the export socket of the running clone. A private
+0600 receipt ties the socket to QMP peer PID plus clone UUID; an existing socket
+is unlinked only after its previous frontend exited and socket ownership/type
+are checked. The new frontend publishes its PID after startup. This was exercised
+without restarting Windows; arbitrary stale/corrupt receipts are not qualified.
+The current GPU-only prototype still admits one window owner and <=4 million
+logical pixels; oversized windows and classic GDI menu surfaces now report errors
+instead of being displayed through TCP. The first three GPU reference readbacks
+remain diagnostic and are not a fallback.
