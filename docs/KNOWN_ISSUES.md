@@ -14,6 +14,8 @@ L'obiettivo resta rendere affidabili driver, accelerazione 3D e presentazione de
 
 ## Priorità corrente
 
+Su richiesta del 24 ottobre, valutare ora IVSHMEM come esperimento separato (**TRN-001**), con frame completi grezzi, notifica senza polling e fallback TCP; [obiettivo e passaggi](IVSHMEM_EVALUATION.md). Questo non chiude né richiede di riattivare le candidate grafiche.
+
 Isolare l'arresto del driver candidato **GFX-002** prima di riattivarlo nel compositore; risolvere il flicker **GFX-001** con un confronto reale valido. Conservare le correzioni utili di drag e resize senza legarne la distribuzione a una candidata DWM instabile. Il recupero della cattura e delle risorse è ancora aperto (**GFX-003/004**).
 
 ## Problemi aperti
@@ -90,6 +92,16 @@ Isolare l'arresto del driver candidato **GFX-002** prima di riattivarlo nel comp
 - **Verificato:** Wait passa dal callback runtime precedentemente vuoto al contesto di scheduling; il controllo resta pendente con fence0 e termina dopo Signal indipendente. Il controllo di pubblicazione individua anche fence1 con vecchi pixel; con gate di completamento e renderer abbinato restituisce i pixel corretti. Le chiamate restano asincrone. Corretto anche l'uso del ring prima della conferma di creazione.
 - **Da completare / chiusura:** risolvere GFX-002 e dimostrare che la correzione elimina un problema concreto come GFX-001 nel pacchetto reale. Non ripetere i controlli già superati senza una modifica pertinente; non dedurre stabilità generale dalla riuscita dei test.
 - **Evidenze:** [test Wait](../tests/WindowsFenceWaitChecks.cs), [test pubblicazione](../tests/WindowsFencePublicationChecks.cs), [driver](../graphics/driver/README.md), [renderer](../graphics/renderer/README.md), [VERIFICATION.md](VERIFICATION.md). La [segnalazione upstream](https://github.com/osy/kvm-guest-drivers-windows/issues/8) conserva il difetto originario, non certifica le candidate locali.
+
+## Esperimento di trasporto separato
+
+### TRN-001 — IVSHMEM non disponibile nel QEMU macOS attuale
+
+- **Stato:** aperto; valutazione iniziale documentata, fattibilità Windows↔Mac e beneficio non dimostrati. Nessuna integrazione o distribuzione.
+- **Verificato:** QEMU Native3D 10.0.12/hash `64a5e90ee941` locale, incluso nel bundle e nel runtime del clone non registra `ivshmem-plain`. La patch proposta non si applica direttamente allo snapshot associato: file rinominato `ivshmem-pci.c`, hunk Kconfig incompatibile; resta anche un gate Meson su EVENTFD. La patch esclude il doorbell su macOS. Sorgente driver KMDF con configurazioni ARM64 e API mapping/MMIO individuato; pacchetto firmato e caricamento non verificati.
+- **Prossimo passo:** build privata del plain con gate Darwin separato e notifica MMIO→socket Unix; prima controllo host mapping/notifica senza disco, poi sfida di byte nel clone con driver ARM64 identificato. Qualificare cache/barriere ARM64 prima dei frame, senza cambiare il driver grafico o le protezioni ordinarie.
+- **Chiusura:** stessa memoria osservata da Windows/Mac, pubblicazione completa prima della notifica e nessun riuso durante la lettura; frame reale e fallback TCP verificati; breve confronto raw/raw e contro TCP+LZ4 con decisione motivata anche se negativa. Nessuna promessa zero-copy completo o soluzione GFX per deduzione.
+- **Evidenze:** [VERIFICATION.md](VERIFICATION.md#24-ottobre--ivshmem-verifica-iniziale-del-runtime-e-della-patch); [valutazione e contratto proposto](IVSHMEM_EVALUATION.md).
 
 ## Limiti e lavoro rinviato
 

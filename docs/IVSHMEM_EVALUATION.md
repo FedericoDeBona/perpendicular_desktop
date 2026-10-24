@@ -1,0 +1,60 @@
+# Valutazione IVSHMEM — 24 ottobre 2026
+
+## Obiettivo e criterio di completamento
+
+Determinare se IVSHMEM può sostituire il solo payload dei frame fra Windows ARM64 e macOS nell'attuale Perpendicular, con una prova isolata di frame BGRA completi grezzi, notifica guest→host senza polling continuo, proprietà dei buffer verificata e fallback TCP funzionante. Misurare poi latenza fino alla presentazione, CPU e frame scartati sia contro TCP grezzo sia contro TCP+LZ4. Una build o un mapping sul solo Mac non completano l'obiettivo.
+
+La valutazione iniziale è conclusa; la fattibilità end-to-end e il vantaggio sono **ancora da dimostrare**. Il runtime attuale non espone il device. Nessuna integrazione frame, compilazione candidata o installazione guest è stata eseguita in questo passaggio. Evidenze e insuccessi in [VERIFICATION.md](VERIFICATION.md#24-ottobre--ivshmem-verifica-iniziale-del-runtime-e-della-patch).
+
+## Risultati verificati e limiti
+
+| Domanda | Evidenza / esito |
+| --- | --- |
+| Quale QEMU? | Native3D locale e incluso nel bundle: 10.0.12, SHA256 `64a5e90ee941f32e270ee119347a2569dc444ba2e2c26af24c07d3eb5cfef07b`. Stesso eseguibile nel runtime immutabile del clone Driver Trial `deadd02604d8…/Contents/Resources/Native3D`. Nessun processo VM vivo al rilievo. |
+| Device disponibile? | `-device ivshmem-plain,help` restituisce «Device 'ivshmem-plain' not found»; anche doorbell assente nel runtime locale. Il comando help termina con exit 0: occorre interpretare il messaggio, non il solo codice di uscita. |
+| Backing store possibile? | `memory-backend-file` è elencato fra gli oggetti disponibili. Questo non prova che BAR guest e processo Mac vedano gli stessi byte, né la compatibilità con HVF. |
+| Patch applicabile direttamente? | No: controllo sullo snapshot sorgente locale 10.0.12 respinto, hunk Kconfig non applicabile e `hw/misc/ivshmem.c` assente; qui esiste `ivshmem-pci.c`. |
+| Basta portare gli hunk? | No: Meson abilita `CONFIG_IVSHMEM` tramite `CONFIG_EVENTFD`; config host locale senza EVENTFD e LINUX. Kconfig richiede anche LINUX. Il gate Meson non è modificato dalla patch. |
+| Driver Windows ARM64? | Sorgente KMDF upstream con configurazioni Win10/Win11 ARM64. Non equivale a un pacchetto binario firmato e caricabile verificato. L'elenco CAB Win11 ARM64 consultato non include IVSHMEM; non è prova di assenza da ogni distribuzione. Endpoint Fedora stable negato da Anubis. Nessun driver scaricato da mirror non ufficiali. |
+
+La [patch indicata](https://github.com/LinuxStereopticon/qemu/commit/67b270f1fa38c10bdff0be99ca84da406630c62d) cambia due file: rimuove LINUX dalla dipendenza del device, introduce `CONFIG_IVSHMEM_DOORBELL` predefinito su Linux e condiziona registrazione, server, eventfd, MSI e scrittura del doorbell. Su macOS il risultato previsto è plain senza doorbell: nessun nuovo canale QEMU→frontend. Non è una patch di accelerazione grafica o di sincronizzazione GPU.
+
+Lo snapshot completo consultato appartiene al profilo locale `graphics-rebuild-qemu-native-20261016`; le ricevute della build successiva conservano questa base e gli overlay. Non è stata ricostruita in questo passaggio l'identità di tutti gli input del link finale: prima di produrre la candidata usare le ricevute/pin correnti, senza ricompilare da un generico tag 10.0.12 e perdere gli overlay Native3D.
+
+## Modifica minima candidata (proposta, non implementata)
+
+1. Separare in Meson la disponibilità della memoria PCI dal supporto eventfd, mantenendo server/client Linux subordinati a eventfd; aggiornare Kconfig e portare le guardie sul file `ivshmem-pci.c`. Non abilitare indiscriminatamente `ivshmem-flat` o il server Linux su Darwin.
+2. Aggiungere una proprietà opt-in di notifica al solo plain sperimentale. BAR0 resta 256 byte, BAR2 è il backing store condiviso, nessuna BAR1/MSI-X. Una scrittura all'offset 12 viene intercettata dal device e produce un avviso su un chardev socket Unix privato collegato al processo Mac. Senza proprietà restano le semantiche ordinarie di plain. È un'estensione locale da riconoscere tramite handshake/versione, non un doorbell standard fra peer.
+3. Il frontend crea un file regolare nuovo per sessione, dimensione potenza di due (inizialmente 64 MiB), permessi 0600 in directory 0700; mappa quel medesimo file con MAP_SHARED e lo passa a QEMU con `memory-backend-file,share=on`. Il frontend conserva descrittore e identità del file. Nessuna riapertura ambigua dopo sostituzione o troncamento; backing e socket fuori dal repository.
+4. QEMU invia un piccolo avviso coalescibile attraverso CharBackend, senza attese sul thread MMIO. Il frontend riceve con DispatchSourceRead e svuota la coda pronta; l'avviso è un suggerimento, i contatori condivisi sono la fonte dello stato. Usare capacità finita e callback di scrivibilità per un avviso pendente quando il socket è pieno. Un evento non deve poter sparire nell'intervallo fra svuotamento e riarmo. Connessione/riconnessione forza una scansione, EOF/errore disabilita il trasporto sperimentale e segnala fallback. Nessun ciclo periodico per cercare frame.
+
+La modifica minima Windows potrebbe essere **zero modifiche al driver IVSHMEM**, se il binario ARM64 disponibile conserva l'API esaminata. [Queue.c upstream](https://github.com/virtio-win/kvm-guest-drivers-windows/blob/d92b9c073ec1108f51846d0bd109c5796b46fd36/ivshmem/Queue.c) permette al titolare del mapping di scrivere il registro mediante `IOCTL_IVSHMEM_RING_DOORBELL`, senza richiedere vettori MSI disponibili. Il campo peer/vector può avere un valore convenuto dall'estensione locale. Il Mac non è un peer standard identificato dal server IVSHMEM.
+
+## Accesso guest e firma
+
+Riferimento fissato: commit upstream `d92b9c073ec1108f51846d0bd109c5796b46fd36`. Il processo Rust enumera l'interfaccia GUID `df576976-569d-4672-95a0-f57e4ea0b210`, apre il device e usa REQUEST_SIZE/REQUEST_MMAP. La risposta include puntatore user-mode, dimensione, peer e vettori; RELEASE_MMAP/chiusura rilasciano il mapping. È consentito un solo mapping alla volta per device: il worker che scrive i frame deve possederlo. Non occorre modificare il driver grafico.
+
+[Device.c](https://github.com/virtio-win/kvm-guest-drivers-windows/blob/d92b9c073ec1108f51846d0bd109c5796b46fd36/ivshmem/Device.c) distingue registri e memoria anche senza interrupt e costruisce un MDL di I/O; [Public.h](https://github.com/virtio-win/kvm-guest-drivers-windows/blob/d92b9c073ec1108f51846d0bd109c5796b46fd36/ivshmem/Public.h) definisce ABI e cache mode. Questo descrive il sorgente, non il comportamento di un SYS non ancora identificato. Usare ABI C ARM64 con allineamenti verificati.
+
+Prima del boot sperimentale reperire pacchetto da distribuzione ufficiale: verificare PE ARM64, INF per PCI 1AF4:1110, catalogo, hash e caricamento effettivo nel clone. Se serve compilare: WDK/KMDF ARM64, INF/catalogo coerenti e firma appropriata; [Windows richiede firma del codice kernel](https://learn.microsoft.com/en-us/windows-hardware/drivers/install/windows-driver-signing-tutorial). Una modifica al SYS/INF richiede nuova confezione/firma; l'autorizzazione storica alla candidata grafica non va estesa automaticamente a nuove modifiche delle protezioni. Conservare le protezioni ordinarie. Il successo della firma non prova avvio o mapping.
+
+## Contratto dei frame da verificare
+
+Prima prova: un produttore, un consumer, una finestra; tre slot a capacità fissa. Header versionato con sessione/epoch, formato BGRA8, dimensioni, stride, byte validi, identità finestra, sequenza e timestamp. Offset relativi, nessun puntatore tra processi. Validare overflow, capacità e rettangoli prima di leggere; respingere il frame troppo grande senza troncarlo. 64 MiB contengono tre raster 2880×1740 BGRA e metadati; non sono una garanzia per ogni monitor/finestra.
+
+Ogni slot ha un contatore pubblicato scritto solo dal guest e uno di rilascio scritto solo dal Mac, su aree separate. Il guest riusa uno slot soltanto quando il Mac ha rilasciato quella generazione. Scrive payload e metadati, applica la barriera di pubblicazione, aggiorna la sequenza per ultimo, ordina le scritture prima dell'IOCTL MMIO e notifica. Il Mac acquisisce la sequenza prima dei dati, copia/presenta e rilascia solo dopo l'ultima lettura. Nessuno slot libero: scarto esplicito del nuovo frame e contatore, mai sovrascrittura del frame posseduto dal Mac. Slot pronti vecchi possono essere scartati dal consumer con rilascio esplicito.
+
+Per la prima presentazione copiare in un buffer Mac posseduto dal renderer e rilasciare lo slot dopo quella copia. Se successivamente Metal usa direttamente il mapping, rilascio solo dal completamento del comando GPU. Il readback Windows rimane necessario. Non qualificare come zero-copy completo nessuna di queste configurazioni.
+
+**Vincolo aperto:** su ARM64 la cacheability effettiva del BAR, le barriere normali→MMIO e l'accesso atomico devono essere verificati su Windows/HVF; volatile o una notifica non sono una fence sufficiente. Non applicare RMW/Interlocked a memoria Device senza supporto dimostrato, né mescolare alias cache incoerenti. Preferire contatori allineati con un solo scrittore e primitive di lettura/scrittura/barriera appropriate al mapping scelto. Un'eventuale piccola modifica al driver deve risolvere questo confine o una differenza osservata del binario, senza coinvolgere WDDM.
+
+Nuova sessione usa backing/epoch nuovi; un reconnect non azzera slot ancora letti da CPU/GPU. Quiescenza o abbandono della vecchia regione, nessun reset cieco. Fallback invalida la sessione IVSHMEM e riprende i frame TCP senza duplicare la finestra; comandi di controllo sempre TCP.
+
+## Passaggi osservabili e verifica minima
+
+1. **Device host disponibile:** build privata con input correnti verificati, registrazione plain e realizzazione su macchina ARM/HVF senza disco Windows. Primo piccolo controllo attraverso MMIO/qtest: BAR2 e MAP_SHARED vedono lo stesso pattern; scrittura BAR0 produce avviso socket. È una verifica host, non prova Windows.
+2. **Percorso Windows minimo:** solo clone recuperabile, driver ARM64 identificato. Windows legge una sfida Mac e scrive risposta/pattern con sequenza e checksum; alla notifica il Mac legge tutti i byte. Fermare il consumer trattenendo uno slot e verificare che il guest non lo modifichi; poi rilasciare e osservare il riuso. Un caso di socket scollegato verifica l'esito esplicito senza polling. Pochi pattern e una prova con consumer ritardato bastano.
+3. **Frame reale e fallback:** stessa WGC hardware senza candidata DWM; una finestra con aggiornamenti riproducibili, resize, contenuto intero, presentazione Metal. Interrompere il canale sperimentale e ritrovare quella finestra su TCP. Confrontare anche checksum fra readback e Mac: non attribuire a IVSHMEM i difetti già presenti nel frame sorgente.
+4. **Breve confronto:** stessa risoluzione, attività, limiti di coda e politica di scarto: IVSHMEM raw / TCP raw / TCP+LZ4 attuale. Rilevare frame prodotti/notificati/ricevuti/presentati/scartati e sequenze, CPU guest/worker/QEMU/frontend, byte/copie e tempi per readback, codec, trasporto/upload e presentazione (mediana e p95 solo con campioni sufficienti). Per latenza end-to-end usare evento input Mac correlato al primo frame che ne mostra l'effetto e al callback di presentazione; i clock dei due OS non si sottraggono senza calibrazione. Il callback Metal non è misura ottica input-to-photon. Nessun numero prestazionale ancora raccolto.
+
+Concludere con adozione motivata soltanto se il vantaggio è ripetibile nella breve attività scelta e il fallback funziona. Altrimenti conservare TCP e registrare il limite. Blocchi modificati, comandi su IVSHMEM/virtio-serial, interrupt bidirezionali e multi-VM restano fuori ambito. GFX-001/002/003/004/007 e WIN-001/002 conservano il proprio stato: questo esperimento non li risolve per deduzione.
