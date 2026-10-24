@@ -93,7 +93,6 @@ final class DesktopWindow:NSObject,NSWindowDelegate {
     private var nativeActive=false
     private var timer:Timer?
     private var visible=false
-    private var fittedDisplay:NSSize?
 
     var state:[String:Any] {["visible":visible,"fullScreen":window.styleMask.contains(.fullScreen),"viewWidth":Int(surface.bounds.width),"viewHeight":Int(surface.bounds.height),"backingScale":window.backingScaleFactor,"nativeActive":nativeActive,"width":Int(surface.source.width),"height":Int(surface.source.height)]}
     init(socket:String,endpoint:@escaping ()->NativeDisplayEndpoint?,resized:@escaping (NSSize)->Void = {_ in})throws{
@@ -103,7 +102,6 @@ final class DesktopWindow:NSObject,NSWindowDelegate {
         window.title="Windows Desktop";window.isReleasedWhenClosed=false;window.contentView=surface;window.delegate=self
         surface.onResize={ [weak self] in
             guard let self,self.visible else{return}
-            self.fittedDisplay=nil
             resized(self.surface.convertToBacking(self.surface.bounds).size)
         }
         window.collectionBehavior.insert(.fullScreenPrimary)
@@ -114,25 +112,6 @@ final class DesktopWindow:NSObject,NSWindowDelegate {
         visible=true;window.makeKeyAndOrderFront(nil);window.makeFirstResponder(surface)
         NSApp.activate(ignoringOtherApps:true);connect();surface.onResize?()
         if timer == nil {timer=Timer.scheduledTimer(withTimeInterval:1,repeats:true){[weak self] _ in Task{@MainActor in self?.connect()}}}
-    }
-    func fitContent(to size:NSSize){
-        fittedDisplay=size
-        fitConfirmedContent()
-    }
-    private func fitConfirmedContent(){
-        // Reconcile only a confirmed, actually presented mode. Full screen
-        // belongs to the Mac display; never resize its window behind AppKit.
-        guard visible,!window.styleMask.contains(.fullScreen),!surface.inLiveResize,
-              let size=fittedDisplay,size == surface.source,size.width>0,size.height>0 else{return}
-        let bounds=surface.bounds.size
-        let minimumScale=max(480/size.width,298/size.height)
-        window.contentMinSize=NSSize(width:size.width*minimumScale,height:size.height*minimumScale)
-        let scale=max(minimumScale,min(bounds.width/size.width,bounds.height/size.height))
-        let content=NSSize(width:size.width*scale,height:size.height*scale)
-        guard abs(content.width-bounds.width)>0.5 || abs(content.height-bounds.height)>0.5 else{return}
-        var frame=window.frameRect(forContentRect:NSRect(origin:.zero,size:content))
-        frame.origin=NSPoint(x:window.frame.minX,y:window.frame.maxY-frame.height)
-        window.setFrame(frame,display:true)
     }
     func stop(){
         visible=false;timer?.invalidate();timer=nil;surface.releaseInput()
@@ -146,7 +125,7 @@ final class DesktopWindow:NSObject,NSWindowDelegate {
             let client=DesktopConnection(path:socket,receive:{[weak self] pixels,width,height in
                 guard let self,self.visible,self.connectionID == id,!self.nativeActive else{return}
                 self.surface.source=NSSize(width:width,height:height)
-                self.surface.renderer.present(pixels,width:width,height:height);self.fitConfirmedContent();self.window.title="Windows Desktop"
+                self.surface.renderer.present(pixels,width:width,height:height);self.window.title="Windows Desktop"
             },layout:{[weak self] screen in
                 guard let self,self.connectionID == id,!self.nativeActive else{return};self.surface.inputScreen=screen
             },failed:{[weak self] message in
@@ -163,7 +142,7 @@ final class DesktopWindow:NSObject,NSWindowDelegate {
                 self.nativeActive=true;self.desktop?.requestPixels(false)
                 self.surface.source=NSSize(width:frame.texture.width,height:frame.texture.height)
                 self.surface.inputScreen=DesktopScreen(id:0,x:0,y:0,width:frame.texture.width,height:frame.texture.height)
-                self.surface.renderer.present(frame);self.fitConfirmedContent();self.window.title="Windows Desktop"
+                self.surface.renderer.present(frame);self.window.title="Windows Desktop"
             },failed:{[weak self] message in
                 guard let self,self.readerID == id else{return}
                 let wasNative=self.nativeActive

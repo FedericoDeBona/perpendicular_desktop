@@ -734,9 +734,8 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
                 let x=log(size.width/desired.width),y=log(size.height/desired.height)
                 return x*x+y*y+2*(x-y)*(x-y)
             }
-            guard let mode=self.desktopModes.min(by:{cost($0)<cost($1)}) else{return}
-            if mode == self.desktopConfirmed {self.machine?.fitDesktopContent(to:mode);return}
-            guard mode != self.desktopAttempted else{return}
+            guard let mode=self.desktopModes.min(by:{cost($0)<cost($1)}),
+                  mode != self.desktopConfirmed,mode != self.desktopAttempted else{return}
             self.desktopAttempted=mode
             let request=UUID();self.desktopResizeRequest=request
             self.bridge.command("display_configure",["width":Int(mode.width),"height":Int(mode.height)],timeout:.seconds(5)){[weak self] result in

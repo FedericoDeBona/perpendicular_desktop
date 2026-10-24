@@ -804,3 +804,11 @@ La modalità dedicata e il primo resize dinamico sono ora implementati e verific
 ### Seguito — bande nere nella finestra desktop
 
 Richiesta utente: resize soddisfacente, rimuovere le bande nere. Build privata DesktopFocus/build-5 (frontend0a2f167b8b44) aperta sullo stesso clone: al termine del resize la cornice assume il rapporto del modo Windows confermato e già presentato; immagine intera, proporzioni e trasformazione input conservate. Vista960×600/scanout1920×1200 e clic Start verificati. Fullscreen escluso dalla riconciliazione della cornice; DPI e distribuzione ordinaria ancora da qualificare. Tentativi di drag automatizzato senza variazione osservabile, non contati come nuova prova di resize. [Evidenze](VERIFICATION.md#24-ottobre--bande-nere-nella-finestra-desktop).
+
+
+### Correzione del requisito — il desktop segue la finestra
+
+L’utente rifiuta esplicitamente l’adattamento inverso della build-5: la cornice Mac deve mantenere le dimensioni scelte; Windows deve applicare una risoluzione personalizzata attraverso il driver. Build-6 rimuove fitContent e la selezione del modo predefinito più vicino, pubblica il raster della vista Retina via RFB, poi verifica le dimensioni Windows. Il driver/helper presenti hanno applicato1920×1280 e2880×1676, assenti dai modi pubblicizzati. Nessun nuovo driver necessario per queste due applicazioni. Saturazione indipendente del presenter e recupero della sessione impediscono ancora la qualifica completa. [Diario](VERIFICATION.md#24-ottobre--ripristino-del-resize-personalizzato-del-desktop).
+
+
+**Esito del seguito:** candidata build-6 non promossa; dopo reset adattatore il cambio personalizzato non torna operativo, mentre SetDisplayConfig/ALLOW_CHANGES restituisce0 scegliendo2048×1152 anziché1440×1676. Conservati tentativo e codice privati. Sorgenti del prodotto ripristinati al percorso build-4, rimuovendo la soluzione inversa build-5. Prossimo risultato necessario: driver applica e presenta due misure personalizzate dopo reset, senza cambiare la cornice. Nessun reboot imposto per questa prova; documento ripristinato a skdf/4caratteri, controllo riconnesso con worker1892 e servizio helpervgpusrv riavviato.
