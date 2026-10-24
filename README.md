@@ -2,6 +2,8 @@
 
 Applicazione Mac per trovare e usare applicazioni Windows eseguite in una VM locale, mostrando le singole finestre sul Mac.
 
+Per iniziare o riprendere il lavoro, leggere il [registro dei problemi](docs/KNOWN_ISSUES.md): è il riferimento per problemi aperti, correzioni da distribuire e prossimi passi. Il [piano](docs/RESTART_PLAN.md) conserva requisiti e vincoli; il [diario delle verifiche](docs/VERIFICATION.md) conserva prove e tentativi falliti.
+
 La macchina di sviluppo attuale è Windows 11 IoT Enterprise LTSC ARM64, importata da UTM in una copia APFS indipendente. La sorgente UTM viene conservata; il bridge Rust attuale e i driver firmati sono installati nella sola copia di sviluppo. Il percorso attivo usa VirtIO3D, ancora sperimentale.
 
 La coppia grafica corrente usa il driver firmato v0.4 e il runtime Native3D Wire2 qualificato. La preparazione del CD verifica la corrispondenza con il runtime del pacchetto Mac prima di aggiungere il driver; dettagli e verifica senza modifiche con `--dry-run` sono in [IMPLEMENTATION.md](docs/IMPLEMENTATION.md).
@@ -16,7 +18,8 @@ Il prodotto non è ancora considerato affidabile: restano perdita del device, pr
 
 - [Piano essenziale e requisiti](docs/RESTART_PLAN.md)
 - [Scelte tecniche, build, limiti e aggiornamenti](docs/IMPLEMENTATION.md)
-- [Prima verifica e problemi emersi](docs/VERIFICATION.md)
+- [Problemi aperti e stato delle correzioni](docs/KNOWN_ISSUES.md)
+- [Diario delle verifiche e problemi emersi](docs/VERIFICATION.md)
 
 Il frontend Mac è Swift/AppKit; servizio, sessione e acquisizione Windows sono Rust ARM64. L'app di sviluppo è `.build/Perpendicular.app`; la VM e la configurazione privata restano in `~/Library/Application Support/Perpendicular Restart/`.
 

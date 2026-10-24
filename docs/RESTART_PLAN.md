@@ -1,5 +1,7 @@
 # Piano essenziale delle applicazioni Windows su Mac
 
+**Prima di riprendere:** leggere [KNOWN_ISSUES.md](KNOWN_ISSUES.md), il registro aggiornato dei problemi e dei prossimi passi. Questo piano conserva requisiti, autorizzazioni ed evoluzione del lavoro; le sezioni storiche non sono un elenco aggiornato dei difetti ancora aperti. Dopo una modifica o una verifica, aggiornare la voce pertinente del registro e collegare le evidenze in [VERIFICATION.md](VERIFICATION.md).
+
 ## Obiettivo
 
 Creare un'applicazione Mac che mostri il catalogo delle applicazioni Windows di una VM locale e consenta di aprirle e usarle in finestre individuali sul Mac. Windows continua a eseguire e disegnare le applicazioni; al Mac devono arrivare i contenuti delle finestre interessate e delle relative finestre secondarie.

@@ -1,7 +1,8 @@
 # Regole di lavoro
 
-Leggi [docs/RESTART_PLAN.md](docs/RESTART_PLAN.md). Le istruzioni dell'utente hanno precedenza.
+Prima di iniziare o riprendere il lavoro, leggi [docs/KNOWN_ISSUES.md](docs/KNOWN_ISSUES.md) per problemi, stato corrente e prossimi passi, poi [docs/RESTART_PLAN.md](docs/RESTART_PLAN.md) per requisiti e vincoli. Le istruzioni dell'utente hanno precedenza.
 
+- Aggiorna il registro dei problemi quando emerge un difetto o cambia l'esito di una verifica. Cerca e aggiorna la voce esistente prima di crearne una nuova; collega le evidenze in VERIFICATION.md. Distingui correzioni nel clone, verifiche circoscritte e distribuzione nell'app ordinaria. Chiudi una voce soltanto quando il suo criterio di chiusura è verificato; conserva gli esiti negativi nel diario delle verifiche.
 - Parti dai requisiti del prodotto. Linguaggi, librerie, protocolli e struttura interna richiedono una scelta motivata sul sistema effettivo.
 - Distingui requisiti dell'utente, ipotesi tecniche e capacità realmente verificate.
 - Consulta implementazioni o esperimenti precedenti soltanto per rispondere a una domanda precisa; non ereditarne automaticamente architettura, dipendenze o conclusioni.
