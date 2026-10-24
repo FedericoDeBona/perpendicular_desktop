@@ -246,10 +246,8 @@ impl Worker {
         for (id, metadata) in restored {
             if let Some(window) = self.windows.get_mut(&id) { window.metadata = metadata; }
         }
-        for window in self.windows.values_mut() {
-            window.target = Arc::new(window.target.fresh_capture());
-            window.stop = Some(capture::spawn(window.target.clone(), outbox.clone()));
-        }
+        // A control-only desktop connection must not restore WGC captures.
+        // Restore them only after the host explicitly requests window frames.
         self.snapshot(&outbox);
         let mut poll = Instant::now();
         let diagnostic_busy = Arc::new(AtomicBool::new(false));
@@ -267,6 +265,10 @@ impl Worker {
                     }
                     let compress_frames = command["encoding"] == "lz4-block";
                     frame_channel_started = true;
+                    for window in self.windows.values_mut() {
+                        window.target = Arc::new(window.target.fresh_capture());
+                        window.stop = Some(capture::spawn(window.target.clone(), outbox.clone()));
+                    }
                     let channel = channel.unwrap().to_owned();
                     let endpoint: SocketAddr = format!("10.0.2.2:{}", config.port).parse().map_err(error)?;
                     let hello = json!({"type":"hello","role":"frames","protocol":1,"token":config.token,
@@ -387,6 +389,10 @@ impl Worker {
                     }
                     continue;
                 }
+                if !frame_channel_started && command["operation"] == "launch" {
+                    outbox.control(json!({"type":"reply","request":request,"ok":false,"message":"Individual windows are disabled in this desktop connection"}));
+                    continue;
+                }
                 if command["operation"] != "heartbeat" {
                     let result = self.command(&command, &outbox);
                     outbox.control(match result {
@@ -414,7 +420,7 @@ impl Worker {
             {
                 outbox.control(json!({"type":"display_changed","epoch":self.epoch}));
             }
-            if poll.elapsed() >= Duration::from_millis(75) {
+            if frame_channel_started && poll.elapsed() >= Duration::from_millis(75) {
                 self.observe(&outbox);
                 poll = Instant::now();
             }

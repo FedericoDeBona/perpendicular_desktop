@@ -220,3 +220,23 @@ private struct LauncherApplication:View {
         }.font(.system(size:11)).foregroundStyle(hovered && connected ? Color.accentColor:Color.secondary)
     }
 }
+
+@MainActor
+struct DesktopControls:View {
+    @ObservedObject var model:ApplicationModel
+    var body:some View {
+        VStack(alignment:.leading,spacing:20){
+            Text("Windows").font(.largeTitle)
+            Text(model.machineStateLabel).foregroundStyle(.secondary)
+            if let notice=model.launcherNotice {Text(notice).foregroundStyle(.orange).textSelection(.enabled)}
+            Button("Apri Windows",action:model.showWindows).controlSize(.large)
+                .disabled(!model.desktopAvailable || model.machineOperation != nil)
+            HStack {
+                Button("Avvia Windows",action:model.startWindows).disabled(!model.canStartWindows)
+                Button("Spegni Windows",action:model.shutdownWindows).disabled(!model.canStopWindows)
+            }
+            Text("Chiudere la vista mantiene Windows e i documenti aperti.").foregroundStyle(.secondary)
+            Spacer()
+        }.padding(28).frame(maxWidth:.infinity,maxHeight:.infinity,alignment:.topLeading)
+    }
+}

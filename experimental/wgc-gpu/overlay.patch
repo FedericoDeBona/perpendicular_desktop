@@ -105,7 +105,7 @@
          );
          let (sender, receiver) = mpsc::sync_channel(128);
          let state = outbox.clone();
-@@ -258,6 +258,7 @@
+@@ -256,6 +256,7 @@
          while outbox.connected.load(Ordering::Acquire) {
              if let Ok(command) = receiver.recv_timeout(Duration::from_millis(10)) {
                  let request = command["request"].clone();
@@ -113,7 +113,7 @@
                  if command["operation"] == "frame_channel" {
                      let channel = command["channel"].as_str().filter(|s| s.len() == 32 && s.bytes().all(|b| b.is_ascii_hexdigit()));
                      if frame_channel_started || channel.is_none() || command["rowAlignment"] != 256
-@@ -265,7 +266,9 @@
+@@ -263,7 +264,9 @@
                          outbox.control(json!({"type":"reply","request":request,"ok":false,"message":"Invalid or duplicate frame channel"}));
                          continue;
                      }
@@ -122,8 +122,8 @@
 +                    if command["gpuFrames"] != true {outbox.control(json!({"type":"reply","request":request,"ok":false,"message":"Solo GPU: canale immagini GPU richiesto."}));continue;}
 +                    let compress_frames = false;
                      frame_channel_started = true;
-                     let channel = channel.unwrap().to_owned();
-                     let endpoint: SocketAddr = format!("10.0.2.2:{}", config.port).parse().map_err(error)?;
+                     for window in self.windows.values_mut() {
+                         window.target = Arc::new(window.target.fresh_capture());
 --- a/guest/src/windows/capture.rs
 +++ b/guest/src/windows/capture.rs
 @@ -1,6 +1,5 @@
@@ -443,7 +443,7 @@
          })();
 --- a/macos/App.swift
 +++ b/macos/App.swift
-@@ -72,10 +72,11 @@
+@@ -81,10 +81,11 @@
  
      func applicationDidFinishLaunching(_ notification:Notification){
          do{
@@ -454,9 +454,9 @@
              else {runtime=try RuntimeStore.prepare(contents:Bundle.main.bundleURL.appendingPathComponent("Contents"),directory:directory)}
 +            try ExperimentalGpuFrames.shared.start()
              machine=try VirtualMachineController(directory:directory,runtime:runtime)
-             bridge=try GuestBridge(port:machine.configuration.guestPort,token:machine.configuration.token)
-             bridge.onConnection={ [weak self] value in
-@@ -122,7 +123,7 @@
+             machine.onDesktopSize={ [weak self] size in self?.desktopSize=size;self?.scheduleDesktopResize() }
+             bridge=try GuestBridge(port:machine.configuration.guestPort,token:machine.configuration.token,individualWindows:!desktopOnly)
+@@ -135,7 +136,7 @@
              }
          }catch{status=error.localizedDescription;launcherNotice="Windows non può essere avviato. "+error.localizedDescription}
          launcher=NSWindow(contentRect:NSRect(x:200,y:160,width:800,height:660),styleMask:[.titled,.closable,.resizable,.miniaturizable],backing:.buffered,defer:false)
@@ -464,17 +464,17 @@
 +        launcher.title="Perpendicular — Solo WGC GPU";launcher.isReleasedWhenClosed=false
          launcher.minSize=NSSize(width:640,height:480)
          launcher.setFrameAutosaveName("PerpendicularLauncher")
-         launcher.contentView=NSHostingView(rootView:Launcher(model:self))
-@@ -208,7 +209,7 @@
+         if desktopOnly {launcher.contentView=NSHostingView(rootView:DesktopControls(model:self))}
+@@ -223,7 +224,7 @@
          Task{@MainActor [weak self] in
              guard let self else{return}
              defer{self.machineOperation=nil}
--            do {try await machine.start();self.acceptMachineState(await machine.observedState())}
-+            do {try await machine.start();try ExperimentalGpuFrames.shared.publishEndpoint();self.acceptMachineState(await machine.observedState())}
+-            do {try await machine.start();if self.desktopOnly {try await machine.showDesktop()};self.acceptMachineState(await machine.observedState())}
++            do {try await machine.start();try ExperimentalGpuFrames.shared.publishEndpoint();if self.desktopOnly {try await machine.showDesktop()};self.acceptMachineState(await machine.observedState())}
              catch {self.acceptMachineState(await machine.observedState());self.launcherNotice="Non riesco ad avviare Windows. "+error.localizedDescription}
          }
      }
-@@ -272,6 +273,11 @@
+@@ -287,6 +288,11 @@
                let command=request["command"] as? String else {
              localResponse(["ok":false,"error":"Expected a JSON command."],reply:reply);return
          }
@@ -486,7 +486,7 @@
          let allowed:Set<String>=["status","execute","display_info","driver_info","graphics_info","geometry_snapshot","application_status","process_list","process_terminate"]
          guard allowed.contains(command) else {
              localResponse(["ok":false,"error":"This local command is not supported."],reply:reply);return
-@@ -830,7 +836,7 @@
+@@ -899,7 +905,7 @@
              guard let id=value["window"] as? String,windows[id] != nil else{return}
              launcherNotice=value["message"] as? String
          case "window_error","launch_error":
@@ -594,8 +594,8 @@
      }
      private func offer(_ window:String,_ value:GuestPacket) {
          lock.lock()
-@@ -275,13 +226,13 @@
-             if (h["capabilities"] as? [String:Any])?["frameChannel"] as? Bool == true {
+@@ -277,13 +228,13 @@
+             if individualWindows,(h["capabilities"] as? [String:Any])?["frameChannel"] as? Bool == true {
                  let channel=UUID().uuidString.replacingOccurrences(of:"-",with:"").lowercased()
                  frameChannel=channel
 -                var options:[String:Any]=["channel":channel,"rowAlignment":256]
@@ -610,7 +610,7 @@
          if activeFrames == id {
              guard h["type"] as? String == "frame" else{clients[id]?.cancel();return}
              recordFrameTimings(h)
-@@ -305,6 +256,7 @@
+@@ -307,6 +258,7 @@
              if let number=header[key] as? Double,number.isFinite,number>=0,number <= ((key == "wireBytes" || key == "bytes") ? 34*1024*1024:60000) {value[key]=number}
          }
          frameReceiveMilliseconds=lastFrameTimings["hostReceiveMilliseconds"] ?? 0

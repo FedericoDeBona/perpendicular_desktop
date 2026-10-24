@@ -10,6 +10,7 @@ struct WindowsApplication:Identifiable {
 
 @MainActor
 final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation,ObservableObject {
+    private let desktopOnly=Bundle.main.object(forInfoDictionaryKey:"PerpendicularDesktopOnly") as? Bool == true
     @Published var apps:[WindowsApplication]=[]
     @Published var status="Waiting for Windows…"
     @Published var displayStatus="Waiting for Windows display…"
@@ -68,6 +69,14 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
     private var sharedDisplay:SharedDisplay?
     private var recoveryItem:NSMenuItem!
     private var displayItems:[NSMenuItem]=[]
+    private var desktopSize=NSSize.zero
+    private var desktopModes:[NSSize]=[]
+    private var desktopConfirmed=NSSize.zero
+    private var desktopResizeTask:Task<Void,Never>?
+    private var desktopReadRequest:UUID?
+    private var desktopReadAgain=false
+    private var desktopResizeRequest:UUID?
+    private var desktopAttempted=NSSize.zero
     private var restarting=false
 
     func applicationDidFinishLaunching(_ notification:Notification){
@@ -77,7 +86,8 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
             if let override=ProcessInfo.processInfo.environment["PERPENDICULAR_RUNTIME"] {runtime=URL(fileURLWithPath:override)}
             else {runtime=try RuntimeStore.prepare(contents:Bundle.main.bundleURL.appendingPathComponent("Contents"),directory:directory)}
             machine=try VirtualMachineController(directory:directory,runtime:runtime)
-            bridge=try GuestBridge(port:machine.configuration.guestPort,token:machine.configuration.token)
+            machine.onDesktopSize={ [weak self] size in self?.desktopSize=size;self?.scheduleDesktopResize() }
+            bridge=try GuestBridge(port:machine.configuration.guestPort,token:machine.configuration.token,individualWindows:!desktopOnly)
             bridge.onConnection={ [weak self] value in
                 guard let self else{return};self.connected=value;self.status=value ? "Windows connected":"Reconnecting to Windows…"
                 self.launcherEpoch=UUID();self.catalogueLoading=false;self.loadingIconID=nil;self.failedIcons=[]
@@ -89,6 +99,9 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
                 for task in self.openingTasks.values {task.cancel()}
                 self.openingTasks=[:];self.openingApps=[]
                 if !value {
+                    self.desktopResizeTask?.cancel();self.desktopResizeTask=nil
+                    self.desktopReadRequest=nil;self.desktopReadAgain=false
+                    self.desktopResizeRequest=nil;self.desktopAttempted = .zero;self.desktopModes=[]
                     self.activeApps=[]
                     self.guestCapabilities=[:]
                     self.displayEpoch=nil;self.displayReadable=false;self.displayConfigurable=false;self.sharedGeometryCapable=false
@@ -98,7 +111,7 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
                     self.invalidateDisplay("Waiting for Windows display…")
                 }
                 if value{
-                    self.refresh()
+                    if !self.desktopOnly {self.refresh()}
                     if ProcessInfo.processInfo.environment["PERPENDICULAR_AUDIT"] == "1" {self.bridge.command("diagnostics",timeout:.seconds(35)){result in
                         if case .success(let reply)=result,let data=try? JSONSerialization.data(withJSONObject:reply["value"] ?? [:],options:[.prettyPrinted,.sortedKeys]){
                             let report=directory.appendingPathComponent("guest-diagnostics.json")
@@ -125,13 +138,14 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
         launcher.title="Perpendicular";launcher.isReleasedWhenClosed=false
         launcher.minSize=NSSize(width:640,height:480)
         launcher.setFrameAutosaveName("PerpendicularLauncher")
-        launcher.contentView=NSHostingView(rootView:Launcher(model:self))
-        launcher.center();launcher.makeKeyAndOrderFront(nil)
+        if desktopOnly {launcher.contentView=NSHostingView(rootView:DesktopControls(model:self))}
+        else {launcher.contentView=NSHostingView(rootView:Launcher(model:self))}
+        launcher.center();if !desktopOnly || machine == nil {launcher.makeKeyAndOrderFront(nil)}
         NSApp.activate(ignoringOtherApps:true)
         let main=NSMenu();let appItem=NSMenuItem();main.addItem(appItem)
         let menu=NSMenu();appItem.submenu=menu
-        let applications=NSMenuItem(title:"Applications",action:#selector(showApplications),keyEquivalent:"l");applications.target=self;menu.addItem(applications)
-        let show=NSMenuItem(title:"Show Windows",action:#selector(showWindows),keyEquivalent:"");show.target=self;menu.addItem(show)
+        let applications=NSMenuItem(title:desktopOnly ? "Controlli Windows":"Applications",action:#selector(showApplications),keyEquivalent:"l");applications.target=self;menu.addItem(applications)
+        let show=NSMenuItem(title:"Apri Windows",action:#selector(showWindows),keyEquivalent:"");show.target=self;menu.addItem(show)
         let displayItem=NSMenuItem(title:"Display",action:nil,keyEquivalent:"")
         let displayMenu=NSMenu();displayItem.submenu=displayMenu;menu.addItem(displayItem)
         for (profile,title) in [("standard","Standard"),("native3D","Experimental 3D")] {
@@ -158,13 +172,14 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
         edit.addItem(withTitle:"Select All",action:#selector(NSText.selectAll(_:)),keyEquivalent:"a")
         let windowItem=NSMenuItem();main.addItem(windowItem)
         let windowMenu=NSMenu(title:"Window");windowItem.submenu=windowMenu;NSApp.windowsMenu=windowMenu
+        windowMenu.addItem(withTitle:"Schermo intero",action:#selector(NSWindow.toggleFullScreen(_:)),keyEquivalent:"")
         windowMenu.addItem(withTitle:"Minimize",action:#selector(NSWindow.performMiniaturize(_:)),keyEquivalent:"m")
         let close=NSMenuItem(title:"Close",action:#selector(closeCurrentWindow),keyEquivalent:"w");close.target=self;windowMenu.addItem(close)
         startMachineObservation()
-        startWindows()
+        if desktopOnly {showWindows()}else{startWindows()}
     }
     func applicationShouldTerminateAfterLastWindowClosed(_ sender:NSApplication)->Bool{false}
-    func applicationShouldHandleReopen(_ sender:NSApplication,hasVisibleWindows flag:Bool)->Bool{showApplications();return false}
+    func applicationShouldHandleReopen(_ sender:NSApplication,hasVisibleWindows flag:Bool)->Bool{if desktopOnly {showWindows()}else{showApplications()};return false}
     @objc func showApplications(){launcher.makeKeyAndOrderFront(nil);NSApp.activate(ignoringOtherApps:true);NotificationCenter.default.post(name:.launcherFocusSearch,object:nil)}
     @objc func closeCurrentWindow(){(NSApp.keyWindow ?? NSApp.mainWindow)?.performClose(nil)}
     func applicationWillTerminate(_ notification:Notification){machineStateTask?.cancel();localControl?.stop();bridge?.command("release");machine?.closeDesktop()}
@@ -208,7 +223,7 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
         Task{@MainActor [weak self] in
             guard let self else{return}
             defer{self.machineOperation=nil}
-            do {try await machine.start();self.acceptMachineState(await machine.observedState())}
+            do {try await machine.start();if self.desktopOnly {try await machine.showDesktop()};self.acceptMachineState(await machine.observedState())}
             catch {self.acceptMachineState(await machine.observedState());self.launcherNotice="Non riesco ad avviare Windows. "+error.localizedDescription}
         }
     }
@@ -244,7 +259,7 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
         Task{@MainActor [weak self] in
             guard let self else{return};defer{self.machineOperation=nil}
             do {try await machine.showDesktop();self.acceptMachineState(await machine.observedState())}
-            catch {self.launcherNotice="Non riesco ad aprire il desktop Windows. "+error.localizedDescription}
+            catch {self.launcherNotice="Non riesco ad aprire il desktop Windows. "+error.localizedDescription;self.showApplications()}
         }
     }
     @objc func shutdownWindows(){
@@ -288,6 +303,7 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
                 "status":status,"displayStatus":displayStatus,"primaryMatchesHost":sharedDisplay != nil,
                 "windowCount":windows.count,"capabilities":guestCapabilities,
                 "frameChannel":bridge?.separateFrames ?? false,
+                "desktop":machine?.desktopState ?? [:],
                 "lastCommandRTTMilliseconds":bridge?.lastRoundTripMilliseconds ?? 0,
                 "frameReceiveMilliseconds":bridge?.frameReceiveMilliseconds ?? 0,
                 "frameTimings":bridge?.lastFrameTimings ?? [:]]],reply:reply);return
@@ -411,7 +427,7 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
         }
     }
     func refresh(){
-        guard connected,!catalogueLoading else{return}
+        guard !desktopOnly,connected,!catalogueLoading else{return}
         catalogueLoading=true;launcherNotice=nil
         catalogueRequest=UUID();let request=catalogueRequest,epoch=launcherEpoch
         readDisplay()
@@ -640,17 +656,18 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
         displaySetupID=UUID()
         invalidateDisplay("Checking Windows display…")
         guard connected else{return}
-        machine.synchronizePrimaryDisplay()
+        if !desktopOnly {machine.synchronizePrimaryDisplay()}
         readDisplay()
         prepareDisplay()
     }
     private func prepareDisplay(){
-        guard displayConfigurable,machine.virtualDisplayEnabled,let host=HostDisplay.current().first(where:\.primary) else{return}
+        guard !desktopOnly,displayConfigurable,machine.virtualDisplayEnabled,let host=HostDisplay.current().first(where:\.primary) else{return}
         let size=host.guestPixelSize
         let width=Int(size.width),height=Int(size.height)
         configureDisplay(width:width,height:height,epoch:displayEpoch)
     }
     private func readDisplay(){
+        if desktopOnly {readDesktopDisplay();return}
         guard connected,displayReadable,let epoch=displayEpoch else{return}
         displayRevision+=1;let revision=displayRevision
         bridge.command("display_info",timeout:.seconds(5)){[weak self] result in
@@ -664,6 +681,15 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
     }
     private func acceptDisplay(_ snapshot:[String:Any]){
         displayUpdating=false
+        if desktopOnly,let displays=snapshot["displays"] as? [[String:Any]],displays.count == 1,
+           let primary=displays.first,let width=primary["width"] as? Int,let height=primary["height"] as? Int {
+            desktopConfirmed=NSSize(width:width,height:height)
+            desktopModes=(primary["modes"] as? [[String:Int]] ?? []).compactMap { mode in
+                guard let w=mode["width"],let h=mode["height"],w>=640,h>=480,w<=4096,h<=4096,w*h<=8_388_608 else{return nil}
+                return NSSize(width:w,height:h)
+            }
+            scheduleDesktopResize()
+        }
         let host=HostDisplay.current()
         let confirmed=host.first(where:\.primary).flatMap{SharedDisplay.primary(host:$0,snapshot:snapshot)}
         sharedDisplay=sharedGeometryCapable ? confirmed:nil
@@ -678,6 +704,48 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
            let data=try? JSONSerialization.data(withJSONObject:["type":"display_info","guest":snapshot,
                 "host":host.map(\.description),"primaryMatchesHost":sharedDisplay != nil],options:[.sortedKeys]) {
             try? FileHandle.standardError.write(contentsOf:data+Data([10]))
+        }
+    }
+    private func readDesktopDisplay(){
+        guard connected,displayReadable,let epoch=displayEpoch,desktopResizeRequest == nil else{return}
+        guard desktopReadRequest == nil else{desktopReadAgain=true;return}
+        let request=UUID();desktopReadRequest=request
+        bridge.command("display_info",timeout:.seconds(5)){[weak self] result in
+            guard let self,self.connected,self.displayEpoch == epoch,self.desktopReadRequest == request else{return}
+            self.desktopReadRequest=nil
+            if self.desktopReadAgain {self.desktopReadAgain=false;self.readDesktopDisplay();return}
+            if case .success(let reply)=result,let snapshot=reply["value"] as? [String:Any] {self.acceptDisplay(snapshot)}
+            else {self.displayStatus="Windows display could not be checked."}
+        }
+    }
+    private func scheduleDesktopResize(){
+        guard desktopOnly,connected,displayConfigurable,desktopResizeRequest == nil,desktopReadRequest == nil,
+              desktopSize.width>0,desktopSize.height>0,!desktopModes.isEmpty,
+              machine?.desktopState["visible"] as? Bool == true else{return}
+        desktopResizeTask?.cancel()
+        desktopResizeTask=Task{@MainActor [weak self] in
+            try? await Task.sleep(for:.milliseconds(300))
+            guard !Task.isCancelled,let self,self.desktopResizeRequest == nil,self.desktopReadRequest == nil,self.connected,
+                  let epoch=self.displayEpoch,self.machine?.desktopState["visible"] as? Bool == true else{return}
+            let desired=self.desktopSize
+            // Choose only an advertised Windows mode. Prefer matching both
+            // Retina dimensions and aspect; preserve the last image meanwhile.
+            func cost(_ size:NSSize)->Double {
+                let x=log(size.width/desired.width),y=log(size.height/desired.height)
+                return x*x+y*y+2*(x-y)*(x-y)
+            }
+            guard let mode=self.desktopModes.min(by:{cost($0)<cost($1)}),
+                  mode != self.desktopConfirmed,mode != self.desktopAttempted else{return}
+            self.desktopAttempted=mode
+            let request=UUID();self.desktopResizeRequest=request
+            self.bridge.command("display_configure",["width":Int(mode.width),"height":Int(mode.height)],timeout:.seconds(5)){[weak self] result in
+                guard let self,self.displayEpoch == epoch,self.desktopResizeRequest == request else{return}
+                self.desktopResizeRequest=nil
+                // The event and reply can cross. Query actual Windows geometry;
+                // never publish the old reply as the current viewport.
+                if case .failure(let error)=result {self.launcherNotice="Risoluzione Windows invariata: "+error.localizedDescription}
+                self.readDisplay()
+            }
         }
     }
     private func configureDisplay(width:Int,height:Int,epoch:String?,attempt:Int=0){
@@ -724,12 +792,12 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
         }
         switch value["type"] as? String{
         case "hello":
-            machine.synchronizePrimaryDisplay()
+            if !desktopOnly {machine.synchronizePrimaryDisplay()}
             displayEpoch=value["epoch"] as? String
             invalidateDisplay("Checking Windows display…")
             let capabilities=value["capabilities"] as? [String:Any] ?? [:]
             guestCapabilities=Dictionary(uniqueKeysWithValues:["execute","displayInfo","driverInfo","graphicsInfo","sharedGeometry","appIcon","applicationStatus","processControl","clipboard"].map{($0,capabilities[$0] as? Bool == true)})
-            startApplicationStatusUpdates()
+            if !desktopOnly {startApplicationStatusUpdates()}
             pumpApplicationIcons()
             displayReadable=capabilities["displayInfo"] as? Bool == true
             displayConfigurable=capabilities["displayConfigure"] as? Bool == true
@@ -775,6 +843,7 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
                 self.displayReadTask=nil;self.readDisplay()
             }
         case "windows":
+            guard !desktopOnly else{return}
             guard let items=value["windows"] as? [[String:Any]],items.count<=16 else{return}
             let current=Set(items.compactMap{$0["id"] as? String})
             focusWarnedWindows.formIntersection(current)

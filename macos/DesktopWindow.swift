@@ -3,6 +3,7 @@ import AppKit
 @MainActor
 private final class DesktopSurface:NSView {
     let renderer:WindowRenderer
+    var onResize:(()->Void)?
     var connection:DesktopConnection?
     var inputScreen=DesktopScreen(id:0,x:0,y:0,width:800,height:600)
     var source=NSSize(width:800,height:600)
@@ -21,7 +22,8 @@ private final class DesktopSurface:NSView {
     override func setFrameSize(_ size:NSSize){super.setFrameSize(size);resize()}
     override func viewDidMoveToWindow(){super.viewDidMoveToWindow();resize()}
     override func viewDidChangeBackingProperties(){super.viewDidChangeBackingProperties();resize()}
-    private func resize(){renderer.resize(bounds.size,scale:Double(window?.backingScaleFactor ?? 1))}
+    private func resize(){renderer.resize(bounds.size,scale:Double(window?.backingScaleFactor ?? 1));if !inLiveResize {onResize?()}}
+    override func viewDidEndLiveResize(){super.viewDidEndLiveResize();onResize?()}
     override func updateTrackingAreas(){
         for area in trackingAreas {removeTrackingArea(area)}
         addTrackingArea(NSTrackingArea(rect:bounds,options:[.mouseMoved,.activeInKeyWindow,.inVisibleRect],owner:self))
@@ -92,17 +94,23 @@ final class DesktopWindow:NSObject,NSWindowDelegate {
     private var timer:Timer?
     private var visible=false
 
-    init(socket:String,endpoint:@escaping ()->NativeDisplayEndpoint?)throws{
+    var state:[String:Any] {["visible":visible,"fullScreen":window.styleMask.contains(.fullScreen),"viewWidth":Int(surface.bounds.width),"viewHeight":Int(surface.bounds.height),"backingScale":window.backingScaleFactor,"nativeActive":nativeActive,"width":Int(surface.source.width),"height":Int(surface.source.height)]}
+    init(socket:String,endpoint:@escaping ()->NativeDisplayEndpoint?,resized:@escaping (NSSize)->Void = {_ in})throws{
         self.socket=socket;self.endpoint=endpoint;surface=DesktopSurface(renderer:try WindowRenderer(opaque:true))
         window=NSWindow(contentRect:NSRect(x:140,y:120,width:960,height:640),styleMask:[.titled,.closable,.miniaturizable,.resizable],backing:.buffered,defer:false)
         super.init()
         window.title="Windows Desktop";window.isReleasedWhenClosed=false;window.contentView=surface;window.delegate=self
+        surface.onResize={ [weak self] in
+            guard let self,self.visible else{return}
+            resized(self.surface.convertToBacking(self.surface.bounds).size)
+        }
+        window.collectionBehavior.insert(.fullScreenPrimary)
         window.backgroundColor = .black
         window.minSize=NSSize(width:480,height:320);window.acceptsMouseMovedEvents=true
     }
     func show(){
         visible=true;window.makeKeyAndOrderFront(nil);window.makeFirstResponder(surface)
-        NSApp.activate(ignoringOtherApps:true);connect()
+        NSApp.activate(ignoringOtherApps:true);connect();surface.onResize?()
         if timer == nil {timer=Timer.scheduledTimer(withTimeInterval:1,repeats:true){[weak self] _ in Task{@MainActor in self?.connect()}}}
     }
     func stop(){

@@ -204,6 +204,7 @@ final class GuestConnection: @unchecked Sendable {
 @MainActor
 final class GuestBridge {
     private let listener: NWListener
+    private let individualWindows:Bool
     private let token: String
     private var clients: [UUID:GuestConnection] = [:]
     private var active: UUID?
@@ -224,7 +225,8 @@ final class GuestBridge {
     var onConnection: ((Bool) -> Void)?
     var connected: Bool { active != nil }
 
-    init(port: UInt16, token: String) throws {
+    init(port: UInt16, token: String, individualWindows:Bool=true) throws {
+        self.individualWindows=individualWindows
         self.token=token
         let tcp=NWProtocolTCP.Options();tcp.noDelay=true
         let parameters=NWParameters(tls:nil,tcp:tcp)
@@ -272,7 +274,7 @@ final class GuestBridge {
             lastFrameTimings=[:];frameReceiveMilliseconds=0
             clients[id]?.authorize(frames:false)
             active=id;lastPacket=Date();onConnection?(true)
-            if (h["capabilities"] as? [String:Any])?["frameChannel"] as? Bool == true {
+            if individualWindows,(h["capabilities"] as? [String:Any])?["frameChannel"] as? Bool == true {
                 let channel=UUID().uuidString.replacingOccurrences(of:"-",with:"").lowercased()
                 frameChannel=channel
                 var options:[String:Any]=["channel":channel,"rowAlignment":256]

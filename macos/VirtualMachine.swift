@@ -33,6 +33,8 @@ final class VirtualMachineController {
     let configuration: MachineConfiguration
     private var machine: Process?
     private var tpm: Process?
+    var onDesktopSize:((NSSize)->Void)?
+    var desktopState:[String:Any] {desktop?.state ?? ["visible":false]}
     private var desktop:DesktopWindow?
     private var displayControl:DesktopConnection?
     private var displayRequest:UUID?
@@ -129,7 +131,7 @@ final class VirtualMachineController {
     func showDesktop() async throws {
         try await start()
         if let launch=desktopLaunch() {
-            if desktop == nil {desktop=try DesktopWindow(socket:launch.socket,endpoint:{[weak self] in self?.desktopLaunch()?.native})}
+            if desktop == nil {desktop=try DesktopWindow(socket:launch.socket,endpoint:{[weak self] in self?.desktopLaunch()?.native},resized:{[weak self] size in self?.onDesktopSize?(size)})}
             desktop?.show();return
         }
         let path=directory.appendingPathComponent("qemu-system-aarch64.pid")
