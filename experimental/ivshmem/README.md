@@ -225,3 +225,36 @@ same window and a subsequent edit succeeded. Full GPU readback remains; this run
 does not demonstrate lower latency than ordinary TCP+LZ4. See the diary for
 hashes, timing cost and preservation receipts. Do not rerun the completed
 qualification or remove its oracle as a claimed performance fix.
+
+## Combined interactive trial: dirty regions plus LZ4
+
+`prepare-dirty.py --lz4 --output /private/new/combined-build` also compresses
+large full/patch payloads with the existing lz4_flex block encoder. Blocks under
+1024 bytes stay raw; compression is used only if it saves more than 64 bytes.
+`encoding` still describes full versus packed rectangles, while
+`sharedPayloadCodec` is `raw` or `lz4-block`; `sharedDecodedBytes` is the expected
+uncompressed payload size and `sharedPayloadBytes` is the actual slot payload.
+The paired receiver bounds the LZ4 output with an extra destination byte and
+requires exact decoded length before reconstruction/release. Decoding currently
+uses a temporary CPU buffer before copying/reconstructing into the owned Metal
+surface; this extra copy has not been removed. Transport tag:
+`ivshmem-dirty-lz4-check`. QEMU and the Windows driver remain unchanged.
+
+The full-byte **coverage oracle remains on every frame**, including full-frame
+fallback when the current rectangles cannot reconstruct the source. Optional
+`PERP_IVSHMEM_HASH_FRAMES=12` limits the additional full-raster SHA diagnostics to
+the first 12 publications of the worker session and after explicit
+`trial_dirty_refresh`. Without this option qualification mode still hashes all
+frames. Switching windows does not replenish the hash budget. The host verifies
+SHA whenever supplied; a missing hash after budget expiry is explicitly not a
+hash proof. Buffer ownership, bounds and coverage checks are still required.
+`dirtyHashMilliseconds` and `dirtyBaseSaveMilliseconds` separate diagnostic costs
+from the combined `dirtyValidationMilliseconds`; these exclude GPU readback,
+codec and subsequent shared-memory copy.
+
+Only the combined private frontend adds **Passa a TCP + LZ4** to the application
+menu. It changes private frame-mode to `lz4`, disables the shared region, and uses
+the existing reconnect/negotiation. This switch lasts for that frontend session;
+returning to IVSHMEM requires a fresh stopped-VM/frontend session, not a reset of
+live slots. The launcher title names the selected trial path. Do not interpret
+this convenience as a new production transport setting.

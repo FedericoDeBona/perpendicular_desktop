@@ -22,14 +22,19 @@ pub fn rectangles(frame:&Direct3D11CaptureFrame,x:i32,y:i32,w:i32,h:i32)->Option
  } Some(result)
 }
 struct Base{key:String,pixels:Vec<u8>,sequence:u32}
-pub struct Dirty{base:Option<Base>}
+pub struct Dirty{base:Option<Base>,hash_limit:usize,hash_remaining:usize}
 impl Dirty {
- pub fn new()->Self{Self{base:None}}
+ pub fn new()->Self{
+  let limit=std::env::var("PERP_IVSHMEM_HASH_FRAMES").ok().and_then(|v|v.parse::<usize>().ok())
+   .filter(|v|(1..=128).contains(v)).unwrap_or(usize::MAX);
+  Self{base:None,hash_limit:limit,hash_remaining:limit}
+ }
  /// Caller has checked the shared slot is free. A later publication error ends
  /// the whole session, so this private base is never reused after failed I/O.
  pub fn prepare(&mut self,h:&mut Value,bytes:&[u8])->Option<Vec<u8>> {
   let started=Instant::now();let forced=REFRESH.swap(false,Ordering::AcqRel);
   let key=json!([h["window"],h["guestWorkerEpoch"],h["generation"],h["width"],h["height"],h["stride"]]).to_string();
+  if forced{self.hash_remaining=self.hash_limit;}
   let stride=h["stride"].as_u64().unwrap_or(0)as usize;
   let width=h["width"].as_u64().unwrap_or(0)as usize;let height=h["height"].as_u64().unwrap_or(0)as usize;
   let rects=h["guestDirtyRects"].as_array().and_then(|r|r.iter().map(|v|{
@@ -52,13 +57,19 @@ impl Dirty {
     if different==0&&!packed.is_empty()&&packed.len()+64<bytes.len(){payload=Some(packed);base_sequence=base.sequence;reason="exact-reconstruction";}
    }
   }}
-  h["guestPixelsSHA256"]=json!(format!("{:x}",Sha256::digest(bytes)));
+  let hash_started=Instant::now();
+  let checked=self.hash_remaining>0;
+  h["guestPixelsSHA256"]=if checked{self.hash_remaining-=1;json!(format!("{:x}",Sha256::digest(bytes)))}else{Value::Null};
+  h["dirtyHashEnabled"]=json!(checked);
+  h["dirtyHashMilliseconds"]=json!(hash_started.elapsed().as_secs_f64()*1000.0);
   h["dirtyBaseIVSequence"]=json!(base_sequence);h["dirtyFullReason"]=json!(reason);
   h["dirtyCoverageMismatchBytes"]=json!(mismatch);h["dirtyFull"]=json!(payload.is_none());
   h["encoding"]=json!(if payload.is_some(){"dirty-raw"}else{"raw"});
   // A complete private base is deliberately retained for this qualification.
   // Its cost and the full-frame hash are included in the diagnostic time.
+  let save_started=Instant::now();
   self.base=Some(Base{key,pixels:bytes.to_vec(),sequence:0});
+  h["dirtyBaseSaveMilliseconds"]=json!(save_started.elapsed().as_secs_f64()*1000.0);
   h["dirtyValidationMilliseconds"]=json!(started.elapsed().as_secs_f64()*1000.0);
   payload
  }

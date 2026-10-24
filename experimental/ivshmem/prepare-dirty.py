@@ -13,7 +13,8 @@ def replace(path,old,new):
     s=path.read_text();assert s.count(old)==1,(path,old[:90],s.count(old));path.write_text(s.replace(old,new))
 
 def main():
-    p=argparse.ArgumentParser(description=__doc__);p.add_argument('--output',required=True,type=Path);a=p.parse_args()
+    p=argparse.ArgumentParser(description=__doc__);p.add_argument('--output',required=True,type=Path)
+    p.add_argument('--lz4',action='store_true',help='Compress full/patch payloads with the existing LZ4 block codec');a=p.parse_args()
     out=a.output.resolve();subprocess.run(['python3',str(HERE/'prepare-frames.py'),'--output',str(out)],check=True)
     guest=out/'guest/src/windows';mac=out/'macos'
     shutil.copy2(HERE/'guest/dirty.rs',guest/'dirty.rs');shutil.copy2(HERE/'DirtyFrames.swift',mac/'DirtyFrames.swift')
@@ -63,6 +64,32 @@ def main():
             };return
         }
         if command == "trial_reconnect" {''')
+    if a.lz4:
+        replace(guest/'ivshmem.rs','  let payload=prepared.as_deref().unwrap_or(bytes);',
+            '''  let decoded=prepared.as_deref().unwrap_or(bytes);
+  let encode_started=Instant::now();
+  let compressed=if decoded.len()>=1024 {Some(lz4_flex::block::compress(decoded))}else{None};
+  let smaller=compressed.as_ref().filter(|p|p.len()+64<decoded.len());
+  let payload=smaller.map(|p|p.as_slice()).unwrap_or(decoded);
+  header["sharedPayloadCodec"]=json!(if smaller.is_some(){"lz4-block"}else{"raw"});
+  header["sharedDecodedBytes"]=json!(decoded.len());
+  header["guestEncodeMilliseconds"]=json!(encode_started.elapsed().as_secs_f64()*1000.0);''')
+        path=guest/'ivshmem.rs';path.write_text(path.read_text().replace('"ivshmem-dirty-check"','"ivshmem-dirty-lz4-check"'))
+        path=mac/'SharedFrames.swift';path.write_text(path.read_text().replace('"ivshmem-dirty-check"','"ivshmem-dirty-lz4-check"'))
+        replace(path,'header["hostDecodeMilliseconds"]=0;header["hostTrialReceiveAt"]=received',
+            'header["hostDecodeMilliseconds"]=header["hostSharedDecodeMilliseconds"] ?? 0;header["hostTrialReceiveAt"]=received')
+        path=mac/'App.swift'
+        replace(path,'launcher.title="Perpendicular IVSHMEM Trial"','launcher.title="Perpendicular — IVSHMEM + LZ4 + regioni"')
+        replace(path,'        let show=NSMenuItem(title:"Show Windows",',
+            '''        let tcp=NSMenuItem(title:"Passa a TCP + LZ4",action:#selector(useTrialTCP),keyEquivalent:"");tcp.target=self;menu.addItem(tcp)
+        let show=NSMenuItem(title:"Show Windows",''')
+        replace(path,'    @objc func showApplications(){',
+            '''    @objc private func useTrialTCP(){
+        let file=FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/Perpendicular IVSHMEM Trial/frame-mode")
+        do{try "lz4\\n".write(to:file,atomically:true,encoding:.utf8)}catch{status=error.localizedDescription;return}
+        launcher.title="Perpendicular — TCP + LZ4 (clone)";sharedFrames?.disable()
+    }
+    @objc func showApplications(){''')
     print('Dirty qualification overlay ready; ordinary files unchanged:',out)
 
 if __name__=='__main__':main()
