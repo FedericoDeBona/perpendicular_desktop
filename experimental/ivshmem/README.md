@@ -48,3 +48,40 @@ QEMU/HVF paused with no disks, obtains ECAM from QMP rather than assuming its
 address, assigns the BARs, checks a pattern each way and receives the MMIO wake.
 QMP shuts down this process; temporary resources are removed. It does not execute
 CPU instructions in Windows or prove guest publication barriers.
+
+## Windows mapping/publication check
+
+A separate APFS clone of the ordinary VM now passes the minimal Windows path
+with the Fedora 2022 ARM64 driver, Secure Boot still enabled and no driver edits
+or new signatures. The device initially appeared as `machine.inf`/status OK;
+that generic binding did not expose the IVSHMEM interface. The explicit driver
+install is required. See the verification diary for hashes and exact evidence.
+
+`guest/MappingProbe.cs` is a small diagnostic invoked through PowerShell Add-Type;
+C# avoids installing another guest compiler for this check. Production capture
+remains Rust. The probe opens the device interface, requests a noncached user
+mapping via the stock IOCTL, reads the Mac challenge and publishes two 4096-byte
+patterns with explicit memory barriers followed by the MMIO IOCTL. It verifies
+that an attempted publish while the host owns the slot is rejected. The Mac
+retains that slot for two seconds, confirms its bytes are unchanged, then
+releases it; the guest can subsequently publish sequence 2.
+
+The Mac half is `observe-windows.py`. It creates a **fresh** backing file and
+socket outside the repository and must start before QEMU. Configure that same
+file with `memory-backend-file,share=on`, use the experimental device and point
+`host-notify` to its socket. Do not reset or truncate a live mapping. The check
+uses offsets 64 (guest sequence), 72 (host release), 4096 (challenge), and 8192
+(response); these are diagnostic offsets, not the final three-slot frame ABI.
+
+After the stock ARM64 package is verified/installed in the isolated VM:
+
+```powershell
+Add-Type -Path 'D:\MappingProbe.cs'
+[IvshmemMappingProbe]::Run() | ConvertTo-Json
+```
+
+The actual qualified run used the same observer logic in a private launch script;
+this portable CLI preserves the behavior and adds refusal to overwrite a backing
+file. This check establishes the observed guest→host memory/notification and
+ownership path. It does not establish long-run reliability, raw WGC presentation,
+TCP fallback or a performance advantage. Do not rerun it without a relevant change.

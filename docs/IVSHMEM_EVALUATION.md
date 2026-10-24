@@ -4,7 +4,7 @@
 
 Determinare se IVSHMEM può sostituire il solo payload dei frame fra Windows ARM64 e macOS nell'attuale Perpendicular, con una prova isolata di frame BGRA completi grezzi, notifica guest→host senza polling continuo, proprietà dei buffer verificata e fallback TCP funzionante. Misurare poi latenza fino alla presentazione, CPU e frame scartati sia contro TCP grezzo sia contro TCP+LZ4. Una build o un mapping sul solo Mac non completano l'obiettivo.
 
-La valutazione iniziale e il primo controllo host sono conclusi; la fattibilità end-to-end e il vantaggio sono **ancora da dimostrare**. Il runtime ordinario non espone il device. Una build privata con device sperimentale supera mapping/notifica tramite qtest su macchina HVF; nessuna integrazione frame o installazione guest ancora eseguita. Evidenze e insuccessi in [VERIFICATION.md](VERIFICATION.md#24-ottobre--ivshmem-verifica-iniziale-del-runtime-e-della-patch).
+La valutazione iniziale e il primo controllo host sono conclusi; il percorso minimo Windows↔Mac è ora verificato, mentre frame WGC, fallback e vantaggio sono **ancora da dimostrare**. Il runtime ordinario non espone il device. Una build privata con device sperimentale supera mapping/notifica tramite qtest su macchina HVF; driver IVSHMEM ARM64 installato nel solo nuovo clone e prova di pubblicazione/riuso riuscita; nessuna integrazione frame ancora eseguita. Evidenze e insuccessi in [VERIFICATION.md](VERIFICATION.md#24-ottobre--ivshmem-verifica-iniziale-del-runtime-e-della-patch).
 
 ## Risultati verificati e limiti
 
@@ -15,7 +15,7 @@ La valutazione iniziale e il primo controllo host sono conclusi; la fattibilità
 | Backing store possibile? | `memory-backend-file` è elencato fra gli oggetti disponibili. Questo non prova che BAR guest e processo Mac vedano gli stessi byte, né la compatibilità con HVF. |
 | Patch applicabile direttamente? | No: controllo sullo snapshot sorgente locale 10.0.12 respinto, hunk Kconfig non applicabile e `hw/misc/ivshmem.c` assente; qui esiste `ivshmem-pci.c`. |
 | Basta portare gli hunk? | No: Meson abilita `CONFIG_IVSHMEM` tramite `CONFIG_EVENTFD`; config host locale senza EVENTFD e LINUX. Kconfig richiede anche LINUX. Il gate Meson non è modificato dalla patch. |
-| Driver Windows ARM64? | Pacchetto ARM64 reale recuperato da Fedora upstream-virtio, archivio 3 agosto 2022, versione100.10.100.10000. SYS PE Aarch64, INF NTARM64 e catalogo con certificato Microsoft Hardware Compatibility Publisher. Fiducia del catalogo/caricamento in Windows ancora da verificare. ISO stable0.1.302 e ZIP attestation0.1-304 consultati non includono IVSHMEM. |
+| Driver Windows ARM64? | Pacchetto ARM64 reale recuperato da Fedora upstream-virtio, archivio 3 agosto 2022, versione100.10.100.10000. SYS PE Aarch64, INF NTARM64 e catalogo con certificato Microsoft Hardware Compatibility Publisher. Catalogo Valid, PnP exit0, servizio Running e hash SYS atteso verificati nel clone con Secure Boot1. Nessuna modifica/firma locale al driver. ISO stable0.1.302 e ZIP attestation0.1-304 consultati non includono IVSHMEM. |
 
 La [patch indicata](https://github.com/LinuxStereopticon/qemu/commit/67b270f1fa38c10bdff0be99ca84da406630c62d) cambia due file: rimuove LINUX dalla dipendenza del device, introduce `CONFIG_IVSHMEM_DOORBELL` predefinito su Linux e condiziona registrazione, server, eventfd, MSI e scrittura del doorbell. Su macOS il risultato previsto è plain senza doorbell: nessun nuovo canale QEMU→frontend. Non è una patch di accelerazione grafica o di sincronizzazione GPU.
 
@@ -29,7 +29,15 @@ Su macchina ARM/HVF senza dischi e CPU ferma, qtest configura PCI 1af4:1110, BAR
 
 La patch del 2021 esclude anche la registrazione BAR0 senza DOORBELL: questo non basta al driver Windows esaminato, che richiede i registri anche senza MSI. Per il primo esperimento è stato scelto un device distinto, costruito dal solo layout plain senza l'infrastruttura eventfd; evita di rifare il port di tutto il device Linux e mantiene separabili gli effetti della prova. Non è una modifica generale Meson/Kconfig né una distribuzione di plain upstream su Darwin.
 
-## Modifica minima candidata (host implementato come device separato; integrazione da fare)
+## Prova minima Windows riuscita nel clone separato
+
+Nuovo clone APFS dalla VM ordinaria, UUID `c9f319b7-6689-45ac-8003-b8e5fbaebbb8`, separato dal Driver Trial grafico. Il dispositivo inizialmente appariva OK ma usava machine.inf senza servizio: non era supporto IVSHMEM. Installato il solo pacchetto ARM64 Fedora individuato, dopo hash e catalogo Valid; PnP exit0, IVSHMEM Running, problema0 e SYS0188b04ec1e2 corrispondente. Secure Boot resta1. Nessun driver grafico, certificato o protezione cambiato.
+
+Il [probe C#](../experimental/ivshmem/guest/MappingProbe.cs), tramite guest execute/PowerShell, ottiene il mapping64MiB noncached (peer0/vectors0), legge la sfida del Mac e pubblica due pattern4096byte con MemoryBarrier prima della sequenza e della scrittura MMIO. Il ricevitore Mac aspetta sul socket, acquisisce con OSMemoryBarrier e vede entrambi i payload completi. Trattiene il primo slot2s: il tentativo guest di riuso viene rifiutato dal controllo di proprietà, e i byte restano invariati sul Mac. Dopo rilascio1, sequenza2/rilascio2 completati. Questo esercita il contratto nella piccola prova, non certifica ancora il futuro produttore Rust o ogni modalità di cache.
+
+C# è limitato alla diagnostica perché disponibile tramite Add-Type senza nuovo compilatore guest; il percorso prodotto rimane Rust/Swift. Il tool SDK SignTool tentato non si avvia per dipendenza side-by-side mancante; non è contato come verifica /kp riuscita. L'accettazione kernel deriva dall'installazione/caricamento PnP osservati con Secure Boot1; nessun controllo disabilitato. Comandi eseguiti tramite guest tool, UI usata soltanto per aprire/chiudere il desktop del clone. Arresto ACPI regolare e checkpoint135719Z conservato; originali e binari ordinari intatti.
+
+## Modifica minima candidata (device e mapping verificati; integrazione frame da fare)
 
 1. Separare in Meson la disponibilità della memoria PCI dal supporto eventfd, mantenendo server/client Linux subordinati a eventfd; aggiornare Kconfig e portare le guardie sul file `ivshmem-pci.c`. Non abilitare indiscriminatamente `ivshmem-flat` o il server Linux su Darwin.
 2. Aggiungere una proprietà opt-in di notifica al solo plain sperimentale. BAR0 resta 256 byte, BAR2 è il backing store condiviso, nessuna BAR1/MSI-X. Una scrittura all'offset 12 viene intercettata dal device e produce un avviso su un chardev socket Unix privato collegato al processo Mac. Senza proprietà restano le semantiche ordinarie di plain. È un'estensione locale da riconoscere tramite handshake/versione, non un doorbell standard fra peer.
