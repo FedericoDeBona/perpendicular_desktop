@@ -4,7 +4,7 @@
 
 Determinare se IVSHMEM può sostituire il solo payload dei frame fra Windows ARM64 e macOS nell'attuale Perpendicular, con una prova isolata di frame BGRA completi grezzi, notifica guest→host senza polling continuo, proprietà dei buffer verificata e fallback TCP funzionante. Misurare poi latenza fino alla presentazione, CPU e frame scartati sia contro TCP grezzo sia contro TCP+LZ4. Una build o un mapping sul solo Mac non completano l'obiettivo.
 
-La valutazione iniziale e il primo controllo host sono conclusi; il percorso minimo Windows↔Mac è ora verificato, mentre frame WGC, fallback e vantaggio sono **ancora da dimostrare**. Il runtime ordinario non espone il device. Una build privata con device sperimentale supera mapping/notifica tramite qtest su macchina HVF; driver IVSHMEM ARM64 installato nel solo nuovo clone e prova di pubblicazione/riuso riuscita; nessuna integrazione frame ancora eseguita. Evidenze e insuccessi in [VERIFICATION.md](VERIFICATION.md#24-ottobre--ivshmem-verifica-iniziale-del-runtime-e-della-patch).
+La valutazione iniziale e il primo controllo host sono conclusi; il percorso minimo Windows↔Mac è ora verificato, e una prima finestra WGC grezza/fallback TCP è provata; confronto pixel esatto e vantaggio sono **ancora da dimostrare**. Il runtime ordinario non espone il device. Una build privata con device sperimentale supera mapping/notifica tramite qtest su macchina HVF; driver IVSHMEM ARM64 installato nel solo nuovo clone e prova di pubblicazione/riuso riuscita; overlay frame privato Rust/Swift verificato su Blocco note e fallback, senza promozione. Evidenze e insuccessi in [VERIFICATION.md](VERIFICATION.md#24-ottobre--ivshmem-verifica-iniziale-del-runtime-e-della-patch).
 
 ## Risultati verificati e limiti
 
@@ -37,7 +37,17 @@ Il [probe C#](../experimental/ivshmem/guest/MappingProbe.cs), tramite guest exec
 
 C# è limitato alla diagnostica perché disponibile tramite Add-Type senza nuovo compilatore guest; il percorso prodotto rimane Rust/Swift. Il tool SDK SignTool tentato non si avvia per dipendenza side-by-side mancante; non è contato come verifica /kp riuscita. L'accettazione kernel deriva dall'installazione/caricamento PnP osservati con Secure Boot1; nessun controllo disabilitato. Comandi eseguiti tramite guest tool, UI usata soltanto per aprire/chiudere il desktop del clone. Arresto ACPI regolare e checkpoint135719Z conservato; originali e binari ordinari intatti.
 
-## Modifica minima candidata (device e mapping verificati; integrazione frame da fare)
+## Primo frame WGC e fallback verificati
+
+Overlay in [prepare-frames.py](../experimental/ivshmem/prepare-frames.py), [guest/frames.rs](../experimental/ivshmem/guest/frames.rs) e [SharedFrames.swift](../experimental/ivshmem/SharedFrames.swift): i sorgenti ordinari sono copiati e modificati soltanto nella directory privata. Tre slot, limiti/epoch/contatori, barriera dmb sy nel guest e OSMemoryBarrier sul Mac. Il Mac legge metadati/pixel solo dopo la notifica e copia nel proprio buffer Metal prima del rilascio. Conservato l'ACK della connessione frame TCP e quindi una sola consegna pendente, come il confronto TCP corrente; controllo e input restano TCP. Non è zero-copy completo.
+
+Nel clone: worker6a5af58088d0 identificato, servizio standard temporaneamente fermato, WGC hardware VirtIO senza recupero software. Blocco note2178×1303/stride8960 (11.674.880byte), frame ricevuti e callback Metal su ivshmem-raw, testo digitato visibile. La disabilitazione della regione causa riconnessione sul TCP raw: stesso ID finestra `61185385-B2DD-4EB2-80AB-4118A18E5047:1`, testo conservato, ulteriore input visibile e transizione terminata. È un caso completo, non affidabilità generale né qualifica dei difetti WinUI.
+
+**Limite corretto:** il launcher esterno aveva sostituito anche il suffisso HASH nella variabile diagnostica. I frame del primo run non hanno checksum; l'affermazione intermedia di una hash coincidente era errata ed è stata corretta. Il confronto byte-per-byte del frame WGC resta aperto. Corretta la sorgente del launcher per il seguito, senza contare come eseguita la correzione. Nessuna misura di latenza end-to-end, CPU o perdita ancora qualificata; i tempi per-frame già registrati sono diagnostica, non benchmark.
+
+Terminato il solo documento sintetico per identità PID/creazione, ripristinato il servizio standard, rimossi i task temporanei; ACPI e checkpoint141842Z regolari. VM/fonti/bundle ordinari invariati. Prossimo passo circoscritto: hash esatto e tre brevi attività uguali, con clock correlati e conteggi comparabili. Non ripetere mapping/driver invariati.
+
+## Modifica minima candidata (device, mapping e primo frame verificati; qualifica del confronto da completare)
 
 1. Separare in Meson la disponibilità della memoria PCI dal supporto eventfd, mantenendo server/client Linux subordinati a eventfd; aggiornare Kconfig e portare le guardie sul file `ivshmem-pci.c`. Non abilitare indiscriminatamente `ivshmem-flat` o il server Linux su Darwin.
 2. Aggiungere una proprietà opt-in di notifica al solo plain sperimentale. BAR0 resta 256 byte, BAR2 è il backing store condiviso, nessuna BAR1/MSI-X. Una scrittura all'offset 12 viene intercettata dal device e produce un avviso su un chardev socket Unix privato collegato al processo Mac. Senza proprietà restano le semantiche ordinarie di plain. È un'estensione locale da riconoscere tramite handshake/versione, non un doorbell standard fra peer.

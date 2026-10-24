@@ -85,3 +85,51 @@ this portable CLI preserves the behavior and adds refusal to overwrite a backing
 file. This check establishes the observed guest→host memory/notification and
 ownership path. It does not establish long-run reliability, raw WGC presentation,
 TCP fallback or a performance advantage. Do not rerun it without a relevant change.
+
+## Raw WGC frame overlay (private clone only)
+
+`prepare-frames.py --output /private/new/frame-build` copies the ordinary Rust
+and Swift sources to a fresh external directory and applies a small experiment
+there. It does not edit the ordinary sources or install the result. The Rust
+`guest/frames.rs` is opt-in with `PERP_IVSHMEM=1`; the private Swift receiver is
+`SharedFrames.swift`. Windows capture remains the existing WGC hardware readback.
+The ordinary graphics driver and renderer are not rebuilt.
+
+Frame ABI: 64 MiB region, magic 0x49565331 at 0, host enabled flag at 4, nonzero
+session epoch at 8. Three slots start at 4096, each with size
+`floor((64MiB-4096)/3/4096)*4096`. Each has aligned u32 published/released counters
+at 0/4, metadata/pixel lengths at 8/12, JSON metadata at 64 (maximum 16384 bytes),
+and raw BGRA pixels at 32768. No shared pointers. Slot payload is bounded; a
+full slot drops the newly selected frame without overwriting owned data.
+All publication/release reads and writes use full memory barriers. Counter wrap
+and invalid metadata are explicit failures, not silent reuse.
+
+The host creates a new backing filename and epoch per frontend/VM session. Start
+this prototype only with its VM stopped; attach the matching backing and socket
+at VM creation. It is not a general frontend-reattach implementation. Never
+truncate an old region while QEMU or a reader still owns it. The receiver copies
+the pixels to an owned Metal buffer (or owned Data fallback), then releases the
+slot. Metal never reads a slot that the guest can overwrite.
+
+The existing authenticated TCP frame connection still carries its hello and one
+receipt byte after each received frame. This deliberately preserves the current
+single-outstanding-frame backpressure policy for a comparable experiment. Pixel
+payloads and their JSON metadata are read from IVSHMEM after the MMIO wake;
+control commands stay on their existing TCP connection. This is not full
+zero-copy and does not remove every TCP operation.
+
+On receiver failure or the private `ivshmem_disable` local-control command, the
+host disables this region and disconnects the bridge. The existing guest retry
+reconnects; the next frame writer sees the disabled session and sends pixels over
+TCP. The successful fallback check kept the same window ID, text and input.
+Startup worker replacement before the first shared frame does not disable the
+experiment. After shared use, a disconnect permanently disables it for that
+frontend session; a fresh boot/session is required to repeat IVSHMEM.
+
+A private `frame-mode` file in the clone directory selects `ivshmem`, `raw`, or
+`lz4` for the comparison. It is experimental configuration, not a product UI.
+The overlay logs received and Metal-presented frame metadata in the clone's
+`frame-events.jsonl`. These are diagnostic callback times, not optical latency.
+The initial real-frame run established delivery/presentation/input and fallback;
+a typo in the external launcher prevented the optional pixel hashes. That run
+must not be presented as an exact frame-byte comparison or as a benchmark.
