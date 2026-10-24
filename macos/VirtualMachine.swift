@@ -139,6 +139,7 @@ final class VirtualMachineController {
               let application=NSRunningApplication(processIdentifier:pid) else {return}
         application.unhide();application.activate(options:[])
     }
+    func fitDesktopContent(to size:NSSize){desktop?.fitContent(to:size)}
     func closeDesktop(){desktop?.stop();desktop?.window.close();desktop=nil}
     func synchronizePrimaryDisplay(){
         // The v0.4 native driver keeps the modes advertised at boot. Sending
