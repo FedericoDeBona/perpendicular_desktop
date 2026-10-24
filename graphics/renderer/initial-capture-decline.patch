@@ -1,0 +1,118 @@
+--- a/src/perp-sync/live.h
++++ b/src/perp-sync/live.h
+@@ -7,7 +7,8 @@
+ #include <stdint.h>
+ #include "wire1-layout.h"
+ #include "broker.h"
+-enum { LIVE_ATTACH=200,LIVE_GRANT,LIVE_ENABLE,LIVE_REVOKE,LIVE_REVOKED,LIVE_DENY,LIVE_DENIED,LIVE_FAULT,LIVE_CAPTURE,LIVE_POOL_STATS,LIVE_RETIRE,LIVE_RETIRED };
++enum { LIVE_ATTACH=200,LIVE_GRANT,LIVE_ENABLE,LIVE_REVOKE,LIVE_REVOKED,LIVE_DENY,LIVE_DENIED,LIVE_FAULT,LIVE_CAPTURE,LIVE_POOL_STATS,LIVE_RETIRE,LIVE_RETIRED,LIVE_UNSUPPORTED };
++enum { LIVE_UNSUPPORTED_MULTI_RING=1 };
+ #define LIVE_MAX_CANDIDATES 4u
+ #define LIVE_MAX_PENDING 8u
+ /* Producer-owned allocation statistics, sampled after actual ACK processing. */
+--- a/src/perp-sync/proxy-broker.c
++++ b/src/perp-sync/proxy-broker.c
+@@ -21,7 +21,7 @@
+ typedef struct LiveExport {uint64_t blob,object;uint32_t resource;} LiveExport;
+ typedef struct LiveWorker {
+     uint32_t id;uint64_t epoch;int fd;struct proxy_socket *control;
+-    bool hello,bad,enabled,revoking,commands_started;
++    bool hello,bad,enabled,revoking,commands_started,capture_unsupported,capture_seen;
+     uint32_t retired_batch;
+     PerpLivePoolStats pool;
+     uint32_t capture_resource;
+@@ -174,6 +174,22 @@
+ {
+     if(h->magic!=PERP_BROKER_MAGIC || h->version!=3 || h->session!=session || h->worker_epoch!=w->epoch || h->context_id!=w->id || h->fd_count!=w->fd_count)return false;
+     if(h->kind==PERP_HELLO && h->bytes==sizeof(*h) && !h->fd_count) {w->hello=true;return true;}
++    if(h->kind==LIVE_UNSUPPORTED) {
++        /* The matching producer explicitly reports that no snapshot budget
++         * has ever existed. Never accept this after a frame/allocation, nor
++         * use an unavailable capture mode to retire an outstanding lease. */
++        if(h->bytes!=sizeof(*h) || h->fd_count || h->status!=LIVE_UNSUPPORTED_MULTI_RING ||
++           h->resource_id || h->resource_epoch || h->blob_id || h->object_id || h->snapshot_generation ||
++           w->capture_seen || w->pool.allocations ||
++           (!w->capture_unsupported && (!w->enabled || active!=w->id)))return false;
++        for(unsigned i=0;i<LIVE_MAX_PENDING;i++)
++            if(frames[i].used && frames[i].header.context_id==w->id)return false;
++        if(!w->capture_unsupported)
++            fprintf(stderr,"perp-live: context %u native snapshot unavailable: multi-ring; guest rendering continues\n",w->id);
++        w->capture_unsupported=true;w->enabled=false;
++        if(active==w->id)active=0;
++        return true;
++    }
+     if(h->kind==PERP_CLAIM && h->bytes==sizeof(*h) && !h->fd_count && h->status==2) {
+         LiveResource *r=resource(h->resource_id);
+         if(!r || r->context!=w->id || r->worker_epoch!=w->epoch || r->blob!=h->blob_id)return false;
+@@ -252,7 +268,7 @@
+     }
+     if(!frame || bytes>LIVE_MAX_BYTES)return false;
+     *frame=(LiveFrame){.header=*h,.packet=*p,.fds={w->rights[0],w->rights[1]},.used=true,.received=now()};w->fd_count=0;
+-    r->last_generation=h->snapshot_generation;received++;if(bytes>peak_bytes)peak_bytes=bytes;if(count>max_pending)max_pending=count;return true;
++    r->last_generation=h->snapshot_generation;w->capture_seen=true;received++;if(bytes>peak_bytes)peak_bytes=bytes;if(count>max_pending)max_pending=count;return true;
+ }
+ static void receive_messages(LiveWorker *w)
+ {
+@@ -368,6 +384,7 @@
+     if(!enabled() || permanently_failed)return;
+     collect_resources();
+     LiveResource *target=resource(selected);LiveWorker *desired=target && !target->tainted?worker(target->context):NULL;
++    if(desired && desired->capture_unsupported)desired=NULL;
+     LiveWorker *current=worker(active);
+     for(unsigned i=0;i<LIVE_MAX_PENDING;i++)if(frames[i].used && !frames[i].leased && !ready(&frames[i]) && now()-frames[i].received>1000000000ull) {
+         LiveWorker *w=worker(frames[i].header.context_id);if(w)fail_worker(w,"producer completion timeout");return;
+@@ -474,8 +491,8 @@
+     bool export_known=false;
+     if(owner)for(unsigned i=0;i<LIVE_MAX_SOURCES;i++)
+         export_known|=owner->exports[i].blob==target->blob && owner->exports[i].resource==target->id;
+-    char *base=NULL;asprintf(&base,"{\"received\":%llu,\"completed\":%llu,\"cancelled\":%llu,\"rejected\":%llu,\"pending\":%u,\"selected\":%u,\"selected_context\":%u,\"selected_tainted\":%s,\"selected_export_known\":%s,\"active_context\":%u,\"peak_snapshot_bytes\":%llu,\"max_pending\":%llu,\"closed\":%s}",
+-        (unsigned long long)received,(unsigned long long)completed,(unsigned long long)cancelled,(unsigned long long)rejected,pending,selected,target?target->context:0,target && target->tainted?"true":"false",export_known?"true":"false",active,
++    char *base=NULL;asprintf(&base,"{\"received\":%llu,\"completed\":%llu,\"cancelled\":%llu,\"rejected\":%llu,\"pending\":%u,\"selected\":%u,\"selected_context\":%u,\"selected_tainted\":%s,\"selected_export_known\":%s,\"active_context\":%u,\"selected_capture_unsupported\":%s,\"peak_snapshot_bytes\":%llu,\"max_pending\":%llu,\"closed\":%s}",
++        (unsigned long long)received,(unsigned long long)completed,(unsigned long long)cancelled,(unsigned long long)rejected,pending,selected,target?target->context:0,target && target->tainted?"true":"false",export_known?"true":"false",active,owner && owner->capture_unsupported?"true":"false",
+         (unsigned long long)peak_bytes,(unsigned long long)max_pending,permanently_failed?"true":"false");
+     char *result=NULL;asprintf(&result,"%.*s,\"abandoned\":%llu,\"worker_allocations\":%llu,\"worker_reuses\":%llu,\"worker_abandon_requests\":%llu,\"worker_abandoned\":%llu,\"worker_peak_bytes\":%llu,\"worker_peak_retained\":%llu,\"worker_retirements\":%llu}",
+         (int)strlen(base)-1,base,(unsigned long long)abandoned,(unsigned long long)pool.allocations,(unsigned long long)pool.reuses,
+--- a/src/perp-sync/worker-prefix.inc
++++ b/src/perp-sync/worker-prefix.inc
+@@ -7,7 +7,7 @@
+ static struct npt_context *live_context;
+ static int live_broker=-1,live_acks[2]={-1,-1};
+ static uint64_t live_session,live_epoch,live_snapshot_bytes;
+-static bool live_enabled,live_faulted;
++static bool live_enabled,live_faulted,live_capture_unsupported;
+ /* Host-private completion is never registered or exported to the guest.
+  * Guest fences may rotate, repeat values, or already be satisfied. */
+ static ID3D11Fence *live_completion_fence;
+--- a/src/perp-sync/worker-suffix.inc
++++ b/src/perp-sync/worker-suffix.inc
+@@ -189,6 +189,11 @@
+         lock();LiveClaim *claim=live_claim_blob(h->blob_id);
+         bool good=claim && claim->resource==h->resource_id && claim->epoch==h->resource_epoch &&
+             claim->object==h->object_id;
++        /* A refresh may already follow ENABLE on the ordered channel.
++         * An initial refusal consumes its valid identity without reading GPU data. */
++        if(good && live_capture_unsupported && !live_faulted && !invalid_scope &&
++           contexts==1 && !live_enabled && !live_snapshot_bytes && !captures &&
++           atomic_load(&live_context->multi_ring)) {unlock();return true;}
+         if(good && claim->granted && !claim->denied && !live_faulted) {
+             good=live_ring_tail && !atomic_load(&live_context->multi_ring);
+             if(good) {
+@@ -201,7 +206,17 @@
+     }
+     if(h->kind==LIVE_ENABLE) {
+         lock();bool good=!live_faulted && !invalid_scope && contexts==1 && !atomic_load(&live_context->multi_ring);
+-        if(good)live_enabled=true;unlock();return good;
++        /* Decline only before any private allocation or capture exists. A
++         * valid but unsupported snapshot request must not kill guest rendering.
++         * Keep the multi-ring read prohibition and all later failure gates. */
++        if(!live_faulted && !invalid_scope && contexts==1 &&
++           atomic_load(&live_context->multi_ring) && !live_enabled &&
++           !live_snapshot_bytes && !captures) {
++            PerpBrokerHeader reply={.kind=LIVE_UNSUPPORTED,.status=LIVE_UNSUPPORTED_MULTI_RING};
++            good=live_emit(&reply,NULL,0,NULL,0);
++            if(good)live_capture_unsupported=true;
++        } else if(good)live_enabled=true;
++        unlock();return good;
+     }
+     if(h->kind==PERP_ACK) {
+         lock();LiveClaim *claim=live_claim_blob(h->blob_id);

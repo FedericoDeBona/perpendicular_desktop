@@ -1,0 +1,140 @@
+--- a/src/virtio/neptune/triton/triton.h
++++ b/src/virtio/neptune/triton/triton.h
+@@ -463,5 +463,6 @@
+
+ #endif /* TRITON_H_INCLUDED */
+
++void tritonTrialConfigureProcess(void);
+ BOOL tritonScheduleInit(PTRITON_DEVICE p);
+ void tritonScheduleDestroy(PTRITON_DEVICE p);
+--- a/src/virtio/neptune/triton/tritonDDI.c
++++ b/src/virtio/neptune/triton/tritonDDI.c
+@@ -1293,6 +1293,7 @@
+ __declspec(dllexport)
+ HRESULT APIENTRY OpenAdapter10_2(D3D10DDIARG_OPENADAPTER *pOpenData)
+ {
++    tritonTrialConfigureProcess();
+     triton_trial_stage("OpenAdapter entry");
+     TR_LOG("OpenAdapter10_2: Interface=0x%08x Version=0x%08x",
+            pOpenData->Interface, pOpenData->Version);
+--- a/src/virtio/neptune/triton/tritonDDI12.c
++++ b/src/virtio/neptune/triton/tritonDDI12.c
+@@ -1408,6 +1408,7 @@
+ __declspec(dllexport)
+ HRESULT APIENTRY OpenAdapter12(D3D12DDIARG_OPENADAPTER *pOpenData)
+ {
++    tritonTrialConfigureProcess();
+     TR_LOG("OpenAdapter12");
+
+     if (!pOpenData || !pOpenData->pAdapterFuncs)
+--- a/src/virtio/neptune/triton/tritonResource.c
++++ b/src/virtio/neptune/triton/tritonResource.c
+@@ -983,7 +983,21 @@
+  * The trial forwards them to dxgkrnl on the same context used by the
+  * scheduled-start bridge. Merely flushing the host ring does not enqueue
+  * the Windows dependency. No CPU wait belongs in either DDI. */
+-static void tritonSyncToken(PTRITON_DEVICE pD, HANDLE token, BOOL acquire)
++static BOOL tritonTraceSyncToken(PTRITON_DEVICE pD, HANDLE token, BOOL acquire)
++{
++    static LONG count;
++    char enabled[2] = {0};
++    if (GetEnvironmentVariableA("PERP_DRIVER_INIT_TRACE", enabled, sizeof(enabled)) != 1 || enabled[0] != '1')
++        return FALSE;
++    unsigned n = (unsigned)InterlockedIncrement(&count);
++    if (n > 24) return FALSE;
++    fprintf(stderr, "trial token route: %s active=%u token=%p runtime=%p\n",
++        acquire ? "acquire" : "release", pD->scheduleState != NULL, token, pD->hKMContext);
++    fflush(stderr);
++    return TRUE;
++}
++
++static void tritonSyncToken(PTRITON_DEVICE pD, HANDLE token, BOOL acquire, BOOL trace)
+ {
+     PFND3DDDI_SYNCTOKENCB callback = acquire
+         ? pD->KTCallbacks.pfnAcquireResourceCb
+@@ -1000,8 +1014,7 @@
+     EnterCriticalSection(&pD->kmCtxLock);
+     HRESULT hr = callback(pD->hRTDevice.handle, &args);
+     LeaveCriticalSection(&pD->kmCtxLock);
+-    char trace[2] = {0};
+-    if (GetEnvironmentVariableA("PERP_DRIVER_INIT_TRACE", trace, sizeof(trace)) == 1 && trace[0] == '1') {
++    if (trace) {
+         fprintf(stderr, "trial token: %s token=%p runtime=%p hr=%08lx\n",
+                 acquire ? "acquire" : "release", token, pD->hKMContext, (unsigned long)hr);
+         fflush(stderr);
+@@ -1014,7 +1027,8 @@
+ {
+     PTRITON_DEVICE pD = (PTRITON_DEVICE)hDev.pDrvPrivate;
+     (void)hRes;
+-    if (pD && pD->scheduleState) tritonSyncToken(pD, h, TRUE);
++    BOOL trace = pD ? tritonTraceSyncToken(pD, h, TRUE) : FALSE;
++    if (pD && pD->scheduleState) tritonSyncToken(pD, h, TRUE, trace);
+ }
+
+ void APIENTRY
+@@ -1022,6 +1036,7 @@
+ {
+     PTRITON_DEVICE pD = (PTRITON_DEVICE)hDev.pDrvPrivate;
+     (void)hRes;
+-    if (pD && pD->scheduleState) tritonSyncToken(pD, h, FALSE);
++    BOOL trace = pD ? tritonTraceSyncToken(pD, h, FALSE) : FALSE;
++    if (pD && pD->scheduleState) tritonSyncToken(pD, h, FALSE, trace);
+     else if (pD && pD->pCtx1) ID3D11DeviceContext1_Flush(pD->pCtx1);
+ }
+--- a/src/virtio/neptune/triton/tritonSchedule.c
++++ b/src/virtio/neptune/triton/tritonSchedule.c
+@@ -2,6 +2,45 @@
+ #include "triton.h"
+ #include "triton_log.h"
+ #include "tritonSharedBridge.h"
++#include <wchar.h>
++
++/* DWM is launched by Windows, so it cannot inherit the probe's environment.
++ * Only this isolated-clone marker and the exact compositor image opt in.
++ * Configure before either OpenAdapter probes and caches the Neptune flags.
++ * The marker is read once: changing mode requires a compositor restart. */
++static BOOL CALLBACK tritonTrialConfigureOnce(PINIT_ONCE once, void *parameter, void **context)
++{
++    (void)once; (void)parameter; (void)context;
++    WCHAR image[MAX_PATH];
++    DWORD length = GetModuleFileNameW(NULL, image, MAX_PATH);
++    if (!length || length >= MAX_PATH) return TRUE;
++    WCHAR *name = wcsrchr(image, L'\\');
++    if (!name || _wcsicmp(name + 1, L"dwm.exe")) return TRUE;
++    HANDLE marker = CreateFileW(L"C:\\ProgramData\\PerpendicularDriverTrial\\dwm-mode-9d7d90a7.txt",
++        GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
++        NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
++    if (marker == INVALID_HANDLE_VALUE) return TRUE;
++    char mode = 0; DWORD count = 0;
++    BOOL read = ReadFile(marker, &mode, 1, &count, NULL);
++    CloseHandle(marker);
++    if (!read || count != 1 || (mode != 'b' && mode != 'f')) return TRUE;
++    FILE *capture = NULL;
++    const char *path = mode == 'f'
++        ? "C:\\ProgramData\\PerpendicularDriverTrial\\dwm-fixed.log"
++        : "C:\\ProgramData\\PerpendicularDriverTrial\\dwm-baseline.log";
++    if (freopen_s(&capture, path, "a", stderr) || !capture) return TRUE;
++    setvbuf(stderr, NULL, _IONBF, 0);
++    SetEnvironmentVariableA("PERP_DRIVER_INIT_TRACE", "1");
++    SetEnvironmentVariableA("NPT_PERF", "multi_ring");
++    SetEnvironmentVariableA("PERP_DRIVER_SCHEDULE_TRIAL", mode == 'f' ? "1" : "0");
++    fprintf(stderr, "trial compositor: pid=%lu mode=%c multi_ring=1\n", GetCurrentProcessId(), mode);
++    return TRUE;
++}
++void tritonTrialConfigureProcess(void)
++{
++    static INIT_ONCE once = INIT_ONCE_STATIC_INIT;
++    InitOnceExecuteOnce(&once, tritonTrialConfigureOnce, NULL, NULL);
++}
+
+ static bool tritonScheduleSubmit(void *cookie, uint32_t context, uint64_t ring, uint32_t value)
+ {
+@@ -30,7 +69,7 @@
+
+ BOOL tritonScheduleInit(PTRITON_DEVICE p)
+ {
+-    /* The trial must not change scheduling in DWM or other guest apps. */
++    /* Opt in only through the probe environment or isolated compositor marker. */
+     char enabled[2] = {0};
+     if (GetEnvironmentVariableA("PERP_DRIVER_SCHEDULE_TRIAL", enabled, sizeof(enabled)) != 1 || enabled[0] != '1')
+         return TRUE;
