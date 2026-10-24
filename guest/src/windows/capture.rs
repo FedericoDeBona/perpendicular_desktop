@@ -416,6 +416,11 @@ unsafe fn run(target: &Target, outbox: &Outbox, stop: &AtomicBool, driver:D3D_DR
             description["wgcSession"]=json!({"originalDirtyRegionMode":original_dirty_mode.map(|mode|mode.0),
                 "dirtyRegionMode":dirty_mode.map(|mode|mode.0),
                 "includeSecondaryWindows":session.IncludeSecondaryWindows().ok()});
+            if std::env::var("PERP_CAPTURE_PIXEL_HASH").as_deref()==Ok("1") {
+                description["diagnosticDriverTrial"]=json!({
+                    "scheduledStartRequested":std::env::var("PERP_DRIVER_SCHEDULE_TRIAL").as_deref()==Ok("1"),
+                    "multiRingRequested":std::env::var("NPT_PERF").as_deref()==Ok("multi_ring")});
+            }
         }
         let (arrived, ready) = mpsc::sync_channel(1);
         let progress=target.progress.clone();
@@ -499,21 +504,11 @@ unsafe fn run(target: &Target, outbox: &Outbox, stop: &AtomicBool, driver:D3D_DR
                     let _ = frame.Close();
                     return Err("Window exceeds the initial capture limit".into());
                 }
-                if current != size {
-                    frame.Close().map_err(error)?;
+                let resize_pool = current != size;
+                if resize_pool {
                     size = current;
                     generation += 1;
                     staging = [None,None];
-                    target.set_phase(Phase::Recreating);
-                    target.progress.recreates.fetch_add(1,Ordering::Relaxed);
-                    pool.Recreate(
-                        &runtime,
-                        DirectXPixelFormat::B8G8R8A8UIntNormalized,
-                        2,
-                        size,
-                    )
-                    .map_err(error)?;
-                    continue;
                 }
                 let access: IDirect3DDxgiInterfaceAccess =
                     frame.Surface().map_err(error)?.cast().map_err(error)?;
@@ -663,6 +658,20 @@ unsafe fn run(target: &Target, outbox: &Outbox, stop: &AtomicBool, driver:D3D_DR
                 frame.Close().map_err(error)?;
                 if !valid {
                     return Err("Invalid capture stride".into());
+                }
+                // A shrink can already have a complete frame inside the old,
+                // larger backing texture. Publish its valid current rectangle
+                // instead of discarding the only update from an idle window.
+                // Release the old frame resources before resizing the pool.
+                // An undersized backing texture still takes the earlier retry.
+                if resize_pool {
+                    drop(submit_band);
+                    drop(texture);
+                    drop(access);
+                    target.set_phase(Phase::Recreating);
+                    target.progress.recreates.fetch_add(1,Ordering::Relaxed);
+                    pool.Recreate(&runtime,DirectXPixelFormat::B8G8R8A8UIntNormalized,2,size)
+                        .map_err(error)?;
                 }
                 if stop.load(Ordering::Acquire) || !outbox.connected.load(Ordering::Acquire) {
                     break;
