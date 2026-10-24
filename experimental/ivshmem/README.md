@@ -133,3 +133,51 @@ The overlay logs received and Metal-presented frame metadata in the clone's
 The initial real-frame run established delivery/presentation/input and fallback;
 a typo in the external launcher prevented the optional pixel hashes. That run
 must not be presented as an exact frame-byte comparison or as a benchmark.
+
+
+## Short comparison and decision
+
+The isolated evaluation is complete. Full-frame hashes match and fallback works
+in the recorded case. IVSHMEM beats TCP raw in the short text activity, while
+ordinary TCP+LZ4 has lower median and p95 latency. Keep the ordinary path; these
+results do not qualify production deployment or fix existing graphics defects.
+See [the evaluation](../../docs/IVSHMEM_EVALUATION.md) for numbers and limits.
+
+`guest/FrameStimulus.cs` is a bounded diagnostic for a newly opened scratch
+ClassicNotepad (PID plus creation FILETIME checked). It changes synthetic text
+48 times at100ms, never opens/saves a document. `compare-frames.py` uses the
+existing authenticated local/guest control, not a new network port. Clock RPCs
+return QPC/frequency, worker CPU and Windows system CPU counters; the private
+frontend brackets them with host uptime to bound the clock offset.
+
+The recorded final run uses a fresh frontend/VM session initially configured
+`lz4`, then `raw`, then `ivshmem`. For the final transition the helper verifies
+QMP UUID, the private backing path, size/magic and all slots never published,
+then enables that unused region with a memory barrier. It never resets slots or
+reenables a previously used/disabled session. Other order: IVSHMEM first, then
+permanent fallback to raw/LZ4. The normal lifecycle still requires VM shutdown
+before creating a new frontend/region.
+
+Run the helper only after the private worker is identified and exactly one
+scratch window is captured on hardware. Outputs must be a fresh file outside
+Git. Do not rerun the completed checks merely to reproduce the table.
+
+```text
+python3 experimental/ivshmem/compare-frames.py --root /private/trial-root \
+  --pid SCRATCH_PID --creation SCRATCH_FILETIME --order lz4,raw,ivshmem \
+  --output /private/new-comparison.json
+```
+
+Latency starts at actual final WGC frame selection, after initial backpressure
+and before GPU staging/readback, and ends at Metal's presented callback. It
+excludes compositor production, earlier waiting, and input-to-screen latency.
+SystemRelativeTime is retained as a diagnostic: six negative nominal times in
+the first run made that source unsuitable for qualified absolute latency here.
+The final selected-QPC run had no invalid samples. Distinct sequences avoid
+counting redraws as new frames. Counters and event windows have one-frame
+asynchronous boundaries; report that difference as a boundary delta, never as
+negative loss. Sequence gaps, explicit IVSHMEM drops, and received sequences not
+presented are separate checks. Acquired WGC frames can be coalesced before
+publication, so zero gaps after publication does not mean zero frames lost
+throughout Windows. CPU seconds are accumulated over each measured interval;
+guest totals include worker/app/background and overlap host virtualization CPU.

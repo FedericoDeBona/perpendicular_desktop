@@ -70,6 +70,22 @@ fn frame_age'''
 }
 
 fn frame_age''')
+    s=s.replace('    packet.header["guestSentQPC"]=json!(counter);','    packet.header["guestSentQPC"]=json!(counter);\n    packet.header["guestSourceTime100ns"]=json!(packet.frame_time_100ns);')
+    p.write_text(s)
+    p=guest/'src/windows/worker.rs';s=p.read_text();needle='                if command["operation"] == "frame_channel" {'
+    assert needle in s
+    s=s.replace(needle,'''                if command["operation"] == "trial_clock" {
+                    outbox.control(json!({"type":"reply","request":request,"ok":true,"result":super::ivshmem::clock()}));
+                    continue;
+                }
+'''+needle);p.write_text(s)
+    p=guest/'src/windows/capture.rs';s=p.read_text()
+    needle='                let frame_time_100ns = frame.SystemRelativeTime()'
+    assert needle in s
+    s=s.replace(needle,'''                let mut trial_selected_qpc=0;
+                let _=windows::Win32::System::Performance::QueryPerformanceCounter(&mut trial_selected_qpc);
+'''+needle)
+    s=s.replace('"guestPixelsSHA256":pixel_hash,','"guestPixelsSHA256":pixel_hash,"guestCaptureSelectedQPC":trial_selected_qpc,')
     p.write_text(s)
     mac=out/'macos';shutil.copytree(REPO/'macos',mac)
     shutil.copy2(EXPERIMENT/'SharedFrames.swift',mac)
@@ -89,6 +105,16 @@ fn frame_age''')
     s=s.replace('                if !value {\n                    self.activeApps=[]','                if !value {\n                    self.sharedFrames?.controlDisconnected()\n                    self.activeApps=[]')
     needle='        let allowed:Set<String>='
     s=s.replace(needle,'''        if command == "ivshmem_disable" {sharedFrames?.disable();localResponse(["ok":true,"result":["disabled":true]],reply:reply);return}
+        if command == "trial_reconnect" {bridge?.disconnect();localResponse(["ok":true,"result":["reconnecting":true]],reply:reply);return}
+        if command == "trial_clock",let bridge {
+            let before=ProcessInfo.processInfo.systemUptime
+            bridge.command("trial_clock",timeout:.seconds(3)){[weak self] result in
+                switch result {
+                case .success(let value):self?.localResponse(["ok":true,"result":["hostBefore":before,"hostAfter":ProcessInfo.processInfo.systemUptime,"guest":value["value"] ?? [:]]],reply:reply)
+                case .failure(let error):self?.localResponse(["ok":false,"error":error.localizedDescription],reply:reply)
+                }
+            };return
+        }
 '''+needle)
     p.write_text(s)
     p=mac/'GuestBridge.swift';s=p.read_text()
@@ -107,6 +133,7 @@ fn frame_age''')
         client.sharedReceipt();receive(id,packet)
     }
 '''+needle)
+    s=s.replace('if ProcessInfo.processInfo.environment["PERPENDICULAR_CAPTURE_DIAGNOSTIC"]=="1",','if true,')
     s=s.replace('header["hostReceivedAt"]=completed','header["hostReceivedAt"]=completed;header["hostTrialReceiveAt"]=completed')
     # Per-frame data for the brief trial, shared and TCP alike.
     s=s.replace('        guard ProcessInfo.processInfo.environment["PERPENDICULAR_STATE_TRACE"]', '''        if let encoded=try? JSONSerialization.data(withJSONObject:["event":"received","hostTime":ProcessInfo.processInfo.systemUptime,"header":header],options:[.sortedKeys]) {

@@ -82,3 +82,23 @@ impl Frames {
  }
 }
 impl Drop for Frames{fn drop(&mut self){unsafe{let _=ioctl(self.handle,0x22200c,&[],&mut []);CloseHandle(self.handle);}}}
+
+/// Fast diagnostic on the existing authenticated TCP control channel.
+/// Keeps host/guest clocks separate until the caller estimates their offset.
+pub fn clock()->Value {unsafe{
+ unsafe extern "system" {
+  fn GetProcessTimes(h:Handle,creation:*mut u64,exit:*mut u64,kernel:*mut u64,user:*mut u64)->i32;
+  fn GetSystemTimes(idle:*mut u64,kernel:*mut u64,user:*mut u64)->i32;
+ }
+ let (mut counter,mut frequency)=(0i64,0i64);
+ let _=windows::Win32::System::Performance::QueryPerformanceCounter(&mut counter);
+ let _=windows::Win32::System::Performance::QueryPerformanceFrequency(&mut frequency);
+ let (mut creation,mut exit,mut kernel,mut user)=(0u64,0u64,0u64,0u64);
+ let process_ok=GetProcessTimes(-1isize as Handle,&mut creation,&mut exit,&mut kernel,&mut user)!=0;
+ let (mut idle,mut system_kernel,mut system_user)=(0u64,0u64,0u64);
+ let system_ok=GetSystemTimes(&mut idle,&mut system_kernel,&mut system_user)!=0;
+ json!({"qpc":counter,"frequency":frequency,"workerCPU100ns":if process_ok {Some(kernel+user)}else{None},
+  "systemIdle100ns":if system_ok {Some(idle)}else{None},
+  "systemKernel100ns":if system_ok {Some(system_kernel)}else{None},
+  "systemUser100ns":if system_ok {Some(system_user)}else{None}})
+}}
