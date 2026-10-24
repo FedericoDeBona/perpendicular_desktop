@@ -14,6 +14,6 @@ def main():
  subprocess.run(['patch','-p1','--forward','--batch','-i',str(HERE/'overlay.patch')],cwd=q,check=True)
  shutil.copy2(HERE/'gpu.rs',q/'guest/src/windows/gpu.rs')
  for name in ['GpuFrames.swift','ExperimentalGpuTrace.swift']:shutil.copy2(HERE/name,q/'macos'/name)
- (q/'overlay.json').write_text(json.dumps({'scope':'single-window WGC GPU; no kernel/UMD replacement','ordinaryModified':False},indent=2)+'\n')
+ (q/'overlay.json').write_text(json.dumps({'scope':'bounded WGC GPU windows; per-packet receipt; no kernel/UMD replacement','ordinaryModified':False},indent=2)+'\n')
  print(q)
 if __name__=='__main__':main()

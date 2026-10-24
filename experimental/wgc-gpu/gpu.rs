@@ -1,14 +1,9 @@
-//! Single-window trial: shared GPU image, query completion, one TCP-metadata ACK.
+//! Bounded window trial: owned GPU image and an exact per-packet TCP-metadata ACK.
 use super::{capture::Target,wire::Outbox,error,catalogue};
 use serde_json::{Value,json};
 use sha2::{Digest,Sha256};
-use std::{sync::{Mutex,OnceLock,atomic::Ordering},time::{Instant,Duration,SystemTime,UNIX_EPOCH}};
+use std::{sync::atomic::Ordering,time::{Instant,Duration,SystemTime,UNIX_EPOCH}};
 use windows::{core::Interface,Win32::{Foundation::{HWND,POINT},Graphics::{Direct3D11::*,Dxgi::IDXGIResource,Gdi::ClientToScreen}}};
-static OWNER:OnceLock<Mutex<Option<String>>>=OnceLock::new();
-pub fn enabled(id:&str)->bool{
- let mut owner=OWNER.get_or_init(||Mutex::new(None)).lock().unwrap();
- if owner.is_none(){*owner=Some(id.to_owned());}owner.as_deref()==Some(id)
-}
 pub struct Gpu{texture:ID3D11Texture2D,query:ID3D11Query,width:u32,height:u32,nonce:[u8;24],checks_left:u8}
 impl Gpu{
  pub unsafe fn new(device:&ID3D11Device,width:u32,height:u32)->Result<Self,String>{unsafe{
@@ -64,8 +59,8 @@ impl Gpu{
    "capture":"wgc-hardware-gpu","gpuMarker":marker_hex,"gpuAllocationWidth":w.div_ceil(64)*64,"gpuAllocationHeight":h.div_ceil(64)*64+1,"guestPixelsSHA256Packed":hash,
    "guestCaptureSelectedQPC":selected_qpc,"guestGpuSubmitMilliseconds":submitted,"guestGpuWaitMilliseconds":gpu_wait,
    "guestReferenceReadback":reference,"guestReadbackMilliseconds":if reference{Value::Null}else{json!(0)},"guestEncodeMilliseconds":0});
-  outbox.frame(&target.id,header,Vec::new(),None);
-  let deadline=Instant::now();while outbox.gpu_ack.load(Ordering::Acquire)<sequence{
+  let acknowledged=outbox.frame(&target.id,header,Vec::new(),None);
+  let deadline=Instant::now();while !acknowledged.load(Ordering::Acquire){
    if !outbox.connected.load(Ordering::Acquire)||deadline.elapsed()>Duration::from_secs(4){return Err("GPU consumer acknowledgement missing".into());}
    std::thread::sleep(Duration::from_millis(1));
   }Ok(())

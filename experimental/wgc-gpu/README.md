@@ -1,4 +1,4 @@
-# Single-window WGC GPU trial
+# Bounded WGC GPU window trial
 
 Opt-in source overlay; ordinary source, VM and runtime are read-only inputs.
 **Current user-requested mode: GPU frames only.** Manual TCP switching and
@@ -8,6 +8,17 @@ no CPU frame encoding/publishing or WARP recovery follows a GPU error. The Mac
 rejects non-GPU frames before reading their payload. Control, metadata and ACKs
 still use TCP. The previous fallback/comparison results below are historical.
 See [the GPU-only restart](../../docs/VERIFICATION.md#24-ottobre--richiesta-solo-gpu-rimozione-fallback-e-riavvio-frontend) for the current receipt.
+The current build also removes the permanent single-window owner gate. A closed
+first window had left later captures rejected, while the UI discarded the cause.
+Each capture now owns its texture; each published packet gets a fresh local ACK
+object, completed only by that exact packet's serialized host receipt. No global
+sequence counter can release another window or a new capture generation. The Mac
+passes capture error messages to the window placeholder. The same live modern
+Notepad document recovered, and a concurrent Calculator was presented, closed,
+reopened and updated. Three pixel hashes matched for each of the three capture
+identities. This is a short two-window check, not general reliability. See
+[the owner fix](../../docs/VERIFICATION.md#24-ottobre--finestra-aperta-ma-non-pronta-correzione-del-proprietario-gpu).
+
 The paired private worker/frontend/renderer require a separate clone. This is
 not a production transport or a new Windows graphics driver. **A bounded runtime
 trial now passes:** a Classic Notepad WGC window was presented on the Mac, three
@@ -54,8 +65,8 @@ mode. The ordinary product and historical paired build retain their prior paths.
 
 There are still a guest GPU copy, a Mac GPU copy, metadata/query overhead and
 Metal presentation. No claim of complete zero-copy or repaired WGC source
-pixels. The current prototype admits one selected window, BGRA8 and bounded
-geometry (up to four million logical pixels); window switching, extensive resize,
+pixels. The current prototype admits BGRA8 windows with bounded
+geometry (up to four million logical pixels per window); extensive resize,
 resource retirement across long sessions and product reliability are not
 qualified. The host timing diagnostics only report a slow snapshot fence versus its pollable event and preserve the existing failure behavior. The normal desktop broker guards remain enabled; disabling them was
 rejected by the current headless runtime and is not an accepted workaround.
@@ -75,7 +86,7 @@ Frontend-only restart can reuse the export socket of the running clone. A privat
 is unlinked only after its previous frontend exited and socket ownership/type
 are checked. The new frontend publishes its PID after startup. This was exercised
 without restarting Windows; arbitrary stale/corrupt receipts are not qualified.
-The current GPU-only prototype still admits one window owner and <=4 million
-logical pixels; oversized windows and classic GDI menu surfaces now report errors
+The current GPU-only prototype retains <=4 million
+logical pixels per window; oversized windows and classic GDI menu surfaces report errors
 instead of being displayed through TCP. The first three GPU reference readbacks
 remain diagnostic and are not a fallback.
