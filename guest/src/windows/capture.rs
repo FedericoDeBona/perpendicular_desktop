@@ -1,5 +1,6 @@
 use super::{catalogue, error, identity, wire::Outbox};
 use serde_json::{Value, json};
+use sha2::{Digest, Sha256};
 use std::{
     sync::{
         Arc, Mutex,
@@ -692,6 +693,11 @@ unsafe fn run(target: &Target, outbox: &Outbox, stop: &AtomicBool, driver:D3D_DR
                 }
                 target.set_phase(Phase::Publishing);
                 sequence += 1;
+                // Bounded opt-in diagnostic, before compression or transmission.
+                // Hash padded bytes too, so the receiver compares the exact packet.
+                let pixel_hash = if sequence<=3 && std::env::var("PERP_CAPTURE_PIXEL_HASH").as_deref()==Ok("1") {
+                    Some(format!("{:x}",Sha256::digest(&pixels)))
+                } else {None};
                 let bounds = catalogue::frame_bounds(hwnd).ok_or("Window geometry unavailable")?;
                 let mut origin = POINT::default();
                 if !ClientToScreen(hwnd, &mut origin).as_bool() {
@@ -710,6 +716,7 @@ unsafe fn run(target: &Target, outbox: &Outbox, stop: &AtomicBool, driver:D3D_DR
                     recovery_reported=true;
                 }
                 outbox.frame(&target.id,json!({"type":"frame","window":target.id,"sequence":sequence,"generation":generation,
+                    "guestPixelsSHA256":pixel_hash,
                     "width":width,"height":height,"stride":stride,"bytes":pixels.len(),"capture":if software_recovery {"wgc-software-recovery"} else {"wgc-hardware-readback"},
                     "guestInitialFrameRepaint":initial_frame_repaint,
                     "guestInitialFrameOpaquePercent":initial_frame_opaque_percent,

@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 import Network
 
 struct GuestPacket: @unchecked Sendable {
@@ -112,6 +113,15 @@ final class GuestConnection: @unchecked Sendable {
                         header["hostReceiveMilliseconds"]=max(0,(completed-received)*1000-decodeMilliseconds)
                         header["hostReceivedAt"]=completed
                         header["hostDecodeMilliseconds"]=decodeMilliseconds
+                        if ProcessInfo.processInfo.environment["PERPENDICULAR_CAPTURE_DIAGNOSTIC"]=="1",
+                           let sequence=header["sequence"] as? Int,(1...3).contains(sequence),
+                           let expected=header["guestPixelsSHA256"] as? String,expected.count==64,
+                           expected.utf8.allSatisfy({(48...57).contains($0) || (97...102).contains($0)}) {
+                            let raw=surface.map{Data(bytesNoCopy:$0.contents,count:$0.byteCount,deallocator:.none)} ?? bytes
+                            let actual=withExtendedLifetime(surface){SHA256.hash(data:raw).map{String(format:"%02x",$0)}.joined()}
+                            header["hostPixelsSHA256"]=actual
+                            header["hostPixelsMatchGuest"]=actual == expected
+                        }
                         if callbacks>0 {header["hostReadCallbacks"]=Double(callbacks)}
                         self.offer(window,GuestPacket(header:header,pixels:bytes,surface:surface))
                         // This retires only the independent CPU/network copy.
