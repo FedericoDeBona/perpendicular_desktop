@@ -2,13 +2,13 @@
 
 **Prima di riprendere:** leggere [KNOWN_ISSUES.md](KNOWN_ISSUES.md), il registro aggiornato dei problemi e dei prossimi passi. Questo piano conserva requisiti, autorizzazioni ed evoluzione del lavoro; le sezioni storiche non sono un elenco aggiornato dei difetti ancora aperti. Dopo una modifica o una verifica, aggiornare la voce pertinente del registro e collegare le evidenze in [VERIFICATION.md](VERIFICATION.md).
 
-## Obiettivo
+## Obiettivo corrente — desktop Windows tramite «Apri Windows»
 
-Creare un'applicazione Mac che mostri il catalogo delle applicazioni Windows di una VM locale e consenta di aprirle e usarle in finestre individuali sul Mac. Windows continua a eseguire e disegnare le applicazioni; al Mac devono arrivare i contenuti delle finestre interessate e delle relative finestre secondarie.
+Aggiornamento esplicito del24 ottobre2026: l’utente trova il desktop Windows diretto molto fluido e piacevole e chiede di concentrare il lavoro dentro la VM. La priorità passa a una modalità desktop utilizzabile e affidabile: avviare o ritrovare la VM, aprire il desktop, usare le app Windows con mouse/tastiera, schermo nitido e accelerazione verificabile, poi chiudere/riaprire il viewer senza perdere la sessione.
 
-Il desktop Windows completo deve restare accessibile per installazione, manutenzione e recupero.
+Le finestre Windows individuali sul Mac, WGC→GPU e l’integrazione1:1, IVSHMEM/compressione/dirty region e N+1 sono rinviati, senza cancellare codice, risultati o idee. I requisiti delle sezioni successive conservano il percorso precedente; non sono prerequisiti del lavoro attivo sul desktop. Il desktop completo diventa il percorso principale da consolidare, non soltanto una superficie di recupero.
 
-Il percorso iniziale senza 3D è stato implementato con verifiche puntuali riportate in [VERIFICATION.md](VERIFICATION.md). La fase attiva è descritta sotto: geometria condivisa, monitor virtuali, presentazione Metal e integrazione del percorso 3D. Le decisioni di partenza rimangono il contesto del restart, senza impedire questa evoluzione autorizzata dall'utente.
+Il riscontro dell’utente non attribuisce causalmente la fluidità all’ultima candidata driver: nell’ultima ripresa il driver Windows non è stato cambiato. Conservare la combinazione funzionante; la candidata sperimentale nel compositore che aveva provocato arresti resta disattivata. Nessuna promozione nel pacchetto/VM ordinari già qualificata da questo cambio di obiettivo. [Riscontro e azione corrente](VERIFICATION.md#24-ottobre--priorità-al-desktop-windows-diretto).
 
 ## Decisioni di partenza
 
@@ -56,7 +56,7 @@ Trasporto, codifica delle immagini, gestione delle finestre, condivisione dei fi
 
 L'accelerazione 3D viene affrontata dopo la base affidabile. Un cambio di driver o modello di sessione può richiedere riavvio e nuove prove: la modularità riduce il lavoro da rifare, non lo elimina.
 
-## Obiettivo attivo — geometria condivisa e percorso grafico
+## Obiettivo precedente — geometria condivisa e percorso grafico
 
 Portare Perpendicular a un'app Mac utilizzabile in cui le applicazioni Windows di una sola VM locale vivono in finestre individuali, con posizione, dimensioni e scala coerenti fra i due sistemi. Il risultato deve funzionare nel pacchetto finale aperto normalmente, non soltanto in un prototipo o in un test isolato.
 
@@ -772,7 +772,7 @@ Preservare eventuali documenti aperti dall’utente. Per terminare la prova, hel
 Prossimo incremento di prodotto, separato dal gate concluso: durata/recupero della sessione e assegnazione esplicita delle risorse al frontend dopo reconnect; prima di estendere a più finestre, affrontare un limite concreto e verificare una breve azione reale. GFX-004 resta aperto, N+1/debug monitor direzione futura separata. [Prove e fallimenti conservati](VERIFICATION.md#24-ottobre--wgc-gpu-primi-frame-esatti-fallback-e-confronto-breve).
 
 
-### Stato corrente — solo WGC GPU, finestre successive sbloccate
+### Ultimo handoff WGC conservato — solo GPU, finestre successive sbloccate
 
 Resta valida la richiesta di eliminare fallback frame TCP manuale/automatico nella candidata: controllo, metadati e ACK restano TCP. Nessuna modifica al percorso ordinario o ai driver. Guest attende negoziazione GPU; Mac accetta solo encoding wgc-gpu/zero payload/superficie Metal. Le prime tre letture diagnostiche/hash per allocazione restano; niente ripiego WARP/menu GDI/decoder pixel TCP privato. Il confronto GPU/TCP precedente è storico, non ripetuto.
 
@@ -785,3 +785,16 @@ Stesso documento utente non salvato, PID4316/creation134373372245370891/HWND9176
 Endpoint GPU originale /tmp/perp-wgc-501-25465.sock riusato con receipt privata0600/QMP UUID/PID e frontend precedente terminato, come già verificato. Non qualificati receipt corrotte, guasti del broker, ACK trattenuto artificialmente, durata e device loss. Restano massimo4M pixel per finestra, dimensioni BGRA limitate e menu GDI non supportati. Il limite del proprietario permanente è rimosso, non presentare la prova su due finestre come qualifica completa di tutte le16 superfici/transienti.
 
 Preservare documenti utente. Per terminare esplicitamente la prova: helper privato `…/WGC-GPU-20261024/build-7/cleanup-windows-dispatch.ps1`, preparato con UUID/hash3df, **non eseguito**. Ferma task e solo worker verificato, avvia servizio standard e rimuove task temporanei; verificare Running/unico standard/zero GPU al momento dell’esecuzione. Non è un fallback del renderer. Stop-ScheduledTask da solo può lasciare un processo figlio vivo. Prossimo passo solo su un nuovo guasto osservabile: distinguere rifiuto cattura, sorgente vecchia/incompleta e import GPU, senza abilitare TCP per nasconderli. [Evidenze correnti](VERIFICATION.md#24-ottobre--finestra-aperta-ma-non-pronta-correzione-del-proprietario-gpu), [rimozione fallback](VERIFICATION.md#24-ottobre--richiesta-solo-gpu-rimozione-fallback-e-riavvio-frontend).
+
+
+### Priorità corrente — consolidare il desktop diretto
+
+Aperto «Apri Windows» sul clone già acceso e lasciato «Windows Desktop» davanti. Nessun riavvio, chiusura documenti, cambio driver, servizio o runtime; build-7/host-7 e worker3df restano quelli dell’ultimo handoff. Il rinvio del lavoro WGC non equivale a un cleanup eseguito né a una nuova release desktop già costruita.
+
+Prossimi passi, nell’ordine, con un solo risultato osservabile per incremento:
+
+1. **Modalità desktop dedicata.** Il pacchetto apre/ritrova la VM e porta direttamente al desktop, senza catalogo obbligatorio o catture WGC individuali automatiche. Conservare comandi guest e gestione VM. Verifica minima: apertura del pacchetto, desktop utilizzabile e stessa app/documento ancora presenti dopo chiusura/riapertura del solo viewer. Non cambiare la politica di spegnimento implicitamente.
+2. **Sessione e input affidabili.** Breve ritorno Mac→Windows, testo con modificatori, scroll e riapertura del viewer; nessun tasto/pulsante bloccato o app duplicata. Registrare i componenti esatti della base funzionante. Un checkpoint offline/avvio a freddo si fa in un passaggio dedicato quando compatibile con i documenti aperti, senza arresti forzati per preparare questa priorità.
+3. **Schermo e grafica nell’uso reale.** Prima un solo desktop/monitor: finestra e schermo intero, testo nitido e puntatore allineato, distinguendo scala del viewer e cambio risoluzione/DPI guest. Poi un caso grafico concreto che presenti un limite nel desktop; Settings/Calcolatrice possono distinguere il difetto nel desktop dal solo WGC. Non ripetere benchmark estesi o controlli fence già superati, non riattivare la candidata DWM. Creality/OpenGL resta APP-001 rinviato finché una richiesta precisa lo rende necessario.
+
+La modalità desktop dedicata è il prossimo incremento proposto, **non implementato in questa revisione documentale**. Nessuna migrazione di protocollo o nuova estensione del driver giustificata dal solo riscontro positivo. Le finestre Mac e N+1 riprenderanno dopo una base desktop affidabile o nuova priorità esplicita. [Diario](VERIFICATION.md#24-ottobre--priorità-al-desktop-windows-diretto).
