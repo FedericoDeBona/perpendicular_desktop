@@ -1,0 +1,256 @@
+--- a/guest/src/windows.rs
++++ b/guest/src/windows.rs
+@@ -12,6 +12,7 @@
+ mod service;
+ mod window_control;
+ mod wire;
++mod gpu;
+ mod worker;
+ 
+ use serde::{Deserialize, Serialize};
+--- a/guest/src/windows/wire.rs
++++ b/guest/src/windows/wire.rs
+@@ -5,7 +5,7 @@
+     net::TcpStream,
+     sync::{
+         Arc, Condvar, Mutex, OnceLock,
+-        atomic::{AtomicBool, AtomicUsize, Ordering},
++        atomic::{AtomicBool, AtomicUsize, AtomicU64, Ordering},
+     },
+     time::{Duration, Instant},
+ };
+@@ -32,6 +32,8 @@
+     split: AtomicBool,
+     row_alignment: AtomicUsize,
+     pub connected: AtomicBool,
++    pub gpu_ack: AtomicU64,
++    pub gpu_enabled:AtomicBool,
+ }
+ 
+ impl Outbox {
+@@ -44,6 +46,8 @@
+             split: AtomicBool::new(false),
+             row_alignment: AtomicUsize::new(4),
+             connected: AtomicBool::new(true),
++            gpu_ack: AtomicU64::new(0),
++            gpu_enabled:AtomicBool::new(false),
+         })
+     }
+     pub fn control(&self, header: Value) {
+@@ -120,10 +124,11 @@
+                     }
+                 }
+                 packet.header["wireBytes"] = json!(packet.bytes.len());
++                let gpu_sequence=if packet.header["encoding"]=="wgc-gpu" {packet.header["sequence"].as_u64()}else{None};
+                 let mut receipt = [0u8;1];
+                 if send(&mut stream, packet).is_err() || stream.read_exact(&mut receipt).is_err() || receipt[0] != 1 {
+                     self.connected.store(false, Ordering::Release);
+-                }
++                } else if let Some(sequence)=gpu_sequence {self.gpu_ack.store(sequence,Ordering::Release);}
+             }
+         }
+         let _ = stream.shutdown(std::net::Shutdown::Both);
+--- a/guest/src/windows/worker.rs
++++ b/guest/src/windows/worker.rs
+@@ -258,6 +258,10 @@
+         while outbox.connected.load(Ordering::Acquire) {
+             if let Ok(command) = receiver.recv_timeout(Duration::from_millis(10)) {
+                 let request = command["request"].clone();
++                if command["operation"] == "trial_clock" {outbox.control(json!({"type":"reply","request":request,"ok":true,"result":super::gpu::clock()}));continue;}
++                if command["operation"] == "trial_gpu_disable" {
++                    super::gpu::disable();outbox.control(json!({"type":"reply","request":request,"ok":true,"result":{"disabled":true}}));continue;
++                }
+                 if command["operation"] == "frame_channel" {
+                     let channel = command["channel"].as_str().filter(|s| s.len() == 32 && s.bytes().all(|b| b.is_ascii_hexdigit()));
+                     if frame_channel_started || channel.is_none() || command["rowAlignment"] != 256
+@@ -265,6 +269,7 @@
+                         outbox.control(json!({"type":"reply","request":request,"ok":false,"message":"Invalid or duplicate frame channel"}));
+                         continue;
+                     }
++                    outbox.gpu_enabled.store(command["gpuFrames"]==true,Ordering::Release);
+                     let compress_frames = command["encoding"] == "lz4-block";
+                     frame_channel_started = true;
+                     let channel = channel.unwrap().to_owned();
+--- a/guest/src/windows/capture.rs
++++ b/guest/src/windows/capture.rs
+@@ -432,6 +432,7 @@
+         session.StartCapture().map_err(|e| gpu_error(&device, "StartCapture", e))?;
+         target.progress.starts.fetch_add(1,Ordering::Relaxed);
+         let result = (|| -> Result<(), String> {
++            let mut native_gpu:Option<super::gpu::Gpu>=None;
+             let mut sequence = target.capture_frames.load(Ordering::Acquire);
+             let mut generation = target.geometry.lock().unwrap().0.max(1);
+             let mut recovery_reported=false;
+@@ -488,6 +489,7 @@
+                     let _ = frame.Close(); frame = newer;
+                 }
+                 target.set_phase(Phase::Reading);
++                let mut gpu_selected_qpc=0;let _=windows::Win32::System::Performance::QueryPerformanceCounter(&mut gpu_selected_qpc);
+                 let frame_time_100ns = frame.SystemRelativeTime().ok().map(|time| time.Duration);
+                 let frame_dirty_mode=frame.DirtyRegionMode().ok().map(|mode|mode.0);
+                 let dirty_regions=frame.DirtyRegions().ok().and_then(|regions|regions.Size().ok());
+@@ -541,6 +543,16 @@
+                 if geometry != previous {
+                     generation += 1;
+                     previous = geometry;
++                }
++                if outbox.row_alignment()==256 && outbox.gpu_enabled.load(Ordering::Acquire) && super::gpu::enabled(&target.id) && !software_recovery {
++                    if native_gpu.as_ref().is_none_or(|g|!g.matches(width as u32,height as u32)) {
++                        native_gpu=Some(super::gpu::Gpu::new(&device,width as u32,height as u32)?);
++                    }
++                    target.set_phase(Phase::Publishing);sequence+=1;
++                    native_gpu.as_mut().unwrap().submit(&device,&context,&texture,x,y,&target,&outbox,generation,sequence.into(),gpu_selected_qpc)?;
++                    frame.Close().map_err(error)?;
++                    if resize_pool {pool.Recreate(&runtime,DirectXPixelFormat::B8G8R8A8UIntNormalized,2,size).map_err(error)?;}
++                    continue;
+                 }
+                 let alignment = outbox.row_alignment();
+                 let row_bytes = (width as usize).checked_mul(4).ok_or("Invalid capture width")?;
+@@ -725,7 +737,7 @@
+                     recovery_reported=true;
+                 }
+                 outbox.frame(&target.id,json!({"type":"frame","window":target.id,"sequence":sequence,"generation":generation,
+-                    "guestPixelsSHA256":pixel_hash,
++                    "guestPixelsSHA256":pixel_hash,"guestCaptureSelectedQPC":gpu_selected_qpc,"transport":"tcp-lz4",
+                     "width":width,"height":height,"stride":stride,"bytes":pixels.len(),"capture":if software_recovery {"wgc-software-recovery"} else {"wgc-hardware-readback"},
+                     "guestInitialFrameRepaint":initial_frame_repaint,
+                     "guestInitialFrameOpaquePercent":initial_frame_opaque_percent,
+--- a/macos/App.swift
++++ b/macos/App.swift
+@@ -72,10 +72,11 @@
+ 
+     func applicationDidFinishLaunching(_ notification:Notification){
+         do{
+-            let directory=FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/Perpendicular Restart")
++            let directory=FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/Perpendicular IVSHMEM Trial")
+             let runtime:URL
+             if let override=ProcessInfo.processInfo.environment["PERPENDICULAR_RUNTIME"] {runtime=URL(fileURLWithPath:override)}
+             else {runtime=try RuntimeStore.prepare(contents:Bundle.main.bundleURL.appendingPathComponent("Contents"),directory:directory)}
++            try ExperimentalGpuFrames.shared.start()
+             machine=try VirtualMachineController(directory:directory,runtime:runtime)
+             bridge=try GuestBridge(port:machine.configuration.guestPort,token:machine.configuration.token)
+             bridge.onConnection={ [weak self] value in
+@@ -122,7 +123,7 @@
+             }
+         }catch{status=error.localizedDescription;launcherNotice="Windows non può essere avviato. "+error.localizedDescription}
+         launcher=NSWindow(contentRect:NSRect(x:200,y:160,width:800,height:660),styleMask:[.titled,.closable,.resizable,.miniaturizable],backing:.buffered,defer:false)
+-        launcher.title="Perpendicular";launcher.isReleasedWhenClosed=false
++        launcher.title="Perpendicular — WGC GPU Trial";launcher.isReleasedWhenClosed=false
+         launcher.minSize=NSSize(width:640,height:480)
+         launcher.setFrameAutosaveName("PerpendicularLauncher")
+         launcher.contentView=NSHostingView(rootView:Launcher(model:self))
+@@ -131,6 +132,7 @@
+         let main=NSMenu();let appItem=NSMenuItem();main.addItem(appItem)
+         let menu=NSMenu();appItem.submenu=menu
+         let applications=NSMenuItem(title:"Applications",action:#selector(showApplications),keyEquivalent:"l");applications.target=self;menu.addItem(applications)
++        let tcp=NSMenuItem(title:"Passa a TCP + LZ4",action:#selector(useTrialTCP),keyEquivalent:"");tcp.target=self;menu.addItem(tcp)
+         let show=NSMenuItem(title:"Show Windows",action:#selector(showWindows),keyEquivalent:"");show.target=self;menu.addItem(show)
+         let displayItem=NSMenuItem(title:"Display",action:nil,keyEquivalent:"")
+         let displayMenu=NSMenu();displayItem.submenu=displayMenu;menu.addItem(displayItem)
+@@ -165,6 +167,7 @@
+     }
+     func applicationShouldTerminateAfterLastWindowClosed(_ sender:NSApplication)->Bool{false}
+     func applicationShouldHandleReopen(_ sender:NSApplication,hasVisibleWindows flag:Bool)->Bool{showApplications();return false}
++    @objc private func useTrialTCP(){bridge.command("trial_gpu_disable"){_ in};launcher.title="Perpendicular — TCP + LZ4 (clone)"}
+     @objc func showApplications(){launcher.makeKeyAndOrderFront(nil);NSApp.activate(ignoringOtherApps:true);NotificationCenter.default.post(name:.launcherFocusSearch,object:nil)}
+     @objc func closeCurrentWindow(){(NSApp.keyWindow ?? NSApp.mainWindow)?.performClose(nil)}
+     func applicationWillTerminate(_ notification:Notification){machineStateTask?.cancel();localControl?.stop();bridge?.command("release");machine?.closeDesktop()}
+@@ -272,6 +275,15 @@
+               let command=request["command"] as? String else {
+             localResponse(["ok":false,"error":"Expected a JSON command."],reply:reply);return
+         }
++        if command == "trial_clock",let bridge {let before=ProcessInfo.processInfo.systemUptime
++            bridge.command(command){[weak self] result in
++                switch result{case .success(let value):self?.localResponse(["ok":true,"result":["hostBefore":before,"hostAfter":ProcessInfo.processInfo.systemUptime,"guest":value["value"] ?? [:]]],reply:reply)
++                case .failure(let error):self?.localResponse(["ok":false,"error":error.localizedDescription],reply:reply)}
++            };return}
++        if command == "trial_gpu_disable",let bridge {bridge.command(command){[weak self] result in
++            switch result{case .success(let value):self?.localResponse(["ok":true,"result":value],reply:reply)
++            case .failure(let error):self?.localResponse(["ok":false,"error":error.localizedDescription],reply:reply)}
++        };return}
+         let allowed:Set<String>=["status","execute","display_info","driver_info","graphics_info","geometry_snapshot","application_status","process_list","process_terminate"]
+         guard allowed.contains(command) else {
+             localResponse(["ok":false,"error":"This local command is not supported."],reply:reply);return
+--- a/macos/GuestBridge.swift
++++ b/macos/GuestBridge.swift
+@@ -132,7 +132,16 @@
+                         self.readHeader()
+                     }
+                     let encoding=object["encoding"] as? String ?? "raw"
+-                    if encoding == "lz4-block" {
++                    if encoding == "wgc-gpu",self.frameOnly,object["wireBytes"] as? Int == 0 {
++                        ExperimentalGpuFrames.shared.copy(packet.header){[weak self] surface,metrics in
++                            guard let self,let surface else{self?.connection.cancel();return}
++                            var header=packet.header;for (key,value) in metrics{header[key]=value}
++                            // Immutable Mac output is complete before the ordinary receipt.
++                            self.offer(window,GuestPacket(header:header,pixels:Data(),surface:surface))
++                            self.connection.send(content:Data([1]),completion:.contentProcessed{[weak self] error in if error != nil{self?.connection.cancel()}})
++                            self.readHeader()
++                        }
++                    }else if encoding == "lz4-block" {
+                         guard self.frameOnly,let count=object["encodedBytes"] as? Int,count>0,count<stride*height else {
+                             self.connection.cancel();return
+                         }
+@@ -275,7 +284,8 @@
+             if (h["capabilities"] as? [String:Any])?["frameChannel"] as? Bool == true {
+                 let channel=UUID().uuidString.replacingOccurrences(of:"-",with:"").lowercased()
+                 frameChannel=channel
+-                var options:[String:Any]=["channel":channel,"rowAlignment":256]
++                if ExperimentalGpuFrames.shared.isFailed {command("trial_gpu_disable"){_ in}}
++                var options:[String:Any]=["channel":channel,"rowAlignment":256,"gpuFrames":!ExperimentalGpuFrames.shared.isFailed]
+                 if ((h["capabilities"] as? [String:Any])?["frameEncodings"] as? [String])?.contains("lz4-block") == true {options["encoding"]="lz4-block"}
+                 command("frame_channel",options,timeout:.seconds(5)){[weak self] result in
+                     if case .failure=result,self?.active == id {self?.clients[id]?.cancel()}
+@@ -305,6 +315,7 @@
+             if let number=header[key] as? Double,number.isFinite,number>=0,number <= ((key == "wireBytes" || key == "bytes") ? 34*1024*1024:60000) {value[key]=number}
+         }
+         frameReceiveMilliseconds=lastFrameTimings["hostReceiveMilliseconds"] ?? 0
++        ExperimentalGpuTrace.record("received",header)
+         guard ProcessInfo.processInfo.environment["PERPENDICULAR_STATE_TRACE"] == "1" else{return}
+         let now=ProcessInfo.processInfo.systemUptime
+         guard now>=nextFrameTrace else{return};nextFrameTrace=now+1
+--- a/macos/ApplicationContent.swift
++++ b/macos/ApplicationContent.swift
+@@ -13,6 +13,8 @@
+     var resizeEnabled=false {didSet{if oldValue != resizeEnabled {window?.invalidateCursorRects(for:self)}}}
+     private(set) var presentationID:UInt64=0
+     private(set) var generation:UInt64=0
++    private var trialHeader:[String:Any]=[:]
++    private var trialFrames:[UInt64:[String:Any]]=[:]
+     private var renderer:WindowRenderer?
+     private var latestPixels=Data()
+     private var latestSurface:GuestFrameSurface?
+@@ -51,6 +53,7 @@
+             let renderer=try WindowRenderer();self.renderer=renderer;layer=renderer.layer
+             renderer.onError={ [weak self] message in self?.renderFailure=message;self?.onRenderError?(message) }
+             renderer.onPresented={ [weak self] id in
++                if let self,let h=self.trialFrames.removeValue(forKey:id){ExperimentalGpuTrace.record("presented",h)}
+                 self?.onFramePresented?(id)
+             }
+         }catch {
+@@ -92,6 +95,7 @@
+             if requireSolidFrame,!packet.pixels.withUnsafeBytes({Self.hasSolidFrame($0.baseAddress!,width:width,height:height,stride:stride)}){return false}
+             latestSurface=nil;latestPixels=packet.pixels
+         }
++        trialHeader=packet.header
+         self.generation=generation;source=NSSize(width:width,height:height);sourceStride=stride
+         redrawCurrentFrame();return true
+     }
+@@ -110,6 +114,7 @@
+     @discardableResult func redrawCurrentFrame()->Bool{
+         guard source.width>0,source.height>0 else{return false}
+         presentationID &+= 1
++        if trialFrames.count>64{trialFrames.removeAll()};trialFrames[presentationID]=trialHeader
+         if let renderer {
+             if let latestSurface {renderer.present(latestSurface,presentationID:presentationID)}
+             else {renderer.present(latestPixels,width:Int(source.width),height:Int(source.height),stride:sourceStride,presentationID:presentationID)}
+--- a/macos/NativeGraphics.swift
++++ b/macos/NativeGraphics.swift
+@@ -39,6 +39,7 @@
+         var values=["DYLD_LIBRARY_PATH":libraries,"DYLD_FALLBACK_LIBRARY_PATH":libraries,
+             "NPT_BACKEND":"dxmt","ANGLE_DEFAULT_PLATFORM":"metal",
+             "RENDER_SERVER_EXEC_PATH":root.appendingPathComponent("bin/virgl_render_server").path,
++            "PERP_WGC_EXPORT_SOCKET":ExperimentalGpuFrames.socketPath,
+             "PERP_NEPTUNE_SCANOUT_BROKER":"1","PERP_NATIVE_DISPLAY_DIRECT":"1",
+             "PERP_NEPTUNE_CONTEXT_RETIREMENT":manifest["context_retirement"] as? Int == 1 ? "1":"0",
+             "PERP_NATIVE_DISPLAY_DIR":directory.path,"PERP_NATIVE_DISPLAY_SESSION":session,
