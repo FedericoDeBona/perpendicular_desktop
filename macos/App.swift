@@ -70,7 +70,6 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
     private var recoveryItem:NSMenuItem!
     private var displayItems:[NSMenuItem]=[]
     private var desktopSize=NSSize.zero
-    private var desktopModes:[NSSize]=[]
     private var desktopConfirmed=NSSize.zero
     private var desktopResizeTask:Task<Void,Never>?
     private var desktopReadRequest:UUID?
@@ -101,7 +100,8 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
                 if !value {
                     self.desktopResizeTask?.cancel();self.desktopResizeTask=nil
                     self.desktopReadRequest=nil;self.desktopReadAgain=false
-                    self.desktopResizeRequest=nil;self.desktopAttempted = .zero;self.desktopModes=[]
+                    self.machine?.finishDesktopResolution()
+                    self.desktopResizeRequest=nil;self.desktopAttempted = .zero;self.desktopConfirmed = .zero
                     self.activeApps=[]
                     self.guestCapabilities=[:]
                     self.displayEpoch=nil;self.displayReadable=false;self.displayConfigurable=false;self.sharedGeometryCapable=false
@@ -684,10 +684,6 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
         if desktopOnly,let displays=snapshot["displays"] as? [[String:Any]],displays.count == 1,
            let primary=displays.first,let width=primary["width"] as? Int,let height=primary["height"] as? Int {
             desktopConfirmed=NSSize(width:width,height:height)
-            desktopModes=(primary["modes"] as? [[String:Int]] ?? []).compactMap { mode in
-                guard let w=mode["width"],let h=mode["height"],w>=640,h>=480,w<=4096,h<=4096,w*h<=8_388_608 else{return nil}
-                return NSSize(width:w,height:h)
-            }
             scheduleDesktopResize()
         }
         let host=HostDisplay.current()
@@ -720,7 +716,7 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
     }
     private func scheduleDesktopResize(){
         guard desktopOnly,connected,displayConfigurable,desktopResizeRequest == nil,desktopReadRequest == nil,
-              desktopSize.width>0,desktopSize.height>0,!desktopModes.isEmpty,
+              desktopSize.width>0,desktopSize.height>0,
               machine?.desktopState["visible"] as? Bool == true else{return}
         desktopResizeTask?.cancel()
         desktopResizeTask=Task{@MainActor [weak self] in
@@ -728,24 +724,44 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
             guard !Task.isCancelled,let self,self.desktopResizeRequest == nil,self.desktopReadRequest == nil,self.connected,
                   let epoch=self.displayEpoch,self.machine?.desktopState["visible"] as? Bool == true else{return}
             let desired=self.desktopSize
-            // Choose only an advertised Windows mode. Prefer matching both
-            // Retina dimensions and aspect; preserve the last image meanwhile.
-            func cost(_ size:NSSize)->Double {
-                let x=log(size.width/desired.width),y=log(size.height/desired.height)
-                return x*x+y*y+2*(x-y)*(x-y)
-            }
-            guard let mode=self.desktopModes.min(by:{cost($0)<cost($1)}),
-                  mode != self.desktopConfirmed,mode != self.desktopAttempted else{return}
+            // Preserve the user's window. Publish its exact Retina raster to
+            // the driver's custom mode rather than selecting a standard mode.
+            let scale=min(1,4096/desired.width,4096/desired.height,sqrt(8_388_608/(desired.width*desired.height)))
+            let mode=NSSize(width:max(640,(desired.width*scale).rounded()),height:max(480,(desired.height*scale).rounded()))
+            guard mode != self.desktopConfirmed,mode != self.desktopAttempted else{return}
             self.desktopAttempted=mode
             let request=UUID();self.desktopResizeRequest=request
-            self.bridge.command("display_configure",["width":Int(mode.width),"height":Int(mode.height)],timeout:.seconds(5)){[weak self] result in
-                guard let self,self.displayEpoch == epoch,self.desktopResizeRequest == request else{return}
-                self.desktopResizeRequest=nil
-                // The event and reply can cross. Query actual Windows geometry;
-                // never publish the old reply as the current viewport.
-                if case .failure(let error)=result {self.launcherNotice="Risoluzione Windows invariata: "+error.localizedDescription}
-                self.readDisplay()
+            self.machine?.requestDesktopResolution(mode)
+            // The driver's resolution event and application are asynchronous.
+            // Keep one transaction pending and verify actual Windows geometry.
+            for _ in 0..<5 {
+                try? await Task.sleep(for:.milliseconds(300))
+                guard !Task.isCancelled,self.connected,self.displayEpoch == epoch,self.desktopResizeRequest == request else{return}
+                let matched=await withCheckedContinuation { continuation in
+                    self.bridge.command("display_info",timeout:.seconds(5)){result in
+                        guard self.displayEpoch == epoch,self.desktopResizeRequest == request else{continuation.resume(returning:false);return}
+                        if case .success(let reply)=result,let snapshot=reply["value"] as? [String:Any],
+                           let primary=(snapshot["displays"] as? [[String:Any]])?.first,
+                           primary["width"] as? Int == Int(mode.width),primary["height"] as? Int == Int(mode.height) {
+                            self.machine?.finishDesktopResolution();self.desktopResizeRequest=nil
+                            self.desktopReadAgain=false;self.acceptDisplay(snapshot)
+                            continuation.resume(returning:true)
+                        }else if case .success=result {
+                            // The monitor notification may complete after the
+                            // driver's helper first tries the mode. Apply the
+                            // exact raster once its mode set becomes available;
+                            // the next read still confirms Windows' actual size.
+                            self.bridge.command("display_configure",["width":Int(mode.width),"height":Int(mode.height)],timeout:.seconds(3)){_ in
+                                continuation.resume(returning:false)
+                            }
+                        }else {continuation.resume(returning:false)}
+                    }
+                }
+                if matched {return}
             }
+            self.machine?.finishDesktopResolution();self.desktopResizeRequest=nil
+            self.launcherNotice="Windows non ha confermato la risoluzione richiesta."
+            self.readDisplay()
         }
     }
     private func configureDisplay(width:Int,height:Int,epoch:String?,attempt:Int=0){

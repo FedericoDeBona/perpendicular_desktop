@@ -1,0 +1,52 @@
+--- a/viogpu/viogpu3d/viogpu_adapter.cpp
++++ b/viogpu/viogpu3d/viogpu_adapter.cpp
+@@ -864,7 +864,7 @@
+     {
+         case StatusConnection:
+             {
+-                pChildStatus->HotPlug.Connected = IsDriverActive();
++                pChildStatus->HotPlug.Connected = IsDriverActive() && m_scanoutConnected[0];
+                 return STATUS_SUCCESS;
+             }
+ 
+@@ -3629,7 +3629,13 @@
+     virtio_get_config(&m_VioDev, FIELD_OFFSET(GPU_CONFIG, events_read), &events_read, sizeof(events_read));
+     if (events_read & VIRTIO_GPU_EVENT_DISPLAY)
+     {
++        VIOGPU_DISP_MODE previousMode = {};
++        vidpn.EscapeCustomResoulution(&previousMode);
+         vidpn.GetDisplayInfo();
++        VIOGPU_DISP_MODE requestedMode = {};
++        vidpn.EscapeCustomResoulution(&requestedMode);
++        const BOOLEAN modeChanged = previousMode.XResolution != requestedMode.XResolution ||
++                                    previousMode.YResolution != requestedMode.YResolution;
+         events_clear |= VIRTIO_GPU_EVENT_DISPLAY;
+         virtio_set_config(&m_VioDev, FIELD_OFFSET(GPU_CONFIG, events_clear), &events_clear, sizeof(events_clear));
+ 
+@@ -3644,6 +3650,14 @@
+             {
+                 ULONG xres = 0, yres = 0;
+                 BOOLEAN connected = ctrlQueue.GetDisplayInfo(vbuf, i, &xres, &yres);
++                // A repeated connected status does not invalidate Windows'
++                // cached monitor modes. Re-enumerate this virtual monitor when
++                // the host replaces its custom raster, then let the agent
++                // apply the new mode. Leave unchanged notifications deduped.
++                if (connected && modeChanged)
++                {
++                    UpdateChildStatus(FALSE);
++                }
+                 UpdateChildStatus(connected);
+             }
+             ctrlQueue.ReleaseBuffer(vbuf);
+--- a/viogpu/viogpu3d/viogpu_adapter.h
++++ b/viogpu/viogpu3d/viogpu_adapter.h
+@@ -91,7 +91,8 @@
+     // Per-scanout last-reported connect state, indexed by ChildUid.
+     // UpdateChildStatus dedupes against this so DXGK only sees real
+     // connected <-> disconnected transitions.
+-    BOOLEAN m_scanoutConnected[MAX_CHILDREN] = {FALSE};
++    // The sole virtual output is present at boot; later host events update it.
++    BOOLEAN m_scanoutConnected[MAX_CHILDREN] = {TRUE};
+ 
+     ULONGLONG GetShmemPA() {
+         if (!m_VioDev.shmem.available) {

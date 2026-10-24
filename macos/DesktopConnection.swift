@@ -212,7 +212,9 @@ final class DesktopConnection:@unchecked Sendable {
                 let layout=try read(4);let number=Int(layout[0]);guard number>0,number<=16 else{throw failure("Invalid desktop layout.")}
                 var screens:[DesktopScreen]=[]
                 for _ in 0..<number {let info=try read(16);screens.append(DesktopScreen(id:u32(info,0),x:u16(info,4),y:u16(info,6),width:u16(info,8),height:u16(info,10)))}
-                if x == 1 && y != 0 {throw failure("Windows did not accept the requested display layout (\(y)).")}
+                // QEMU returns 4 when the request is forwarded to virtio-gpu.
+                // The guest mode must still be verified independently.
+                if x == 1 && y != 0 && y != 4 {throw failure("Windows did not accept the requested display layout (\(y)).")}
                 if y == 0,let primary=screens.first(where:{$0.id == 0}) ?? screens.first {
                     framebufferWidth=width;framebufferHeight=height;try setScreen(primary)
                 }

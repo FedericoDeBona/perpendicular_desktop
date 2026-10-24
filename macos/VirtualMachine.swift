@@ -139,7 +139,18 @@ final class VirtualMachineController {
               let application=NSRunningApplication(processIdentifier:pid) else {return}
         application.unhide();application.activate(options:[])
     }
-    func closeDesktop(){desktop?.stop();desktop?.window.close();desktop=nil}
+    func requestDesktopResolution(_ size:NSSize){
+        guard let launch=desktopLaunch() else{return}
+        displayControl?.stop()
+        // This publishes the custom mode to virtio-gpu. The guest's driver
+        // helper applies it; RFB's framebuffer acknowledgement is not proof
+        // of the Windows mode, which ApplicationModel reads back separately.
+        let client=DesktopConnection(path:launch.socket,receive:{_,_,_ in},layout:{_ in},failed:{_ in})
+        displayControl=client;client.requestPixels(false)
+        client.setScreens([DesktopScreen(id:0,x:0,y:0,width:Int(size.width),height:Int(size.height))]);client.start()
+    }
+    func finishDesktopResolution(){displayControl?.stop();displayControl=nil}
+    func closeDesktop(){finishDesktopResolution();desktop?.stop();desktop?.window.close();desktop=nil}
     func synchronizePrimaryDisplay(){
         // The v0.4 native driver keeps the modes advertised at boot. Sending
         // a new RFB preferred size while connected can select a smaller default
@@ -242,10 +253,13 @@ final class VirtualMachineController {
             // Retina window capture needs contiguous 16 MiB driver pools. The
             // measured 256 MiB aperture fragmented below that size with two
             // ordinary apps; use the next PCI BAR size for this local 3D path.
-            // The signed v0.4 driver deduplicates connected->connected
-            // notifications, so a later RFB resize may not refresh its modes.
-            // Seed the single monitor with the Mac's bounded Retina raster.
-            let initialDisplay=HostDisplay.current().first?.guestPixelSize ?? NSSize(width:1280,height:800)
+            // Windows caches the monitor's initial mode envelope. Include the
+            // full display, not only its work area, so fullscreen also fits.
+            let fullDisplay=HostDisplay.current().first.map {
+                NSSize(width:$0.frame.width*$0.scale,height:$0.frame.height*$0.scale)
+            } ?? NSSize(width:1280,height:800)
+            let scale=min(1,4096/fullDisplay.width,4096/fullDisplay.height,sqrt(8_388_608/(fullDisplay.width*fullDisplay.height)))
+            let initialDisplay=NSSize(width:max(640,(fullDisplay.width*scale).rounded()),height:max(480,(fullDisplay.height*scale).rounded()))
             arguments += ["-device","virtio-ramfb-gl,id=display0,addr=0x8,disable-legacy=on,neptune=on,blob=on,hostmem=512M,max_outputs=1,xres=\(Int(initialDisplay.width)),yres=\(Int(initialDisplay.height))"]
         }else{arguments += ["-device","ramfb"]}
         machine = try launch("qemu-system-aarch64",arguments,log:"qemu.log",executable:native?.executable,

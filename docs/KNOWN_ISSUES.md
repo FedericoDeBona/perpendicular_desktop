@@ -18,9 +18,9 @@ L'obiettivo resta rendere affidabili driver, accelerazione 3D e presentazione de
 
 Ordine aggiornato nella nuova chat: (1) breve riproduzione in «Apri Windows» dei contenuti Settings/Calcolatrice durante input, menu, scroll e resize; (2) correggere soltanto cause concrete distinguendo app, composizione Windows e presentazione Mac; se il difetto non compare, registrare il limite e proseguire; (3) modalità desktop dedicata senza catalogo obbligatorio o catture individuali automatiche; (4) sessione/input dopo riapertura; (5) **solo +1**, un monitor Windows con vera risoluzione adattata alla vista Mac e al fullscreen, scala Retina/input coerenti, richieste seriali e risposte effettive. Nessun monitor N aggiuntivo in questa fase. Conservare la candidata DWM instabile disattivata e APP-001 rinviato. Questi sono requisiti, non capacità già qualificate.
 
-**Incremento corrente verificato nel clone:** pacchetto privato DesktopFocus/build-4 apre direttamente il desktop; controllo VM/guest disponibile, frameChannel=false, nessuna finestra individuale. Worker5588/d6d0da93aebc differisce dal precedente3df: ripristino catture soltanto dopo richiesta esplicita del canale finestre. Stesso QEMU25490 e documento Notepad7936; nessun reboot/driver/ordinario modificato. Finestra1920×1200↔fullscreen2880×1740 confermati nel guest e nello scanout nativo; chiusura viewer con VM accesa e riapertura/input riusciti. Corretto conflitto fra query display e configurazione. [Prove e limiti](VERIFICATION.md#24-ottobre--desktop-dedicato-e-primo-resize-su-un-solo-monitor).
+**Incremento precedente verificato nel clone (build-4, storico):** pacchetto privato DesktopFocus/build-4 apre direttamente il desktop; controllo VM/guest disponibile, frameChannel=false, nessuna finestra individuale. Worker5588/d6d0da93aebc differisce dal precedente3df: ripristino catture soltanto dopo richiesta esplicita del canale finestre. Stesso QEMU25490 e documento Notepad7936; nessun reboot/driver/ordinario modificato. Finestra1920×1200↔fullscreen2880×1740 confermati nel guest e nello scanout nativo; chiusura viewer con VM accesa e riapertura/input riusciti. Corretto conflitto fra query display e configurazione. [Prove e limiti](VERIFICATION.md#24-ottobre--desktop-dedicato-e-primo-resize-su-un-solo-monitor).
 
-**Richiesta corretta dall’utente:** il desktop deve adattarsi alla finestra tramite driver. L’adattamento inverso build-5 è rifiutato e rimosso; sorgenti tornati al percorso build-4 con modi predefiniti. La candidata privata build-6 ha confermato1920×1280 e2880×1676 prima del reset, ma dopo il recupero non applica più misure personalizzate: non promossa. Il comando SetDisplayConfig può riuscire scegliendo una misura diversa. Resize libero senza bande **non risolto**. Testo Notepad ripristinato a «skdf»/4caratteri dopo ripetizioni input della prova; guest control riconnesso con worker1892, stesso QEMU25490. [Esiti e recupero](VERIFICATION.md#24-ottobre--ripristino-del-resize-personalizzato-del-desktop). DPI, avvio a freddo e distribuzione ordinaria ancora da qualificare.
+**Richiesta corretta dall’utente e stato corrente:** Windows deve adattare il desktop alla finestra tramite driver; l’adattamento inverso build-5 è rifiutato e rimosso. Seconda candidata KMD caricata nel clone (oem16.inf, SYS9c64a219412b), frontend DesktopFocus/build-9: vista960×640@2→Windows/scanout1920×1280, stretta720×838@2→1440×1676, fullscreen1440×900@2→2880×1800 e ritorno. Finestre senza bande, cornice Mac conservata, nativeActive=true. La prima candidata TRUE→TRUE era intermittente ed è sostituita da una reale transizione monitor solo al cambio raster. **Resta un’anomalia nelle acquisizioni fullscreen**, da distinguere dalla geometria confermata; DPI/dimensione percepita e distribuzione ordinaria non qualificati. Secure Boot0/TESTSIGNING autorizzati soltanto nel clone; UMD/helper originali. Notepad originale skdf/4caratteri preservato. [Prova finale, fallimenti e limiti](VERIFICATION.md#24-ottobre--seconda-candidata-resize-geometrie-effettive-e-pulizia-autorizzata).
 
 ## Problemi aperti
 
@@ -77,6 +77,31 @@ Ordine aggiornato nella nuova chat: (1) breve riproduzione in «Apri Windows» d
 - **Prossimo passo:** prima di distribuire il pacchetto definire quando l'aggiornamento richiede riavvio e confermare la topologia prima di riabilitare geometria e input condivisi.
 - **Chiusura:** aggiornamento e riavvio eventualmente richiesto portano al display concordato; l'app non presenta come confermata una geometria non applicata.
 - **Evidenze:** [VERIFICATION.md](VERIFICATION.md), «gate pronto prima dell'uso e frame valido al resize».
+
+### GFX-008 — Acquisizione fullscreen con fasce bianche e frammenti
+
+- **Stato:** aperto; anomalia osservata nelle acquisizioni del viewer fullscreen, causa non isolata.
+- **Verificato:** con seconda candidata resize, Windows e scanout2880×1800; vista/layer/presentation frame1440×900punti@2, drawable2880×1800. CUA restituisce immagine ridotta e fasce bianche/frammentate in alto/destra. Le acquisizioni in finestra normale e stretta sono complete senza bande. Riaprire il binding CUA restituisce un’immagine pulita ma fa uscire dal fullscreen: non prova una correzione del caso.
+- **Prossimo passo:** distinguere acquisizione CUA e presentazione realmente visibile con un’osservazione fullscreen indipendente, senza modificare il driver che applica già la misura corretta. La sola coincidenza delle dimensioni non chiude il difetto visivo.
+- **Chiusura:** immagine fullscreen completa e aggiornata nel passaggio prima difettoso; eventuale problema del solo acquisitore identificato con evidenza indipendente.
+- **Evidenze:** [resize, diagnostica e limiti](VERIFICATION.md#24-ottobre--seconda-candidata-resize-geometrie-effettive-e-pulizia-autorizzata).
+
+### SYS-001 — Arresto del runtime HVF durante il riavvio del clone
+
+- **Stato:** aperto, osservazione circoscritta durante la preparazione del resize.
+- **Verificato:** QEMU55266 termina con assertion `isv` in `hvf_vcpu_exec`/hvf.c2378 durante un riavvio Windows, con KMD originale ancora Running. Nessuna attribuzione al nuovo driver di resize. Successivi arresti ACPI completi riusciti.
+- **Prossimo passo:** se ricompare, conservare istruzione/MMIO e contesto del medesimo guasto prima di cambiare il gestore HVF. Non allargare la prova del resize in un nuovo esperimento del runtime.
+- **Chiusura:** causa identificata e medesimo passaggio prima difettoso completato con il runtime corretto; un singolo boot riuscito non chiude il problema.
+- **Evidenze:** [preparazione del resize](VERIFICATION.md#24-ottobre--driver-per-risoluzioni-personalizzate-preparazione-e-installazione-nel-clone).
+
+### SYS-002 — Spazio host esaurito durante la prova driver
+
+- **Stato:** spazio recuperato e immagine riparata nel clone; prevenzione nel prodotto aperta.
+- **Verificato:**103MiB liberi sul Mac, errore CRC creando il task Windows e QEMU terminato per `aio failed: No space left on device`. Rimossi esclusivamente ISO/cache e copie generate ricostruibili; dischi, checkpoint e sorgenti preservati. Recuperati2,2GiB al rilievo; qemu-img ripara due cluster non referenziati, zero corruzioni, verifica finale senza errori. Windows riavviato, volume Healthy e hash del SYS compilato esatto.
+- **Pulizia autorizzata successiva:** eliminati11 rollback intermedi del clone del24ottobre, recuperati1.642.475.520byte; conservati primo/ultimo rollback, checkpoint pre-SecureBoot/driver e VM attuale. Prima della rimozione verificato che il disco attivo non abbia backing file. Circa20GB liberi al rilievo. [Ricevuta e limiti](VERIFICATION.md#24-ottobre--seconda-candidata-resize-geometrie-effettive-e-pulizia-autorizzata).
+- **Prossimo passo:** conservare spazio sufficiente durante la verifica corrente; prima di distribuire definire controllo e segnalazione dello spazio host che impediscano una terminazione cieca durante le scritture.
+- **Chiusura:** caso di spazio insufficiente gestito senza perdita dati e con errore utilizzabile nell’app; il solo recupero manuale non chiude il problema.
+- **Evidenze:** [diario e recupero](VERIFICATION.md#24-ottobre--driver-per-risoluzioni-personalizzate-preparazione-e-installazione-nel-clone).
 
 ## Correzioni nel clone: distribuzione ancora da completare
 

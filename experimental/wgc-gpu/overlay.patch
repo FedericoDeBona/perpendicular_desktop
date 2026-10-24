@@ -443,7 +443,7 @@
          })();
 --- a/macos/App.swift
 +++ b/macos/App.swift
-@@ -81,10 +81,11 @@
+@@ -80,10 +80,11 @@
  
      func applicationDidFinishLaunching(_ notification:Notification){
          do{
@@ -486,7 +486,7 @@
          let allowed:Set<String>=["status","execute","display_info","driver_info","graphics_info","geometry_snapshot","application_status","process_list","process_terminate"]
          guard allowed.contains(command) else {
              localResponse(["ok":false,"error":"This local command is not supported."],reply:reply);return
-@@ -899,7 +905,7 @@
+@@ -915,7 +921,7 @@
              guard let id=value["window"] as? String,windows[id] != nil else{return}
              launcherNotice=value["message"] as? String
          case "window_error","launch_error":

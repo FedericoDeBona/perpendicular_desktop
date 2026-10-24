@@ -2,6 +2,8 @@
 
 **Candidata sperimentale, non integrata nel prodotto.** Il24 ottobre il controllo minimo Wait/Signal supera per la prima volta l’ordinamento dopo l’inoltro del token di acquisizione al runtime Windows. Il primo confronto su finestre reali non dimostra ancora un beneficio su WinUI o frame parziali; questo risultato non qualifica affidabilità generale. I tentativi precedenti e i relativi fallimenti sono conservati sotto.
 
+Esperimento desktop separato: [risoluzioni personalizzate](custom-resolution.md), patch KMD senza modifiche scheduler/UMD; verificata nel clone, non distribuita nell’ordinario.
+
 ## Domanda e modifica candidata
 
 Il controllo esistente `scripts/check-graphics-fence-wait.py` aveva dimostrato che sul pacchetto ufficiale v0.4 il lavoro D3D11 successivo a un Wait può completarsi prima del Signal. Quella prova non identifica la causa di ogni superficie WGC incompleta.
