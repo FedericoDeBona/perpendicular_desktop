@@ -8,9 +8,11 @@ Determinare se IVSHMEM può sostituire il solo payload dei frame fra Windows ARM
 
 **Seguito richiesto: scegliere un codec per IVSHMEM.** Ricerca conclusa con un unico candidato: LZ4 block indipendente, riusando `lz4_flex =0.14.0` e il decoder Apple già presenti. IVSHMEM+LZ4 non è ancora implementato o misurato; la decisione precedente riguarda IVSHMEM grezzo. [Motivazione e confine della proposta](#compressione-su-ivshmem-un-solo-candidato).
 
+**Prima prova dei rettangoli eseguita.** Ricostruzione esatta e fallback riusciti con un riferimento completo di controllo. Nel campione di 23 frame, 19 patch corrette, 3 coperture insufficienti protette dal ritorno al frame completo e 1 refresh richiesto. Nessuna qualifica dei delta senza quel controllo, nessun risparmio di readback o miglioramento di latenza dimostrato. [Risultati della prova](#prova-dei-rettangoli-grezzi-nel-clone).
+
 ## Confronto conclusivo e decisione
 
-Una sola finestra Blocco note sintetica, WGC hardware VirtIO, 2178×1303, stride 8960, **11.674.880byte BGRA per frame**. Tre attività identiche:48 aggiornamenti di testo a 100 ms, tre aggiornamenti di riscaldamento e breve assestamento; stessa finestra/ID e geometria, medesima politica di un frame pendente/ACK TCP. Ordine conclusivo LZ4→raw→IVSHMEM, invertito rispetto alla prima raccolta per esporre l'effetto dell'ordine/avvio. Nessun blocco modificato o migrazione dei comandi.
+Una sola finestra Blocco note sintetica, WGC hardware VirtIO, 2178×1303, stride 8960, **11.674.880 byte BGRA per frame**. Tre attività identiche:48 aggiornamenti di testo a 100 ms, tre aggiornamenti di riscaldamento e breve assestamento; stessa finestra/ID e geometria, medesima politica di un frame pendente/ACK TCP. Ordine conclusivo LZ4→raw→IVSHMEM, invertito rispetto alla prima raccolta per esporre l'effetto dell'ordine/avvio. Nessun blocco modificato o migrazione dei comandi.
 
 | Trasporto | Intervallo osservato | Selezione frame→callback Metal mediana / p95 | Ricevuti / presentati distinti | Pixel su TCP |
 | --- | --- | --- | --- | --- |
@@ -69,7 +71,7 @@ C# è limitato alla diagnostica perché disponibile tramite Add-Type senza nuovo
 
 Overlay in [prepare-frames.py](../experimental/ivshmem/prepare-frames.py), [guest/frames.rs](../experimental/ivshmem/guest/frames.rs) e [SharedFrames.swift](../experimental/ivshmem/SharedFrames.swift): i sorgenti ordinari sono copiati e modificati soltanto nella directory privata. Tre slot, limiti/epoch/contatori, barriera dmb sy nel guest e OSMemoryBarrier sul Mac. Il Mac legge metadati/pixel solo dopo la notifica e copia nel proprio buffer Metal prima del rilascio. Conservato l'ACK della connessione frame TCP e quindi una sola consegna pendente, come il confronto TCP corrente; controllo e input restano TCP. Non è zero-copy completo.
 
-Nel clone: worker6a5af58088d0 identificato, servizio standard temporaneamente fermato, WGC hardware VirtIO senza recupero software. Blocco note2178×1303/stride 8960 (11.674.880byte), frame ricevuti e callback Metal su ivshmem-raw, testo digitato visibile. La disabilitazione della regione causa riconnessione sul TCP raw: stesso ID finestra `61185385-B2DD-4EB2-80AB-4118A18E5047:1`, testo conservato, ulteriore input visibile e transizione terminata. È un caso completo, non affidabilità generale né qualifica dei difetti WinUI.
+Nel clone: worker6a5af58088d0 identificato, servizio standard temporaneamente fermato, WGC hardware VirtIO senza recupero software. Blocco note2178×1303/stride 8960 (11.674.880 byte), frame ricevuti e callback Metal su ivshmem-raw, testo digitato visibile. La disabilitazione della regione causa riconnessione sul TCP raw: stesso ID finestra `61185385-B2DD-4EB2-80AB-4118A18E5047:1`, testo conservato, ulteriore input visibile e transizione terminata. È un caso completo, non affidabilità generale né qualifica dei difetti WinUI.
 
 **Limite del primo run, poi risolto:** il launcher esterno aveva sostituito anche il suffisso HASH nella variabile diagnostica. I frame del primo run non hanno checksum; l'affermazione intermedia di una hash coincidente era errata ed è stata corretta. Il confronto byte-per-byte del frame WGC restava aperto in quel run; i tre hash del passaggio conclusivo sopra lo qualificano nel caso circoscritto. Corretta la sorgente del launcher per il seguito, senza contare come eseguita la correzione. In quel primo run nessuna misura di latenza end-to-end, CPU o perdita era qualificata; i tempi per-frame già registrati sono diagnostica, non benchmark.
 
@@ -147,4 +149,29 @@ Primo risultato osservabile per un seguito: un piccolo cambiamento riproducibile
 
 Il protocollo delta deve identificare base/epoch/generazione e nuova sequenza; base non valida, resize, riconnessione o gap non ricostruibile richiedono frame completo. La politica attuale elimina frame intermedi sia al dequeue WGC sia nella coda: non basta conservare i rettangoli dell'ultimo. Serve l'unione dei cambiamenti di tutti i frame saltati oppure un refresh completo; non assumere senza prova che WGC accumuli anche quelli mai consumati. Mantenere frame completi come baseline/fallback. Sul Mac conservare la base senza modificare buffer ancora letti da Metal; l'eventuale costo di una copia completa della base va misurato, non nascosto nel risparmio dei byte condivisi.
 
-**Esito rapido:** alternativa pertinente se l'obiettivo è evitare il codec, con API già osservata, ma beneficio/correttezza ancora da dimostrare. Questa revisione non avvia la VM e non implementa regioni o rendering parziale. [Evidenze e limiti](VERIFICATION.md#24-ottobre--ivshmem-dirty-regions-osservate-ma-non-qualificate).
+**Esito della revisione iniziale:** alternativa pertinente se l'obiettivo è evitare il codec, con API già osservata, ma beneficio/correttezza ancora da dimostrare in quel passaggio. La revisione non aveva avviato la VM o implementato regioni/rendering parziale; la prova successiva è descritta sotto. [Evidenze iniziali](VERIFICATION.md#24-ottobre--ivshmem-dirty-regions-osservate-ma-non-qualificate).
+
+## Prova dei rettangoli grezzi nel clone
+
+Eseguita su richiesta «vai con la prova». Overlay separato in [experimental/ivshmem](../experimental/ivshmem/README.md#dirty-region-qualification-overlay), senza modificare sorgenti/runtime ordinari o driver. WGC ReportOnly, stessa cattura hardware 2178×1303/stride 8960, raw 11.674.880 byte. Conservato il readback completo: questo è l'oracolo per qualificare regioni, pubblicazione e ricostruzione, non un'implementazione di readback selettivo.
+
+Il guest ritaglia le coordinate WGC sul crop effettivo e verifica che l'ultima base pubblicata più quei rettangoli ricostruisca **tutti i byte** del readback attuale, padding incluso. Pubblica patch grezze solo in caso di uguaglianza e risparmio di byte; ogni divergenza invia full. Il Mac verifica base/epoch/generazione, alloca un nuovo buffer Metal posseduto, copia la base immutabile e applica le patch. Hash dell'intera ricostruzione confrontata con quella del riferimento guest prima di rilasciare lo slot. Nessun buffer già pubblicato viene modificato mentre Metal può leggerlo.
+
+Un Blocco note sintetico riceve una riga breve e i caratteri A/B/C/D; screenshot conferma `IVSHMEM dirty check: ABCD`. Campione controllato sequenze 9…31:
+
+| Esito | Frame | Evidenza |
+| --- | --- | --- |
+| Patch grezza esatta | 19 | Ricostruzione guest completa uguale al riferimento, hash Mac identica |
+| Copertura insufficiente → full | 3 | Seq 18/27/31: 679/309/461 byte differenti fuori dalla ricostruzione con i soli rettangoli correnti |
+| Reset esplicito della base → full | 1 | Seq 28, poi ripresa delle patch |
+| Ricevuti / presentati | 23 / 23 | Sequenze contigue, tutti gli hash completi Mac coincidono |
+
+Esempio reale di aggiornamento testo: rettangolo 2141×36 più stato 282×45, payload 359.064 byte invece 11.674.880, circa 32,5× meno byte. Il cursore da solo usa 3×36/432 byte: non confondere quel caso con un aggiornamento di testo. Nell'intero campione, inclusi i 4 full, 48.538.756 byte contro 268.522.240 equivalenti raw,−81,92% di payload pixel condiviso; restano metadati, ACK e notifiche.
+
+**Limite di correttezza emerso:** usare ingenuamente i rettangoli dell'ultimo frame sull'ultima base avrebbe perso cambiamenti in 3 casi. Nel tratto controllato non ci sono buchi nelle sequenze pubblicate e acquisiti/callback WGC aumentano entrambi di 23; non è dimostrato che quei casi derivino da uno skip visibile. Accumulo interno, tempi di cattura/readback o difetti grafici preesistenti non sono isolati. Non qualificare i metadati come completi né rimuovere il confronto per dichiarare l'ottimizzazione riuscita. Il full fallback ha conservato l'immagine corretta rispetto al riferimento; non ripara un riferimento WGC eventualmente già difettoso.
+
+Costi diagnostici mediani nel campione: readback completo 11,10 ms, validazione/hash/copie private guest 60,54 ms, ricostruzione+hash Mac 8,14 ms (copia intera della base nelle patch 1,69 ms). Copia guest→shared 0,024 ms mediana, con campioni full più costosi. Questi tempi comprendono controlli intenzionalmente onerosi, non un confronto di prestazioni con TCP+LZ4. Nessun encode/decode dei pixel, ma il lavoro CPU di qualificazione e il readback non sono eliminati; nessuna promessa di latenza migliore.
+
+Disabilitazione IVSHMEM→TCP raw riuscita sulla stessa finestra/ID; input E successivo visibile e presentato, testo `ABCDE`. Servizio normale ripristinato, worker/task temporanei rimossi, documento sintetico terminato per identità, clone spento con ACPI/checkpoint 150806Z e frontend chiuso. Disco/EFI e binari ordinari invariati. [Diario, hash e insuccessi](VERIFICATION.md#24-ottobre--ivshmem-prova-rettangoli-con-riferimento-completo-e-tre-coperture-insufficienti).
+
+**Decisione del passaggio:** trasporto e ricostruzione per rettangoli dimostrati nel caso, risparmio di byte osservato; delta senza oracolo e vantaggio sul prodotto non qualificati. Conservare TCP+LZ4 ordinario e la prova separata. Prima di ridurre il readback o eliminare l'oracolo occorre chiarire la copertura nei tre casi conservati. LZ4 rimane il candidato codec; non aggiungere ora codec, rendering parziale o modifiche grafiche per compensare questo limite.

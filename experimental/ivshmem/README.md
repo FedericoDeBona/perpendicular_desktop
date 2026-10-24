@@ -181,3 +181,47 @@ presented are separate checks. Acquired WGC frames can be coalesced before
 publication, so zero gaps after publication does not mean zero frames lost
 throughout Windows. CPU seconds are accumulated over each measured interval;
 guest totals include worker/app/background and overlap host virtualization CPU.
+
+## Dirty-region qualification overlay
+
+`prepare-dirty.py --output /private/new/dirty-build` applies the raw-frame
+preparer and adds only the diagnostic source overlay. It does not build, install,
+or start a VM. Its paired worker/frontend require `PERP_IVSHMEM=1` and
+`PERP_IVSHMEM_DIRTY_CHECK=1`, with private frame-mode `ivshmem`.
+`guest/SmallUpdate.cs` makes one edit of at most 80 characters in a verified scratch
+ClassicNotepad (PID plus creation FILETIME), without saving any document.
+
+This is a **qualification**, not an optimized dirty readback. WGC stays ReportOnly
+and the GPU staging/readback stays complete. The capture overlay clips at most 32
+WGC rectangles to the actual capture crop and logs `[x,y,width,height]` arrays.
+`guest/dirty.rs` retains the last published complete image and applies only the
+current rectangles to a private copy. It compares every padded byte against the
+current full readback. Missing metadata, geometry/base change, insufficient byte
+savings, or coverage mismatch sends the full frame. A private authenticated
+`trial_dirty_refresh` command forces the next full publication. Publication error
+invalidates the session; no base is reused after failed shared I/O.
+
+New paired transport tag `ivshmem-dirty-check`: `bytes` remains `stride*height`,
+while slot payload length and `sharedPayloadBytes` count only packed pixel bytes.
+For `dirtyFull=false`, `encoding=dirty-raw`, `dirtyBaseIVSequence` names the base
+and packed rows follow `guestDirtyRects` order, without row padding. Full frames
+use `encoding=raw`. There is no dictionary or pixel codec. An old receiver rejects
+the new tag rather than interpreting a patch as a complete raster.
+
+`DirtyFrames.swift` allocates a new owned Metal surface, copies the immutable old
+base, patches it and verifies the complete SHA256 against the guest oracle before
+releasing the shared slot. Neither old nor new surfaces are modified after
+publication. This deliberately retains a full Mac base copy and diagnostic
+hashes; their cost is reported, not hidden as a transport saving. Buffer, queue
+and MMIO notification rules are otherwise the raw experiment's existing ones.
+
+The bounded real run reconstructed/presented 23 update-phase frames exactly:
+19 patches, 3 coverage mismatches protected by full-frame fallback, 1 explicit base
+refresh. Text update payloads included 359064 bytes versus 11674880 raw; caret-only
+patches 432 bytes are recorded separately. The naive last-frame-rectangle policy
+is not qualified: it would have missed changes in those 3 cases, even with no gap
+in the observed published sequences. Cause not isolated. Fallback to TCP on the
+same window and a subsequent edit succeeded. Full GPU readback remains; this run
+does not demonstrate lower latency than ordinary TCP+LZ4. See the diary for
+hashes, timing cost and preservation receipts. Do not rerun the completed
+qualification or remove its oracle as a claimed performance fix.
