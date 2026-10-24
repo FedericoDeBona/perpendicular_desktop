@@ -31,7 +31,7 @@ private final class ResizePreviewView:NSView {
 private enum MouseMode {case pending,move,resize(ResizeEdges),remote,zoom,discard}
 private enum WindowInput {
     case input([String:Any])
-    case leftMouse(NSEvent,[String:Any])
+    case leftMouse(WindowMouseSample,[String:Any])
     var textBytes:Int {
         if case .input(let value)=self {return (value["text"] as? String)?.utf8.count ?? 0}
         return 0
@@ -173,7 +173,10 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
         content.input={ [weak self] event in
             self?.receive(.input(event))
         }
-        if role == .main {content.leftMouse={ [weak self] event,value in self?.receive(.leftMouse(event,value)) }}
+        if role == .main {content.leftMouse={ [weak self] event,value in
+            guard let self else{return}
+            self.receive(.leftMouse(WindowMouseSample(event:event,window:self.window),value))
+        }}
         content.pointerExited={ [weak self] in self?.onPointerExit?() }
         content.onFramePresented={ [weak self] id in self?.frameWasPresented(id) }
         content.onRenderError={ [weak self] message in self?.failFrameTransition();self?.onError?(message) }
@@ -545,14 +548,8 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
             beginSharedGeometry();commitSharedGeometry()
         }
     }
-    private func leftMouse(_ event:NSEvent,_ value:[String:Any]){
-        // Use the position recorded in this event, in global coordinates.
-        // Reading the current mouse position loses queued drag samples; converting
-        // old window-relative samples after moving the window adds the move twice.
-        let point:NSPoint
-        if let recorded=event.cgEvent?.location {
-            point=NSPoint(x:recorded.x,y:(NSScreen.screens.first?.frame.maxY ?? 0)-recorded.y)
-        }else {point=window.convertPoint(toScreen:event.locationInWindow)}
+    private func leftMouse(_ event:WindowMouseSample,_ value:[String:Any]){
+        let point=event.screenLocation
         switch event.type {
         case .leftMouseDown:
             guard expectedSize == nil,!nativeResizing else{bridge.command("release");return}

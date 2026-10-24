@@ -4,7 +4,28 @@ import AppKit
 
 @main
 struct WindowGeometryChecks {
-    static func main(){
+    @MainActor static func main(){
+        NSApplication.shared.setActivationPolicy(.prohibited)
+        let window=NSWindow(contentRect:NSRect(x:100,y:100,width:400,height:300),
+                            styleMask:.borderless,backing:.buffered,defer:false)
+        func event(_ type:NSEvent.EventType,_ point:NSPoint)->NSEvent {
+            NSEvent.mouseEvent(with:type,location:point,modifierFlags:[],timestamp:1,
+                windowNumber:window.windowNumber,context:nil,eventNumber:1,clickCount:1,pressure:1)!
+        }
+        let down=WindowMouseSample(event:event(.leftMouseDown,NSPoint(x:100,y:200)),window:window)
+        let pending=[event(.leftMouseDragged,NSPoint(x:110,y:210)),
+                     event(.leftMouseDragged,NSPoint(x:130,y:230)),
+                     event(.leftMouseUp,NSPoint(x:130,y:230))]
+        // Hit testing queues these samples before the first move is applied.
+        let samples=pending.map {WindowMouseSample(event:$0,window:window)}
+        for (sample,delta) in zip(samples,[NSPoint(x:10,y:10),NSPoint(x:30,y:30),NSPoint(x:30,y:30)]) {
+            let actual=NSPoint(x:sample.screenLocation.x-down.screenLocation.x,
+                               y:sample.screenLocation.y-down.screenLocation.y)
+            precondition(actual == delta,"An earlier window move must not alter queued mouse coordinates")
+            window.setFrameOrigin(NSPoint(x:100+actual.x,y:100+actual.y))
+        }
+        precondition(window.frame.origin == NSPoint(x:130,y:130),"Queued drag must follow the physical delta once")
+        precondition(samples.last?.type == .leftMouseUp && down.clickCount == 1,"Frozen samples must retain gesture metadata")
         let original=NSRect(x:100,y:200,width:400,height:300)
         let minimum=NSSize(width:160,height:100),maximum=NSSize(width:800,height:552)
         let corner:ResizeEdges=[.left,.bottom]

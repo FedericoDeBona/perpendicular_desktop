@@ -1,5 +1,22 @@
 import AppKit
 
+/// NSEvent can reconstruct its CGEvent using the window's current origin.
+/// Freeze its coordinates at receipt, before hit testing can queue the sample
+/// and an earlier sample can move the window.
+struct WindowMouseSample {
+    let type:NSEvent.EventType
+    let screenLocation:NSPoint
+    let locationInWindow:NSPoint
+    let clickCount:Int
+
+    @MainActor init(event:NSEvent,window:NSWindow){
+        type=event.type;locationInWindow=event.locationInWindow;clickCount=event.clickCount
+        if let recorded=event.cgEvent?.location {
+            screenLocation=NSPoint(x:recorded.x,y:(NSScreen.screens.first?.frame.maxY ?? 0)-recorded.y)
+        }else {screenLocation=window.convertPoint(toScreen:event.locationInWindow)}
+    }
+}
+
 struct ResizeEdges:OptionSet {
     let rawValue:Int
     static let left=ResizeEdges(rawValue:1),right=ResizeEdges(rawValue:2)
