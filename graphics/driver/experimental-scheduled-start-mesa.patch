@@ -302,4 +302,73 @@
 
  static inline void triton_log_raw(const char *line)
  {
---
+--- a/src/virtio/neptune/triton/tritonResource.c
++++ b/src/virtio/neptune/triton/tritonResource.c
+@@ -979,32 +979,49 @@
+     TR_STUB("SetHardwareProtectionState (no D3D11 equivalent)");
+ }
+
+-/* WDDM 2.1: sync-token acquire/release for cross-process shared-resource
+- * handoff.  From the 2.1 interface up the runtime stops flushing around
+- * shared/redirection surfaces itself and delegates producer-side
+- * publication to pfnReleaseResource, so Release must flush the device's
+- * pending work: the surface contents have to be submitted (and
+- * host-ordered) before the consumer's acquire, or DWM composes whatever
+- * bytes the surface happens to hold.
+- *
+- * Acquire needs no wait of its own: submissions execute in order on the
+- * host ring, and dxgkrnl serializes the cross-process handoff on the KM
+- * sync token before scheduling the acquirer. */
++/* WDDM 2.1 sync tokens also carry ID3D11DeviceContext4::Wait/Signal.
++ * The trial forwards them to dxgkrnl on the same context used by the
++ * scheduled-start bridge. Merely flushing the host ring does not enqueue
++ * the Windows dependency. No CPU wait belongs in either DDI. */
++static void tritonSyncToken(PTRITON_DEVICE pD, HANDLE token, BOOL acquire)
++{
++    PFND3DDDI_SYNCTOKENCB callback = acquire
++        ? pD->KTCallbacks.pfnAcquireResourceCb
++        : pD->KTCallbacks.pfnReleaseResourceCb;
++    if (!callback || !pD->hKMContext) {
++        tritonSetError(pD, E_FAIL);
++        return;
++    }
++    ID3D11DeviceContext1_Flush(pD->pCtx1);
++    D3DDDICB_SYNCTOKEN args = {0};
++    args.hSyncToken = token;
++    args.BroadcastContextCount = 1;
++    args.BroadcastContextArray = &pD->hKMContext;
++    EnterCriticalSection(&pD->kmCtxLock);
++    HRESULT hr = callback(pD->hRTDevice.handle, &args);
++    LeaveCriticalSection(&pD->kmCtxLock);
++    char trace[2] = {0};
++    if (GetEnvironmentVariableA("PERP_DRIVER_INIT_TRACE", trace, sizeof(trace)) == 1 && trace[0] == '1') {
++        fprintf(stderr, "trial token: %s token=%p runtime=%p hr=%08lx\n",
++                acquire ? "acquire" : "release", token, pD->hKMContext, (unsigned long)hr);
++        fflush(stderr);
++    }
++    if (FAILED(hr)) tritonSetError(pD, hr);
++}
+
+ void APIENTRY
+ tritonAcquireResource(D3D10DDI_HDEVICE hDev, D3D10DDI_HRESOURCE hRes, HANDLE h)
+ {
+-    (void)hDev;
++    PTRITON_DEVICE pD = (PTRITON_DEVICE)hDev.pDrvPrivate;
+     (void)hRes;
+-    (void)h;
++    if (pD && pD->scheduleState) tritonSyncToken(pD, h, TRUE);
+ }
+
+ void APIENTRY
+ tritonReleaseResource(D3D10DDI_HDEVICE hDev, D3D10DDI_HRESOURCE hRes, HANDLE h)
+ {
+-    PTRITON_DEVICE pD = (PTRITON_DEVICE)(hDev.pDrvPrivate);
++    PTRITON_DEVICE pD = (PTRITON_DEVICE)hDev.pDrvPrivate;
+     (void)hRes;
+-    (void)h;
+-    if (pD && pD->pCtx1)
+-        ID3D11DeviceContext1_Flush(pD->pCtx1);
+-}
++    if (pD && pD->scheduleState) tritonSyncToken(pD, h, FALSE);
++    else if (pD && pD->pCtx1) ID3D11DeviceContext1_Flush(pD->pCtx1);
++}
