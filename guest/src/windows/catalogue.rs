@@ -15,7 +15,7 @@ use windows::{
         },
         System::{
             Com::{CLSCTX_LOCAL_SERVER, COINIT_APARTMENTTHREADED, CoCreateInstance, CoInitializeEx, CoTaskMemFree, CoUninitialize},
-            Threading::{GetProcessId, GetProcessTimes, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION},
+            Threading::{GetProcessId, GetProcessTimes, OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION},
         },
         UI::{
             Input::KeyboardAndMouse::IsWindowEnabled,
@@ -40,6 +40,7 @@ use windows::{
 pub struct Catalogue {
     pub items: HashMap<String, IShellItem>,
     identities: HashMap<String, String>,
+    images: HashMap<String, String>,
 }
 
 /// The process owning an ApplicationFrameWindow is shared. Its app identity
@@ -62,6 +63,11 @@ impl HostedContent {
         !self.app_id.is_empty() && self.app_id.len() <= 32768
             && process_app_id(self.hwnd).is_some_and(|actual| actual.eq_ignore_ascii_case(&self.app_id))
     }
+}
+
+/// The Explorer process also owns the desktop and taskbar. They are not apps.
+pub fn shell_surface(raw: usize) -> bool {
+    matches!(window_class(raw).as_str(), "Progman" | "WorkerW" | "Shell_TrayWnd" | "Shell_SecondaryTrayWnd")
 }
 
 pub fn window_class(raw: usize) -> String {
@@ -184,11 +190,27 @@ unsafe fn text(value: PWSTR) -> String {
     }
 }
 
+fn primary_app(parsing: &str) -> &'static str {
+    let value = parsing.to_ascii_lowercase();
+    if value == "microsoft.windows.explorer" {"explorer"}
+    else if value == "msedge" {"edge"}
+    else if value.starts_with("microsoft.windowsnotepad_") {"notepad"}
+    else if value.starts_with("microsoft.windowscalculator_") {"calculator"}
+    else if value.starts_with("windows.immersivecontrolpanel_") {"settings"}
+    else if value.starts_with("microsoft.paint_") || value == "microsoft.windows.mspaint" {"paint"}
+    else if value.starts_with("microsoft.windowsterminal_") {"terminal"}
+    else if value.starts_with("microsoft.screensketch_") {"snipping"}
+    else if value.starts_with("microsoft.windows.photos_") {"photos"}
+    else if value.starts_with("microsoft.windowsstore_") {"store"}
+    else {""}
+}
+
 impl Catalogue {
     pub fn new() -> Self {
         Self {
             items: HashMap::new(),
             identities: HashMap::new(),
+            images: HashMap::new(),
         }
     }
 
@@ -207,6 +229,7 @@ impl Catalogue {
             let mut apps = Vec::new();
             let mut items = HashMap::new();
             let mut identities = HashMap::new();
+            let mut images = HashMap::new();
             for _ in 0..1024 {
                 let mut next = [None];
                 let mut fetched = 0;
@@ -227,6 +250,7 @@ impl Catalogue {
                 if name.is_empty() || name.len() > 512 || parsing.len() > 32768 {
                     continue;
                 }
+                let mut image_path = String::new();
                 // Exclude host-forwarding aliases and unavailable local links.
                 if let Ok(properties) = item.cast::<IShellItem2>() {
                     // Converted VMs can retain rundll32 shortcuts whose target
@@ -239,9 +263,11 @@ impl Catalogue {
                     if let Ok(target) = properties.GetString(&PKEY_Link_TargetParsingPath) {
                         let path = text(target);
                         let normalized = path.to_lowercase();
+                        image_path = path.clone();
                         if normalized.contains("sharedhostapps")
                             || path.starts_with("\\\\")
-                            || (path.as_bytes().get(1) == Some(&b':')
+                            || (path.as_bytes().first().is_some_and(u8::is_ascii_alphabetic)
+                                && path.as_bytes().get(1) == Some(&b':')
                                 && !std::path::Path::new(&path).exists())
                         {
                             continue;
@@ -249,13 +275,21 @@ impl Catalogue {
                     }
                 }
                 let id = format!("{:x}", Sha256::digest(parsing.as_bytes()));
-                apps.push(json!({"id":id,"name":name}));
+                let key = primary_app(&parsing);
+                let revision = std::fs::metadata(&image_path).ok().and_then(|m| m.modified().ok())
+                    .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|t| t.as_secs().to_string()).unwrap_or_default();
+                apps.push(json!({"id":id,"name":name,"key":key,"essential":!key.is_empty(),"iconRevision":revision}));
+                if key == "explorer" || key == "edge" {
+                    if key == "explorer" {image_path = std::env::var("WINDIR").unwrap_or_else(|_| "C:\\Windows".into()) + "\\explorer.exe";}
+                    if !image_path.is_empty() && std::path::Path::new(&image_path).is_file() {images.insert(id.clone(), image_path);}
+                }
                 identities.insert(id.clone(), parsing);
                 items.insert(id, item);
             }
             apps.sort_by_key(|a| a["name"].as_str().unwrap_or_default().to_lowercase());
             self.items = items;
             self.identities = identities;
+            self.images = images;
             Ok(json!(apps))
         }
     }
@@ -267,8 +301,22 @@ impl Catalogue {
         let Some(expected) = self.identities.get(id) else {
             return false;
         };
-        process_app_id(hwnd).is_some_and(|actual| actual.eq_ignore_ascii_case(
-            expected.strip_prefix("shell:AppsFolder\\").unwrap_or(expected)))
+        if process_app_id(hwnd).is_some_and(|actual| actual.eq_ignore_ascii_case(
+            expected.strip_prefix("shell:AppsFolder\\").unwrap_or(expected))) {return true;}
+        // Explorer and Edge can reuse an existing process without returning a
+        // launch handle. Match only these catalogue entries by their installed
+        // full image path and real application window class, never by title.
+        let Some(expected_image) = self.images.get(id) else {return false;};
+        let class = window_class(hwnd);
+        if (primary_app(expected) == "explorer" && class != "CabinetWClass" && class != "ExploreWClass")
+            || (primary_app(expected) == "edge" && class != "Chrome_WidgetWin_1") {return false;}
+        unsafe {
+            let Ok(handle) = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, process_id(hwnd)) else {return false;};
+            let handle = identity::Handle(handle);
+            let mut buffer = vec![0u16; 32768];let mut length = buffer.len() as u32;
+            QueryFullProcessImageNameW(handle.0, PROCESS_NAME_WIN32, PWSTR(buffer.as_mut_ptr()), &mut length).is_ok()
+                && String::from_utf16_lossy(&buffer[..length as usize]).eq_ignore_ascii_case(expected_image)
+        }
     }
 
     pub fn hosted_content(&self, app: &str, frame: usize, sid: &str, session: u32) -> Option<HostedContent> {

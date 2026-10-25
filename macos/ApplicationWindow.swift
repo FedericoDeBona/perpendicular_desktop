@@ -202,6 +202,7 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
             // Re-present its valid image only when the raster is unchanged.
             content.redrawCurrentFrame()
         }
+        if !updating {finishPresentedTransition()}
         trace(updating ? "frame_display_wait":"frame_display_ready")
     }
     private func beginFrameTransition(_ message:String){
@@ -215,7 +216,14 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
         transitionTimeout=Task{@MainActor [weak self] in
             try? await Task.sleep(for:.seconds(10))
             guard !Task.isCancelled,let self,self.transitionID == identity,self.transitionActive else{return}
-            self.failFrameTransition("Windows sta impiegando più tempo.")
+            // A delayed presentation is not a failed image. Keep the original
+            // required ID so a static window can finish when its first command
+            // or matching metadata arrives, without needing a second WGC frame.
+            self.finishPresentedTransition()
+            guard self.transitionActive else{return}
+            self.transitionTimeout=nil
+            self.transitionView.stalled("La finestra sta impiegando più tempo.",canReveal:self.hasFrame || self.rejectedTransitionPacket != nil)
+            self.trace("frame_transition_delayed")
         }
         trace("frame_transition_started")
         onGeometry?()
@@ -231,7 +239,10 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
     private func frameWasPresented(_ id:UInt64){
         lastPresentedID=max(lastPresentedID,id)
         if transitionActive {trace("frame_transition_presented")}
-        guard transitionActive,id>=transitionAfterPresentation,!displayUpdating,
+        finishPresentedTransition()
+    }
+    private func finishPresentedTransition(){
+        guard transitionActive,hasFrame,sourceRect.size == frameSize,lastPresentedID>=transitionAfterPresentation,!displayUpdating,
               !geometryFinishing,expectedSize == nil,!nativeResizing else{return}
         endFrameTransition()
     }
@@ -314,6 +325,9 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
             if !minimized && window.isMiniaturized {window.deminiaturize(nil)}
         }
         if !visible {window.orderOut(nil)}else if hasFrame && !minimized && !role.transient && !window.isVisible {window.orderFront(nil)}
+        // Metadata and the completed Metal presentation arrive independently.
+        // Reconcile either order; an unchanged WGC window need not repaint.
+        finishPresentedTransition()
     }
     func attach(to owner:ApplicationWindow){
         if window.parent != owner.window {

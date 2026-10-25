@@ -105,59 +105,20 @@ final class GuestConnection: @unchecked Sendable {
                           object["bytes"] as? Int == stride*height else {
                         self.connection.cancel();return
                     }
-                    let received=ProcessInfo.processInfo.systemUptime
-                    let complete:@Sendable (Data,GuestFrameSurface?,Int,Double)->Void = {[weak self] bytes,surface,callbacks,decodeMilliseconds in
-                        guard let self else{return}
-                        var header=packet.header
-                        let completed=ProcessInfo.processInfo.systemUptime
-                        header["hostReceiveMilliseconds"]=max(0,(completed-received)*1000-decodeMilliseconds)
-                        header["hostReceivedAt"]=completed
-                        header["hostDecodeMilliseconds"]=decodeMilliseconds
-                        if ProcessInfo.processInfo.environment["PERPENDICULAR_CAPTURE_DIAGNOSTIC"]=="1",
-                           let sequence=header["sequence"] as? Int,(1...3).contains(sequence),
-                           let expected=header["guestPixelsSHA256"] as? String,expected.count==64,
-                           expected.utf8.allSatisfy({(48...57).contains($0) || (97...102).contains($0)}) {
-                            let raw=surface.map{Data(bytesNoCopy:$0.contents,count:$0.byteCount,deallocator:.none)} ?? bytes
-                            let actual=withExtendedLifetime(surface){SHA256.hash(data:raw).map{String(format:"%02x",$0)}.joined()}
-                            header["hostPixelsSHA256"]=actual
-                            header["hostPixelsMatchGuest"]=actual == expected
-                        }
-                        if callbacks>0 {header["hostReadCallbacks"]=Double(callbacks)}
-                        self.offer(window,GuestPacket(header:header,pixels:bytes,surface:surface))
-                        // This retires only the independent CPU/network copy.
-                        // The shared Metal buffer stays immutable through GPU completion.
-                        if self.frameOnly {self.connection.send(content:Data([1]),completion:.contentProcessed{[weak self] error in
-                            if error != nil {self?.connection.cancel()}
-                        })}
-                        self.readHeader()
-                    }
                     let encoding=object["encoding"] as? String ?? "raw"
-                    if encoding == "lz4-block" {
-                        guard self.frameOnly,let count=object["encodedBytes"] as? Int,count>0,count<stride*height else {
-                            self.connection.cancel();return
+                    guard encoding == "wgc-gpu",self.frameOnly,object["wireBytes"] as? Int == 0 else {
+                        self.gpuFailure(window,"Immagine della finestra non disponibile.");return
+                    }
+                    if encoding == "wgc-gpu",self.frameOnly,object["wireBytes"] as? Int == 0 {
+                        NativeWindowFrames.shared.copy(packet.header){[weak self] surface,metrics in
+                            guard let self else{return};guard let surface else{self.gpuFailure(window,"Immagine della finestra non disponibile.");return}
+                            var header=packet.header;for (key,value) in metrics{header[key]=value}
+                            // Immutable Mac output is complete before the ordinary receipt.
+                            self.offer(window,GuestPacket(header:header,pixels:Data(),surface:surface))
+                            self.connection.send(content:Data([1]),completion:.contentProcessed{[weak self] error in if error != nil{self?.connection.cancel()}})
+                            self.readHeader()
                         }
-                        self.read(count){[weak self] encoded in
-                            guard let self else{return}
-                            let started=ProcessInfo.processInfo.systemUptime
-                            let surface=GuestFrameSurface.allocate(width:width,height:height,stride:stride,decodeGuard:true)
-                            if let surface {
-                                guard GuestFrameCodec.decodeLZ4(encoded,into:UnsafeMutableRawBufferPointer(start:surface.contents,count:surface.byteCount+1),expected:surface.byteCount) else {
-                                    self.connection.cancel();return
-                                }
-                                complete(Data(),surface,0,(ProcessInfo.processInfo.systemUptime-started)*1000)
-                            }else{
-                                var pixels=Data(count:stride*height+1)
-                                let valid=pixels.withUnsafeMutableBytes { GuestFrameCodec.decodeLZ4(encoded,into:$0,expected:stride*height) }
-                                guard valid else{self.connection.cancel();return}
-                                pixels.removeLast()
-                                complete(pixels,nil,0,(ProcessInfo.processInfo.systemUptime-started)*1000)
-                            }
-                        }
-                    }else if encoding == "raw",object["encodedBytes"] == nil {
-                        if let surface=GuestFrameSurface.allocate(width:width,height:height,stride:stride) {
-                            self.readSurface(surface,offset:0,callbacks:0){complete(Data(),surface,$0,0)}
-                        } else {self.read(stride*height){complete($0,nil,0,0)}}
-                    }else{self.connection.cancel();return}
+                    }
                 } else {
                     Task { @MainActor [self] in self.packet(self.id,packet) }
                     // Authentication is decided on the main actor. Do not
@@ -167,20 +128,10 @@ final class GuestConnection: @unchecked Sendable {
             }
         }
     }
-    private func readSurface(_ surface:GuestFrameSurface,offset:Int,callbacks:Int,completion:@escaping @Sendable (Int)->Void){
-        let remaining=surface.byteCount-offset
-        // One bounded chunk per callback, copied directly into the final Metal
-        // buffer. Larger pixel reads reduce callbacks without queuing more frames.
-        let chunk=min(remaining,256*1024)
-        connection.receive(minimumIncompleteLength:chunk,maximumLength:chunk){[weak self] data,_,complete,error in
-            guard let self else{return}
-            guard error == nil,let data,!data.isEmpty,data.count<=remaining else{self.connection.cancel();return}
-            data.withUnsafeBytes{if let bytes=$0.baseAddress{surface.contents.advanced(by:offset).copyMemory(from:bytes,byteCount:data.count)}}
-            let next=offset+data.count
-            if next == surface.byteCount{completion(callbacks+1)}
-            else if !complete{self.readSurface(surface,offset:next,callbacks:callbacks+1,completion:completion)}
-            else{self.connection.cancel()}
-        }
+    private func gpuFailure(_ window:String,_ message:String){
+        NativeWindowTrace.record("gpu-only-error",["window":window,"message":message])
+        Task{@MainActor [self] in packet(id,GuestPacket(header:["type":"window_error","window":window,"message":message]))}
+        // No ACK and no more frame reads; ordinary control remains available.
     }
     private func offer(_ window:String,_ value:GuestPacket) {
         lock.lock()
@@ -277,13 +228,13 @@ final class GuestBridge {
             if individualWindows,(h["capabilities"] as? [String:Any])?["frameChannel"] as? Bool == true {
                 let channel=UUID().uuidString.replacingOccurrences(of:"-",with:"").lowercased()
                 frameChannel=channel
-                var options:[String:Any]=["channel":channel,"rowAlignment":256]
-                if ((h["capabilities"] as? [String:Any])?["frameEncodings"] as? [String])?.contains("lz4-block") == true {options["encoding"]="lz4-block"}
+                let options:[String:Any]=["channel":channel,"rowAlignment":256,"gpuFrames":true]
                 command("frame_channel",options,timeout:.seconds(5)){[weak self] result in
                     if case .failure=result,self?.active == id {self?.clients[id]?.cancel()}
                 }
             }
         }
+        if activeFrames == id,h["type"] as? String == "window_error" {onPacket?(packet);return}
         if activeFrames == id {
             guard h["type"] as? String == "frame" else{clients[id]?.cancel();return}
             recordFrameTimings(h)
@@ -307,6 +258,7 @@ final class GuestBridge {
             if let number=header[key] as? Double,number.isFinite,number>=0,number <= ((key == "wireBytes" || key == "bytes") ? 34*1024*1024:60000) {value[key]=number}
         }
         frameReceiveMilliseconds=lastFrameTimings["hostReceiveMilliseconds"] ?? 0
+        NativeWindowTrace.record("received",header)
         guard ProcessInfo.processInfo.environment["PERPENDICULAR_STATE_TRACE"] == "1" else{return}
         let now=ProcessInfo.processInfo.systemUptime
         guard now>=nextFrameTrace else{return};nextFrameTrace=now+1

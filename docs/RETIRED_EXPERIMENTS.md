@@ -4,6 +4,8 @@ Il 25 ottobre 2026 l’utente ha scelto la base desktop con driver ufficiale e p
 
 Le prove e i fallimenti restano in [VERIFICATION.md](VERIFICATION.md). I sorgenti rimossi sono recuperabili dalla revisione completa [d5c02e3](https://github.com/FedericoDeBona/perpendicular_desktop/tree/d5c02e3), precedente alla pulizia:
 
+**Recuperare IVSHMEM:** consultare `experimental/ivshmem` al commit `d5c02e3` su GitHub, oppure estrarlo fuori dal checkout con `git archive d5c02e3 experimental/ivshmem | tar -x -C /percorso/di/recupero` (directory già esistente). Valutazione e risultati: `docs/IVSHMEM_EVALUATION.md` al commit `3589194`. Git recupera sorgenti e documentazione, non i vecchi dischi/checkpoint eliminati. Il percorso attuale rimane invariato finché non si integra esplicitamente il codice recuperato.
+
 | Prova ritirata | Sorgente storico |
 | --- | --- |
 | IVSHMEM, full frame, compressione e dirty region | [experimental/ivshmem](https://github.com/FedericoDeBona/perpendicular_desktop/tree/d5c02e3/experimental/ivshmem) |
@@ -19,3 +21,5 @@ Il renderer attuale contiene ancora l’export host introdotto durante WGC. Per 
 I vecchi dischi e checkpoint rimossi non sono recuperabili da Git. Rimangono la VM attuale, quella ordinaria, la sorgente originaria e un checkpoint recente, descritti nel [piano corrente](RESTART_PLAN.md). Ricevute private, log e immagini compatti restano fuori dal repository. I vecchi percorsi nelle sezioni storiche del diario possono riferirsi a build o dischi ora eliminati: non sono istruzioni operative.
 
 Anche la documentazione operativa è stata ripulita: rimossi i resoconti separati delle valutazioni concluse, gli handoff di build eliminate e le vecchie istruzioni kernel/WARP/RDP. README, implementazione, registro dei problemi e guide grafiche descrivono la base attuale. I problemi non risolti restano nel registro con il loro ambito e gli stessi ID; la rimozione di un esperimento non equivale alla soluzione dei suoi difetti.
+
+La nuova richiesta di launcher riprende soltanto il percorso immagini GPU già presente nel worker installato: ora è nei sorgenti attivi `guest/src/windows/gpu.rs`, `macos/NativeWindowFrames.swift` e `macos/NativeTransport/gpu-receiver.*`, con endpoint legato alla VM selezionata. Non è il ripristino dei prototipi IVSHMEM o delle candidate kernel ritirate.

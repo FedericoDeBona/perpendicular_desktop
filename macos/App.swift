@@ -3,15 +3,16 @@ import SwiftUI
 import CryptoKit
 import ImageIO
 
-struct WindowsApplication:Identifiable {
-    let id:String
-    let name:String
-}
-
 @MainActor
 final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation,ObservableObject {
     private let desktopOnly=Bundle.main.object(forInfoDictionaryKey:"PerpendicularDesktopOnly") as? Bool == true
     @Published var apps:[WindowsApplication]=[]
+    @Published var launcherPreferences=LauncherPreferences()
+    @Published private(set) var launcherDisplays:[[String:Any]]=[]
+    private var launcherLibrary:LauncherLibrary?
+    private var iconDiskChecked:Set<String>=[]
+    private var iconCacheHits=0
+    private var iconFetches=0
     @Published var status="Waiting for Windows…"
     @Published var displayStatus="Waiting for Windows display…"
     @Published var connected=false
@@ -81,12 +82,16 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
     func applicationDidFinishLaunching(_ notification:Notification){
         do{
             let directory=FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/Perpendicular Restart")
+            launcherLibrary=try LauncherLibrary(directory:directory)
+            launcherPreferences=launcherLibrary?.loadPreferences() ?? .init()
+            apps=launcherLibrary?.loadCatalogue() ?? []
             let runtime:URL
             if let override=ProcessInfo.processInfo.environment["PERPENDICULAR_RUNTIME"] {runtime=URL(fileURLWithPath:override)}
             else {runtime=try RuntimeStore.prepare(contents:Bundle.main.bundleURL.appendingPathComponent("Contents"),directory:directory)}
             machine=try VirtualMachineController(directory:directory,runtime:runtime)
+            try NativeWindowFrames.shared.prepare(directory:directory,machineID:machine.configuration.id)
             machine.onDesktopSize={ [weak self] size in self?.desktopSize=size;self?.scheduleDesktopResize() }
-            bridge=try GuestBridge(port:machine.configuration.guestPort,token:machine.configuration.token,individualWindows:!desktopOnly)
+            bridge=try GuestBridge(port:machine.configuration.guestPort,token:machine.configuration.token,individualWindows:true)
             bridge.onConnection={ [weak self] value in
                 guard let self else{return};self.connected=value;self.status=value ? "Windows connected":"Reconnecting to Windows…"
                 self.launcherEpoch=UUID();self.catalogueLoading=false;self.loadingIconID=nil;self.failedIcons=[]
@@ -111,7 +116,7 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
                     self.invalidateDisplay("Waiting for Windows display…")
                 }
                 if value{
-                    if !self.desktopOnly {self.refresh()}
+                    self.refresh()
                     if ProcessInfo.processInfo.environment["PERPENDICULAR_AUDIT"] == "1" {self.bridge.command("diagnostics",timeout:.seconds(35)){result in
                         if case .success(let reply)=result,let data=try? JSONSerialization.data(withJSONObject:reply["value"] ?? [:],options:[.prettyPrinted,.sortedKeys]){
                             let report=directory.appendingPathComponent("guest-diagnostics.json")
@@ -134,17 +139,18 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
                 try? FileHandle.standardError.write(contentsOf:Data(("Local control unavailable: "+error.localizedDescription+"\n").utf8))
             }
         }catch{status=error.localizedDescription;launcherNotice="Windows non può essere avviato. "+error.localizedDescription}
-        launcher=NSWindow(contentRect:NSRect(x:200,y:160,width:800,height:660),styleMask:[.titled,.closable,.resizable,.miniaturizable],backing:.buffered,defer:false)
+        launcher=NSWindow(contentRect:NSRect(x:200,y:160,width:960,height:680),styleMask:[.titled,.closable,.resizable,.miniaturizable],backing:.buffered,defer:false)
         launcher.title="Perpendicular";launcher.isReleasedWhenClosed=false
-        launcher.minSize=NSSize(width:640,height:480)
+        launcher.titlebarAppearsTransparent=true;launcher.toolbarStyle = .unified
+        launcher.backgroundColor = .windowBackgroundColor
+        launcher.minSize=NSSize(width:800,height:540)
         launcher.setFrameAutosaveName("PerpendicularLauncher")
-        if desktopOnly {launcher.contentView=NSHostingView(rootView:DesktopControls(model:self))}
-        else {launcher.contentView=NSHostingView(rootView:Launcher(model:self))}
-        launcher.center();if !desktopOnly || machine == nil {launcher.makeKeyAndOrderFront(nil)}
+        launcher.contentView=NSHostingView(rootView:Launcher(model:self))
+        launcher.center();launcher.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps:true)
         let main=NSMenu();let appItem=NSMenuItem();main.addItem(appItem)
         let menu=NSMenu();appItem.submenu=menu
-        let applications=NSMenuItem(title:desktopOnly ? "Controlli Windows":"Applications",action:#selector(showApplications),keyEquivalent:"l");applications.target=self;menu.addItem(applications)
+        let applications=NSMenuItem(title:"Libreria",action:#selector(showApplications),keyEquivalent:"l");applications.target=self;menu.addItem(applications)
         let show=NSMenuItem(title:"Apri Windows",action:#selector(showWindows),keyEquivalent:"");show.target=self;menu.addItem(show)
         let displayItem=NSMenuItem(title:"Display",action:nil,keyEquivalent:"")
         let displayMenu=NSMenu();displayItem.submenu=displayMenu;menu.addItem(displayItem)
@@ -176,10 +182,10 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
         windowMenu.addItem(withTitle:"Minimize",action:#selector(NSWindow.performMiniaturize(_:)),keyEquivalent:"m")
         let close=NSMenuItem(title:"Close",action:#selector(closeCurrentWindow),keyEquivalent:"w");close.target=self;windowMenu.addItem(close)
         startMachineObservation()
-        if desktopOnly {showWindows()}else{startWindows()}
+        startWindows()
     }
     func applicationShouldTerminateAfterLastWindowClosed(_ sender:NSApplication)->Bool{false}
-    func applicationShouldHandleReopen(_ sender:NSApplication,hasVisibleWindows flag:Bool)->Bool{if desktopOnly {showWindows()}else{showApplications()};return false}
+    func applicationShouldHandleReopen(_ sender:NSApplication,hasVisibleWindows flag:Bool)->Bool{showApplications();return false}
     @objc func showApplications(){launcher.makeKeyAndOrderFront(nil);NSApp.activate(ignoringOtherApps:true);NotificationCenter.default.post(name:.launcherFocusSearch,object:nil)}
     @objc func closeCurrentWindow(){(NSApp.keyWindow ?? NSApp.mainWindow)?.performClose(nil)}
     func applicationWillTerminate(_ notification:Notification){machineStateTask?.cancel();localControl?.stop();bridge?.command("release");machine?.closeDesktop()}
@@ -223,7 +229,7 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
         Task{@MainActor [weak self] in
             guard let self else{return}
             defer{self.machineOperation=nil}
-            do {try await machine.start();if self.desktopOnly {try await machine.showDesktop()};self.acceptMachineState(await machine.observedState())}
+            do {try await machine.start();try NativeWindowFrames.shared.publishEndpoint();self.acceptMachineState(await machine.observedState())}
             catch {self.acceptMachineState(await machine.observedState());self.launcherNotice="Non riesco ad avviare Windows. "+error.localizedDescription}
         }
     }
@@ -303,6 +309,8 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
                 "status":status,"displayStatus":displayStatus,"primaryMatchesHost":sharedDisplay != nil,
                 "windowCount":windows.count,"capabilities":guestCapabilities,
                 "frameChannel":bridge?.separateFrames ?? false,
+                "windowGPU":NativeWindowFrames.shared.diagnostics,
+                "launcher":["apps":apps.map{["id":$0.id,"name":$0.name,"key":$0.key,"essential":$0.essential]},"iconCacheHits":iconCacheHits,"iconFetches":iconFetches,"cachedIcons":applicationIcons.count,"recent":launcherPreferences.recent(apps).map(\.id)],
                 "desktop":machine?.desktopState ?? [:],
                 "lastCommandRTTMilliseconds":bridge?.lastRoundTripMilliseconds ?? 0,
                 "frameReceiveMilliseconds":bridge?.frameReceiveMilliseconds ?? 0,
@@ -427,7 +435,7 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
         }
     }
     func refresh(){
-        guard !desktopOnly,connected,!catalogueLoading else{return}
+        guard connected,!catalogueLoading else{return}
         catalogueLoading=true;launcherNotice=nil
         catalogueRequest=UUID();let request=catalogueRequest,epoch=launcherEpoch
         readDisplay()
@@ -439,16 +447,19 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
                 guard let values=reply["value"] as? [[String:Any]] else {
                     self.launcherNotice="L’elenco delle app non è disponibile. Riprova con Aggiorna.";return
                 }
+                let previousRevisions=Dictionary(uniqueKeysWithValues:self.apps.map{($0.id,$0.iconRevision)})
                 var identities:Set<String>=[]
                 self.apps=values.prefix(1024).compactMap{value in
                     guard let id=value["id"] as? String,id.utf8.count==64,let name=value["name"] as? String,name.utf8.count<=512 else{return nil}
                     guard !name.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty,identities.insert(id).inserted else{return nil}
-                    return WindowsApplication(id:id,name:name)
+                    return WindowsApplication(id:id,name:name,key:value["key"] as? String ?? "",essential:value["essential"] as? Bool == true,iconRevision:value["iconRevision"] as? String ?? "")
                 }.sorted{$0.name.localizedStandardCompare($1.name) == .orderedAscending}
-                self.failedIcons=[]
+                try? self.launcherLibrary?.saveCatalogue(self.apps)
+                self.failedIcons=[];self.iconDiskChecked=[]
                 self.visibleIcons.formIntersection(identities)
                 self.iconVisibility=self.iconVisibility.filter{identities.contains($0.key)}
-                self.applicationIcons=self.applicationIcons.filter{identities.contains($0.key)}
+                let revisions=Dictionary(uniqueKeysWithValues:self.apps.map{($0.id,$0.iconRevision)})
+                self.applicationIcons=self.applicationIcons.filter{identities.contains($0.key) && previousRevisions[$0.key] == revisions[$0.key]}
                 self.iconOrder.removeAll{!identities.contains($0)}
                 self.status="\(self.apps.count) applications"
                 self.pumpApplicationIcons()
@@ -469,6 +480,7 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
                 self.finishOpening(app.id);self.status=error.localizedDescription
                 self.launcherNotice="Non riesco ad aprire \(app.name). "+error.localizedDescription;self.openingNoticeApp=app.id
             case .success(let reply):
+                self.launcherPreferences.record(app.id);try? self.launcherLibrary?.save(self.launcherPreferences)
                 if let value=reply["value"] as? [String:Any],value["existing"] as? Bool == true,value["ready"] as? Bool != false {self.finishOpening(app.id,appeared:true)}
             }
         }
@@ -598,17 +610,23 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
     }
     private func pumpApplicationIcons(){
         let needed=visibleIcons.union(windowApps.values)
+        for app in apps where needed.contains(app.id) && applicationIcons[app.id] == nil && !iconDiskChecked.contains(app.id) {
+            iconDiskChecked.insert(app.id)
+            if let data=launcherLibrary?.cachedIcon(for:app),let image=Self.decodeIcon(data) {
+                applicationIcons[app.id]=image;iconOrder.append(app.id);iconCacheHits+=1
+            }
+        }
         guard connected,guestCapabilities["appIcon"] == true,loadingIconID == nil,
               let app=apps.first(where:{needed.contains($0.id) && applicationIcons[$0.id] == nil && !failedIcons.contains($0.id)}) else{return}
-        let epoch=launcherEpoch;loadingIconID=app.id
+        let epoch=launcherEpoch;loadingIconID=app.id;iconFetches+=1
         bridge.command("app_icon",["app":app.id],timeout:.seconds(8)){[weak self] result in
             guard let self,self.launcherEpoch == epoch,self.loadingIconID == app.id else{return}
             self.loadingIconID=nil
             if case .success(let reply)=result,let value=reply["value"] as? [String:Any],
                value["app"] as? String == app.id,let width=value["width"] as? Int,let height=value["height"] as? Int,
-               (1...128).contains(width),(1...128).contains(height),
-               let encoded=value["pngBase64"] as? String,encoded.utf8.count<=174_764,
-               let data=Data(base64Encoded:encoded),data.count<=131_072,
+               (1...256).contains(width),(1...256).contains(height),
+               let encoded=value["pngBase64"] as? String,encoded.utf8.count<=699_052,
+               let data=Data(base64Encoded:encoded),data.count<=524_288,
                data.starts(with:[137,80,78,71,13,10,26,10]),
                let expected=value["sha256"] as? String,
                SHA256.hash(data:data).map({String(format:"%02x",$0)}).joined() == expected.lowercased(),
@@ -618,9 +636,10 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
                properties[kCGImagePropertyPixelWidth as String] as? Int == width,
                properties[kCGImagePropertyPixelHeight as String] as? Int == height,
                let image=CGImageSourceCreateImageAtIndex(source,0,nil) {
-                if self.applicationIcons.count>=64,let evicted=self.iconOrder.first(where:{!self.visibleIcons.contains($0)}) ?? self.iconOrder.first {
+                if self.applicationIcons.count>=128,let evicted=self.iconOrder.first(where:{!self.visibleIcons.contains($0)}) ?? self.iconOrder.first {
                     self.applicationIcons.removeValue(forKey:evicted);self.iconOrder.removeAll{$0 == evicted}
                 }
+                try? self.launcherLibrary?.saveIcon(data,for:app)
                 self.applicationIcons[app.id]=NSImage(cgImage:image,size:NSSize(width:width,height:height))
                 self.iconOrder.append(app.id)
                 for (id,window) in self.windows where self.windowApps[id] == app.id {
@@ -629,6 +648,18 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
             }else{self.failedIcons.insert(app.id)}
             self.pumpApplicationIcons()
         }
+    }
+    func togglePin(_ app:WindowsApplication){
+        if !launcherPreferences.pinned.insert(app.id).inserted {launcherPreferences.pinned.remove(app.id)}
+        try? launcherLibrary?.save(launcherPreferences)
+    }
+    private static func decodeIcon(_ data:Data)->NSImage? {
+        guard data.starts(with:[137,80,78,71,13,10,26,10]),
+              let source=CGImageSourceCreateWithData(data as CFData,[kCGImageSourceShouldCache:false] as CFDictionary),CGImageSourceGetCount(source)==1,
+              let properties=CGImageSourceCopyPropertiesAtIndex(source,0,nil) as? [String:Any],
+              let width=properties[kCGImagePropertyPixelWidth as String] as? Int,let height=properties[kCGImagePropertyPixelHeight as String] as? Int,
+              (1...256).contains(width),(1...256).contains(height),let image=CGImageSourceCreateImageAtIndex(source,0,nil) else{return nil}
+        return NSImage(cgImage:image,size:NSSize(width:width,height:height))
     }
     private func layoutChildren(){
         guard !layoutInProgress else{return};layoutInProgress=true
@@ -680,6 +711,7 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
         }
     }
     private func acceptDisplay(_ snapshot:[String:Any]){
+        launcherDisplays=snapshot["displays"] as? [[String:Any]] ?? []
         displayUpdating=false
         if desktopOnly,let displays=snapshot["displays"] as? [[String:Any]],displays.count == 1,
            let primary=displays.first,let width=primary["width"] as? Int,let height=primary["height"] as? Int {
@@ -819,7 +851,7 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
             invalidateDisplay("Checking Windows display…")
             let capabilities=value["capabilities"] as? [String:Any] ?? [:]
             guestCapabilities=Dictionary(uniqueKeysWithValues:["execute","displayInfo","driverInfo","graphicsInfo","sharedGeometry","appIcon","applicationStatus","processControl","clipboard"].map{($0,capabilities[$0] as? Bool == true)})
-            if !desktopOnly {startApplicationStatusUpdates()}
+            startApplicationStatusUpdates()
             pumpApplicationIcons()
             displayReadable=capabilities["displayInfo"] as? Bool == true
             displayConfigurable=capabilities["displayConfigure"] as? Bool == true
@@ -865,7 +897,6 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
                 self.displayReadTask=nil;self.readDisplay()
             }
         case "windows":
-            guard !desktopOnly else{return}
             guard let items=value["windows"] as? [[String:Any]],items.count<=16 else{return}
             let current=Set(items.compactMap{$0["id"] as? String})
             focusWarnedWindows.formIntersection(current)
@@ -884,7 +915,7 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
                 if windows[id]==nil{
                     let role=WindowRole(rawValue:item["role"] as? String ?? "dialog") ?? .dialog
                     let controller=ApplicationWindow(id:id,title:title,role:role,bridge:bridge)
-                    controller.activateOnFirstShow=machine?.desktopIsKey != true
+                    controller.activateOnFirstShow=openingApps.contains(item["app"] as? String ?? "") && machine?.desktopIsKey != true
                     controller.onError={ [weak self] message in self?.status=message;self?.launcherNotice=message }
                     controller.onClose={ [weak self] in self?.windows.removeValue(forKey:id) }
                     controller.onGeometry={ [weak self] in self?.layoutChildren() }

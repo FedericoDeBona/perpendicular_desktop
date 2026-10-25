@@ -56,11 +56,11 @@ final class WindowTransitionView:NSVisualEffectView {
     }
     func begin(_ message:String){
         layer?.removeAllAnimations();alphaValue=1;isHidden=false
-        detail.stringValue=message;actions.isHidden=true;ring.isHidden=false;ring.start()
+        detail.stringValue=message;detail.isHidden=true;actions.isHidden=true;ring.isHidden=false;ring.start()
         setAccessibilityLabel(message)
     }
     func stalled(_ message:String,canReveal:Bool){
-        detail.stringValue=message;ring.stop();ring.isHidden=true
+        detail.stringValue=message;detail.isHidden=false;ring.stop();ring.isHidden=true
         revealButton.isHidden = !canReveal;actions.isHidden=false
         setAccessibilityLabel(message)
     }

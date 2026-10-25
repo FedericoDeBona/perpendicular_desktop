@@ -10,3 +10,5 @@ SHA-256 delle sorgenti di riferimento:
 - `ndt.h`: `04e32cb87fa643fb1c14f55fe416d3dde3a047ca73cabb2da19250a4b1725895`
 
 La verifica dell’integrazione avviene con una breve prova del desktop reale e del suo recupero. La copia GPU e i limiti del percorso sono descritti nell’[implementazione corrente](../../docs/IMPLEMENTATION.md).
+
+Il launcher usa inoltre `gpu-receiver.c/.h` per ricevere dal renderer il descrittore di una superficie Windows, con consumer in NativeWindowFrames. `bridge.h` espone entrambi i contratti al compilatore Swift; ndt.c/ndt.h e i loro hash sopra rimangono invariati. Cache icone e controllo delle app non transitano su questi descrittori.

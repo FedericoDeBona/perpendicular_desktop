@@ -4,11 +4,11 @@ Aggiornato il 25 ottobre 2026. Leggere questo file prima di iniziare o riprender
 
 ## Base corrente e priorità
 
-Si prosegue su `main` dal desktop diretto «Apri Windows», pacchetto privato build-11 e VM di sviluppo c9f319b7. Driver ufficiale Microsoft-signed cfbc713754c7, Secure Boot attivo, TESTSIGNING disattivato e Code Integrity attiva. Resize reale 1920×1280, 1440×1676, fullscreen 2880×1800 e ritorno verificati con riscontro Windows/scanout; l’utente conferma assenza di bande. `nativeActive=true`, `frameChannel=false`. [Prova attuale](VERIFICATION.md#25-ottobre--resize-con-driver-ufficiale-e-protezioni-ripristinate).
+Si prosegue su `main` con il nuovo launcher delle sole app Windows (Launcher-20261025/build-5) nella VM di sviluppo c9f319b7. Driver ufficiale Microsoft-signed cfbc713754c7, Secure Boot attivo, TESTSIGNING disattivato e Code Integrity attiva confermati anche dopo l’aggiornamento. Il runtime grafico è invariato. Il launcher usa frame GPU delle finestre e frameChannel=true; il desktop mantiene lo scanout nativo. Resize reale 1920×1280, 1440×1676, fullscreen 2880×1800 e ritorno restano la precedente verifica desktop, con riscontro utente senza bande, distinta dalle nuove prove di catalogo/finestre. [Resize](VERIFICATION.md#25-ottobre--resize-con-driver-ufficiale-e-protezioni-ripristinate), [launcher](VERIFICATION.md#25-ottobre--launcher-windows-cache-persistente-e-limite-n1).
 
 La pulizia autorizzata ha rimosso vecchi clone, rollback, build e prototipi, recuperando circa 25,1 GB reali. Restano VM attuale, VM ordinaria e sorgente originaria, pacchetto/runtime in uso, sorgenti corrispondenti e un checkpoint recente. Il checkpoint precede la riattivazione di Secure Boot; percorsi e vincoli di ripristino sono nel piano. Nessuna nuova distribuzione nell’app/VM ordinaria è stata qualificata. [Ricevute e limiti](VERIFICATION.md#25-ottobre--pulizia-delle-vecchie-prove-e-base-corrente).
 
-Il lavoro successivo deve riguardare un difetto concreto del desktop o un piccolo incremento richiesto. Finestre individuali e N+1 sono rinviati; le candidate auto-firmate non sono selezionate e non vanno riattivate per il resize. Le loro anomalie restano documentate senza diventare una lista di prove da ripetere. La pulizia dei documenti operativi non chiude alcun problema grafico.
+La nuova richiesta riprende launcher delle sole app Windows, finestre integrate e N+1: non sono più rinviati per priorità. Icone persistenti ad alta risoluzione, app principali, recenti e preferiti sono parte del launcher. Le candidate auto-firmate non sono selezionate e non vanno riattivate per il resize. Le loro anomalie restano documentate senza diventare una lista di prove da ripetere. La pulizia dei documenti operativi non chiude alcun problema grafico.
 
 README, implementazione e guide grafiche sono stati ripuliti anche dalle istruzioni superate e dai riferimenti operativi alle build eliminate. [Revisione della documentazione e controlli](VERIFICATION.md#25-ottobre--pulizia-completa-della-documentazione-operativa).
 
@@ -38,6 +38,7 @@ README, implementazione e guide grafiche sono stati ripuliti anche dalle istruzi
 
 ### SYS-001 — Arresto HVF durante riavvio o arresto
 
+- **Seguito launcher:** ricomparsa durante l’arresto regolare del vecchio pacchetto; controllo offline qcow2 con check-errors=0, nessuna riparazione o restore, successivo arresto/avvio riuscito. [Evidenze](VERIFICATION.md#25-ottobre--launcher-windows-cache-persistente-e-limite-n1).
 - **Stato:** aperto; assertion `(isv)` in `hvf_vcpu_exec`/hvf.c2378 osservata anche con KMD ufficiale. Nessuna causa attribuita al resize.
 - **Verificato:** ricomparsa durante sostituzione/arresto del 25 ottobre; verifica offline del disco senza errori e successivo avvio con protezioni attive riuscito. Anche arresti ACPI completi riusciti; non sono una soluzione causale.
 - **Prossimo passo:** se ricompare, conservare istruzione/MMIO e contesto del medesimo guasto prima di cambiare il gestore HVF.
@@ -52,6 +53,13 @@ README, implementazione e guide grafiche sono stati ripuliti anche dalle istruzi
 - **Chiusura:** spazio insufficiente gestito senza perdita dati e con errore utilizzabile nell’app; il recupero manuale non basta.
 - **Evidenze:** [incidente e recupero](VERIFICATION.md#24-ottobre--driver-per-risoluzioni-personalizzate-preparazione-e-installazione-nel-clone), [pulizia autorizzata](VERIFICATION.md#25-ottobre--pulizia-delle-vecchie-prove-e-base-corrente).
 
+### APP-002 — Esplora file assente e finestre riusate non riconosciute
+
+- **Stato:** filtro del catalogo e associazione corretti nel clone del launcher. Esplora file ed Edge presenti fra le app principali e aperti in finestre Mac; distribuzione ordinaria non qualificata.
+- **Causa/correzione:** il target namespace `::{…}` di Esplora file veniva scambiato per un drive mancante perché il secondo carattere è `:`. Il controllo ora richiede una lettera di unità. Per i due programmi che riusano processi esistenti, associazione per percorso eseguibile completo e classe della finestra; il solo PID restituito dalla Shell non basta. Desktop/taskbar dello stesso Explorer sono esclusi, anche al ripristino.
+- **Chiusura:** catalogo e avvio delle due app verificati nel pacchetto destinato all’utente, senza inglobare il desktop o duplicare le app. I pixel mancanti di Esplora file restano GFX-001.
+- **Evidenze:** [prova launcher](VERIFICATION.md#25-ottobre--launcher-windows-cache-persistente-e-limite-n1).
+
 ## Limite delle acquisizioni automatiche
 
 ### GFX-008 — Screenshot fullscreen con fasce bianche e frammenti
@@ -64,11 +72,11 @@ README, implementazione e guide grafiche sono stati ripuliti anche dalle istruzi
 
 ## Finestre individuali ed esperimenti ritirati
 
-Queste voci conservano limiti non risolti, senza richiedere di ripristinare codice, dischi o protezioni delle prove eliminate. Il percorso individuale è rinviato; riprenderlo soltanto su priorità esplicita o necessità concreta del desktop.
+Queste voci conservano limiti non risolti, senza richiedere di ripristinare codice, dischi o protezioni delle prove eliminate. Il percorso individuale è ripreso dalla nuova richiesta di launcher; i vecchi esperimenti kernel e IVSHMEM restano ritirati. Riprendere una prova tecnica soltanto per una necessità concreta del percorso attivo.
 
 ### GFX-001 — Flicker e cifre mancanti nelle catture WGC
 
-- **Stato:** aperto nel percorso individuale, non riprodotto in modo persistente nel desktop diretto attuale. PNG già ricevuti dal Mac mostravano cifre mancanti prima del disegno Metal; i campioni completi con hash uguali non escludono la compressione nel caso parziale.
+- **Stato:** aperto nel percorso individuale, ora ripreso. Nel nuovo launcher Esplora file si apre e presenta immagini aggiornate, ma alcune etichette delle cartelle sono assenti: nuova riproduzione circoscritta, non una correzione del contenuto. Il desktop diretto conserva il precedente riscontro distinto. PNG già ricevuti dal Mac mostravano cifre mancanti prima del disegno Metal; i campioni completi con hash uguali non escludono la compressione nel caso parziale.
 - **Prossimo passo, se ripreso:** conservare una riproduzione pertinente e seguire produzione, cattura e lettura della superficie, senza riattivare per deduzione la candidata DWM.
 - **Chiusura:** stesso passaggio prima difettoso completo e aggiornato nell’app reale, con componenti identificati e breve verifica di input/resize.
 - **Evidenze:** [pixel prima/dopo trasporto](VERIFICATION.md#24-ottobre--confronto-dei-pixel-prima-e-dopo-il-trasporto), [riscontro desktop](VERIFICATION.md#25-ottobre--verifica-del-desktop-accelerato-app-reali-e-rilascio-risorse).
@@ -82,6 +90,7 @@ Queste voci conservano limiti non risolti, senza richiedere di ripristinare codi
 
 ### GFX-003 — Cattura ferma dopo cambio compositore
 
+- **Seguito launcher:** la riapertura ha mostrato anche un errore transitorio di disponibilità dell’immagine GPU, recuperato dalla riconnessione; causa non isolata, non confondere con l’attesa del presenter corretta in WIN-002. Conservata la prova negativa. Il pacchetto finale riapre le due finestre con primo frame presentato e gate concluso, senza errore GPU registrato nel tratto; aggiunta diagnostica privata `windowGPU` per un’eventuale ricomparsa, senza fallback o indebolire hash/identità. [Evidenze](VERIFICATION.md#25-ottobre--launcher-windows-cache-persistente-e-limite-n1).
 - **Stato:** aperto nel percorso individuale. Windows contiene 79 mentre la cattura mostra 78; riavviare il worker recupera il contenuto senza riavviare l’app. Recupero automatico non verificato.
 - **Prossimo passo, se ripreso:** riconoscere la sessione WGC invalida e ricrearla conservando identità, sequenze e input.
 - **Chiusura:** frame aggiornati dopo cambio compositore senza riavvio manuale del worker, duplicati o immagini della vecchia sessione.
@@ -109,6 +118,7 @@ Queste voci conservano limiti non risolti, senza richiedere di ripristinare codi
 
 ### WIN-002 — Resize individuale in attesa del frame
 
+- **Seguito launcher:** riaprendo il frontend, primo frame valido/già presentato ma attesa ancora attiva con requiredPresentationID2 e presentedID1. Metadati, conferma display e presentazione ora riconciliati in entrambi gli ordini; il solo timeout non alza l’ID richiesto. La riapertura corretta completa le due finestre già dal primo frame presentato, senza nuovo avvio delle app. È un caso distinto dal recupero WGC di GFX-003, non una sua chiusura. [Evidenze](VERIFICATION.md#25-ottobre--launcher-windows-cache-persistente-e-limite-n1).
 - **Stato:** caso corretto nel clone, commit 36378af; distribuzione ordinaria non qualificata. Il worker pubblica il frame già disponibile nel nuovo rettangolo prima di ricreare il pool WGC.
 - **Prossimo passo / chiusura, se ripreso:** breve verifica del percorso individuale nel pacchetto destinato all’utente; non confondere questo guasto con il resize del desktop corrente.
 - **Evidenze:** [frame valido al resize](VERIFICATION.md#24-ottobre--gate-pronto-prima-delluso-e-frame-valido-al-resize).
@@ -120,13 +130,15 @@ Queste voci conservano limiti non risolti, senza richiedere di ripristinare codi
 - **Criterio soddisfatto:** prova end-to-end e confronto circoscritto con decisione motivata; nessun altro benchmark necessario per chiudere l’esperimento.
 - **Evidenze:** [confronto e decisione](VERIFICATION.md#24-ottobre--ivshmem-frame-esatti-confronto-breve-e-decisione), [indice storico](RETIRED_EXPERIMENTS.md).
 
-## Capacità rinviate
+## Monitor e compatibilità
 
 ### WIN-003 — Monitor N+1 e drag fra scale diverse
 
-- **Stato:** rinviato. Desktop attuale con una sola uscita; secondo monitor, DPI e trasferimenti non qualificati. Direzione concordata: monitor Windows corrispondenti ai Mac più area «Apri Windows» riservata e pulsanti debug; non è isolamento dei desktop Windows.
-- **Prossimo passo / chiusura, se ripreso:** qualificare due uscite reali, poi trasferire finestra e dialogo fra aree e scale conservando immagine, posizione e input. Non cambiare topologia come prerequisito del desktop attuale.
-- **Evidenze:** [requisiti rinviati](RESTART_PLAN.md#direzioni-rinviate), [valutazione](VERIFICATION.md#24-ottobre--valutazione-n1-monitor-isolamento-e-gpu-per-schermo).
+- **Stato:** richiesto nuovamente, non disponibile nella base attuale. Desktop con una sola uscita; secondo monitor, DPI e trasferimenti non qualificati. Direzione concordata: monitor Windows corrispondenti ai Mac più area «Apri Windows» riservata e pulsanti debug; non è isolamento dei desktop Windows.
+- **Vincolo verificato il 25 ottobre:** il KMD ufficiale ha MAX_CHILDREN=1. La seconda GPU 3D non supporta hotplug e il QEMU corrente rifiuta due device virtio-gpu-gl anche all’avvio (prova in pausa senza dischi). Aumentare soltanto max_outputs non basta; nessun secondo monitor attivato, nessuna riduzione delle protezioni e nessun display fittizio dichiarato pronto.
+- **Prossimo passo / chiusura:** serve un percorso grafico con più uscite e driver accettato con Secure Boot, oppure isolamento effettivo di più adattatori nel runtime. Qualificare due uscite reali prima di N+1, poi trasferire finestra/dialogo fra aree e scale conservando immagine, posizione e input. Il launcher mostra le sole uscite lette da Windows.
+- **Nuove evidenze:** [launcher e limite N+1](VERIFICATION.md#25-ottobre--launcher-windows-cache-persistente-e-limite-n1).
+- **Evidenze:** [requisiti rinviati](RESTART_PLAN.md#direzioni-e-limiti), [valutazione](VERIFICATION.md#24-ottobre--valutazione-n1-monitor-isolamento-e-gpu-per-schermo).
 
 ### APP-001 — Creality / OpenGL
 

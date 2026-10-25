@@ -12,6 +12,7 @@ mod identity;
 mod service;
 mod window_control;
 mod wire;
+mod gpu;
 mod worker;
 
 use serde::{Deserialize, Serialize};

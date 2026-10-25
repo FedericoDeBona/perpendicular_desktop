@@ -217,7 +217,7 @@ impl Worker {
         outbox.control(
             json!({"type":"hello","protocol":1,"token":config.token,"epoch":self.epoch,
             "sid":self.sid,"session":self.session,"version":env!("CARGO_PKG_VERSION"),
-            "capabilities":{"capture":"wgc-hardware-readback-with-software-recovery","windows":4,"transients":12,"windowRoles":true,"input":true,"catalogue":true,"appIcon":true,"frameChannel":true,"frameEncodings":["lz4-block"],"displayInfo":true,"driverInfo":true,"graphicsInfo":true,"displayConfigure":true,"sharedGeometry":true,"processControl":true,"clipboard":true,"clipboardTextBytes":262144,"applicationStatus":true,"execute":true,"executeTimeoutSeconds":60,"executeOutputBytes":65536,"displayEvents":self.display_observer.is_some()}}),
+            "capabilities":{"capture":"wgc-hardware-readback-with-software-recovery","windows":4,"transients":12,"windowRoles":true,"input":true,"catalogue":true,"appIcon":true,"frameChannel":true,"gpuFramesOnly":true,"frameEncodings":[],"displayInfo":true,"driverInfo":true,"graphicsInfo":true,"displayConfigure":true,"sharedGeometry":true,"processControl":true,"clipboard":true,"clipboardTextBytes":262144,"applicationStatus":true,"execute":true,"executeTimeoutSeconds":60,"executeOutputBytes":65536,"displayEvents":self.display_observer.is_some()}}),
         );
         let (sender, receiver) = mpsc::sync_channel(128);
         let state = outbox.clone();
@@ -256,6 +256,7 @@ impl Worker {
         while outbox.connected.load(Ordering::Acquire) {
             if let Ok(command) = receiver.recv_timeout(Duration::from_millis(10)) {
                 let request = command["request"].clone();
+                if command["operation"] == "trial_clock" {outbox.control(json!({"type":"reply","request":request,"ok":true,"result":super::gpu::clock()}));continue;}
                 if command["operation"] == "frame_channel" {
                     let channel = command["channel"].as_str().filter(|s| s.len() == 32 && s.bytes().all(|b| b.is_ascii_hexdigit()));
                     if frame_channel_started || channel.is_none() || command["rowAlignment"] != 256
@@ -263,12 +264,15 @@ impl Worker {
                         outbox.control(json!({"type":"reply","request":request,"ok":false,"message":"Invalid or duplicate frame channel"}));
                         continue;
                     }
-                    let compress_frames = command["encoding"] == "lz4-block";
+                    outbox.gpu_enabled.store(command["gpuFrames"]==true,Ordering::Release);
+                    if command["gpuFrames"] != true {outbox.control(json!({"type":"reply","request":request,"ok":false,"message":"Solo GPU: canale immagini GPU richiesto."}));continue;}
+                    let compress_frames = false;
                     frame_channel_started = true;
-                    for window in self.windows.values_mut() {
-                        window.target = Arc::new(window.target.fresh_capture());
-                        window.stop = Some(capture::spawn(window.target.clone(), outbox.clone()));
-                    }
+        for window in self.windows.values_mut() {
+            window.target = Arc::new(window.target.fresh_capture());
+            window.stop = Some(capture::spawn(window.target.clone(), outbox.clone()));
+        }
+
                     let channel = channel.unwrap().to_owned();
                     let endpoint: SocketAddr = format!("10.0.2.2:{}", config.port).parse().map_err(error)?;
                     let hello = json!({"type":"hello","role":"frames","protocol":1,"token":config.token,
@@ -847,7 +851,7 @@ impl Worker {
             .windows
             .iter()
             .filter(|(_, w)| {
-                !w.target.valid()
+                !w.target.valid() || catalogue::shell_surface(w.target.hwnd)
                     || (catalogue::transient(&w.metadata)
                         && (!visible.contains(&w.target.hwnd)
                             || w.parent
@@ -940,6 +944,7 @@ impl Worker {
     }
 
     fn add(&mut self, raw: usize, app: String, outbox: &Arc<Outbox>) -> bool {
+        if catalogue::shell_surface(raw) {return false;}
         let raw = catalogue::host_frame(raw, &self.sid, self.session).unwrap_or(raw);
         let Some(metadata) = catalogue::details(raw, &self.sid, self.session) else {
             return false;
@@ -1122,7 +1127,8 @@ impl Worker {
             let Some(metadata) = catalogue::details(raw as usize, &self.sid, self.session) else {
                 continue;
             };
-            if metadata["cloaked"] == true || catalogue::host_frame(raw as usize, &self.sid, self.session).is_some() { continue; }
+            if metadata["cloaked"] == true || catalogue::shell_surface(raw as usize)
+                || catalogue::host_frame(raw as usize, &self.sid, self.session).is_some() { continue; }
             let hosted = if metadata["class"] == "ApplicationFrameWindow" {
                 let Ok(content) = serde_json::from_value::<catalogue::HostedContent>(value["hosted"].clone()) else { continue; };
                 if !content.valid(raw as usize, &self.sid, self.session) || !content.matches_app()

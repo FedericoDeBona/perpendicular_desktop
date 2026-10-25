@@ -37,6 +37,7 @@ struct NativeGraphics {
     func environment(directory:URL,session:String,primary:HostDisplay?=nil)->[String:String]{
         let libraries=root.appendingPathComponent("lib").path
         var values=["DYLD_LIBRARY_PATH":libraries,"DYLD_FALLBACK_LIBRARY_PATH":libraries,
+            "PERP_WGC_EXPORT_SOCKET":NativeWindowFrames.shared.socketPath,
             "NPT_BACKEND":"dxmt","ANGLE_DEFAULT_PLATFORM":"metal",
             "RENDER_SERVER_EXEC_PATH":root.appendingPathComponent("bin/virgl_render_server").path,
             "PERP_NEPTUNE_SCANOUT_BROKER":"1","PERP_NATIVE_DISPLAY_DIRECT":"1",

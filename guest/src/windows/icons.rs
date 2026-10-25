@@ -29,8 +29,8 @@ use windows::{
     core::{Interface, PCWSTR},
 };
 
-const ICON_EDGE: u32 = 128;
-const PNG_LIMIT: u64 = 128 * 1024;
+const ICON_EDGE: u32 = 256;
+const PNG_LIMIT: u64 = 512 * 1024;
 
 fn at(stage: &'static str) -> impl FnOnce(windows::core::Error) -> String {
     move |value| format!("App icon {stage}: {}", error(value))
@@ -99,7 +99,7 @@ fn base64(bytes: &[u8]) -> String {
 }
 
 /// app is a catalogue ID; parsing is obtained through Catalogue::icon_source.
-/// The PNG response is <=128KiB and fits the existing 1MiB guest header limit.
+/// The PNG response is <=512KiB and fits the existing 1MiB guest header limit.
 pub fn extract(app: &str, parsing: &str) -> Result<Value, String> {
     if app.len() != 64
         || parsing.is_empty()

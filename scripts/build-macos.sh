@@ -7,11 +7,12 @@ guest="$PWD/guest/target/aarch64-pc-windows-msvc/release/perpendicular-guest.exe
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources/Guest"
 cp macos/Info.plist "$app/Contents/Info.plist"
 xcrun clang -O2 -target arm64-apple-macosx14.0 -c macos/NativeTransport/ndt.c -o .build/native-transport.o
+xcrun clang -O2 -target arm64-apple-macosx14.0 -c macos/NativeTransport/gpu-receiver.c -o .build/gpu-receiver.o
 xcrun swiftc -swift-version 6 -O -parse-as-library -target arm64-apple-macosx14.0 \
-    -import-objc-header macos/NativeTransport/ndt.h .build/native-transport.o \
-    macos/RuntimeStore.swift macos/NativeGraphics.swift macos/NativeDisplay.swift macos/DesktopConnection.swift macos/DesktopWindow.swift \
+    -import-objc-header macos/NativeTransport/bridge.h .build/native-transport.o .build/gpu-receiver.o \
+    macos/RuntimeStore.swift macos/NativeWindowFrames.swift macos/NativeGraphics.swift macos/NativeDisplay.swift macos/DesktopConnection.swift macos/DesktopWindow.swift \
     macos/VirtualMachine.swift macos/MachineControl.swift macos/GuestBridge.swift macos/GuestFrameSurface.swift macos/MacLocalControl.swift macos/DisplayTopology.swift macos/SharedDisplay.swift \
-    macos/WindowGeometry.swift macos/WindowRenderer.swift macos/WindowTransitionView.swift macos/ApplicationContent.swift macos/ApplicationWindow.swift macos/Launcher.swift macos/GuestProcesses.swift macos/App.swift \
+    macos/WindowGeometry.swift macos/WindowRenderer.swift macos/WindowTransitionView.swift macos/ApplicationContent.swift macos/ApplicationWindow.swift macos/LauncherLibrary.swift macos/Launcher.swift macos/GuestProcesses.swift macos/App.swift \
     -o "$app/Contents/MacOS/Perpendicular"
 cp "$guest" guest/install.ps1 guest/install.cmd "$app/Contents/Resources/Guest/"
 if [[ "${SKIP_RUNTIME:-0}" != 1 ]]; then

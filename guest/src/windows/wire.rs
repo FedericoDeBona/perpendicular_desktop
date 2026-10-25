@@ -14,6 +14,8 @@ use windows::Win32::System::Performance::{QueryPerformanceCounter, QueryPerforma
 pub struct Packet {
     pub header: Value,
     pub bytes: Arc<Vec<u8>>,
+    // Exact packet receipt: another window/sequence must never unlock this image.
+    acknowledged: Option<Arc<AtomicBool>>,
     // WGC uses QPC expressed in 100 ns units. Absolute guest clocks stay local.
     frame_time_100ns: Option<i64>,
     enqueued: Option<Instant>,
@@ -32,6 +34,7 @@ pub struct Outbox {
     split: AtomicBool,
     row_alignment: AtomicUsize,
     pub connected: AtomicBool,
+    pub gpu_enabled:AtomicBool,
 }
 
 impl Outbox {
@@ -44,6 +47,7 @@ impl Outbox {
             split: AtomicBool::new(false),
             row_alignment: AtomicUsize::new(4),
             connected: AtomicBool::new(true),
+            gpu_enabled:AtomicBool::new(false),
         })
     }
     pub fn control(&self, header: Value) {
@@ -55,23 +59,26 @@ impl Outbox {
         pending.controls.push_back(Packet {
             header,
             bytes: Arc::new(Vec::new()),
+            acknowledged: None,
             frame_time_100ns: None,
             enqueued: None,
         });
         self.wake.notify_one();
     }
-    pub fn frame(&self, id: &str, header: Value, bytes: impl Into<Arc<Vec<u8>>>, frame_time_100ns: Option<i64>) {
+    pub fn frame(&self, id: &str, header: Value, bytes: impl Into<Arc<Vec<u8>>>, frame_time_100ns: Option<i64>) -> Arc<AtomicBool> {
+        let acknowledged = Arc::new(AtomicBool::new(false));
         let mut pending = self.pending.lock().unwrap();
         if !pending.frames.contains_key(id) {
             pending.order.push_back(id.to_owned());
         }
         pending
             .frames
-            .insert(id.to_owned(), Packet { header, bytes:bytes.into(), frame_time_100ns, enqueued:Some(Instant::now()) });
+            .insert(id.to_owned(), Packet { header, bytes:bytes.into(), acknowledged:Some(acknowledged.clone()), frame_time_100ns, enqueued:Some(Instant::now()) });
         if !self.split.load(Ordering::Acquire) {
             self.wake.notify_one();
         }
         self.frame_wake.notify_one();
+        acknowledged
     }
     pub fn row_alignment(&self) -> usize { self.row_alignment.load(Ordering::Acquire) }
     pub fn wait_for_frame_slot(&self, id: &str, stop: &AtomicBool) -> bool {
@@ -89,7 +96,7 @@ impl Outbox {
         stream.set_nodelay(true).map_err(super::error)?;
         stream.set_write_timeout(Some(Duration::from_secs(3))).map_err(super::error)?;
         stream.set_read_timeout(Some(Duration::from_secs(5))).map_err(super::error)?;
-        send(&mut stream, Packet { header:hello, bytes:Arc::new(Vec::new()), frame_time_100ns:None, enqueued:None }).map_err(super::error)?;
+        send(&mut stream, Packet { header:hello, bytes:Arc::new(Vec::new()), acknowledged:None, frame_time_100ns:None, enqueued:None }).map_err(super::error)?;
         self.row_alignment.store(256, Ordering::Release);
         self.split.store(true, Ordering::Release);
         self.wake.notify_one();
@@ -120,10 +127,11 @@ impl Outbox {
                     }
                 }
                 packet.header["wireBytes"] = json!(packet.bytes.len());
+                let acknowledged = packet.acknowledged.clone();
                 let mut receipt = [0u8;1];
                 if send(&mut stream, packet).is_err() || stream.read_exact(&mut receipt).is_err() || receipt[0] != 1 {
                     self.connected.store(false, Ordering::Release);
-                }
+                } else if let Some(acknowledged)=acknowledged {acknowledged.store(true,Ordering::Release);}
             }
         }
         let _ = stream.shutdown(std::net::Shutdown::Both);
@@ -160,6 +168,7 @@ impl Outbox {
                     Packet {
                         header: json!({"type":"heartbeat"}),
                         bytes: Arc::new(Vec::new()),
+                        acknowledged: None,
                         frame_time_100ns: None,
                         enqueued: None,
                     }

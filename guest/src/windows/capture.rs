@@ -1,6 +1,5 @@
 use super::{catalogue, error, identity, wire::Outbox};
 use serde_json::{Value, json};
-use sha2::{Digest, Sha256};
 use std::{
     sync::{
         Arc, Mutex,
@@ -137,19 +136,9 @@ pub fn spawn(target: Arc<Target>, outbox: Arc<Outbox>) -> Arc<AtomicBool> {
     std::thread::spawn(move || {
         let class = catalogue::window_class(target.hwnd);
         let tooltip = class.eq_ignore_ascii_case("tooltips_class32") || class == "MicrosoftWindowsTooltip";
-        let mut result = if class == "#32768" {
-            super::menu_capture::run(&target, &outbox, &flag)
+        let result = if class == "#32768" {
+            Err("Solo GPU: il menu classico non dispone ancora di una superficie GPU esportabile.".into())
         } else { unsafe { run(&target, &outbox, &flag, D3D_DRIVER_TYPE_HARDWARE, None) } };
-        if result.is_err() && target.readback_device_lost.swap(false,Ordering::AcqRel)
-            && !flag.load(Ordering::Acquire) && outbox.connected.load(Ordering::Acquire) && target.valid()
-        {
-            // One replacement session, after the failed hardware session and
-            // all its resources have returned. No retry loop or device reuse.
-            let failure=result.as_ref().unwrap_err().clone();
-            outbox.control(json!({"type":"window_notice","window":target.id,
-                "message":"Lettura GPU interrotta: tentativo di recupero software della cattura.","role":"window"}));
-            result=unsafe {run(&target,&outbox,&flag,D3D_DRIVER_TYPE_WARP,Some(&failure))};
-        }
         if let Err(message) = result {
             let mut description = target.capture_device.lock().unwrap();
             let description = description.get_or_insert_with(|| json!({}));
@@ -298,6 +287,12 @@ unsafe fn create_item(target:&Target,interop:&IGraphicsCaptureItemInterop)->Resu
 
 unsafe fn run(target: &Target, outbox: &Outbox, stop: &AtomicBool, driver:D3D_DRIVER_TYPE, hardware_failure:Option<&str>) -> Result<(), String> {
     unsafe {
+        let deadline=Instant::now();
+        while outbox.row_alignment()!=256 || !outbox.gpu_enabled.load(Ordering::Acquire) {
+            if stop.load(Ordering::Acquire) || !outbox.connected.load(Ordering::Acquire) {return Ok(());}
+            if deadline.elapsed()>Duration::from_secs(5) {return Err("Solo GPU: canale immagini non disponibile. Nessun fallback TCP.".into());}
+            std::thread::sleep(Duration::from_millis(5));
+        }
         RoInitialize(RO_INIT_MULTITHREADED).map_err(error)?;
         struct Apartment;
         impl Drop for Apartment {
@@ -432,19 +427,11 @@ unsafe fn run(target: &Target, outbox: &Outbox, stop: &AtomicBool, driver:D3D_DR
         session.StartCapture().map_err(|e| gpu_error(&device, "StartCapture", e))?;
         target.progress.starts.fetch_add(1,Ordering::Relaxed);
         let result = (|| -> Result<(), String> {
+            let mut native_gpu:Option<super::gpu::Gpu>=None;
             let mut sequence = target.capture_frames.load(Ordering::Acquire);
             let mut generation = target.geometry.lock().unwrap().0.max(1);
-            let mut recovery_reported=false;
-            let classic_dialog = !target.full_frame && catalogue::window_class(target.hwnd)=="#32770";
-            let mut inspect_initial_frame = target.full_frame || classic_dialog;
-            let mut initial_frame_repaint:Option<bool> = None;
-            let mut initial_frame_opaque_percent:Option<usize> = None;
             let mut previous = [0; 6];
-            let mut staging: [Option<ID3D11Texture2D>;2] = [None,None];
-            let mut staging_size = (0, 0);
-            let mut last_pixels = Arc::new(Vec::<u8>::new());
             while !stop.load(Ordering::Acquire) && outbox.connected.load(Ordering::Acquire) {
-                let started = Instant::now();
                 target.set_phase(Phase::Validating);
                 if !target.valid() {
                     target.set_phase(Phase::Invalidated);
@@ -475,20 +462,18 @@ unsafe fn run(target: &Target, outbox: &Outbox, stop: &AtomicBool, driver:D3D_DR
                 // Keep this GPU frame until the replaceable network slot is
                 // available. Do not read back images just to replace pending
                 // pixels, and never discard the final update of a static window.
-                let waiting = Instant::now();
                 target.set_phase(Phase::Backpressure);
                 if !outbox.wait_for_frame_slot(&target.id, stop) {
                     let _ = frame.Close();
                     break;
                 }
-                let backpressure_milliseconds = waiting.elapsed().as_secs_f64() * 1000.0;
                 for _ in 0..2 {
                     let Ok(newer) = pool.TryGetNextFrame() else {break};
                     target.progress.acquired.fetch_add(1,Ordering::Relaxed);
                     let _ = frame.Close(); frame = newer;
                 }
                 target.set_phase(Phase::Reading);
-                let frame_time_100ns = frame.SystemRelativeTime().ok().map(|time| time.Duration);
+                let mut gpu_selected_qpc=0;let _=windows::Win32::System::Performance::QueryPerformanceCounter(&mut gpu_selected_qpc);
                 let frame_dirty_mode=frame.DirtyRegionMode().ok().map(|mode|mode.0);
                 let dirty_regions=frame.DirtyRegions().ok().and_then(|regions|regions.Size().ok());
                 if let Some(description)=target.capture_device.lock().unwrap().as_mut() {
@@ -508,7 +493,6 @@ unsafe fn run(target: &Target, outbox: &Outbox, stop: &AtomicBool, driver:D3D_DR
                 if resize_pool {
                     size = current;
                     generation += 1;
-                    staging = [None,None];
                 }
                 let access: IDirect3DDxgiInterfaceAccess =
                     frame.Surface().map_err(error)?.cast().map_err(error)?;
@@ -519,7 +503,6 @@ unsafe fn run(target: &Target, outbox: &Outbox, stop: &AtomicBool, driver:D3D_DR
                 // Never read rows outside that texture, or end a healthy capture for it.
                 if desc.Width < current.Width as u32 || desc.Height < current.Height as u32 {
                     frame.Close().map_err(error)?;
-                    staging = [None,None];
                     target.set_phase(Phase::Recreating);
                     target.progress.recreates.fetch_add(1,Ordering::Relaxed);
                     pool.Recreate(
@@ -542,204 +525,16 @@ unsafe fn run(target: &Target, outbox: &Outbox, stop: &AtomicBool, driver:D3D_DR
                     generation += 1;
                     previous = geometry;
                 }
-                let alignment = outbox.row_alignment();
-                let row_bytes = (width as usize).checked_mul(4).ok_or("Invalid capture width")?;
-                let stride = row_bytes.div_ceil(alignment).checked_mul(alignment).ok_or("Invalid capture stride")?;
-                let total = stride.checked_mul(height as usize).ok_or("Invalid capture size")?;
-                if x < 0 || y < 0 || width <= 0 || height <= 0
-                    || i64::from(x) + i64::from(width) > i64::from(desc.Width)
-                    || i64::from(y) + i64::from(height) > i64::from(desc.Height)
-                    || stride < row_bytes || total > 34 * 1024 * 1024
-                {
-                    return Err("Invalid capture rectangle".into());
+                if !outbox.gpu_enabled.load(Ordering::Acquire) || software_recovery {
+                    return Err("Solo GPU: questa superficie non è supportata. Nessun fallback TCP.".into());
                 }
-                // Keep each staging allocation bounded independently of the
-                // window. The complete image still uses its original geometry.
-                let bounded_rows = (4 * 1024 * 1024 / row_bytes.div_ceil(256).max(1) / 256)
-                    .max(1).min(height as usize);
-                // Share the existing staging budget between two slots instead
-                // of doubling it. Small surfaces and software recovery keep
-                // their original single-allocation path.
-                let staging_count=if !software_recovery && bounded_rows<height as usize {2}else{1};
-                let readback_rows=(bounded_rows/staging_count).max(1);
-                if staging_size != (width as u32, readback_rows as u32) {
-                    staging = [None,None];
-                    staging_size = (width as u32, readback_rows as u32);
+                if native_gpu.as_ref().is_none_or(|g|!g.matches(width as u32,height as u32)) {
+                    native_gpu=Some(super::gpu::Gpu::new(&device,width as u32,height as u32)?);
                 }
-                let band_count=(height as usize).div_ceil(readback_rows);
-                for slot in staging.iter_mut().take(staging_count) {
-                    if slot.is_some() {continue;}
-                    desc.Width = width as u32;
-                    desc.Height = readback_rows as u32;
-                    desc.Usage = D3D11_USAGE_STAGING;
-                    desc.BindFlags = 0;
-                    desc.CPUAccessFlags = D3D11_CPU_ACCESS_READ.0 as u32;
-                    desc.MiscFlags = 0;
-                    desc.MipLevels = 1;
-                    desc.ArraySize = 1;
-                    if desc.Format != DXGI_FORMAT_B8G8R8A8_UNORM || desc.SampleDesc.Count != 1 {
-                        return Err("Unsupported capture format".into());
-                    }
-                    device.CreateTexture2D(&desc, None, Some(slot))
-                        .map_err(|e| gpu_error(&device, "Create readback texture", e))?;
-                }
-                // Never copy the old image or mutate storage still held by the
-                // encoder/writer. Reuse only an exclusively owned allocation;
-                // otherwise allocate the new frame as before, with no waiting.
-                let buffer_reused = Arc::get_mut(&mut last_pixels).is_some_and(|p| p.capacity() >= total);
-                if !buffer_reused { last_pixels = Arc::new(Vec::with_capacity(total)); }
-                let pixels = Arc::get_mut(&mut last_pixels).ok_or("Capture buffer is still in use")?;
-                pixels.clear();
-                target.set_phase(Phase::Mapping);
-                let readback_started = Instant::now();
-                let mut valid = true;
-                let (mut copy_submit_ms, mut map_ms, mut pixel_copy_ms, mut unmap_ms) = (0.0, 0.0, 0.0, 0.0);
-                // Prime both bounded textures. Refill a slot only after its
-                // CPU read and Unmap, so the next GPU copy can run while we
-                // read the other slot. All bands belong to this retained WGC
-                // frame; there are no inter-frame leases or waits for reuse.
-                let mut submit_band=|band:usize, flush:bool| -> Result<(),String> {
-                    let backing=staging[band % staging_count].as_ref().ok_or("Missing readback resource")?;
-                    let first_row=band*readback_rows;
-                    let rows=readback_rows.min(height as usize-first_row);
-                    let region = D3D11_BOX { left:x as u32, top:y as u32 + first_row as u32, front:0,
-                        right:(x + width) as u32, bottom:y as u32 + first_row as u32 + rows as u32, back:1 };
-                    let submitted = Instant::now();
-                    context.CopySubresourceRegion(backing, 0, 0, 0, 0, &texture, 0, Some(&region));
-                    if flush {context.Flush();}
-                    copy_submit_ms += submitted.elapsed().as_secs_f64() * 1000.0;
-                    Ok(())
-                };
-                // Submit the primed pair together. Refilled slots still flush
-                // immediately to overlap GPU copies with the other CPU read.
-                for band in 0..staging_count {submit_band(band, band+1==staging_count)?;}
-                for band in 0..band_count {
-                    let first_row=band*readback_rows;
-                    let rows=readback_rows.min(height as usize-first_row);
-                    let backing=staging[band % staging_count].as_ref().ok_or("Missing readback resource")?;
-                    let map_started = Instant::now();
-                    let mut mapped = D3D11_MAPPED_SUBRESOURCE::default();
-                    context
-                        .Map(backing, 0, D3D11_MAP_READ, 0, Some(&mut mapped))
-                        .map_err(|e| {
-                            let reason=device.GetDeviceRemovedReason().err().map(|reason|reason.code().0 as u32);
-                            if matches!(reason,Some(0x887a0020|0x887a0005|0x887a0006|0x887a0007)) {
-                                target.readback_device_lost.store(true,Ordering::Release);
-                            }
-                            gpu_error(&device,"Map readback texture",e)
-                        })?;
-                    map_ms += map_started.elapsed().as_secs_f64() * 1000.0;
-                    let copying = Instant::now();
-                    valid = !mapped.pData.is_null() && mapped.RowPitch as usize >= row_bytes
-                        && (rows - 1).checked_mul(mapped.RowPitch as usize)
-                            .and_then(|last| last.checked_add(row_bytes)).is_some();
-                    if valid {
-                        for row in 0..rows {
-                            let destination = pixels.as_mut_ptr().add((first_row + row) * stride);
-                            std::ptr::copy_nonoverlapping(
-                                (mapped.pData as *const u8).add(row * mapped.RowPitch as usize),
-                                destination,
-                                row_bytes,
-                            );
-                            std::ptr::write_bytes(destination.add(row_bytes), 0, stride - row_bytes);
-                        }
-                    }
-                    pixel_copy_ms += copying.elapsed().as_secs_f64() * 1000.0;
-                    let unmapping = Instant::now();
-                    context.Unmap(backing, 0);
-                    unmap_ms += unmapping.elapsed().as_secs_f64() * 1000.0;
-                    if !valid { break; }
-                    if band+staging_count<band_count {submit_band(band+staging_count,true)?;}
-                }
-                // Every pixel and padding byte is initialized before publication.
-                if valid { pixels.set_len(total); }
-                let readback_milliseconds = readback_started.elapsed().as_secs_f64() * 1000.0;
-                target.set_phase(Phase::Reading);
+                target.set_phase(Phase::Publishing);sequence+=1;
+                native_gpu.as_mut().unwrap().submit(&device,&context,&texture,x,y,&target,&outbox,generation,sequence.into(),gpu_selected_qpc)?;
                 frame.Close().map_err(error)?;
-                if !valid {
-                    return Err("Invalid capture stride".into());
-                }
-                // A shrink can already have a complete frame inside the old,
-                // larger backing texture. Publish its valid current rectangle
-                // instead of discarding the only update from an idle window.
-                // Release the old frame resources before resizing the pool.
-                // An undersized backing texture still takes the earlier retry.
-                if resize_pool {
-                    drop(submit_band);
-                    drop(texture);
-                    drop(access);
-                    target.set_phase(Phase::Recreating);
-                    target.progress.recreates.fetch_add(1,Ordering::Relaxed);
-                    pool.Recreate(&runtime,DirectXPixelFormat::B8G8R8A8UIntNormalized,2,size)
-                        .map_err(error)?;
-                }
-                if stop.load(Ordering::Acquire) || !outbox.connected.load(Ordering::Acquire) {
-                    break;
-                }
-                // A new WGC session can deliver an empty or partly missing
-                // first frame and no later update until input. Use the same
-                // rectangular-window coverage threshold as the Mac transition
-                // gate; this is a one-time invalidation, not a pixel repair or
-                // a claim that the producer's GPU synchronization is correct.
-                // Invalidate just this authenticated HWND once; let its own UI
-                // thread repaint asynchronously. Preserve the partial frame and
-                // the request result rather than treating a retry as new data.
-                if inspect_initial_frame {
-                    inspect_initial_frame=false;
-                    let (mut opaque,mut sampled)=(0usize,0usize);
-                    for row in (0..height as usize).step_by((height as usize/24).max(1)) {
-                        for column in (0..width as usize).step_by((width as usize/32).max(1)) {
-                            sampled+=1;
-                            if pixels[row*stride+column*4+3]>=224 {opaque+=1;}
-                        }
-                    }
-                    initial_frame_opaque_percent=Some(opaque*100/sampled);
-                    if opaque*100<sampled*85 && target.valid() && IsWindowVisible(hwnd).as_bool() {
-                        let mut flags=RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN;
-                        if target.full_frame {flags |= RDW_FRAME;}
-                        initial_frame_repaint=Some(RedrawWindow(Some(hwnd),None,None,flags).as_bool());
-                    }
-                }
-                target.set_phase(Phase::Publishing);
-                sequence += 1;
-                // Bounded opt-in diagnostic, before compression or transmission.
-                // Hash padded bytes too, so the receiver compares the exact packet.
-                let pixel_hash = if sequence<=3 && std::env::var("PERP_CAPTURE_PIXEL_HASH").as_deref()==Ok("1") {
-                    Some(format!("{:x}",Sha256::digest(&pixels)))
-                } else {None};
-                let bounds = catalogue::frame_bounds(hwnd).ok_or("Window geometry unavailable")?;
-                let mut origin = POINT::default();
-                if !ClientToScreen(hwnd, &mut origin).as_bool() {
-                    return Err("Window geometry unavailable".into());
-                }
-                let offset = if target.full_frame {
-                    (bounds.left - origin.x, bounds.top - origin.y)
-                } else {
-                    (0, 0)
-                };
-                *target.geometry.lock().unwrap() = (generation, width, height, offset.0, offset.1);
-                target.capture_frames.store(sequence, Ordering::Release);
-                if software_recovery && !recovery_reported {
-                    outbox.control(json!({"type":"window_notice","window":target.id,"role":"window",
-                        "message":"Recupero software della cattura attivo: la lettura GPU ha restituito un errore."}));
-                    recovery_reported=true;
-                }
-                outbox.frame(&target.id,json!({"type":"frame","window":target.id,"sequence":sequence,"generation":generation,
-                    "guestPixelsSHA256":pixel_hash,
-                    "width":width,"height":height,"stride":stride,"bytes":pixels.len(),"capture":if software_recovery {"wgc-software-recovery"} else {"wgc-hardware-readback"},
-                    "guestInitialFrameRepaint":initial_frame_repaint,
-                    "guestInitialFrameOpaquePercent":initial_frame_opaque_percent,
-                    "guestInitialDialogRepaint":if classic_dialog {initial_frame_repaint} else {None},
-                    "guestDirtyRegionMode":frame_dirty_mode,"guestDirtyRegionCount":dirty_regions,
-                    "guestReadbackSlots":staging_count,"guestReadbackBands":band_count,
-                    "guestBufferReused":u8::from(buffer_reused),
-                    "guestReadbackMilliseconds":readback_milliseconds,
-                    "guestCopySubmitMilliseconds":copy_submit_ms,"guestMapMilliseconds":map_ms,
-                    "guestPixelCopyMilliseconds":pixel_copy_ms,"guestUnmapMilliseconds":unmap_ms,
-                    "guestBackpressureMilliseconds":backpressure_milliseconds}),last_pixels.clone(),frame_time_100ns);
-                if let Some(delay) = Duration::from_millis(16).checked_sub(started.elapsed()) {
-                    std::thread::sleep(delay);
-                }
+                if resize_pool {pool.Recreate(&runtime,DirectXPixelFormat::B8G8R8A8UIntNormalized,2,size).map_err(error)?;}
             }
             Ok(())
         })();
