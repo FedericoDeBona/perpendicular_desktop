@@ -15,11 +15,12 @@ struct NativeDisplayEndpoint:Codable,Sendable {
 /// Complete the read explicitly; an undrawn frame also retires when dropped.
 final class NativeDisplayFrame:@unchecked Sendable {
     let texture:any MTLTexture
+    let traceID:String
     private let backing:any MTLBuffer
     private let retirementLock=NSLock()
     private var retirement:(@Sendable ()->Void)?
-    init(texture:any MTLTexture,backing:any MTLBuffer,retired:@escaping @Sendable ()->Void){
-        self.texture=texture;self.backing=backing;self.retirement=retired
+    init(texture:any MTLTexture,backing:any MTLBuffer,traceID:String,retired:@escaping @Sendable ()->Void){
+        self.texture=texture;self.backing=backing;self.traceID=traceID;self.retirement=retired
     }
     /// Call only after the last GPU read. Metal may retain a completed command's
     /// handler, so object deallocation is not a timely producer acknowledgement.
@@ -87,6 +88,7 @@ final class NativeDisplayReader:@unchecked Sendable {
             if result == NDT_AGAIN {break}
             guard result == NDT_OK else{close("Invalid graphics frame (\(result)).");return}
             let number=frame.metadata.id.frame
+            PipelineTrace.record("desktop-take","desktop:\(endpoint.epoch):\(number)",["width":frame.metadata.width,"height":frame.metadata.height])
             guard frames[number] == nil else{ndt_frame_close(&frame);close("Repeated graphics frame.");return}
             frames[number]=Entry(frame)
         }
@@ -99,7 +101,10 @@ final class NativeDisplayReader:@unchecked Sendable {
                 if ProcessInfo.processInfo.systemUptime>entry.deadline {close("Windows did not finish a graphics frame.")}
                 break
             }
-            guard ready == NDT_OK,let frame=importFrame(entry.frame,number:number) else{close("Unsupported graphics frame.");return}
+            guard ready == NDT_OK else{close("Unsupported graphics frame.");return}
+            PipelineTrace.record("desktop-ready","desktop:\(endpoint.epoch):\(number)")
+            guard let frame=importFrame(entry.frame,number:number) else{close("Unsupported graphics frame.");return}
+            PipelineTrace.record("desktop-imported",frame.traceID)
             entry.delivered=true
             Task{@MainActor [receive] in receive(frame)}
         }
@@ -121,7 +126,7 @@ final class NativeDisplayReader:@unchecked Sendable {
         let descriptor=MTLTextureDescriptor.texture2DDescriptor(pixelFormat:.bgra8Unorm,width:Int(width),height:Int(height),mipmapped:false)
         descriptor.storageMode = .shared;descriptor.usage = .shaderRead
         guard let texture=backing.makeTexture(descriptor:descriptor,offset:0,bytesPerRow:Int(pitch)) else{return nil}
-        return NativeDisplayFrame(texture:texture,backing:backing){[self] in queue.async{[self] in retire(number)}}
+        return NativeDisplayFrame(texture:texture,backing:backing,traceID:"desktop:\(endpoint.epoch):\(number)"){[self] in queue.async{[self] in retire(number)}}
     }
     private func retire(_ number:UInt64){
         guard let entry=frames[number],!entry.retired else{return}
@@ -133,6 +138,7 @@ final class NativeDisplayReader:@unchecked Sendable {
             let result=ndt_queue_ack(&connection,&entry.frame.metadata.id)
             if result == NDT_AGAIN {return}
             if result != NDT_OK {close("Cannot retire a graphics frame.")}
+            PipelineTrace.record("desktop-ack-queued","desktop:\(endpoint.epoch):\(number)",["result":result])
         }
         ndt_frame_close(&entry.frame);frames.removeValue(forKey:number)
     }

@@ -16,6 +16,8 @@ final class GuestFrameSurface:@unchecked Sendable {
     let byteCount:Int
     let buffer:any MTLBuffer
     let texture:any MTLTexture
+    // Assigned by the sole receiver before immutable publication.
+    var traceID=""
     var contents:UnsafeMutableRawPointer {buffer.contents()}
 
     private init(width:Int,height:Int,stride:Int,buffer:any MTLBuffer,texture:any MTLTexture){

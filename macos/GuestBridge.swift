@@ -115,6 +115,7 @@ final class GuestConnection: @unchecked Sendable {
                             var header=packet.header;for (key,value) in metrics{header[key]=value}
                             // Immutable Mac output is complete before the ordinary receipt.
                             self.offer(window,GuestPacket(header:header,pixels:Data(),surface:surface))
+                            PipelineTrace.record("wgc-ack-enqueued",surface.traceID)
                             self.connection.send(content:Data([1]),completion:.contentProcessed{[weak self] error in if error != nil{self?.connection.cancel()}})
                             self.readHeader()
                         }
@@ -143,6 +144,7 @@ final class GuestConnection: @unchecked Sendable {
     @MainActor private func drain() {
         lock.lock(); let pending=frames; frames.removeAll(keepingCapacity:true); drainScheduled=false; lock.unlock()
         for value in pending.values {
+            if let surface=value.surface {PipelineTrace.record("wgc-main-dispatch",surface.traceID)}
             var header=value.header
             if let received=header.removeValue(forKey:"hostReceivedAt") as? Double {
                 header["hostDispatchMilliseconds"]=max(0,(ProcessInfo.processInfo.systemUptime-received)*1000)

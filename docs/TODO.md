@@ -4,7 +4,7 @@ Ultimo aggiornamento: **25 ottobre 2026**. Responsabile dell'aggiornamento: l'ag
 
 Questo è l'elenco operativo delle attività. [KNOWN_ISSUES.md](KNOWN_ISSUES.md) conserva diagnosi e dettagli dei difetti, [VERIFICATION.md](VERIFICATION.md) le evidenze e i fallimenti, [RESTART_PLAN.md](RESTART_PLAN.md) la base operativa. Gli ID qui sotto sono stabili e rimandano ai problemi esistenti: non sostituiscono né duplicano il registro dei difetti.
 
-**Ultima richiesta: report dettagliato sull’apertura di Explorer nel desktop VM, consegnato con prove reali e limiti; nessuna ottimizzazione applicata.** PERF-001 aperto. [Rapporto](reports/2026-10-25-explorer-opening.md).
+**Ultima richiesta: analisi della pipeline grafica desktop e singola app, report consegnato con misure reali di GPU/presentazione e limiti espliciti.** [Rapporto](reports/2026-10-25-graphics-pipeline.md). Strumentazione verificata nella build diagnostica sulla VM principale, non distribuita nell’app ordinaria; nessuna ottimizzazione. TODO-004/007 restano IN CORSO per gli stadi guest/runtime mancanti. WIN-004 riprodotto e recuperato; GFX-007 aperto.
 
 **Interventi precedenti: RAM semplificata nella0.2.3 (TODO-019, qualifica UI parziale) e accesso automatico ripristinato/verificato (TODO-021).** Avvio utente a1 GB e successivo avvio protetto con login automatico osservati; Windows vede circa4 GB dopo hotplug. Nessun nuovo benchmark di reclaim. TODO-020 resta completato, gli altri stati invariati.
 
@@ -30,17 +30,17 @@ Priorità 1–4 corrispondenti alla richiesta iniziale dell'utente; TODO-017/018
 | ID | Attività | Stato corrente | Riferimenti / dipendenze |
 | --- | --- | --- | --- |
 | TODO-001 | Schermi Windows N+1 | BLOCCATO nel driver/runtime corrente | WIN-003; serve prima una seconda uscita reale protetta. |
-| TODO-002 | Geometria, input e finestre Mac/Windows 1:1 | DA FARE; correzioni parziali precedenti | GFX-006, WIN-001/002/003; estensione multischermo dipende da 001. |
+| TODO-002 | Geometria, input e finestre Mac/Windows 1:1 | DA FARE; correzioni parziali precedenti | GFX-006, WIN-001/002/003/004; estensione multischermo dipende da 001. |
 | TODO-003 | Stessi file utente su Mac e Windows, senza copie | DA FARE; virtio-fs candidato, combinazione non qualificata | Backend macOS, client ARM64 firmato, compatibilità RAM. |
 | TODO-019 | Catalogo unico, recenti in alto e impostazioni VM al posto dei processi | IN CORSO: semplificato/installato0.2.3, qualifica UI parziale | Massimo RAM principale e avvio in Avanzate; store verificato; CUA crasha nel suo servizio sul pannello. |
 | TODO-021 | Ripristinare l’accesso automatico Windows senza scadenza | FATTO sulla main protetta | SYS-004; password esistente in LSA e nuovo boot con login automatico osservato. |
 | TODO-020 | Integrare l'icona Perpendicular «Carbone e cobalto» | FATTO nella0.2.2 | Icona nativa/fallback inclusi, due gruppi verificati nel bundle e marchio/versione osservati nel Finder. |
 | TODO-017 | Scorciatoie e comandi Mac nelle app Windows e in Perpendicular | DA FARE per completamento e qualifica main; base parziale presente | Cmd+C/V/X/T/Q e altri comandi comuni; destinazione secondo focus/contesto. |
 | TODO-018 | Copia/incolla di testo e file Mac ↔ Windows | DA FARE; testo già implementato e provato storicamente, file mancanti | Entrambe le direzioni, desktop e singole app; collegamento con TODO-003. |
-| TODO-004 | Tutti i tempi della pipeline grafica, desktop e singola app | DA FARE; strumentazione esistente incompleta | Copertura per stadio, correlazione e limiti di misura. |
+| TODO-004 | Tutti i tempi della pipeline grafica, desktop e singola app | IN CORSO: report GPU/presentazione consegnato | Tratto frontend correlato nei due percorsi; guest/runtime e input completi ancora mancanti. |
 | TODO-005 | Misurare e migliorare disco/I/O quando utile | IN CORSO: primo rilievo Explorer | QMP misurato; attribuzione per thread/fault e code ancora incompleta. |
 | TODO-006 | Misurare CPU e costo della VM sempre accesa | IN CORSO: primo rilievo Explorer | CPU processi e Time Profiler QEMU; stack guest/idle/energia non qualificati. |
-| TODO-007 | Misurare GPU e costo della traduzione grafica | IN CORSO: contatori desktop osservati | Tempi GPU dell’apertura non ottenuti; nessuna attribuzione inventata. |
+| TODO-007 | Misurare GPU e costo della traduzione grafica | IN CORSO: GPU/presentazione frontend misurati | Backend/driver e tempi per encoder ancora mancanti; report pipeline consegnato. |
 | TODO-016 | Correggere la sincronizzazione GPU Wait/Signal | BLOCCATO per una soluzione protetta qualificata; difetto aperto | GFX-007; segnalazione upstream nell'issue8, distinta dagli esperimenti ritirati. |
 | TODO-008 | Catture complete, aggiornate e risorse grafiche rilasciate | DA FARE | GFX-001/003/004, difetti aperti. |
 | TODO-009 | Arresto/riavvio affidabile e gestione degli errori | DA FARE | SYS-001. |
@@ -111,6 +111,8 @@ Sorgenti ora versionati in `design/brand/Perpendicular.icon`, palette e guida in
 
 ## TODO-017 — Comandi e scorciatoie Mac nelle app Windows
 
+**Nuova verifica pipeline:** Notepad individuale visibile ma input inizialmente rifiutato; recupero dal desktop e successiva scrittura riuscita. WIN-004 aperto, nessuna correzione dell’attivazione applicata. Cmd+Q apre il normale dialogo Salva/Non salvare nella prova diagnostica; non è qualifica di tutti i comandi né distribuzione. [Evidenza](VERIFICATION.md#25-ottobre--pipeline-grafica-con-timestamp-gpu-e-presentazione).
+
 **Stato: DA FARE per completamento e qualifica nell'app principale; implementazione parziale già presente.** Requisito: usare le abituali scorciatoie Mac anche nelle finestre Windows, con menu e tastiera coerenti, senza dover cambiare abitudini passando da un sistema all'altro.
 
 Ricognizione del codice: `ApplicationContent.swift` intercetta combinazioni Command, inoltra molti comandi come Control, gestisce copia/taglia/incolla e traduce Cmd+Q in Alt+F4. `App.swift` ha il comando Quit di Perpendicular; il desktop usa un altro percorso input in `DesktopWindow.swift`. La [verifica del22 ottobre](VERIFICATION.md#22-ottobre--delete-scorciatoie-mac-e-appunti-di-testo) copre un giro di testo e alcuni tasti, non tutte le scorciatoie né la main attuale. Alt+F4 sulla finestra non dimostra di aver chiuso tutta l'app Windows e i suoi processi.
@@ -151,18 +153,22 @@ L'interfaccia deve offrire la stessa operazione da menu e da tastiera. Drag-and-
 
 ## TODO-004 — Tutti i tempi della pipeline grafica
 
-**Analisi Explorer consegnata sulla main0.2.3:** [rapporto dettagliato](reports/2026-10-25-explorer-opening.md), PERF-001. Tre aperture con sequenza visiva completa, più una esplorativa esclusa dai confronti; clock correlati, CPU guest/host, QMP I/O e contatori grafici, memoria/swap. Finestra e contenuto completo separati. Nessuna ottimizzazione o modifica del pacchetto. **Copertura generale ancora incompleta:** tempi interni UI/DWM/driver/GPU non tutti separabili e percorso finestre individuali escluso. **Prossimo passo:** scelta dell’utente; raccomandato confronto sulla pressione di memoria prima di cambiare componenti. Non segnare FATTO l’intera TODO per il solo rapporto. [Verifica](VERIFICATION.md#25-ottobre--analisi-apertura-explorer-nel-desktop-vm).
+**Stato: IN CORSO; analisi desktop e finestra individuale consegnata il25 ottobre.** [Report pipeline](reports/2026-10-25-graphics-pipeline.md), [verifica](VERIFICATION.md#25-ottobre--pipeline-grafica-con-timestamp-gpu-e-presentazione). Traccia facoltativa nei sorgenti, build diagnostica verificata sulla stessa VM principale protetta; app ordinaria non sostituita. Campione desktop1920×1280:964 frame,896 comandi,882 presentazioni positive/14 zero; mediana ingresso frontend→presentazione41,498 ms, GPU copy+draw0,476 ms. Notepad principale, seconda raccolta:49 copie,42 comandi,34 presentazioni positive/8 zero; mediana selezione WGC→presentazione35,788 ms, copia GPU0,247 e disegno0,214 ms. Non sommare mediane, confrontare scene diverse o scambiare questi intervalli per input→contenuto completo. Prima traccia limitata a12000 eventi; scarti e margini censurati esplicitati.
 
-**Stato: IN CORSO, prima analisi circoscritta all’apertura di Explorer nel desktop della VM su richiesta esplicita.** Rapporto della breve prova reale fino al contenuto visibile consegnato, con tempi osservabili e limiti dichiarati; nessuna ottimizzazione applicata in questo passaggio. Il percorso delle app in finestre Mac è escluso da questa analisi. Occorrono due rapporti distinti: **desktop Windows → finestra desktop Mac** e **singola app Windows → propria finestra Mac**. Obiettivo: attribuire latenza e lavoro ai componenti, individuare il collo di bottiglia e ottimizzare solo dopo una misura utile.
+**Copertura/limite:** import/match, copie, dispatch UI, drawable, command buffer GPU, presentazione Metal e ACK ora osservati e correlati; offset QPC/host calibrato. Produzione app, età WGC prima della selezione, DWM/driver/virtqueue e backend interno per frame non separati. Nessuna copertura totale né ottimizzazione dichiarata FATTA. Outlier UI31,785 ms e input inizialmente rifiutato per focus Windows (WIN-004), poi scrittura riuscita dopo recupero dal desktop.
 
-Ricognizione dei sorgenti, non nuova verifica runtime:
+**Prossimo passo:** confronto breve sulla stessa scena per attribuire attesa post-GPU/pacing e outlier MainActor, mantenendo frame non presentati nel conteggio; completamento del tratto guest/runtime solo con marker/ETW effettivamente utilizzabili. Occorre correlare job backend e frame esportato, senza equiparare query/ACK a correttezza o visibilità. Distribuzione della diagnostica nell’app ordinaria ancora non eseguita.
+
+L’[analisi precedente Explorer](reports/2026-10-25-explorer-opening.md) conserva aperture fino al contenuto visivo completo e contesto CPU/I/O/memoria: PERF-001 resta aperto, causa non isolata. La nuova misura di decine di millisecondi del presenter non spiega da sola i secondi di caricamento progressivo.
+
+Ricognizione iniziale e aggiornamento dei punti di misura:
 
 - `GuestBridge.swift` registra alcuni tempi di readback/trasporto/dispatch e ultimo RTT; non tutte le chiavi valgono per ogni percorso. I tempi readback/encode di un vecchio percorso pixel non descrivono automaticamente il percorso GPU corrente.
 - `guest/src/windows/gpu.rs` pubblica selezione QPC, invio e attesa query GPU. L'attesa usa polling e sleep: non misura soltanto il tempo di esecuzione GPU.
-- `NativeWindowFrames.swift` misura fino al completamento della copia Metal con un orologio CPU: include preparazione, coda e callback; non è il solo tempo GPU.
-- `WindowRenderer.swift` ha già una callback di presentazione per lo stato della finestra, ma non registra `presentedTime` in una timeline completa. Il desktop importa una superficie condivisa e il presenter la copia in una texture locale prima dell'ACK: non è zero-copy. Contatori di frame/risorse/pending non sostituiscono i tempi.
+- `NativeWindowFrames.swift` conserva il totale CPU e, con traccia abilitata, esporta anche GPUStart/End della copia separata; preparazione, invio/attesa GPU e callback sono distinguibili.
+- `WindowRenderer.swift` ora traccia `presentedTime`, inclusi gli zeri, e GPUStart/End con ID sorgente/disegno. Il desktop copia in una texture locale prima dell’ACK: non è zero-copy. La callback funzionale di readiness non filtra ancora timestamp zero: limite registrato in WIN-002, senza cambiare il comportamento durante l’analisi.
 
-**Prossimo risultato:** una mappa con una riga per ogni stadio, ingresso/uscita, ID frame correlato, orologio, strumento, copertura e incertezza. Ogni tratto deve risultare misurato, stimato con limite dichiarato oppure non osservabile con motivo. Individuare almeno:
+**Copertura da completare:** mantenere una mappa con una riga per ogni stadio, ingresso/uscita, ID frame correlato, orologio, strumento, copertura e incertezza. Ogni tratto deve risultare misurato, stimato con limite dichiarato oppure non osservabile con motivo. Individuare almeno:
 
 | Tratto da coprire | Desktop | Singola app |
 | --- | --- | --- |
@@ -206,11 +212,11 @@ Il difetto Wait/Signal di TODO-016 condiziona l'interpretazione delle misure gue
 
 ## TODO-007 — GPU e traduzione grafica
 
-**Stato: IN CORSO, contatori e attese pending dello scanout osservati su Explorer.** Percorso desktop attivo, ma traccia Metal dell’apertura non utilizzabile: nessun tempo GPU o per-encoder dichiarato misurato. [Rapporto](reports/2026-10-25-explorer-opening.md). Distinguere CPU di driver/renderer/traduzione da esecuzione GPU Metal, copie, sincronizzazione e attesa della presentazione; l'utilizzo della GPU virtuale non descrive da solo il lavoro della GPU Apple.
+**Stato: IN CORSO, tempi GPU del frontend misurati nei due percorsi.** [Report pipeline](reports/2026-10-25-graphics-pipeline.md) e [verifica](VERIFICATION.md#25-ottobre--pipeline-grafica-con-timestamp-gpu-e-presentazione): copia WGC separata, command buffer presenter, invio→inizio, fine→callback e presentazione correlati. Attesa post-GPU maggiore del costo GPU tipico di queste scene; outlier UI osservato. Backend Metal del renderer, driver guest e attribuzione per encoder desktop ancora mancanti; nessun contatore hardware di banda/cache/occupancy misurato e nessuna ottimizzazione. Diagnostica solo nella build temporanea, app ordinaria conservata. La traccia Metal dell’[apertura Explorer precedente](reports/2026-10-25-explorer-opening.md) resta non utilizzabile: non è stata convertita retroattivamente in una misura GPU.
 
 **Meccanismi:** timeline di TODO-004, Metal System Trace e tempi command buffer. I contatori dettagliati sono condizionati da [counterSets/supportsCounterSampling](https://developer.apple.com/documentation/metal/mtldevice/countersets) del dispositivo e dai confini supportati; non promettere cache/banda/occupancy prima di averne accertato l'esposizione. Analogamente, query timestamp D3D o eventi ETW del guest non diventano automaticamente tempi fisici Apple attendibili.
 
-**Prossimo passo:** mappa delle misure disponibili sul backend effettivo, quindi una sola scena/azione reale sufficiente a separare lavoro CPU, copie e GPU. Collegare i dati a risoluzione, scala e numero di superfici. Evitare benchmark estesi o modifiche del driver per il solo desiderio di avere più contatori.
+**Prossimo passo:** dopo il report frontend, correlare job del backend effettivo e superficie esportata solo se esiste un meccanismo concreto. Per l’attesa di presentazione, un confronto breve sulla stessa scena, risoluzione e scala; preservare gli scarti nel conteggio. Evitare benchmark estesi o modifiche del driver per il solo desiderio di avere più contatori.
 
 **Fatto quando:** costo grafico attribuito con limiti espliciti e, se il collo di bottiglia è correggibile, confronto concreto prima/dopo. Se non sono disponibili contatori o timestamp utili, avvisare e limitare l'analisi alle parti osservabili; nessuna stima presentata come misura hardware.
 

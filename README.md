@@ -19,6 +19,7 @@ La pulizia autorizzata ha eliminato i vecchi dischi VM e launcher. Restano un ba
 Restano aperti arresti HVF, saturazione storica delle risorse e gestione dello spazio host. Una breve verifica riuscita non certifica affidabilità generale o compatibilità con tutte le app. Esplora file ed Edge sono disponibili nel launcher e si aprono in finestre Mac tramite immagini GPU. Il difetto noto delle etichette mancanti in alcune catture resta aperto. N+1 è nuovamente richiesto ma non disponibile: il driver/runtime corrente non offre ancora le uscite necessarie. Creality/OpenGL resta rinviato.
 
 - [Report: tempi di apertura di Explorer nel desktop VM, evidenze e possibili colli di bottiglia](docs/reports/2026-10-25-explorer-opening.md)
+- [Report: pipeline grafica desktop e finestra individuale, tempi GPU, code e presentazione](docs/reports/2026-10-25-graphics-pipeline.md)
 - [TODO: feature, correzioni, stati e criteri di completamento](docs/TODO.md)
 - [Requisiti, base attuale e prossimi passi](docs/RESTART_PLAN.md)
 - [Implementazione attuale, build e manutenzione](docs/IMPLEMENTATION.md)

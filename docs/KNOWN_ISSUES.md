@@ -20,7 +20,7 @@ Il ciclo RAM protetto 4→2→4 GiB con dati conservati resta la qualifica prece
 
 **Aggiornamento0.2.3:** RAM massima come unico controllo principale, iniziale in Avanzate. Avvio utente1 GB seguito da hotplug fino a4 GB e un nuovo accesso automatico protetto verificati; SYS-004 chiuso, SYS-001 ricomparso. CUA continua a fermarsi sul pannello: DiagnosticReports conferma crash di SkyComputerUseService in Array.remove(at:); TODO-019 mantiene il limite di qualifica UI. [Evidenze](VERIFICATION.md#25-ottobre--ram-semplificata-e-accesso-windows).
 
-**Richiesta prestazionale corrente:** analisi Explorer nel desktop consegnata, PERF-001 riprodotto; nessuna correzione applicata. Tempi visivi e limiti nel [rapporto](reports/2026-10-25-explorer-opening.md). TODO-004/005/006/007 distinguono le prime misure dalle attribuzioni e dai tempi GPU ancora mancanti.
+**Richiesta prestazionale corrente:** [analisi pipeline desktop/singola app](reports/2026-10-25-graphics-pipeline.md) consegnata con timestamp GPU/presentazione frontend, scarti e limiti. Diagnostica solo nella build temporanea sulla VM main; app ordinaria conservata. TODO-004/007 aperte per guest/runtime mancanti; nessuna ottimizzazione. PERF-001 resta distinto, WIN-004 focus riprodotto.
 
 ## Come aggiornare il registro
 
@@ -32,6 +32,8 @@ Il ciclo RAM protetto 4→2→4 GiB con dati conservati resta la qualifica prece
 ## Problemi pertinenti al desktop
 
 ### PERF-001 — Explorer nel desktop compare prima del contenuto completo
+
+- **Seguito pipeline25 ottobre:** frontend temporaneo sulla VM principale: tratto desktop ingresso→presentazione mediano41,498 ms, GPU copy+draw0,476 ms nel campione1920×1280. Non sono tempi di apertura/produzione Explorer e non spiegano da soli i secondi del rapporto precedente. Nessuna causa o correzione chiusa. [Report pipeline](reports/2026-10-25-graphics-pipeline.md), [verifica](VERIFICATION.md#25-ottobre--pipeline-grafica-con-timestamp-gpu-e-presentazione).
 
 - **Stato:** difetto prestazionale riprodotto nella main0.2.3; analisi consegnata, nessuna ottimizzazione applicata. Percorso desktop Native3D, senza usare finestre integrate/WGC.
 - **Verificato:** Home con osservazione leggera: finestra Win32 rilevata1,39 s, primo frame vicino al riferimento completo entro5,41 s. Home con profiler CPU host:3,25/11,06 s. Questo PC, nuovo processo:3,63/9,71 s, poi ulteriore caricamento fino a circa13,20 s. Condizioni diverse, non una distribuzione statistica o un A/B controllato.
@@ -165,10 +167,20 @@ Queste voci conservano limiti non risolti, senza richiedere di ripristinare codi
 
 ### WIN-002 — Resize individuale in attesa del frame
 
+- **Rilievo diagnostico25 ottobre:** osservati callback Metal con `presentedTime=0`; il callback funzionale di readiness in WindowRenderer non verifica questo valore prima di chiamare onPresented. È un limite del criterio «già presentato», distinto dalle durate GPU e da un errore del command buffer. Non dimostrata la causa dei precedenti guasti, nessuna correzione del gate applicata. Richiedere una presentazione positiva nella futura qualifica. [Report](reports/2026-10-25-graphics-pipeline.md), [verifica](VERIFICATION.md#25-ottobre--pipeline-grafica-con-timestamp-gpu-e-presentazione).
+
 - **Seguito launcher:** riaprendo il frontend, primo frame valido/già presentato ma attesa ancora attiva con requiredPresentationID2 e presentedID1. Metadati, conferma display e presentazione ora riconciliati in entrambi gli ordini; il solo timeout non alza l’ID richiesto. La riapertura corretta completa le due finestre già dal primo frame presentato, senza nuovo avvio delle app. È un caso distinto dal recupero WGC di GFX-003, non una sua chiusura. [Evidenze](VERIFICATION.md#25-ottobre--launcher-windows-cache-persistente-e-limite-n1).
 - **Stato:** caso corretto nel clone, commit 36378af; distribuzione ordinaria non qualificata. Il worker pubblica il frame già disponibile nel nuovo rettangolo prima di ricreare il pool WGC.
 - **Prossimo passo / chiusura, se ripreso:** breve verifica del percorso individuale nel pacchetto destinato all’utente; non confondere questo guasto con il resize del desktop corrente.
 - **Evidenze:** [frame valido al resize](VERIFICATION.md#24-ottobre--gate-pronto-prima-delluso-e-frame-valido-al-resize).
+
+### WIN-004 — Finestra Mac visibile ma app Windows non attiva
+
+- **Stato:** aperto, riprodotto nella build diagnostica sulla IoT principale; app installata non modificata e causa non isolata.
+- **Verificato:** avvio Notepad dal launcher, immagine nella finestra Mac ma testo rifiutato dal controllo focus con messaggio «L’app non è attiva in Windows». «Apri Windows», click nell’editor e ritorno alla finestra Mac ripristinano la scrittura. Il recupero non è una correzione dell’attivazione.
+- **Prossimo passo:** correlare richiesta attivazione, foreground HWND guest e focus della finestra Mac, preservando il blocco dell’input verso un’app diversa.
+- **Chiusura:** apertura/ripresa dalla main porta alla corretta app attiva e riceve input senza passaggio manuale nel desktop; nessun input deviato o documento duplicato. TODO-017/011.
+- **Evidenze:** [report pipeline](reports/2026-10-25-graphics-pipeline.md), [diario](VERIFICATION.md#25-ottobre--pipeline-grafica-con-timestamp-gpu-e-presentazione).
 
 ### TRN-001 — Valutazione IVSHMEM
 

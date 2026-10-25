@@ -11,16 +11,17 @@ private final class DrawableAccess:@unchecked Sendable {
     private let layer:CAMetalLayer
     private let work=DispatchQueue(label:"perpendicular.drawable.acquire",qos:.userInteractive)
     init(_ layer:CAMetalLayer){self.layer=layer}
-    func request(_ completed:@escaping @MainActor @Sendable ((any CAMetalDrawable)?)->Void){
+    func request(traceID:String,_ completed:@escaping @MainActor @Sendable ((any CAMetalDrawable)?)->Void){
         work.async { [self] in
+            PipelineTrace.record("drawable-call",traceID)
             let drawable=autoreleasepool{layer.nextDrawable()}
+            PipelineTrace.record("drawable-return",traceID,["available":drawable != nil])
             Task { @MainActor in completed(drawable) }
         }
     }
 }
 
-/// Presents one window. The transport still supplies CPU BGRA pixels; this
-/// renderer does not turn that transport into a shared guest/host GPU surface.
+/// Presents a desktop lease, immutable GPU window image or legacy pixel image.
 @MainActor
 final class WindowRenderer {
     let layer=CAMetalLayer()
@@ -46,6 +47,9 @@ final class WindowRenderer {
     private var targetScale=1.0
     private lazy var drawableAccess=DrawableAccess(layer)
     private var reportedSources=Set<String>()
+    private let traceRenderer=UUID().uuidString
+    private var traceDraw:UInt64=0
+    private var traceSource=""
     var onError:((String)->Void)?
     var onPresented:((UInt64)->Void)?
 
@@ -101,12 +105,15 @@ final class WindowRenderer {
         dirty=true;draw()
     }
     func present(_ pixels:Data,width:Int,height:Int,stride:Int?=nil,presentationID:UInt64=0){
+        traceSource=""
         self.presentationID=presentationID
         external=nil;shared=nil;nativeCache=false
         self.pixels=pixels;pixelStride=stride ?? width*4;size=NSSize(width:width,height:height)
         revision &+= 1;dirty=true;draw()
     }
     func present(_ surface:GuestFrameSurface,presentationID:UInt64=0){
+        traceSource=surface.traceID
+        PipelineTrace.record("renderer-receive",traceSource,["renderer":traceRenderer,"presentationID":presentationID])
         self.presentationID=presentationID
         guard surface.texture.device.registryID == device.registryID else{onError?("The graphics devices do not match.");return}
         external=nil;nativeCache=false;pixels=Data();texture=nil;shared=surface
@@ -114,6 +121,8 @@ final class WindowRenderer {
         dirty=true;draw()
     }
     func present(_ frame:NativeDisplayFrame){
+        traceSource=frame.traceID
+        PipelineTrace.record("renderer-receive",traceSource,["renderer":traceRenderer])
         guard frame.texture.device.registryID == device.registryID else{onError?("The graphics devices do not match.");return}
         external=frame;shared=nil;pixels=Data();size=NSSize(width:frame.texture.width,height:frame.texture.height)
         dirty=true;draw()
@@ -128,7 +137,10 @@ final class WindowRenderer {
         if layer.contentsScale != targetScale {layer.contentsScale=targetScale}
         if layer.drawableSize != targetDrawableSize {layer.drawableSize=targetDrawableSize}
         drawing=true
-        drawableAccess.request { [weak self] drawable in
+        traceDraw &+= 1
+        let requestID="\(traceRenderer):\(traceDraw)"
+        PipelineTrace.record("drawable-request",requestID)
+        drawableAccess.request(traceID:requestID) { [weak self] drawable in
             guard let self else{return}
             guard let drawable else{
                 self.drawing=false
@@ -136,7 +148,7 @@ final class WindowRenderer {
                 return
             }
             self.drawableFailures=0
-            self.render(drawable)
+            self.render(drawable,requestID:requestID)
         }
     }
     private func retryDrawable(){
@@ -157,7 +169,7 @@ final class WindowRenderer {
             self.draw()
         }
     }
-    private func render(_ drawable:any CAMetalDrawable){
+    private func render(_ drawable:any CAMetalDrawable,requestID:String){
         var submitted=false
         defer{if !submitted {drawing=false}}
         // clear/resize/new frames can run during acquisition. Select the source
@@ -171,6 +183,8 @@ final class WindowRenderer {
         let frameSurface=shared
         let nativeSurface=lease != nil || nativeCache
         let sourceKind=nativeSurface ? "native-surface":frameSurface != nil ? "shared-buffer":"cpu"
+        let sourceID=traceSource
+        PipelineTrace.record("render-select",requestID,["sourceID":sourceID,"sourceKind":sourceKind,"width":width,"height":height,"drawableWidth":drawable.texture.width,"drawableHeight":drawable.texture.height])
         let sampledTexture:any MTLTexture
         if let frameSurface {
             sampledTexture=frameSurface.texture
@@ -216,7 +230,8 @@ final class WindowRenderer {
         encoder.endEncoding()
         if lease != nil {nativeCache=true;external=nil}
         dirty=drawableSize != targetDrawableSize || layer.contentsScale != targetScale
-        drawable.addPresentedHandler { [weak self] _ in
+        drawable.addPresentedHandler { [weak self] presented in
+            PipelineTrace.record("drawable-presented",requestID,["sourceID":sourceID,"presentedTime":presented.presentedTime])
             Task{@MainActor [weak self] in
                 guard let self,self.size == NSSize(width:width,height:height),
                       self.targetDrawableSize == drawableSize,self.targetScale == renderedScale else{return}
@@ -225,6 +240,7 @@ final class WindowRenderer {
         }
         command.present(drawable)
         command.addCompletedHandler { [weak self,lease,frameSurface] buffer in
+            PipelineTrace.record("render-complete",requestID,["sourceID":sourceID,"gpuStart":buffer.gpuStartTime,"gpuEnd":buffer.gpuEndTime,"status":buffer.status.rawValue])
             // The producer image has been copied into our own texture and every
             // GPU read is complete. Do not wait for Metal to release this block.
             lease?.finishReading()
@@ -247,6 +263,6 @@ final class WindowRenderer {
                 if self.dirty {self.draw()}
             }
         }
-        submitted=true;command.commit()
+        submitted=true;PipelineTrace.record("render-commit",requestID,["sourceID":sourceID]);command.commit()
     }
 }

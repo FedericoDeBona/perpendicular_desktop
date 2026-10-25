@@ -343,7 +343,7 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
               let command=request["command"] as? String else {
             localResponse(["ok":false,"error":"Expected a JSON command."],reply:reply);return
         }
-        let allowed:Set<String>=["status","memory_status","execute","display_info","driver_info","graphics_info","geometry_snapshot","application_status","process_list","process_terminate"]
+        let allowed:Set<String>=["status","memory_status","execute","display_info","driver_info","graphics_info","geometry_snapshot","application_status","process_list","process_terminate","pipeline_clock"]
         guard allowed.contains(command) else {
             localResponse(["ok":false,"error":"This local command is not supported."],reply:reply);return
         }
@@ -370,6 +370,15 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
         }
         guard connected,let bridge else {
             localResponse(["ok":false,"error":"Windows is not connected."],reply:reply);return
+        }
+        if command == "pipeline_clock" {
+            let started=ProcessInfo.processInfo.systemUptime
+            bridge.command("trial_clock",timeout:.seconds(2)){[weak self] result in
+                switch result {
+                case .success(let value):self?.localResponse(["ok":true,"result":["hostBefore":started,"hostAfter":ProcessInfo.processInfo.systemUptime,"guest":value]],reply:reply)
+                case .failure(let error):self?.localResponse(["ok":false,"error":error.localizedDescription],reply:reply)
+                }
+            };return
         }
         if command == "application_status" || command == "process_list" || command == "process_terminate" {
             let capability=command == "application_status" ? "applicationStatus":"processControl"

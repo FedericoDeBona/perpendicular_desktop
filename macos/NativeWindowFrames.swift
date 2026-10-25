@@ -3,6 +3,39 @@ import Darwin
 import Metal
 import CryptoKit
 
+/// Opt-in, bounded diagnostic trace. No titles, pixels or input text are logged.
+/// A new private file is required; an existing file is never overwritten.
+final class PipelineTrace:@unchecked Sendable {
+    static let shared=PipelineTrace()
+    private let lock=NSLock()
+    private var count=0
+    private var previousCostMilliseconds=0.0
+    private let started=ProcessInfo.processInfo.systemUptime
+    private let fd:Int32
+    private init(){
+        if let path=ProcessInfo.processInfo.environment["PERPENDICULAR_PIPELINE_TRACE"],path.hasPrefix("/") {
+            fd=Darwin.open(path,O_WRONLY|O_CREAT|O_EXCL|O_NOFOLLOW,0o600)
+        }else{fd = -1}
+    }
+    static func record(_ event:String,_ id:String,_ fields:[String:Any]=[:]){
+        let trace=shared
+        guard trace.fd>=0 else{return}
+        let now=ProcessInfo.processInfo.systemUptime
+        trace.lock.lock();defer{trace.lock.unlock()}
+        guard trace.count<12000,now-trace.started<360 else{return}
+        var row=fields;row["event"]=event;row["id"]=id;row["hostSeconds"]=now
+        row["previousRecordMilliseconds"]=trace.previousCostMilliseconds
+        guard let data=try? JSONSerialization.data(withJSONObject:row,options:[.sortedKeys]) else{return}
+        let bytes=data+Data([10])
+        bytes.withUnsafeBytes{_ = Darwin.write(trace.fd,$0.baseAddress!,bytes.count)}
+        trace.count+=1
+        trace.previousCostMilliseconds=(ProcessInfo.processInfo.systemUptime-now)*1000
+    }
+    static func frameID(_ header:[String:Any])->String {
+        "wgc:\(header["window"] ?? "?"):\(header["generation"] ?? "?"):\(header["sequence"] ?? "?")"
+    }
+}
+
 /// Receives descriptors from the matched renderer; pixel traffic stays on GPU.
 final class NativeWindowFrames:@unchecked Sendable {
     static let shared=NativeWindowFrames()
@@ -95,10 +128,13 @@ final class NativeWindowFrames:@unchecked Sendable {
     }
     func copy(_ header:[String:Any],completion:@escaping @Sendable (GuestFrameSurface?,[String:Any])->Void){
         let packet=GuestPacket(header:header)
+        let traceID=PipelineTrace.frameID(header)
+        PipelineTrace.record("wgc-header",traceID,header.filter{["sequence","generation","width","height","guestCaptureSelectedQPC","guestGpuSubmitMilliseconds","guestGpuWaitMilliseconds","guestReferenceReadback"].contains($0.key)})
         queue.async{[self] in
             let header=packet.header
             receive()
             let started=ProcessInfo.processInfo.systemUptime
+            PipelineTrace.record("wgc-copy-start",traceID)
             guard let w=header["width"] as? Int,let h=header["height"] as? Int,let stride=header["stride"] as? Int,
                   let marker=header["gpuMarker"] as? String,marker.count==64,
                   marker.utf8.allSatisfy({(48...57).contains($0)||(97...102).contains($0)}),
@@ -110,7 +146,9 @@ final class NativeWindowFrames:@unchecked Sendable {
                   let command=commands?.makeCommandBuffer(),let blit=command.makeBlitCommandEncoder() else{var diagnostic=header;diagnostic["cachedResources"]=resources.map{["width":$0.width,"height":$0.height,"stride":$0.stride]};self.fail("resource-match-or-allocation",details:diagnostic);NativeWindowTrace.record("gpu-rejected",diagnostic);completion(nil,[:]);return}
             blit.copy(from:resource.texture,sourceSlice:0,sourceLevel:0,sourceOrigin:MTLOrigin(x:0,y:0,z:0),sourceSize:MTLSize(width:w,height:h,depth:1),
                       to:output.texture,destinationSlice:0,destinationLevel:0,destinationOrigin:MTLOrigin(x:0,y:0,z:0));blit.endEncoding()
+            output.traceID=traceID
             command.addCompletedHandler{buffer in
+                PipelineTrace.record("wgc-copy-complete",traceID,["gpuStart":buffer.gpuStartTime,"gpuEnd":buffer.gpuEndTime,"status":buffer.status.rawValue])
                 let header=packet.header
                 guard buffer.status == .completed else{self.fail();NativeWindowTrace.record("gpu-rejected",header);completion(nil,[:]);return}
                 var metrics:[String:Any]=["hostGpuCopyMilliseconds":(ProcessInfo.processInfo.systemUptime-started)*1000,"hostGpuSourceMatched":true]
@@ -123,7 +161,7 @@ final class NativeWindowFrames:@unchecked Sendable {
                 // After this GPU copy finishes the guest may reuse its source.
                 // Metal presentation reads only our separate immutable output.
                 withExtendedLifetime(resource){completion(output,metrics)}
-            };command.commit()
+            };PipelineTrace.record("wgc-copy-commit",traceID);command.commit()
         }
     }
 }
