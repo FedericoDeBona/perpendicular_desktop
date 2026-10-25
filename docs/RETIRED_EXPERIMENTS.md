@@ -30,3 +30,7 @@ La nuova richiesta di launcher riprende soltanto il percorso immagini GPU già p
 ## 25 ottobre — Pacing del frontend a richiesta (non distribuito)
 
 Due varianti CAMetalDisplayLink e una di presentazione con transazione UI sono escluse dalla0.2.4: troppi timestamp di presentazione zero oppure nessun beneficio qualificato/primo frame individuale bianco. Non è una conclusione generale sulle API Apple. Sorgenti e raw conservati privatamente in Research/Graphics-Latency-20261025; presenter precedente e VSync attivo mantenuti. La0.2.4 distribuisce soltanto consegna diretta alla UI e riduzione delle pubblicazioni di stato invariato. [Esiti e limiti](reports/2026-10-25-graphics-latency-update.md), [verifica](VERIFICATION.md#25-ottobre--tentativi-di-riduzione-latenza-e-ui-024).
+
+## 25 ottobre — Adattatori misti per N+1 (non distribuiti)
+
+GPU3D + VirtIO2D con DOD302 ARM64 firmato provati nella copia IoT: selezione mirata del driver coinvolge entrambi gli adattatori, perdendo il3D oppure lasciando codice43 sul secondo. Sottosistemi PCI distinti nella candidata host non bastano. Frontend/patch QEMU non promossi, copia spenta; sorgenti ed evidenze in Research/Multimonitor-20261025. TODO-001/WIN-003 restano bloccati nel perimetro verificato, non impossibili in generale. [Diario e ripristino main](VERIFICATION.md#25-ottobre--todo-001-prova-di-adattatori-misti-protetti).

@@ -20,7 +20,7 @@ Il ciclo RAM protetto 4→2→4 GiB con dati conservati resta la qualifica prece
 
 **Aggiornamento0.2.3:** RAM massima come unico controllo principale, iniziale in Avanzate. Avvio utente1 GB seguito da hotplug fino a4 GB e un nuovo accesso automatico protetto verificati; SYS-004 chiuso, SYS-001 ricomparso. CUA continua a fermarsi sul pannello: DiagnosticReports conferma crash di SkyComputerUseService in Array.remove(at:); TODO-019 mantiene il limite di qualifica UI. [Evidenze](VERIFICATION.md#25-ottobre--ram-semplificata-e-accesso-windows).
 
-**Richiesta prestazionale corrente:** correzione UI circoscritta installata/verificata nella0.2.4 (notifiche ripetute evitate e consegna diretta dei frame). Tentativi di ridurre l’attesa di presentazione respinti; presenter precedente conservato. Outlier UI32 ms e attribuzione guest/runtime ancora aperti, nessun beneficio di latenza inventato. [Esito pratico](reports/2026-10-25-graphics-latency-update.md), [verifica](VERIFICATION.md#25-ottobre--tentativi-di-riduzione-latenza-e-ui-024). PERF-001/WIN-004/GFX-007 non chiusi.
+**Intervento prestazionale precedente:** correzione UI circoscritta installata/verificata nella0.2.4 (notifiche ripetute evitate e consegna diretta dei frame). Tentativi di ridurre l’attesa di presentazione respinti; presenter precedente conservato. Outlier UI32 ms e attribuzione guest/runtime ancora aperti, nessun beneficio di latenza inventato. [Esito pratico](reports/2026-10-25-graphics-latency-update.md), [verifica](VERIFICATION.md#25-ottobre--tentativi-di-riduzione-latenza-e-ui-024). PERF-001/WIN-004/GFX-007 non chiusi.
 
 ## Come aggiornare il registro
 
@@ -194,6 +194,8 @@ Queste voci conservano limiti non risolti, senza richiedere di ripristinare codi
 ## Monitor e compatibilità
 
 ### WIN-003 — Monitor N+1 e drag fra scale diverse
+
+- **Nuova prova protetta:** QEMU accetta3D+2D; DOD302 ARM64 Microsoft-signed si carica nella copia con Secure Boot. DiInstallDevice mirato al secondo associa però DOD anche al primo, perdendo l’accelerazione; il ripristino3D sul primo coinvolge entrambi e lascia il secondo in codice43. Candidata host con sottosistemi1100/1101 distinti: stesso esito. SetupAPI conserva la riconfigurazione dell’altro dispositivo nella stessa operazione; non è una diagnosi di impossibilità generale del binding per istanza. Nessuna coppia di uscite estese qualificata, nessun trasferimento/DPI provato. Copia spenta, main conservata e riavviata con protezioni verificate. [Evidenze](VERIFICATION.md#25-ottobre--todo-001-prova-di-adattatori-misti-protetti).
 
 - **Stato:** richiesto nuovamente, non disponibile nella base attuale. Desktop con una sola uscita; secondo monitor, DPI e trasferimenti non qualificati. Direzione concordata: monitor Windows corrispondenti ai Mac più area «Apri Windows» riservata e pulsanti debug; non è isolamento dei desktop Windows.
 - **Vincolo verificato il 25 ottobre:** il KMD ufficiale ha MAX_CHILDREN=1. La seconda GPU 3D non supporta hotplug e il QEMU corrente rifiuta due device virtio-gpu-gl anche all’avvio (prova in pausa senza dischi). Aumentare soltanto max_outputs non basta; nessun secondo monitor attivato, nessuna riduzione delle protezioni e nessun display fittizio dichiarato pronto.
