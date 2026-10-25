@@ -1,0 +1,50 @@
+{
+  "fill": {
+    "automatic-gradient": "extended-srgb:0.08235,0.10196,0.14510,1.00000"
+  },
+  "groups": [
+    {
+      "layers": [
+        {
+          "image-name": "base.svg",
+          "name": "Base · vetro cobalto",
+          "fill": {
+            "solid": "extended-srgb:0.30588,0.48627,0.99608,1.00000"
+          }
+        }
+      ],
+      "name": "02 · Base",
+      "shadow": {
+        "kind": "neutral",
+        "opacity": 0.28
+      },
+      "translucency": {
+        "enabled": true,
+        "value": 0.18
+      }
+    },
+    {
+      "layers": [
+        {
+          "image-name": "stem.svg",
+          "name": "Stelo · vetro cobalto",
+          "fill": {
+            "solid": "extended-srgb:0.30588,0.48627,0.99608,1.00000"
+          }
+        }
+      ],
+      "name": "01 · Stelo",
+      "shadow": {
+        "kind": "neutral",
+        "opacity": 0.28
+      },
+      "translucency": {
+        "enabled": true,
+        "value": 0.18
+      }
+    }
+  ],
+  "supported-platforms": {
+    "squares": "shared"
+  }
+}

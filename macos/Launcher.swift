@@ -85,7 +85,7 @@ struct Launcher:View {
     private var sidebar:some View {
         VStack(alignment:.leading,spacing:0){
             HStack(spacing:10){
-                Image(systemName:"square.stack.3d.up.fill").font(.system(size:22,weight:.medium)).foregroundStyle(.indigo)
+                Image("BrandMark").resizable().interpolation(.high).scaledToFit().frame(width:28,height:28)
                 Text("Perpendicular").font(.system(size:14,weight:.semibold))
             }.padding(.horizontal,20).padding(.top,30).padding(.bottom,34)
             VStack(spacing:5){

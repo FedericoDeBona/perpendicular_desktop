@@ -15,6 +15,7 @@ xcrun swiftc -swift-version 6 -O -parse-as-library -target arm64-apple-macosx14.
     macos/WindowGeometry.swift macos/WindowRenderer.swift macos/WindowTransitionView.swift macos/ApplicationContent.swift macos/ApplicationWindow.swift macos/LauncherLibrary.swift macos/Launcher.swift macos/GuestApplicationState.swift macos/App.swift \
     -o "$app/Contents/MacOS/Perpendicular"
 cp "$guest" guest/install.ps1 guest/install.cmd "$app/Contents/Resources/Guest/"
+zsh scripts/package-app-icon.sh "$app"
 if [[ "${SKIP_RUNTIME:-0}" != 1 ]]; then
     python3 scripts/copy-main-runtime.py --from-app "${PERPENDICULAR_RUNTIME_APP:-/Applications/Perpendicular.app}" --to-app "$app"
 fi

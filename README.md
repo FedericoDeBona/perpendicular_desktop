@@ -4,7 +4,9 @@ Launcher Mac delle app Windows di una VM locale, con accesso al desktop Windows 
 
 Prima di iniziare o riprendere leggere il [registro dei problemi](docs/KNOWN_ISSUES.md), poi il [piano di lavoro](docs/RESTART_PLAN.md) e la [TODO da mantenere obbligatoriamente aggiornata](docs/TODO.md). Il lavoro prosegue su `main` dalla base scelta dall’utente il 25 ottobre 2026.
 
-La base principale è **Perpendicular 0.2.1**, installata in `/Applications/Perpendicular.app`, con collegamento `Perpendicular.app` sul Desktop. App, strumenti di controllo e build selezionano per default la VM in `~/Library/Application Support/Perpendicular Memory IoT`.
+La base principale è **Perpendicular 0.2.2**, installata in `/Applications/Perpendicular.app`, con collegamento `Perpendicular.app` sul Desktop. App, strumenti di controllo e build selezionano per default la VM in `~/Library/Application Support/Perpendicular Memory IoT`.
+
+La0.2.2 integra l’icona finale «Carbone e cobalto»: documento Icon Composer compilato con i due livelli, fallback ICNS e simbolo nel launcher. Icona e versione osservate nel Finder dopo installazione; nessun avvio della VM per questa modifica.
 
 La sezione Impostazioni sostituisce il pannello dei processi. Permette anche RAM iniziale di1 GB: è una configurazione disponibile per la prova dell’utente, non un avvio già qualificato. I valori salvati restano separati dalla configurazione corrente finché Windows non è spento; il salvataggio non riavvia né riduce la memoria della sessione aperta. Catalogo installato osservato; verifica automatica completa del pannello interrotta da errore dello strumento UI. [Verifiche e limiti](docs/VERIFICATION.md#25-ottobre--catalogo-unico-e-impostazioni-cpuram).
 

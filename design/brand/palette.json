@@ -1,0 +1,86 @@
+{
+  "name": "Perpendicular / Carbone e cobalto",
+  "version": 3,
+  "colorSpace": "sRGB",
+  "colors": {
+    "carbon": "#151A23",
+    "carbonRaised": "#202632",
+    "cobalt": "#4E7CFE",
+    "cobaltDeep": "#2459D6",
+    "cobaltLight": "#B8CAFF",
+    "paper": "#F4F6F9",
+    "white": "#FFFFFF",
+    "ink": "#171C26",
+    "muted": "#687386",
+    "accent": "#2459D6",
+    "accentDark": "#A9BEFF",
+    "selectionLight": "#DDE7FF",
+    "selectionDark": "#293C68",
+    "lineLight": "#DCE1E9",
+    "lineDark": "#363F4D",
+    "successLight": "#237454",
+    "successDark": "#8BDCAE",
+    "warningLight": "#8A580A",
+    "warningDark": "#FFD083",
+    "errorLight": "#B5374D",
+    "errorDark": "#FF9BAB"
+  },
+  "themes": {
+    "light": {
+      "background": "paper",
+      "surface": "white",
+      "textPrimary": "ink",
+      "textSecondary": "muted",
+      "accent": "accent",
+      "onAccent": "white",
+      "selection": "selectionLight",
+      "separator": "lineLight",
+      "success": "successLight",
+      "warning": "warningLight",
+      "error": "errorLight"
+    },
+    "dark": {
+      "background": "carbon",
+      "surface": "carbonRaised",
+      "textPrimary": "paper",
+      "textSecondary": "cobaltLight",
+      "accent": "accentDark",
+      "onAccent": "carbon",
+      "selection": "selectionDark",
+      "separator": "lineDark",
+      "success": "successDark",
+      "warning": "warningDark",
+      "error": "errorDark"
+    }
+  },
+  "icon": {
+    "symbol": "cobalt",
+    "background": "carbon",
+    "darkSymbol": "cobalt",
+    "rotationDegrees": -45,
+    "separateStrokes": true,
+    "layerOrder": [
+      "base",
+      "stem"
+    ],
+    "glass": {
+      "stem": {
+        "enabled": true,
+        "translucency": 0.18,
+        "shadowOpacity": 0.28
+      },
+      "base": {
+        "enabled": true,
+        "translucency": 0.18,
+        "shadowOpacity": 0.28
+      }
+    },
+    "backgroundTreatment": "Gradiente nativo carbone, come nel disegno scelto.",
+    "material": "Due livelli indipendenti dello stesso vetro cobalto; lo stelo si sovrappone alla base."
+  },
+  "usage": {
+    "primary": "Cobalto per azioni primarie e stati attivi.",
+    "surfaces": "Carta neutra in modalità chiara; carbone in modalità scura.",
+    "restraint": "Usare il cobalto come unico accento cromatico dominante; mantenere il resto neutro."
+  }
+}

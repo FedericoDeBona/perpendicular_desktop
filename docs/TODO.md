@@ -4,7 +4,7 @@ Ultimo aggiornamento: **25 ottobre 2026**. Responsabile dell'aggiornamento: l'ag
 
 Questo è l'elenco operativo delle attività. [KNOWN_ISSUES.md](KNOWN_ISSUES.md) conserva diagnosi e dettagli dei difetti, [VERIFICATION.md](VERIFICATION.md) le evidenze e i fallimenti, [RESTART_PLAN.md](RESTART_PLAN.md) la base operativa. Gli ID qui sotto sono stabili e rimandano ai problemi esistenti: non sostituiscono né duplicano il registro dei difetti.
 
-**Passaggio attuale: implementazione esplicitamente richiesta di TODO-019, catalogo unico e impostazioni VM.** Le precedenti revisioni della lista erano soltanto documentali. Le altre attività restano nei rispettivi stati; la prova di avvio con1 GB è riservata all'utente, non eseguita automaticamente.
+**Ultimi interventi: TODO-019 implementato con qualifica UI parziale; TODO-020 applicato e verificato nella0.2.2 su richiesta esplicita.** Le precedenti revisioni della lista erano soltanto documentali. Le altre attività restano nei rispettivi stati; la prova di avvio con1 GB è riservata all'utente, non eseguita automaticamente.
 
 ## Regole di aggiornamento e stati
 
@@ -31,7 +31,7 @@ Priorità 1–4 corrispondenti alla richiesta iniziale dell'utente; TODO-017/018
 | TODO-002 | Geometria, input e finestre Mac/Windows 1:1 | DA FARE; correzioni parziali precedenti | GFX-006, WIN-001/002/003; estensione multischermo dipende da 001. |
 | TODO-003 | Stessi file utente su Mac e Windows, senza copie | DA FARE; virtio-fs candidato, combinazione non qualificata | Backend macOS, client ARM64 firmato, compatibilità RAM. |
 | TODO-019 | Catalogo unico, recenti in alto e impostazioni VM al posto dei processi | IN CORSO: implementato/installato0.2.1, qualifica UI parziale | Catalogo osservato; configurazione verificata su fixture; verifica interattiva pannello interrotta da errore CUA. |
-| TODO-020 | Integrare l'icona Perpendicular «Carbone e cobalto» | DA FARE; asset ricevuti dalla chat design | Documento Icon Composer e fallback ICNS pronti; non ancora nel bundle installato. |
+| TODO-020 | Integrare l'icona Perpendicular «Carbone e cobalto» | FATTO nella0.2.2 | Icona nativa/fallback inclusi, due gruppi verificati nel bundle e marchio/versione osservati nel Finder. |
 | TODO-017 | Scorciatoie e comandi Mac nelle app Windows e in Perpendicular | DA FARE per completamento e qualifica main; base parziale presente | Cmd+C/V/X/T/Q e altri comandi comuni; destinazione secondo focus/contesto. |
 | TODO-018 | Copia/incolla di testo e file Mac ↔ Windows | DA FARE; testo già implementato e provato storicamente, file mancanti | Entrambe le direzioni, desktop e singole app; collegamento con TODO-003. |
 | TODO-004 | Tutti i tempi della pipeline grafica, desktop e singola app | DA FARE; strumentazione esistente incompleta | Copertura per stadio, correlazione e limiti di misura. |
@@ -100,11 +100,11 @@ L'integrazione dei percorsi condivisi deve comprendere anche i riferimenti ai fi
 
 ## TODO-020 — Icona Perpendicular «Carbone e cobalto»
 
-**Stato: DA FARE; consegna asset ricevuta dalla chat design il25 ottobre.** Integrare al prossimo aggiornamento delle icone il disegno finale, mantenendo simbolo originale e due gruppi separati base/stelo, dello stesso cobalto con Liquid Glass su fondo carbone. L'app0.2.1 installata non incorpora ancora questa consegna.
+**Stato: FATTO nella0.2.2, dopo ordine esplicito di applicare le icone.** Disegno finale nel bundle principale, simbolo originale con gruppi Base/Stelo distinti dello stesso cobalto su carbone. La build compila il documento Icon Composer in Assets.car e include ICNS statico e PNG del marchio per il launcher; CFBundleIconFile/CFBundleIconName allineati al compilatore.
 
-Riferimenti locali: documento pronto `/Users/federico/Desktop/Perpendicular Design/Perpendicular.icon`; sorgenti `design/brand/Perpendicular.icon`, palette e guida in `design/brand/`. PNG, ICNS e palette esportati nella cartella Desktop indicata. Il fallback ICNS è statico; la struttura dei materiali dinamici rimane nel documento nativo. Sorgenti presenti al controllo di sola lettura, non modificati o aggiunti al commit di questo promemoria.
+Sorgenti ora versionati in `design/brand/Perpendicular.icon`, palette e guida in `design/brand/`; consegna originale nel Desktop preservata. `scripts/package-app-icon.sh` è parte della build ordinaria. Gli output compilati/esportati restano fuori Git.
 
-**Prossimo passo:** integrare icona e metadati nel confezionamento del bundle Mac, verificando il percorso nativo Icon Composer e il fallback compatibile con il minimo macOS supportato. Conservare i due gruppi, colori e geometria ricevuti; non dichiarare materiale dinamico ottenuto con il solo ICNS. **Fatto quando:** nuova build installata con il marchio corretto in Finder/Dock e una verifica visiva pertinente; documentare separatamente l'eventuale supporto limitato al fallback. Nessun intervento VM/driver richiesto. [Consegna registrata](VERIFICATION.md#25-ottobre--consegna-asset-carbone-e-cobalto).
+**Verificato:** build e firma deep/strict; assetutil mostra i due gruppi nativi e tre stack per gli aspetti supportati. Finder, informazioni dell’app installata: marchio corretto e versione0.2.2 visibili. Fallback ICNS e PNG inclusi; verifica su macOS precedenti e Dock con app in esecuzione non effettuata. Il simbolo del launcher è confezionato, senza nuova apertura del frontend: VM e app erano già spenti e sono rimasti spenti. Nessuna modifica della configurazione VM o del runtime. [Evidenze](VERIFICATION.md#25-ottobre--icona-carbone-e-cobalto-applicata).
 
 ## TODO-017 — Comandi e scorciatoie Mac nelle app Windows
 

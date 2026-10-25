@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <title>Perpendicular — simbolo originale, inclinato di 45 gradi</title>
+  <g transform="translate(-51 -51) rotate(-45 512 512)">
+    <path fill="#4E7CFE" d="M492 258H532Q554 258 554 280V642H716Q738 642 738 664V704Q738 726 716 726H308Q286 726 286 704V664Q286 642 308 642H470V280Q470 258 492 258Z"/>
+  </g>
+</svg>
