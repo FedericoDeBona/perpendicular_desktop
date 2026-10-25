@@ -8,7 +8,7 @@ Comandi Mac e appunti trasversali testo/file sono ora requisiti espliciti in TOD
 
 ## Base corrente e priorità
 
-**Base principale dopo la pulizia del 25 ottobre:** `/Applications/Perpendicular.app`, ora versione0.2.4, collegamento `Perpendicular.app` sul Desktop. App, build e strumenti selezionano per default la IoT0795218c in `~/Library/Application Support/Perpendicular Memory IoT`. Driver grafico e RAM Microsoft-signed, Secure Boot/Code Integrity attivi, TESTSIGNINGfalse confermati dopo l’avvio della0.2.0; la0.2.1 ha conservato la medesima sessione Windows e il runtime. La0.2.2 applica il marchio a VM già spenta, senza avviarla. RAM automatica configurata. [Promozione e pulizia](VERIFICATION.md#25-ottobre--pulizia-definitiva-e-promozione-iot-a-base-principale).
+**Base principale dopo la pulizia del 25 ottobre:** `/Applications/Perpendicular.app`, ora versione0.2.5, collegamento `Perpendicular.app` sul Desktop. App, build e strumenti selezionano per default la IoT0795218c in `~/Library/Application Support/Perpendicular Memory IoT`. Driver grafico e RAM Microsoft-signed, Secure Boot/Code Integrity attivi, TESTSIGNINGfalse confermati dopo l’avvio della0.2.0; la0.2.1 ha conservato la medesima sessione Windows e il runtime. La0.2.2 applica il marchio a VM già spenta, senza avviarla. RAM automatica configurata. [Promozione e pulizia](VERIFICATION.md#25-ottobre--pulizia-definitiva-e-promozione-iot-a-base-principale).
 
 **Catalogo/impostazioni0.2.1:** unica pagina App con recenti in alto e catalogo completo, pannello processi rimosso, impostazioni CPU/RAM salvate per il prossimo avvio. Persistenza e applicazione dopo arresto controllate su fixture con il controller reale; nessun boot della VM a1 GB. Catalogo installato visibile, qualifica interattiva del pannello incompleta per chiusura del canale CUA, senza crash dell’app rilevato. TODO-019 conserva il limite; non è un nuovo difetto di prodotto dimostrato. [Evidenze](VERIFICATION.md#25-ottobre--catalogo-unico-e-impostazioni-cpuram).
 
@@ -21,6 +21,8 @@ Il ciclo RAM protetto 4→2→4 GiB con dati conservati resta la qualifica prece
 **Aggiornamento0.2.3:** RAM massima come unico controllo principale, iniziale in Avanzate. Avvio utente1 GB seguito da hotplug fino a4 GB e un nuovo accesso automatico protetto verificati; SYS-004 chiuso, SYS-001 ricomparso. CUA continua a fermarsi sul pannello: DiagnosticReports conferma crash di SkyComputerUseService in Array.remove(at:); TODO-019 mantiene il limite di qualifica UI. [Evidenze](VERIFICATION.md#25-ottobre--ram-semplificata-e-accesso-windows).
 
 **Intervento prestazionale precedente:** correzione UI circoscritta installata/verificata nella0.2.4 (notifiche ripetute evitate e consegna diretta dei frame). Tentativi di ridurre l’attesa di presentazione respinti; presenter precedente conservato. Outlier UI32 ms e attribuzione guest/runtime ancora aperti, nessun beneficio di latenza inventato. [Esito pratico](reports/2026-10-25-graphics-latency-update.md), [verifica](VERIFICATION.md#25-ottobre--tentativi-di-riduzione-latenza-e-ui-024). PERF-001/WIN-004/GFX-007 non chiusi.
+
+**Aggiornamento corrente0.2.5:** percorso N+1 misto protetto installato nella main, con un Mac fisico e due uscite Windows (3D riservato+DOD app). Mapping stabile/DPI app192, testo, drag, resize, dialogo e Cancel verificati nell’app canonica. Desktop3D conservato2048×1152/DPI144; non necessita corrispondenza al Mac. Il precedente tentativo di forzarne il raster fallisce1610, senza chiudere GFX-006 in generale. Tre uscite nel clone erano una prova distinta. Trasferimento fra Mac di scala diversa, cambio monitor, riserva taskbar/Snap e guasti grafici rimangono aperti. [Evidenze0.2.5](VERIFICATION.md#25-ottobre--integrazione-n1-e-distribuzione-025).
 
 ## Come aggiornare il registro
 
@@ -99,6 +101,13 @@ Il ciclo RAM protetto 4→2→4 GiB con dati conservati resta la qualifica prece
 - **Chiusura:** accesso automatico reale nella main, protezioni boot conservate e nessuna password cambiata o pubblicata.
 - **Evidenze:** [semplificazione RAM e accesso](VERIFICATION.md#25-ottobre--ram-semplificata-e-accesso-windows).
 
+### SYS-005 — Aggiornamento del servizio guest interrotto dalla propria chiusura
+
+- **Stato:** aperto per la procedura automatica. Nella main l’installer avviato attraverso il proprio broker si interrompe durante la sostituzione: nuovo file presente ma servizio ancora sul vecchio percorso, capacità displayTopology assente. Non basta il disconnect a provare il successo.
+- **Recupero verificato:** attività Windows temporanea nello stesso account interattivo elevato, indipendente dal job del broker, completa l’aggiornamento e si elimina. Nuovo servizio6c9c494886c6 Running, transcript concluso e capacità letta. Nessuna password o modifica dei privilegi persistenti. Questa procedura manuale non è ancora un updater robusto nel prodotto.
+- **Prossimo passo / chiusura:** installazione esterna al servizio che attende la sostituzione e conferma versione/capacità dopo riconnessione; conservare rollback e segnalare l’errore senza dichiarare completamento dal solo disconnect. Il setup grafico deve usare l’INF qualificato in DriverStore: quello dal CD fallisce0xe0000217 nel caso osservato.
+- **Evidenze:** [distribuzione0.2.5 e tentativi](VERIFICATION.md#25-ottobre--integrazione-n1-e-distribuzione-025), TODO-009.
+
 ### APP-002 — Esplora file assente e finestre riusate non riconosciute
 
 - **Stato:** filtro del catalogo e associazione corretti nel clone del launcher. Esplora file ed Edge presenti fra le app principali e aperti in finestre Mac; distribuzione ordinaria non qualificata.
@@ -136,6 +145,8 @@ Queste voci conservano limiti non risolti, senza richiedere di ripristinare codi
 
 ### GFX-003 — Cattura ferma dopo cambio compositore
 
+- **Seguito0.2.5:** corretto un guasto concreto della riconnessione: renderer ancora sul vecchio socket WGC e frontend su uno nuovo. Record di avvio autenticato e lock per VM ora conservano il socket effettivo. Stesso documento ripreso nel clone e nella main, senza reboot Windows. Pixel-hash transitorio ricompare nel clone e poi recupera: GFX-003 resta aperto, controlli conservati. [Evidenze](VERIFICATION.md#25-ottobre--integrazione-n1-e-distribuzione-025).
+
 - **Seguito multischermo protetto:** nel trasferimento iniziale Notepad al DOD compare `pixel-hash`; la finestra in seguito mostra nuovamente contenuto e input aggiornati. Nessun controllo disattivato, nessuna causa o affidabilità generale del recupero dimostrata. La diagnostica conserva l’ultimo errore e non descrive da sola l’esito di ogni frame successivo. [Evidenze](VERIFICATION.md#25-ottobre--todo-001-alternative-protette-e-associazione-per-dispositivo).
 
 - **Nuova evidenza durante i tentativi di latenza:** alcune riconnessioni dello stesso Notepad producono `windowGPU.reason=pixel-hash`, con sorgente associata al marker ma hash guest/host diversi prima del presenter. Conservati i controlli, nessun ACK di successo del frame non verificato; nessuna causa attribuita automaticamente alle candidate. Chiusura del solo documento temporaneo e nuova apertura consentono la verifica finale nella0.2.4; non è recupero qualificato dello stesso documento e non chiude il problema. [Diario](VERIFICATION.md#25-ottobre--tentativi-di-riduzione-latenza-e-ui-024).
@@ -165,11 +176,15 @@ Queste voci conservano limiti non risolti, senza richiedere di ripristinare codi
 
 ### WIN-001 — Spostamenti casuali nel drag delle finestre individuali
 
+- **Qualifica main0.2.5 circoscritta:** drag Notepad da(41,291) a(91,260)punti Mac, guest da(2130,140) a(2230,202)pixel: stesso spostamento a scala0,5, frame successivo accettato/presentato e transizione conclusa. Un monitor fisico soltanto; non prova stabilità generale o trasferimenti fra scale diverse. [Evidenze](VERIFICATION.md#25-ottobre--integrazione-n1-e-distribuzione-025).
+
 - **Stato:** causa corretta e verificata nel clone, commit 21d206b; distribuzione ordinaria e altre configurazioni non qualificate. Posizione/metadati mouse sono acquisiti prima dell’accodamento, evitando coordinate ricostruite dopo lo spostamento della finestra Mac.
 - **Prossimo passo / chiusura, se ripreso:** confezionare e qualificare il percorso individuale destinato all’utente. Il passaggio fra monitor resta WIN-003.
 - **Evidenze:** [diario delle verifiche](VERIFICATION.md), correzione del drag del 24 ottobre.
 
 ### WIN-002 — Resize individuale in attesa del frame
+
+- **Qualifica main0.2.5 circoscritta:** resize Notepad2044×1078→1844×978pixel, Mac1022×539→922×489punti, primo frame pertinente presentato/transitionfalse e input riabilitato. Dialogo706×209pixel→353×105punti realmente visibile e Cancel riuscito. Input tentato troppo presto viene rifiutato; l’avviso «non ancora pronta» e l’attesa percepita restano da migliorare, senza indebolire il gate. [Evidenze](VERIFICATION.md#25-ottobre--integrazione-n1-e-distribuzione-025).
 
 - **Rilievo diagnostico25 ottobre:** osservati callback Metal con `presentedTime=0`; il callback funzionale di readiness in WindowRenderer non verifica questo valore prima di chiamare onPresented. È un limite del criterio «già presentato», distinto dalle durate GPU e da un errore del command buffer. Non dimostrata la causa dei precedenti guasti, nessuna correzione del gate applicata. Richiedere una presentazione positiva nella futura qualifica. [Report](reports/2026-10-25-graphics-pipeline.md), [verifica](VERIFICATION.md#25-ottobre--pipeline-grafica-con-timestamp-gpu-e-presentazione).
 
@@ -179,6 +194,8 @@ Queste voci conservano limiti non risolti, senza richiedere di ripristinare codi
 - **Evidenze:** [frame valido al resize](VERIFICATION.md#24-ottobre--gate-pronto-prima-delluso-e-frame-valido-al-resize).
 
 ### WIN-004 — Finestra Mac visibile ma app Windows non attiva
+
+- **Qualifica main0.2.5 circoscritta:** aggiunto ripristino del first responder quando la finestra diventa key. Notepad riceve «Prova N+1 nella main» dopo il frame pronto; click Cancel sul dialogo restituisce il documento. Non qualificate tutte le app o ogni ripresa del focus; voce mantenuta aperta. [Evidenze](VERIFICATION.md#25-ottobre--integrazione-n1-e-distribuzione-025).
 
 - **Stato:** aperto, riprodotto nella build diagnostica sulla IoT principale; app installata non modificata e causa non isolata.
 - **Verificato:** avvio Notepad dal launcher, immagine nella finestra Mac ma testo rifiutato dal controllo focus con messaggio «L’app non è attiva in Windows». «Apri Windows», click nell’editor e ritorno alla finestra Mac ripristinano la scrittura. Il recupero non è una correzione dell’attivazione.
@@ -197,6 +214,8 @@ Queste voci conservano limiti non risolti, senza richiedere di ripristinare codi
 
 ### WIN-003 — Monitor N+1 e drag fra scale diverse
 
+- **Stato corrente0.2.5 nella main:** un Mac1440×900@2→DOD2880×1800/DPI192,3D riservato2048×1152/DPI144; `mappedDisplays=1`/setup completo. Testo, drag, resize e dialogo/Cancel reali verificati. Mapping per monitor e limiti guest implementati; riserva privata app distinta dalla work area OS. Restano passaggio fra monitor/scale diverse (secondo Mac non collegato in questa fase), cambio monitor che può richiedere setup DOD esplicito/reboot, Snap/massimizzazioni e margine inferiore48punti della taskbar. Nessuna affidabilità completa dichiarata. Questo aggiornamento supera le descrizioni «nessuna main» dei passaggi storici sotto. [Evidenze](VERIFICATION.md#25-ottobre--integrazione-n1-e-distribuzione-025).
+
 - **Nuovo risultato nel clone, tre uscite protette:** primaria3D SUBSYS1101, due2D SUBSYS1100; SetupDiCallClassInstaller seleziona i driver originali per dispositivo senza riconfigurare l’altro. QueryDisplayConfig/SetDisplayConfig confermano tre schermi estesi:3D2880×1800 principale, DOD2880×1740 e3840×2100. Device D3D predefinito e cattura sono hardware. Stesso documento con nuovo testo visibile sulle tre uscite; configurazione/driver/accelerazione e protezioni conservati dopo nuovo boot. Implementazione opt-in e strumenti nel repository, candidata privata soltanto; non è ancora N+1 integrato nell’app principale. [Evidenze](VERIFICATION.md#25-ottobre--todo-001-alternative-protette-e-associazione-per-dispositivo).
 
 - **Requisito aggiornato dall'utente:** account EV/Hardware Dev Center escluso; Secure Boot disattivato e TESTSIGNING solo se indispensabili **e solo in assenza di alternative realmente valide**. La prova mista protetta supera il precedente blocco di associazione e ha la precedenza. IDD ARM64 originale rifiutato dalla normale validazione del pacchetto; nessuna protezione ridotta, nessun driver auto-firmato adottato.
@@ -205,9 +224,9 @@ Queste voci conservano limiti non risolti, senza richiedere di ripristinare codi
 
 - **Prova precedente, esito negativo conservato:** QEMU accetta3D+2D; DOD302 ARM64 Microsoft-signed si carica nella copia con Secure Boot. DiInstallDevice mirato al secondo associa però DOD anche al primo, perdendo l’accelerazione; il ripristino3D sul primo coinvolge entrambi e lascia il secondo in codice43. Candidata host con sottosistemi1100/1101 distinti: stesso esito. SetupAPI conserva la riconfigurazione dell’altro dispositivo nella stessa operazione; non è una diagnosi di impossibilità generale del binding per istanza. Nessuna coppia di uscite estese qualificata, nessun trasferimento/DPI provato. Copia spenta, main conservata e riavviata con protezioni verificate. [Evidenze](VERIFICATION.md#25-ottobre--todo-001-prova-di-adattatori-misti-protetti).
 
-- **Stato:** IN CORSO. Tre uscite utilizzabili nel clone, una sola nella main. Mappatura automatica Mac/Windows, DPI e limiti per monitor non integrati. Sul terzo schermo il dialogo riceve il frame ma resta presentedID0/transitionActive e CUA fallisce con ScreenCaptureKit−3811: limite concreto, senza attribuirlo automaticamente a WGC, driver o al solo acquisitore. Non dichiarata la visibilità del dialogo dal frame ricevuto. La prima prova a due uscite aveva invece mostrato realmente il dialogo sul Mac.
+- **Stato precedente, ora superato dall’incremento0.2.5 sopra:** tre uscite nel clone, una nella main; mapping/DPI non integrati. Sul terzo schermo il dialogo riceve il frame ma resta presentedID0/transitionActive e CUA fallisce con ScreenCaptureKit−3811: limite concreto, senza attribuirlo automaticamente a WGC, driver o al solo acquisitore. Non dichiarata la visibilità del dialogo dal frame ricevuto. La prima prova a due uscite aveva invece mostrato realmente il dialogo sul Mac.
 - **Vincoli ancora validi:** il KMD ufficiale ha MAX_CHILDREN=1; `max_outputs` da solo non lo estende. Il runtime3D ha stato globale e rifiuta una seconda GPU3D; la strada scelta usa un solo device3D e DOD separati. Gli adattatori DOD non sono nuove GPU3D e il device di cattura hardware non misura il costo della composizione/copia fra adattatori.
-- **Prossimo passo / chiusura:** integrare la candidata protetta con assegnazione stabile dei monitor Mac alle uscite DOD, desktop3D riservato, installazione per istanza e configurazione automatica. Aggiornare SharedDisplay e work area guest, verificare DPI/trasferimento finestra e dialogo/input nell’app reale, poi main. I Mac sono@2 ma i DOD96DPI: risoluzione corretta non basta. Nessun FATTO finché il criterio end-to-end non è soddisfatto.
+- **Prossimo passo / chiusura:** verificare nella main0.2.5 un trasferimento finestra+dialogo fra due monitor Mac/scale diverse quando disponibili; poi cambio monitor e setup delle nuove istanze. Conservare mapping/DPI app già verificati. Chiusura solo dopo il percorso end-to-end pertinente, senza dichiarare i passaggi non eseguiti.
 - **Nuove evidenze:** [launcher e limite N+1](VERIFICATION.md#25-ottobre--launcher-windows-cache-persistente-e-limite-n1).
 - **Evidenze:** [requisiti rinviati](RESTART_PLAN.md#direzioni-e-limiti), [valutazione](VERIFICATION.md#24-ottobre--valutazione-n1-monitor-isolamento-e-gpu-per-schermo).
 

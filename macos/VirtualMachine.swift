@@ -108,8 +108,16 @@ final class VirtualMachineController {
         }.value
     }
     var nativeGraphicsEnabled:Bool {configuration.graphics == "native3D" && configuration.recoveryDisplay != true}
+    var mixedDisplaysEnabled:Bool {nativeGraphicsEnabled && configuration.mixedDisplays == true}
     var virtualDisplayEnabled:Bool {nativeGraphicsEnabled}
     var desktopIsKey:Bool {desktop?.window.isKeyWindow == true}
+    var appDisplayBindings:AppDisplayBindings? {
+        guard mixedDisplaysEnabled,let launch=desktopLaunch(),
+              let data=try? Data(contentsOf:directory.appendingPathComponent("app-displays.json")),data.count<8192,
+              let value=try? JSONDecoder().decode(AppDisplayBindings.self,from:data),
+              value.machineID==configuration.id,value.pid==launch.pid else{return nil}
+        return value
+    }
 
     func applyingPendingSettings()async throws->VirtualMachineController {
         guard await observedState() == .stopped else{return self}
@@ -236,11 +244,14 @@ final class VirtualMachineController {
         if let native,configuration.dynamicMemory != nil,!native.supportsDynamicMemory {
             throw CocoaError(.executableRuntimeMismatch,userInfo:[NSLocalizedDescriptionKey:"This graphics runtime has not been qualified for dynamic RAM. Use the qualified Windows IoT memory runtime."])
         }
-        if configuration.mixedDisplays == true && (!nativeGraphicsEnabled || native?.supportsMixedDisplays != true) {
+        if mixedDisplaysEnabled && (!nativeGraphicsEnabled || native?.supportsMixedDisplays != true) {
             throw CocoaError(.executableRuntimeMismatch,userInfo:[NSLocalizedDescriptionKey:"Il runtime non supporta la configurazione multischermo protetta."])
         }
-        if configuration.mixedDisplays == true && !(1...15).contains(hostDisplays.count) {
+        if mixedDisplaysEnabled && !(1...15).contains(hostDisplays.count) {
             throw CocoaError(.executableRuntimeMismatch,userInfo:[NSLocalizedDescriptionKey:"La configurazione multischermo richiede da uno a quindici schermi Mac rilevati."])
+        }
+        if mixedDisplaysEnabled && !MixedDisplayPlan.supported(hostDisplays) {
+            throw CocoaError(.executableRuntimeMismatch,userInfo:[NSLocalizedDescriptionKey:"Gli schermi collegati non sono supportati dalla configurazione multischermo corrente."])
         }
         let session=UUID().uuidString.replacingOccurrences(of:"-",with:"").lowercased()
         let displayDirectory=URL(fileURLWithPath:"/tmp/perpendicular-display-\(getuid())-\(session.prefix(8))")
@@ -303,14 +314,16 @@ final class VirtualMachineController {
             // Windows caches the monitor's initial mode envelope. Include the
             // full display, not only its work area, so fullscreen also fits.
             let fullDisplay=hostDisplays.first.map {
-                NSSize(width:$0.frame.width*$0.scale,height:$0.frame.height*$0.scale)
+                let scale=mixedDisplaysEnabled ? CGFloat(MixedDisplayPlan.rasterScale(hostDisplays)):$0.scale
+                return NSSize(width:$0.frame.width*scale,height:$0.frame.height*scale)
             } ?? NSSize(width:1280,height:800)
             let scale=min(1,4096/fullDisplay.width,4096/fullDisplay.height,sqrt(8_388_608/(fullDisplay.width*fullDisplay.height)))
             let initialDisplay=NSSize(width:max(640,(fullDisplay.width*scale).rounded()),height:max(480,(fullDisplay.height*scale).rounded()))
             arguments += ["-device","virtio-ramfb-gl,id=display0,addr=0x8,disable-legacy=on,neptune=on,blob=on,hostmem=512M,max_outputs=1,xres=\(Int(initialDisplay.width)),yres=\(Int(initialDisplay.height))"]
-            if c.mixedDisplays == true {
+            if mixedDisplaysEnabled {
+                let appScale=MixedDisplayPlan.rasterScale(hostDisplays)
                 for (index,host) in hostDisplays.enumerated() {
-                    let size=host.guestPixelSize
+                    let size=NSSize(width:host.frame.width*CGFloat(appScale),height:host.frame.height*CGFloat(appScale))
                     let slot=String(9+index,radix:16)
                     arguments += ["-device","virtio-gpu-pci,id=appdisplay\(index),addr=0x\(slot),disable-legacy=on,max_outputs=1,xres=\(Int(size.width)),yres=\(Int(size.height))"]
                 }
@@ -326,15 +339,23 @@ final class VirtualMachineController {
         var launchEnvironment=native?.environment(directory:displayDirectory,session:session,primary:HostDisplay.current().first(where:\.primary))
         // Never inherit an experiment flag into an ordinary VM. The runtime
         // changes the primary PCI identity only for this explicit configuration.
-        if native != nil {launchEnvironment?["PERP_VIRTIO_MIXED_DISPLAYS"]=c.mixedDisplays == true ? "1":"0"}
+        if native != nil {launchEnvironment?["PERP_VIRTIO_MIXED_DISPLAYS"]=mixedDisplaysEnabled ? "1":"0"}
         if c.dynamicMemory != nil {
             launchEnvironment=(launchEnvironment ?? [:]).merging(["PERP_HVF_BALLOON_RECLAIM":"1","PERP_HVF_VIRTIO_MEM":"1"]){_,new in new}
         }
         machine = try launch("qemu-system-aarch64",arguments,log:"qemu.log",executable:native?.executable,
             environment:launchEnvironment)
+        if mixedDisplaysEnabled {
+            let value=AppDisplayBindings(machineID:c.id,pid:machine!.processIdentifier,
+                displays:hostDisplays.enumerated().map{AppDisplayBinding(hostID:$0.element.stableID!,slot:9+$0.offset)})
+            let path=directory.appendingPathComponent("app-displays.json")
+            try JSONEncoder().encode(value).write(to:path,options:.atomic)
+            try FileManager.default.setAttributes([.posixPermissions:0o600],ofItemAtPath:path.path)
+        }
         let endpoint=nativeGraphicsEnabled ? NativeDisplayEndpoint(socketPath:displayDirectory.appendingPathComponent("native-display.sock").path,
             serverPID:machine!.processIdentifier,expectedUID:getuid(),sessionHi:UInt64(session.prefix(16),radix:16)!,sessionLo:UInt64(session.suffix(16),radix:16)!,epoch:1):nil
-        let state=DesktopLaunch(machineID:c.id,pid:machine!.processIdentifier,socket:desktopSocket,native:endpoint)
+        let state=DesktopLaunch(machineID:c.id,pid:machine!.processIdentifier,socket:desktopSocket,native:endpoint,
+            wgcSocket:nativeGraphicsEnabled ? NativeWindowFrames.shared.socketPath:nil)
         let launchFile=directory.appendingPathComponent("desktop-launch.json")
         try JSONEncoder().encode(state).write(to:launchFile,options:.atomic)
         try FileManager.default.setAttributes([.posixPermissions:0o600],ofItemAtPath:launchFile.path)

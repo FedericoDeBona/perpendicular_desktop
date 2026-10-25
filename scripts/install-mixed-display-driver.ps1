@@ -1,5 +1,6 @@
 # Select one original signed driver on one explicit PCI instance. Run elevated
-# in the isolated VM only, until the N+1 setup is qualified in the main app.
+# on a prepared N+1 VM. After staging, pass the original INF in DriverStore;
+# installing directly from CD failed with 0xe0000217 in the main qualification.
 param(
  [Parameter(Mandatory=$true)][string]$InstanceId,
  [Parameter(Mandatory=$true)][ValidateSet('Accelerated','AppDisplay')][string]$Role,

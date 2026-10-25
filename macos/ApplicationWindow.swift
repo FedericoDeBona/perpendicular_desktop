@@ -109,6 +109,8 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
     private var pixelScale=1.0
     private var fallbackPixelScale=1.0
     private var sharedDisplay:SharedDisplay?
+    private var sharedDisplays:[SharedDisplay]=[]
+    private var initialAppPlacementRequested=false
     private var applyingSourceGeometry=false
     private var adjustedInitialPlacement=false
     private var maximumPixels=NSSize(width:4096,height:4096)
@@ -262,6 +264,15 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
     /// Only a display snapshot confirmed by the frontend can enable shared
     /// placement. Removing that snapshot invalidates every outstanding gesture.
     func setSharedDisplay(_ display:SharedDisplay?){
+        sharedDisplays=display.map{[$0]} ?? []
+        setSelectedDisplay(display)
+    }
+    func setSharedDisplays(_ displays:[SharedDisplay]){
+        guard displays != sharedDisplays else{return}
+        sharedDisplays=displays
+        setSelectedDisplay(SharedDisplay.best(displays,guest:sourceRect))
+    }
+    private func setSelectedDisplay(_ display:SharedDisplay?){
         guard sharedDisplay != display else{return}
         cancelSharedGeometry()
         if nativeResizing || expectedSize != nil {
@@ -277,13 +288,35 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
         if display != nil {applySourceFrame()}else if hasFrame{applyFrameSize()}
         onGeometry?()
     }
+    private func refreshSharedDisplay(){
+        let display=SharedDisplay.best(sharedDisplays,guest:sourceRect)
+        guard display != sharedDisplay else{return}
+        sharedDisplay=display
+        pixelScale=display.map{Double($0.pixelScale)} ?? fallbackPixelScale
+        applySizeLimits()
+    }
+    /// Move only an admitted native app still on the reserved Windows desktop.
+    /// Geometry metadata, not this request's ACK, determines its final placement.
+    func placeOnAppDisplayIfNeeded(_ display:SharedDisplay){
+        guard role == .main,!initialAppPlacementRequested,!sourceRect.isEmpty,
+              SharedDisplay.best(sharedDisplays,guest:sourceRect)==nil else{return}
+        initialAppPlacementRequested=true
+        let area=display.guestWorkArea ?? display.guestFrame
+        let inset=40/display.pixelScale
+        let width=min(sourceRect.width,area.width),height=min(sourceRect.height,area.height)
+        let x=area.minX+min(inset,max(0,area.width-width)),y=area.minY+min(inset,max(0,area.height-height))
+        bridge.command("set_geometry",["window":id,"gesture":UUID().uuidString,"serial":1,
+            "x":Int(x.rounded()),"y":Int(y.rounded()),"width":Int(width.rounded()),"height":Int(height.rounded())],timeout:.seconds(3)){[weak self] result in
+                if case .failure=result {self?.onError?("Windows non ha spostato l’app sullo schermo Mac.")}
+        }
+    }
     private func applySizeLimits(){
         guard !role.transient else{return}
         window.minSize=window.frameRect(forContentRect:NSRect(origin:.zero,
             size:NSSize(width:minimumPixels.width*pixelScale,height:minimumPixels.height*pixelScale))).size
         window.maxSize=window.frameRect(forContentRect:NSRect(origin:.zero,
-            size:NSSize(width:max(minimumPixels.width,maximumPixels.width)*pixelScale,
-                        height:max(minimumPixels.height,maximumPixels.height)*pixelScale))).size
+            size:NSSize(width:max(minimumPixels.width,min(maximumPixels.width,sharedDisplay?.guestWorkArea?.width ?? maximumPixels.width))*pixelScale,
+                        height:max(minimumPixels.height,min(maximumPixels.height,sharedDisplay?.guestWorkArea?.height ?? maximumPixels.height))*pixelScale))).size
     }
     func update(_ item:[String:Any]){
         window.title=item["title"] as? String ?? ""
@@ -300,6 +333,7 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
             }
             sourceRect=next
         }
+        refreshSharedDisplay()
         canResize=item["resizable"] as? Bool ?? true
         content.resizeEnabled=role == .main && canResize && !transitionActive
         if let width=item["minWidth"] as? Double,let height=item["minHeight"] as? Double,
@@ -740,8 +774,9 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
         trace("resize_finished")
     }
     private var sharedTarget:NSRect? {
-        guard let sharedDisplay else{return nil}
-        let frame=sharedDisplay.guestFrame(forMac:window.contentRect(forFrameRect:resizePreviewFrame ?? window.frame))
+        let mac=window.contentRect(forFrameRect:resizePreviewFrame ?? window.frame)
+        guard let display=SharedDisplay.best(sharedDisplays,host:mac) ?? sharedDisplay else{return nil}
+        let frame=display.guestFrame(forMac:mac)
         return NSRect(x:frame.minX.rounded(),y:frame.minY.rounded(),
                       width:max(160,frame.width.rounded()),height:max(100,frame.height.rounded()))
     }
@@ -853,7 +888,7 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
             if inputBlocked || !deferredInput.isEmpty {cancelInput()}
             else {gesture=nil}
         }
-        else if let geometryConfirmed {sourceRect=geometryConfirmed}
+        else if let geometryConfirmed {sourceRect=geometryConfirmed;refreshSharedDisplay()}
         cancelSharedGeometry()
         applySourceFrame();bridge.command("release");onGeometry?()
         if let error {failFrameTransition();onError?(error)}
@@ -876,6 +911,7 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
     }
     var presentationState:[String:Any] {
         ["transitionActive":transitionActive,"displayUpdating":displayUpdating,
+         "keyWindow":window.isKeyWindow,"contentFocused":window.firstResponder === content,"inputSuspended":content.inputSuspended,
          "requiredPresentationID":transitionAfterPresentation,"presentedID":lastPresentedID,
          "submittedID":content.presentationID,"hasFrame":hasFrame,
          "receivedSequence":receivedSequence,"acceptedSequence":acceptedSequence,
@@ -907,7 +943,12 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
         else {zoomRestore=window.frame;let top=window.frame.maxY;window.setFrame(NSRect(x:window.frame.minX,y:top-window.maxSize.height,width:window.maxSize.width,height:window.maxSize.height),display:true)}
         commitResize()
     }
-    func windowDidBecomeKey(_ notification:Notification){if !role.transient{bridge.command("activate",["window":id])}}
+    func windowDidBecomeKey(_ notification:Notification){
+        if !role.transient {
+            window.makeFirstResponder(content)
+            bridge.command("activate",["window":id])
+        }
+    }
     func windowDidResignKey(_ notification:Notification){
         if !role.transient {
             cancelInput("The window lost focus before the pending input could be sent.")

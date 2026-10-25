@@ -33,12 +33,7 @@ impl Drop for DeviceKey {
 /// precisely when a display driver has failed. Keep adapter history, but report
 /// only present monitors. This inventory remains separate from display_info.
 pub fn devices() -> Result<Vec<Value>, String> {
-    let mut result = class_devices(
-        &GUID_DEVCLASS_DISPLAY,
-        "display",
-        SETUP_DI_GET_CLASS_DEVS_FLAGS(0),
-        64,
-    )?;
+    let mut result = adapters()?;
     result.extend(class_devices(
         &GUID_DEVCLASS_MONITOR,
         "monitor",
@@ -46,6 +41,15 @@ pub fn devices() -> Result<Vec<Value>, String> {
         16,
     )?);
     Ok(result)
+}
+
+pub fn adapters() -> Result<Vec<Value>, String> {
+    class_devices(
+        &GUID_DEVCLASS_DISPLAY,
+        "display",
+        SETUP_DI_GET_CLASS_DEVS_FLAGS(0),
+        64,
+    )
 }
 
 fn class_devices(
@@ -120,7 +124,8 @@ fn class_devices(
             let mut device = json!({"class":kind,"instance":instance,"name":property(&DEVPKEY_Device_DeviceDesc),
                 "present":property(&DEVPKEY_Device_IsPresent),"service":property(&DEVPKEY_Device_Service),
                 "inf":property(&DEVPKEY_Device_DriverInfPath),"problem":property(&DEVPKEY_Device_ProblemCode),
-                "status":property(&DEVPKEY_Device_DevNodeStatus)});
+                "status":property(&DEVPKEY_Device_DevNodeStatus),
+                "pciAddress":property(&DEVPKEY_Device_Address)});
             if kind == "monitor" {
                 device["edid"] = match read_edid(set.0, &info) {
                     Ok(bytes) => parse_edid(&bytes).unwrap_or_else(

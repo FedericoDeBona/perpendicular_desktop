@@ -68,6 +68,8 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
     private var sharedGeometryCapable=false
     private var displayReadTask:Task<Void,Never>?
     private var sharedDisplay:SharedDisplay?
+    private var sharedDisplays:[SharedDisplay]=[]
+    private var mixedDisplayConfiguring=false
     private var recoveryItem:NSMenuItem!
     private var displayItems:[NSMenuItem]=[]
     private var desktopSize=NSSize.zero
@@ -105,6 +107,7 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
                 for task in self.openingTasks.values {task.cancel()}
                 self.openingTasks=[:];self.openingApps=[]
                 if !value {
+                    self.mixedDisplayConfiguring=false
                     self.desktopResizeTask?.cancel();self.desktopResizeTask=nil
                     self.desktopReadRequest=nil;self.desktopReadAgain=false
                     self.machine?.finishDesktopResolution()
@@ -352,7 +355,7 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
               let command=request["command"] as? String else {
             localResponse(["ok":false,"error":"Expected a JSON command."],reply:reply);return
         }
-        let allowed:Set<String>=["status","memory_status","execute","display_info","driver_info","graphics_info","geometry_snapshot","application_status","process_list","process_terminate","pipeline_clock"]
+        let allowed:Set<String>=["status","memory_status","execute","display_info","display_topology","driver_info","graphics_info","geometry_snapshot","application_status","process_list","process_terminate","pipeline_clock"]
         guard allowed.contains(command) else {
             localResponse(["ok":false,"error":"This local command is not supported."],reply:reply);return
         }
@@ -366,6 +369,7 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
             localResponse(["ok":true,"result":["connected":connected,"machineRunning":running,
                 "machineState":machineStateLabel,"machineOperation":machineOperation as Any? ?? NSNull(),
                 "status":status,"displayStatus":displayStatus,"primaryMatchesHost":sharedDisplay != nil,
+                "mappedDisplays":sharedDisplays.count,"displaySetupComplete":machine?.mixedDisplaysEnabled == true ? !sharedDisplays.isEmpty:sharedDisplay != nil,
                 "memory":memoryController?.state ?? ["enabled":false],
                 "vmSettings":["pending":settingsPending,"initialMemoryMiB":vmSettings?.initialMemoryMiB ?? 0,"maximumMemoryMiB":vmSettings?.maximumMemoryMiB ?? 0,"cpus":vmSettings?.cpus ?? 0],
                 "windowCount":windows.count,"capabilities":guestCapabilities,
@@ -427,7 +431,7 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
         if command == "geometry_snapshot" {
             localGeometrySnapshot(Array(windows.keys.sorted())[...],rows:[],epoch:displayEpoch,reply:reply);return
         }
-        let capabilities=["memory_status":"memoryStatus","display_info":"displayInfo","driver_info":"driverInfo","graphics_info":"graphicsInfo"]
+        let capabilities=["memory_status":"memoryStatus","display_info":"displayInfo","display_topology":"displayTopology","driver_info":"driverInfo","graphics_info":"graphicsInfo"]
         guard let capability=capabilities[command],guestCapabilities[capability] == true else {
             localResponse(["ok":false,"error":"The connected guest does not support this query."],reply:reply);return
         }
@@ -540,6 +544,9 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
     }
     func launch(_ app:WindowsApplication){
         guard connected,!openingApps.contains(app.id) else{return}
+        if machine?.mixedDisplaysEnabled == true,sharedDisplays.isEmpty {
+            launcherNotice="Attendi che Windows completi la preparazione degli schermi.";return
+        }
         launcherNotice=nil;beginOpening(app)
         status="Opening \(app.name)…"
         let epoch=launcherEpoch
@@ -711,10 +718,11 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
         }
     }
     private func invalidateDisplay(_ message:String){
-        displayRevision+=1;displayUpdating=true;sharedDisplay=nil;displayStatus=message
+        displayRevision+=1;displayUpdating=true;sharedDisplay=nil;sharedDisplays=[];displayStatus=message
         for window in windows.values {window.setDisplayUpdating(true);window.setSharedDisplay(nil)}
     }
     @objc private func hostDisplaysChanged(){
+        mixedDisplayConfiguring=false
         displaySetupTask?.cancel();displaySetupTask=nil
         displaySetupID=UUID()
         invalidateDisplay("Checking Windows display…")
@@ -724,12 +732,14 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
         prepareDisplay()
     }
     private func prepareDisplay(){
+        if machine?.mixedDisplaysEnabled == true {readMixedDisplay();return}
         guard !desktopOnly,displayConfigurable,machine.virtualDisplayEnabled,let host=HostDisplay.current().first(where:\.primary) else{return}
         let size=host.guestPixelSize
         let width=Int(size.width),height=Int(size.height)
         configureDisplay(width:width,height:height,epoch:displayEpoch)
     }
     private func readDisplay(){
+        if machine?.mixedDisplaysEnabled == true {readMixedDisplay();return}
         if desktopOnly {readDesktopDisplay();return}
         guard connected,displayReadable,let epoch=displayEpoch else{return}
         displayRevision+=1;let revision=displayRevision
@@ -765,6 +775,51 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
                 "host":host.map(\.description),"primaryMatchesHost":sharedDisplay != nil],options:[.sortedKeys]) {
             try? FileHandle.standardError.write(contentsOf:data+Data([10]))
         }
+    }
+    private func readMixedDisplay(){
+        guard connected,let epoch=displayEpoch,!mixedDisplayConfiguring else{return}
+        guard guestCapabilities["displayTopology"] == true,let bindings=machine.appDisplayBindings else {
+            failMixedDisplay("La configurazione multischermo richiede gli strumenti Windows aggiornati e un nuovo avvio.");return
+        }
+        mixedDisplayConfiguring=true
+        let request=UUID();displaySetupID=request
+        bridge.command("display_topology",timeout:.seconds(5)){[weak self] result in
+            guard let self,self.connected,self.displayEpoch==epoch,self.displaySetupID==request else{return}
+            do {
+                guard case .success(let reply)=result,let topology=reply["value"] as? [String:Any] else {throw NSError(domain:"Displays",code:1,userInfo:[NSLocalizedDescriptionKey:"Impossibile leggere gli schermi Windows."])}
+                let plan=try MixedDisplayPlan(hosts:HostDisplay.current(),bindings:bindings,topology:topology)
+                self.bridge.command("display_layout",["layout":plan.layout],timeout:.seconds(12)){[weak self] result in
+                    guard let self,self.connected,self.displayEpoch==epoch,self.displaySetupID==request else{return}
+                    self.mixedDisplayConfiguring=false
+                    do {
+                        guard case .success(let reply)=result,let snapshot=reply["value"] as? [String:Any] else {
+                            if case .failure(let error)=result {throw error}
+                            throw CocoaError(.coderReadCorrupt)
+                        }
+                        let mappings=try plan.mappings(snapshot:snapshot)
+                        self.sharedDisplay=nil;self.sharedDisplays=mappings;self.displayUpdating=false
+                        self.launcherDisplays=((snapshot["monitors"] as? [String:Any])?["displays"] as? [[String:Any]] ?? []).map{monitor in
+                            var monitor=monitor
+                            if let index=plan.devices.firstIndex(of:monitor["device"] as? String ?? "") {
+                                monitor["label"]="Schermo Mac \(index+1)";monitor["appScreen"]=true
+                            }else{monitor["label"]="Desktop Windows";monitor["appScreen"]=false}
+                            return monitor
+                        }
+                        self.displayStatus="\(mappings.count) schermi Mac collegati, desktop Windows separato."
+                        for window in self.windows.values {
+                            window.setSharedDisplays(mappings);window.setDisplayUpdating(false)
+                            if self.machine.desktopIsKey != true,let first=mappings.first {window.placeOnAppDisplayIfNeeded(first)}
+                        }
+                        self.layoutChildren()
+                    }catch{self.failMixedDisplay(error.localizedDescription)}
+                }
+            }catch{self.mixedDisplayConfiguring=false;self.failMixedDisplay(error.localizedDescription)}
+        }
+    }
+    private func failMixedDisplay(_ message:String){
+        mixedDisplayConfiguring=false;sharedDisplay=nil;sharedDisplays=[];displayUpdating=false
+        displayStatus=message;launcherNotice=message
+        for window in windows.values {window.setSharedDisplay(nil);window.setDisplayUpdating(false);window.failFrameTransition()}
     }
     private func readDesktopDisplay(){
         guard connected,displayReadable,let epoch=displayEpoch,desktopResizeRequest == nil else{return}
@@ -882,7 +937,7 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
             displayEpoch=value["epoch"] as? String
             invalidateDisplay("Checking Windows display…")
             let capabilities=value["capabilities"] as? [String:Any] ?? [:]
-            guestCapabilities=Dictionary(uniqueKeysWithValues:["memoryStatus","execute","displayInfo","driverInfo","graphicsInfo","sharedGeometry","appIcon","applicationStatus","processControl","clipboard"].map{($0,capabilities[$0] as? Bool == true)})
+            guestCapabilities=Dictionary(uniqueKeysWithValues:["memoryStatus","execute","displayInfo","displayTopology","driverInfo","graphicsInfo","sharedGeometry","appIcon","applicationStatus","processControl","clipboard"].map{($0,capabilities[$0] as? Bool == true)})
             memoryController?.guestReady=guestCapabilities["memoryStatus"] == true
             startApplicationStatusUpdates()
             pumpApplicationIcons()
@@ -922,6 +977,7 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
             }
         case "display_changed":
             guard value["epoch"] as? String == displayEpoch else{return}
+            if machine?.mixedDisplaysEnabled == true,mixedDisplayConfiguring {return}
             invalidateDisplay("Checking Windows display…")
             displayReadTask?.cancel()
             displayReadTask=Task{@MainActor [weak self] in
@@ -955,13 +1011,17 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
                     controller.onPointerExit={ [weak self] in self?.pointerExited(id) }
                     controller.onRecovery={ [weak self] in self?.showWindows() }
                     controller.setDisplayUpdating(displayUpdating && displayReadable)
-                    controller.setSharedDisplay(sharedDisplay)
+                    if machine?.mixedDisplaysEnabled == true {controller.setSharedDisplays(sharedDisplays)}
+                    else {controller.setSharedDisplay(sharedDisplay)}
                     windows[id]=controller
                 }
                 if let appID=windowApps[id] {
                     windows[id]?.identifyApplication(name:apps.first(where:{$0.id == appID})?.name ?? "App Windows",icon:applicationIcons[appID])
                 }
                 windows[id]?.update(item)
+                if machine?.mixedDisplaysEnabled == true,machine.desktopIsKey != true,let first=sharedDisplays.first {
+                    windows[id]?.placeOnAppDisplayIfNeeded(first)
+                }
                 if let frame=earlyFrames.removeValue(forKey:id){windows[id]?.present(frame);if let app=windowApps[id]{finishOpening(app,appeared:true)}}
             }
             layoutChildren()

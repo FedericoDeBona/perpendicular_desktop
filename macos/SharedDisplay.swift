@@ -9,12 +9,35 @@ struct SharedDisplay:Equatable {
     let hostFrame: NSRect
     let guestWorkArea: NSRect?
 
-    private init(host: HostDisplay, guestFrame: NSRect, guestWorkArea: NSRect?) {
-        pixelScale = host.workArea.width / guestFrame.width
+    let device:String?
+    private init(host: HostDisplay, guestFrame: NSRect, guestWorkArea: NSRect?,full:Bool=false,device:String?=nil) {
+        let frame=full ? host.frame:host.workArea
+        pixelScale = frame.width / guestFrame.width
         self.guestFrame = guestFrame
-        hostFrame = host.workArea
+        hostFrame = frame;self.device=device
         self.guestWorkArea = guestWorkArea
     }
+
+    static func mapped(host:HostDisplay,monitor:[String:Any],requested:[String:Any],scale:Int)->SharedDisplay? {
+        guard let frame=rectangle(monitor),let expected=rectangle(requested),frame==expected,
+              integer(monitor["dpi"])==CGFloat(96*scale),
+              let fields=(monitor["appWorkArea"] ?? monitor["workArea"]) as? [String:Any],let area=rectangle(fields),frame.contains(area),
+              let device=monitor["device"] as? String else{return nil}
+        let mapping=SharedDisplay(host:host,guestFrame:frame,guestWorkArea:area,full:true,device:device)
+        let actual=mapping.macFrame(forGuest:area)
+        guard host.workArea.insetBy(dx:-1,dy:-1).contains(actual) else{return nil}
+        return mapping
+    }
+
+    static func best(_ displays:[SharedDisplay],guest rect:NSRect)->SharedDisplay? {
+        displays.max{a,b in area(a.guestFrame.intersection(rect))<area(b.guestFrame.intersection(rect))}
+            .flatMap{area($0.guestFrame.intersection(rect))>0 ? $0:nil}
+    }
+    static func best(_ displays:[SharedDisplay],host rect:NSRect)->SharedDisplay? {
+        displays.max{a,b in area(a.hostFrame.intersection(rect))<area(b.hostFrame.intersection(rect))}
+            .flatMap{area($0.hostFrame.intersection(rect))>0 ? $0:nil}
+    }
+    private static func area(_ rect:NSRect)->CGFloat {rect.isNull ? 0:max(0,rect.width)*max(0,rect.height)}
 
     /// Confirm the requested pixel mode, independently of Windows UI scaling.
     /// DPI controls text/control sizes inside Windows; it does not change the

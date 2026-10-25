@@ -45,6 +45,7 @@ final class NativeWindowFrames:@unchecked Sendable {
     private var machineID=""
     private var qmp=""
     private var savedEndpoint:Endpoint?
+    private var ownerFD:Int32 = -1
     private(set) var socketPath=""
     private let queue=DispatchQueue(label:"perpendicular.window-gpu")
     private let device=MTLCreateSystemDefaultDevice()!
@@ -74,6 +75,27 @@ final class NativeWindowFrames:@unchecked Sendable {
         endpointURL=root.appendingPathComponent("Control/wgc-export-endpoint.json")
         socketPath="/tmp/perp-wgc-\(getuid())-\(getpid()).sock"
         var info=stat()
+        let control=root.appendingPathComponent("Control")
+        try FileManager.default.createDirectory(at:control,withIntermediateDirectories:true,attributes:[.posixPermissions:0o700])
+        guard lstat(control.path,&info)==0,info.st_uid==getuid(),info.st_mode & mode_t(S_IFMT)==mode_t(S_IFDIR) else{throw CocoaError(.fileWriteNoPermission)}
+        let lock=Darwin.open(control.appendingPathComponent("wgc-owner.lock").path,O_CREAT|O_RDWR|O_NOFOLLOW|O_CLOEXEC,0o600)
+        guard lock>=0 else{throw CocoaError(.fileWriteNoPermission)}
+        var keepLock=false;defer{if !keepLock{Darwin.close(lock)}}
+        var ownership=flock()
+        ownership.l_type=Int16(F_WRLCK);ownership.l_whence=Int16(SEEK_SET)
+        guard fcntl(lock,F_SETLK,&ownership)==0 else{throw CocoaError(.fileWriteFileExists)}
+        // The launch record stores the actual immutable renderer environment.
+        // Publishing a new frontend must never redirect an already-running VM.
+        var rendererSocket:String?
+        let launchFile=root.appendingPathComponent("desktop-launch.json")
+        if lstat(launchFile.path,&info)==0,info.st_uid==getuid(),info.st_mode & 0o777 == 0o600,
+           let data=try? Data(contentsOf:launchFile),data.count<8192,
+           let launch=try? JSONDecoder().decode(DesktopLaunch.self,from:data),launch.machineID==machineID,
+           let path=launch.wgcSocket,path.hasPrefix("/tmp/perp-wgc-\(getuid())-"),path.hasSuffix(".sock"),
+           path.dropFirst("/tmp/perp-wgc-\(getuid())-".count).dropLast(5).allSatisfy({$0.isNumber}),
+           (try? MachineControl.execute(socket:qmp,operation:"query-uuid",expectedUUID:machineID,expectedPID:launch.pid)) != nil {
+            rendererSocket=path
+        }
         if lstat(endpointURL.path,&info)==0,info.st_uid==getuid(),info.st_mode & 0o777 == 0o600,
            let data=try? Data(contentsOf:endpointURL),data.count<1024,let e=try? JSONDecoder().decode(Endpoint.self,from:data),
            e.qemuPID>1,e.frontendPID>1,e.socket.hasPrefix("/tmp/perp-wgc-\(getuid())-"),e.socket.hasSuffix(".sock"),
@@ -81,9 +103,10 @@ final class NativeWindowFrames:@unchecked Sendable {
            (try? MachineControl.execute(socket:qmp,operation:"query-uuid",expectedUUID:machineID,expectedPID:e.qemuPID)) != nil {
             guard kill(e.frontendPID,0) != 0,errno==ESRCH else{throw CocoaError(.fileWriteFileExists)}
             savedEndpoint=e;socketPath=e.socket
-            if lstat(socketPath,&info)==0 {
-                guard info.st_uid==getuid(),info.st_mode & mode_t(S_IFMT)==mode_t(S_IFSOCK),unlink(socketPath)==0 else{throw CocoaError(.fileWriteNoPermission)}
-            }
+        }
+        if let rendererSocket {socketPath=rendererSocket}
+        if lstat(socketPath,&info)==0 {
+            guard info.st_uid==getuid(),info.st_mode & mode_t(S_IFMT)==mode_t(S_IFSOCK),unlink(socketPath)==0 else{throw CocoaError(.fileWriteNoPermission)}
         }
         commands=device.makeCommandQueue()
         let fd=Darwin.socket(AF_UNIX,SOCK_DGRAM,0);guard fd>=0 else{throw CocoaError(.fileReadUnknown)}
@@ -95,6 +118,7 @@ final class NativeWindowFrames:@unchecked Sendable {
         guard result==0,chmod(socketPath,0o600)==0,fcntl(fd,F_SETFL,O_NONBLOCK)==0 else{Darwin.close(fd);throw CocoaError(.fileReadUnknown)}
         listener=fd;let source=DispatchSource.makeReadSource(fileDescriptor:fd,queue:queue);self.source=source
         source.setEventHandler{[weak self] in self?.receive()};source.resume()
+        ownerFD=lock;keepLock=true
     }
     func publishEndpoint()throws {
         let text=try String(contentsOf:root.appendingPathComponent("qemu-system-aarch64.pid"),encoding:.utf8)

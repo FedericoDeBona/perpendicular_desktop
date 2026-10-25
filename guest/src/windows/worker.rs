@@ -2,7 +2,7 @@ use super::{
     Configuration, app_process,
     capture::{self, Target},
     catalogue::{self, Catalogue},
-    clipboard, display, error, execute, identity, window_control,
+    clipboard, display, display_topology, error, execute, identity, window_control,
     wire::{self, Outbox},
 };
 use serde_json::{Value, json};
@@ -217,7 +217,7 @@ impl Worker {
         outbox.control(
             json!({"type":"hello","protocol":1,"token":config.token,"epoch":self.epoch,
             "sid":self.sid,"session":self.session,"version":env!("CARGO_PKG_VERSION"),
-            "capabilities":{"capture":"wgc-hardware-readback-with-software-recovery","windows":4,"transients":12,"windowRoles":true,"input":true,"catalogue":true,"appIcon":true,"frameChannel":true,"gpuFramesOnly":true,"frameEncodings":[],"displayInfo":true,"driverInfo":true,"graphicsInfo":true,"displayConfigure":true,"sharedGeometry":true,"processControl":true,"clipboard":true,"clipboardTextBytes":262144,"applicationStatus":true,"memoryStatus":true,"execute":true,"executeTimeoutSeconds":60,"executeOutputBytes":65536,"displayEvents":self.display_observer.is_some()}}),
+            "capabilities":{"capture":"wgc-hardware-readback-with-software-recovery","windows":4,"transients":12,"windowRoles":true,"input":true,"catalogue":true,"appIcon":true,"frameChannel":true,"gpuFramesOnly":true,"frameEncodings":[],"displayInfo":true,"displayTopology":true,"driverInfo":true,"graphicsInfo":true,"displayConfigure":true,"sharedGeometry":true,"processControl":true,"clipboard":true,"clipboardTextBytes":262144,"applicationStatus":true,"memoryStatus":true,"execute":true,"executeTimeoutSeconds":60,"executeOutputBytes":65536,"displayEvents":self.display_observer.is_some()}}),
         );
         let (sender, receiver) = mpsc::sync_channel(128);
         let state = outbox.clone();
@@ -364,12 +364,15 @@ impl Worker {
                     || command["operation"] == "display_info"
                     || command["operation"] == "graphics_info"
                     || command["operation"] == "display_configure"
+                    || command["operation"] == "display_topology"
+                    || command["operation"] == "display_layout"
                 {
                     let graphics_request = command["operation"] == "graphics_info";
                     let driver_request = command["operation"] == "driver_info";
                     let configure_request = command["operation"] == "display_configure";
-                    let display_request =
-                        command["operation"] == "display_info" || configure_request;
+                    let topology_request = command["operation"] == "display_topology";
+                    let layout_request = command["operation"] == "display_layout";
+                    let display_request = command["operation"] == "display_info" || configure_request || topology_request || layout_request;
                     let busy = if graphics_request {
                         self.graphics_busy.clone()
                     } else if display_request {
@@ -388,6 +391,10 @@ impl Worker {
                                 Ok(display::graphics())
                             } else if configure_request {
                                 display::configure(&command)
+                            } else if topology_request {
+                                display_topology::snapshot()
+                            } else if layout_request {
+                                display_topology::configure(&command)
                             } else if display_request {
                                 Ok(display::snapshot())
                             } else {

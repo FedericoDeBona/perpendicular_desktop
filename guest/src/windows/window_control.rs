@@ -1,13 +1,38 @@
 use super::{capture::Target, catalogue, error};
 use serde_json::{Value, json};
+use std::sync::{Mutex, OnceLock};
 use windows::Win32::{
     Foundation::{HWND, LPARAM, POINT, RECT, WPARAM},
-    Graphics::Gdi::ClientToScreen,
+    Graphics::Gdi::{ClientToScreen, GetMonitorInfoW, MonitorFromWindow, MonitorFromRect,
+        MONITORINFO, MONITOR_DEFAULTTONEAREST},
     UI::{HiDpi::{GetDpiForWindow, GetSystemMetricsForDpi}, WindowsAndMessaging::*},
 };
 
-fn work_area() -> RECT {
+static APP_AREAS: OnceLock<Mutex<Vec<(RECT,RECT)>>> = OnceLock::new();
+
+/// Limits of authenticated native app windows, separate from Explorer's
+/// global work areas. Never move the taskbar or reserve space on the desktop.
+pub fn set_app_work_areas(areas: Vec<(RECT,RECT)>) -> Result<(),String> {
+    *APP_AREAS.get_or_init(||Mutex::new(Vec::new())).lock().map_err(|_|"App display state unavailable")?=areas;
+    Ok(())
+}
+pub fn app_work_area(monitor:RECT,current:RECT)->RECT {
+    let Some(areas)=APP_AREAS.get() else{return current};
+    let Ok(areas)=areas.lock() else{return current};
+    let Some((_,area))=areas.iter().find(|(frame,_)|*frame==monitor) else{return current};
+    let result=RECT{left:current.left.max(area.left),top:current.top.max(area.top),
+        right:current.right.min(area.right),bottom:current.bottom.min(area.bottom)};
+    if result.right-result.left>=160 && result.bottom-result.top>=100 {result}else{current}
+}
+
+fn work_area(hwnd: HWND, requested: Option<&RECT>) -> RECT {
     unsafe {
+        let monitor = match requested {
+            Some(rect) => MonitorFromRect(rect, MONITOR_DEFAULTTONEAREST),
+            None => MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST),
+        };
+        let mut info = MONITORINFO { cbSize: size_of::<MONITORINFO>() as u32, ..Default::default() };
+        if GetMonitorInfoW(monitor, &mut info).as_bool() { return app_work_area(info.rcMonitor,info.rcWork); }
         let mut area = RECT::default();
         if SystemParametersInfoW(
             SPI_GETWORKAREA,
@@ -29,7 +54,7 @@ fn work_area() -> RECT {
 pub fn minimum_size(hwnd: HWND, full: bool) -> Option<(i32, i32)> {
     unsafe {
         let dpi = GetDpiForWindow(hwnd).max(96);
-        let area = work_area();
+        let area = work_area(hwnd, None);
         let mut info = MINMAXINFO {
             ptMaxPosition: POINT { x: area.left, y: area.top },
             ptMaxSize: POINT { x: area.right-area.left, y: area.bottom-area.top },
@@ -71,8 +96,11 @@ pub fn describe_minimum(metadata: &mut Value) {
 }
 
 pub fn limits(hwnd: HWND, full: bool) -> (i32, i32) {
+    limits_in(hwnd, full, work_area(hwnd, None))
+}
+
+fn limits_in(hwnd: HWND, full: bool, area: RECT) -> (i32, i32) {
     unsafe {
-        let area = work_area();
         let mut outer = RECT::default();
         let _ = GetWindowRect(hwnd, &mut outer);
         let mut client = RECT::default();
@@ -143,7 +171,10 @@ pub fn set_geometry(target: &Target, value: &Value) -> Result<Value, String> {
         .ok_or("Invalid window height")? as i32;
     unsafe {
         let hwnd = HWND(target.hwnd as *mut _);
-        let (max_width, max_height) = limits(hwnd, target.full_frame);
+        let requested = RECT { left: requested_x, top: requested_y,
+            right: requested_x + width, bottom: requested_y + height };
+        let area = work_area(hwnd, Some(&requested));
+        let (max_width, max_height) = limits_in(hwnd, target.full_frame, area);
         let (width, height) = (width.min(max_width), height.min(max_height));
         let mut outer = RECT::default();
         GetWindowRect(hwnd, &mut outer).map_err(error)?;
@@ -167,7 +198,6 @@ pub fn set_geometry(target: &Target, value: &Value) -> Result<Value, String> {
         let extra_y = outer.bottom - outer.top - (surface.bottom - surface.top);
         let offset_x = surface.left - outer.left;
         let offset_y = surface.top - outer.top;
-        let area = work_area();
         let (x, y) = if target.full_frame {
             (
                 requested_x.clamp(area.left, (area.right - width).max(area.left)) - offset_x,
@@ -296,7 +326,7 @@ pub fn resize(target: &Target, value: &Value) -> Result<Value, String> {
         };
         let extra_x = outer.right - outer.left - (surface.right - surface.left);
         let extra_y = outer.bottom - outer.top - (surface.bottom - surface.top);
-        let area = work_area();
+        let area = work_area(hwnd, None);
         let visible = catalogue::frame_bounds(hwnd).unwrap_or(outer);
         let full_width = if target.full_frame {
             width

@@ -153,20 +153,24 @@ struct Launcher:View {
         ScrollView {
             VStack(alignment:.leading,spacing:20){
                 ForEach(Array(model.launcherDisplays.enumerated()),id:\.offset){index,display in
-                    Button(action:model.showWindows){
-                        HStack(spacing:20){
-                            Image(systemName:"display").font(.system(size:34,weight:.ultraLight)).foregroundStyle(.indigo).frame(width:70,height:65)
-                            VStack(alignment:.leading,spacing:6){
-                                Text(index == 0 ? "Windows":"Schermo \(index+1)").font(.system(size:16,weight:.semibold))
-                                if let width=display["width"] as? Int,let height=display["height"] as? Int {Text("\(width) × \(height)").font(.system(size:12)).foregroundStyle(.secondary)}
-                            }
-                            Spacer()
-                            Image(systemName:"arrow.up.right").foregroundStyle(.tertiary)
-                        }.padding(20).background(Color.primary.opacity(0.035),in:RoundedRectangle(cornerRadius:18))
-                    }.buttonStyle(.plain)
+                    if display["appScreen"] as? Bool == true {
+                        displayRow(index:index,display:display)
+                    }else{Button(action:model.showWindows){displayRow(index:index,display:display)}.buttonStyle(.plain)}
                 }
             }.padding(.horizontal,32).padding(.bottom,32)
         }
+    }
+    private func displayRow(index:Int,display:[String:Any])->some View {
+                        HStack(spacing:20){
+                            Image(systemName:"display").font(.system(size:34,weight:.ultraLight)).foregroundStyle(.indigo).frame(width:70,height:65)
+                            VStack(alignment:.leading,spacing:6){
+                                Text(display["label"] as? String ?? (index == 0 ? "Windows":"Schermo \(index+1)")).font(.system(size:16,weight:.semibold))
+                                if let width=display["width"] as? Int,let height=display["height"] as? Int {Text("\(width) × \(height)").font(.system(size:12)).foregroundStyle(.secondary)}
+                            }
+                            Spacer()
+                            if display["appScreen"] as? Bool == true {Text("Collegato").font(.system(size:12)).foregroundStyle(.secondary)}
+                            else {Image(systemName:"arrow.up.right").foregroundStyle(.tertiary)}
+                        }.padding(20).background(Color.primary.opacity(0.035),in:RoundedRectangle(cornerRadius:18))
     }
 }
 

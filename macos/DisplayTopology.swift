@@ -57,3 +57,92 @@ struct HostDisplay {
         return value
     }
 }
+
+struct AppDisplayBinding:Codable {let hostID:String;let slot:Int}
+struct AppDisplayBindings:Codable {let machineID:String;let pid:Int32;let displays:[AppDisplayBinding]}
+
+/// One Windows DIP per Mac point. Keep a uniform guest DPI so ordinary and
+/// legacy Windows apps do not change logical size while moving between Macs.
+/// A non-Retina Mac downsamples the same raster through its normal presenter.
+struct MixedDisplayPlan {
+    let layout:[[String:Any]]
+    let hosts:[HostDisplay]
+    let devices:[String]
+    let scale:Int
+
+    static func rasterScale(_ hosts:[HostDisplay])->Int {
+        hosts.allSatisfy{fits($0.frame.size,scale:2)} ? 2:1
+    }
+    static func supported(_ hosts:[HostDisplay])->Bool {
+        let scale=rasterScale(hosts)
+        return (1...15).contains(hosts.count) && hosts.allSatisfy{fits($0.frame.size,scale:scale) && $0.stableID != nil}
+    }
+    private static func fits(_ size:NSSize,scale:Int)->Bool {
+        let w=size.width*CGFloat(scale),h=size.height*CGFloat(scale)
+        return w>=640 && h>=480 && w<=4096 && h<=4096 && w*h<=8_388_608
+    }
+    private static func failure(_ text:String)->NSError {NSError(domain:"Displays",code:1,userInfo:[NSLocalizedDescriptionKey:text])}
+
+    init(hosts:[HostDisplay],bindings:AppDisplayBindings,topology:[String:Any])throws {
+        guard !hosts.isEmpty,hosts.count==bindings.displays.count,
+              Set(bindings.displays.map(\.hostID)).count==hosts.count,
+              Set(bindings.displays.map(\.slot)).count==hosts.count,
+              let paths=topology["paths"] as? [[String:Any]],paths.count==hosts.count+1,
+              let monitors=(topology["monitors"] as? [String:Any])?["displays"] as? [[String:Any]] else {
+            throw Self.failure("La configurazione degli schermi non è completa. Riavvia Windows dopo aver collegato gli schermi.")
+        }
+        let scale=Self.rasterScale(hosts)
+        guard hosts.allSatisfy({Self.fits($0.frame.size,scale:scale) && $0.stableID != nil}) else {
+            throw Self.failure("La dimensione di uno schermo supera il limite grafico corrente.")
+        }
+        func path(slot:Int,service:String)throws->[String:Any] {
+            let found=paths.filter{($0["pciAddress"] as? Int)==(slot<<16) && $0["service"] as? String==service && $0["problem"] as? Int==0}
+            guard found.count==1,found[0]["device"] is String else {
+                throw Self.failure("Il driver dello schermo aggiuntivo non è pronto. Completa l’installazione multischermo.")
+            }
+            return found[0]
+        }
+        let primary=try path(slot:8,service:"VioGpu3D")
+        guard let primaryName=primary["device"] as? String,
+              let width=primary["width"] as? Int,let height=primary["height"] as? Int,
+              (640...4096).contains(width),(480...4096).contains(height),width*height<=8_388_608 else {
+            throw Self.failure("Il desktop Windows non è disponibile.")
+        }
+        // The reserved desktop has no Mac point mapping. Preserve its working
+        // raster and DPI: old Windows profiles may not advertise the new boot
+        // raster. Only the app displays need the common 1-DIP/1-point scale.
+        var layout:[[String:Any]]=[["device":primaryName,"x":0,"y":0,"width":width,"height":height,"primary":true]]
+        var devices:[String]=[]
+        // Place the reserved desktop against the leftmost app monitor. The
+        // app monitors themselves preserve the actual Mac arrangement.
+        let anchor=hosts.min{a,b in a.frame.minX == b.frame.minX ? a.frame.maxY>b.frame.maxY:a.frame.minX<b.frame.minX}!
+        for host in hosts {
+            guard let binding=bindings.displays.first(where:{$0.hostID==host.stableID}),
+                  (9...23).contains(binding.slot) else {throw Self.failure("Gli schermi sono cambiati. Riavvia Windows per aggiornarli.")}
+            let device=try path(slot:binding.slot,service:"VioGpuDod")["device"] as! String
+            let x=width+Int(((host.frame.minX-anchor.frame.minX)*CGFloat(scale)).rounded())
+            let y=Int(((anchor.frame.maxY-host.frame.maxY)*CGFloat(scale)).rounded())
+            let work=host.workArea
+            let area:[String:Int]=["x":x+Int(((work.minX-host.frame.minX)*CGFloat(scale)).rounded()),
+                "y":y+Int(((host.frame.maxY-work.maxY)*CGFloat(scale)).rounded()),
+                "width":Int((work.width*CGFloat(scale)).rounded()),"height":Int((work.height*CGFloat(scale)).rounded())]
+            layout.append(["device":device,"x":x,"y":y,"width":Int((host.frame.width*CGFloat(scale)).rounded()),
+                "height":Int((host.frame.height*CGFloat(scale)).rounded()),"primary":false,"dpi":96*scale,"workArea":area])
+            devices.append(device)
+        }
+        guard Set(devices).count==hosts.count,monitors.count==layout.count else {throw Self.failure("Le uscite Windows non sono distinte.")}
+        self.layout=layout;self.hosts=hosts;self.devices=devices;self.scale=scale
+    }
+
+    func mappings(snapshot:[String:Any])throws->[SharedDisplay] {
+        guard let monitors=(snapshot["monitors"] as? [String:Any])?["displays"] as? [[String:Any]] else {throw Self.failure("Impossibile verificare gli schermi Windows.")}
+        return try zip(hosts,devices).map { host,device in
+            guard let actual=monitors.first(where:{$0["device"] as? String==device}),
+                  let requested=layout.first(where:{$0["device"] as? String==device}),
+                  let mapping=SharedDisplay.mapped(host:host,monitor:actual,requested:requested,scale:scale) else {
+                throw Self.failure("Windows non ha confermato posizione, dimensioni e scala degli schermi.")
+            }
+            return mapping
+        }
+    }
+}

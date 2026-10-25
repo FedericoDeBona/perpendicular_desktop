@@ -4,7 +4,9 @@ Launcher Mac delle app Windows di una VM locale, con accesso al desktop Windows 
 
 Prima di iniziare o riprendere leggere il [registro dei problemi](docs/KNOWN_ISSUES.md), poi il [piano di lavoro](docs/RESTART_PLAN.md) e la [TODO da mantenere obbligatoriamente aggiornata](docs/TODO.md). Il lavoro prosegue su `main` dalla base scelta dall’utente il 25 ottobre 2026.
 
-La base principale è **Perpendicular 0.2.4**, installata in `/Applications/Perpendicular.app`, con collegamento `Perpendicular.app` sul Desktop. App, strumenti di controllo e build selezionano per default la VM in `~/Library/Application Support/Perpendicular Memory IoT`.
+La base principale è **Perpendicular 0.2.5**, installata in `/Applications/Perpendicular.app`, con collegamento `Perpendicular.app` sul Desktop. App, strumenti di controllo e build selezionano per default la VM in `~/Library/Application Support/Perpendicular Memory IoT`.
+
+La0.2.5 integra il percorso protetto N+1: desktop Windows separato e un’uscita per ciascun monitor Mac, con mapping e scala delle app verificati. Nella main con un Mac fisico sono riusciti testo, drag, resize, dialogo e ripresa dello stesso documento lasciando Windows acceso. Trasferimento fra monitor di scala diversa, cambio monitor e alcuni problemi grafici restano aperti; [stato e limiti](docs/TODO.md#todo-001--schermi-n1), [verifiche](docs/VERIFICATION.md#25-ottobre--integrazione-n1-e-distribuzione-025).
 
 La0.2.4 riduce notifiche ripetute al launcher e consegna i frame direttamente alla UI. Le prove per ridurre l’attesa di presentazione non hanno dato un beneficio qualificato; il presenter precedente è conservato. [Esito pratico e limiti](docs/reports/2026-10-25-graphics-latency-update.md).
 

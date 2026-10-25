@@ -78,4 +78,5 @@ struct DesktopLaunch:Codable {
     let pid:Int32
     let socket:String
     let native:NativeDisplayEndpoint?
+    let wgcSocket:String?
 }

@@ -4,9 +4,12 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 use std::{collections::BTreeSet, thread, time::Duration};
 use windows::Win32::{
-    Devices::Display::*,
+    Devices::{Display::*, DeviceAndDriverInstallation::{CM_Get_Device_Interface_PropertyW, CR_SUCCESS},
+        Properties::{DEVPKEY_Device_InstanceId, DEVPROP_TYPE_STRING, DEVPROPTYPE}},
     Foundation::{ERROR_INSUFFICIENT_BUFFER, ERROR_SUCCESS},
+    Foundation::RECT,
 };
+use windows::core::PCWSTR;
 
 struct Topology {
     paths: Vec<DISPLAYCONFIG_PATH_INFO>,
@@ -22,7 +25,15 @@ struct Layout {
     width: u32,
     height: u32,
     primary: bool,
+    #[serde(default)]
+    dpi: Option<u32>,
+    #[serde(default, rename = "workArea")]
+    work_area: Option<Area>,
 }
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Area { x: i32, y: i32, width: i32, height: i32 }
 
 impl Topology {
     fn read() -> Result<Self, String> {
@@ -97,17 +108,46 @@ impl Topology {
 
     fn describe(&self) -> Result<Value, String> {
         let mut paths = Vec::new();
+        let adapters = super::drivers::adapters()?;
         for path in &self.paths {
             let mode = &self.modes[self.source_index(path)?];
             let source = unsafe { mode.Anonymous.sourceMode };
-            paths.push(json!({"device":Self::source_name(path)?,
+            let mut name = DISPLAYCONFIG_ADAPTER_NAME::default();
+            name.header.r#type = DISPLAYCONFIG_DEVICE_INFO_GET_ADAPTER_NAME;
+            name.header.size = size_of::<DISPLAYCONFIG_ADAPTER_NAME>() as u32;
+            name.header.adapterId = path.sourceInfo.adapterId;
+            let code = unsafe { DisplayConfigGetDeviceInfo(&mut name.header) };
+            if code != 0 { return Err(format!("Read display adapter: {code}")); }
+            let mut instance = [0u16;1024];
+            let mut bytes = (instance.len()*2) as u32;
+            let mut kind = DEVPROPTYPE::default();
+            let code = unsafe { CM_Get_Device_Interface_PropertyW(PCWSTR(name.adapterDevicePath.as_ptr()),
+                &DEVPKEY_Device_InstanceId, &mut kind, Some(instance.as_mut_ptr().cast()), &mut bytes, 0) };
+            if code != CR_SUCCESS || kind != DEVPROP_TYPE_STRING || bytes > 2048 || bytes%2 != 0 {
+                return Err("Cannot identify display adapter instance".into());
+            }
+            let instance = String::from_utf16_lossy(&instance[..instance.iter().position(|&c|c==0).unwrap_or(instance.len())]);
+            let adapter = adapters.iter().find(|a| a["instance"].as_str().is_some_and(|v| v.eq_ignore_ascii_case(&instance)))
+                .ok_or("Display adapter is not in the device inventory")?;
+            paths.push(json!({"device":Self::source_name(path)?,"instance":instance,
+                "pciAddress":adapter["pciAddress"],"service":adapter["service"],"problem":adapter["problem"],
                 "adapterLuid":{"high":path.sourceInfo.adapterId.HighPart,"low":path.sourceInfo.adapterId.LowPart},
                 "sourceId":path.sourceInfo.id,"targetId":path.targetInfo.id,
                 "targetAvailable":path.targetInfo.targetAvailable.as_bool(),
                 "x":source.position.x,"y":source.position.y,
                 "width":source.width,"height":source.height}));
         }
-        Ok(json!({"paths":paths,"monitors":super::display::snapshot()}))
+        let mut monitors=super::display::snapshot();
+        if let Some(displays)=monitors["displays"].as_array_mut() {
+            for monitor in displays {
+                let get=|fields:&Value,key:&str|fields[key].as_i64().and_then(|v|i32::try_from(v).ok()).ok_or("Invalid monitor bounds");
+                let rect=|fields:&Value|->Result<RECT,String>{let x=get(fields,"x")?;let y=get(fields,"y")?;
+                    Ok(RECT{left:x,top:y,right:x+get(fields,"width")?,bottom:y+get(fields,"height")?})};
+                let area=super::window_control::app_work_area(rect(monitor)?,rect(&monitor["workArea"])?);
+                monitor["appWorkArea"]=json!({"x":area.left,"y":area.top,"width":area.right-area.left,"height":area.bottom-area.top});
+            }
+        }
+        Ok(json!({"paths":paths,"monitors":monitors}))
     }
 
     fn select_primary(&mut self, name: &str) -> Result<(), String> {
@@ -156,6 +196,10 @@ impl Topology {
     }
 
     fn arrange(&mut self, layout: &[Layout]) -> Result<(), String> {
+        self.arrange_validated(layout, true)
+    }
+
+    fn arrange_validated(&mut self, layout: &[Layout], apply: bool) -> Result<(), String> {
         if layout.len() != self.paths.len() || layout.iter().filter(|m| m.primary).count() != 1 {
             return Err("Layout must describe every active display and one primary".into());
         }
@@ -169,6 +213,16 @@ impl Topology {
                 || (monitor.primary && (monitor.x != 0 || monitor.y != 0))
             {
                 return Err("Invalid display layout coordinates or dimensions".into());
+            }
+            if monitor.dpi.is_some_and(|dpi| ![96,120,144,168,192,216,240,288].contains(&dpi)) {
+                return Err("Unsupported display DPI".into());
+            }
+            if let Some(area) = &monitor.work_area {
+                if area.width < 160 || area.height < 100 || area.x < monitor.x || area.y < monitor.y
+                    || i64::from(area.x)+i64::from(area.width) > i64::from(monitor.x)+i64::from(monitor.width)
+                    || i64::from(area.y)+i64::from(area.height) > i64::from(monitor.y)+i64::from(monitor.height) {
+                    return Err("Work area must fit its display".into());
+                }
             }
             for other in &layout[..i] {
                 if monitor.device.eq_ignore_ascii_case(&other.device)
@@ -217,7 +271,7 @@ impl Topology {
         }
         self.paths
             .swap(0, primary.ok_or("Primary display not active")?);
-        self.apply()
+        if apply { self.apply() } else { Ok(()) }
     }
 
     fn apply(&self) -> Result<(), String> {
@@ -242,7 +296,83 @@ impl Topology {
     }
 }
 
+// Windows Settings uses these two private packets for live per-monitor DPI.
+// Bound the ABI/range and verify through the normal monitor API afterwards;
+// an unsupported Windows build fails instead of changing registry defaults.
+#[repr(C)]
+#[derive(Default)]
+struct DpiGet { header: DISPLAYCONFIG_DEVICE_INFO_HEADER, minimum: i32, current: i32, maximum: i32 }
+#[repr(C)]
+struct DpiSet { header: DISPLAYCONFIG_DEVICE_INFO_HEADER, relative: i32 }
+
+fn set_dpi(path: &DISPLAYCONFIG_PATH_INFO, dpi: u32) -> Result<(), String> {
+    let scales = [96u32,120,144,168,192,216,240,288,336,384,432,480];
+    if size_of::<DpiGet>() != 32 || size_of::<DpiSet>() != 24 { return Err("Unsupported DPI packet ABI".into()); }
+    let mut get = DpiGet::default();
+    get.header = DISPLAYCONFIG_DEVICE_INFO_HEADER { r#type: DISPLAYCONFIG_DEVICE_INFO_TYPE(-3),
+        size: 32, adapterId: path.sourceInfo.adapterId, id: path.sourceInfo.id };
+    let code = unsafe { DisplayConfigGetDeviceInfo(&mut get.header) };
+    if code != 0 { return Err(format!("Read live display scaling: {code}")); }
+    if !(-11..=0).contains(&get.minimum) || !(0..=11).contains(&get.maximum)
+        || get.current < get.minimum || get.current > get.maximum {
+        return Err("Unsupported live DPI range".into());
+    }
+    let desired = scales.iter().position(|&s|s==dpi).ok_or("Unsupported DPI value")? as i32 + get.minimum;
+    if desired < get.minimum || desired > get.maximum { return Err("Requested DPI is outside this monitor's range".into()); }
+    if desired == get.current { return Ok(()); }
+    let set = DpiSet { header: DISPLAYCONFIG_DEVICE_INFO_HEADER {r#type:DISPLAYCONFIG_DEVICE_INFO_TYPE(-4),
+        size:24,adapterId:path.sourceInfo.adapterId,id:path.sourceInfo.id},relative:desired };
+    let code = unsafe { DisplayConfigSetDeviceInfo(&set.header) };
+    if code != 0 { return Err(format!("Apply live display scaling: {code}")); }
+    Ok(())
+}
+
+fn matches(description: &Value, layout: &[Layout], include_dpi: bool) -> bool {
+    description["monitors"]["displays"].as_array().is_some_and(|displays|
+        displays.len()==layout.len() && layout.iter().all(|m| displays.iter().any(|d|
+            d["device"].as_str().is_some_and(|v|v.eq_ignore_ascii_case(&m.device)) && d["x"]==m.x && d["y"]==m.y
+                && d["width"]==m.width && d["height"]==m.height && d["primary"]==m.primary
+                && (!include_dpi || m.dpi.is_none_or(|dpi|d["dpi"]==dpi)))))
+}
+
+pub fn snapshot() -> Result<Value, String> { Topology::read()?.describe() }
+
+pub fn configure(value: &Value) -> Result<Value, String> {
+    let layout: Vec<Layout> = serde_json::from_value(value["layout"].clone()).map_err(|e|format!("Invalid layout: {e}"))?;
+    let mut topology = Topology::read()?;
+    // Always validate the full input, even if its raster already matches.
+    let already_matches = matches(&topology.describe()?, &layout, false);
+    topology.arrange_validated(&layout, !already_matches)?;
+    let current = Topology::read()?;
+    for monitor in &layout {
+        if let Some(dpi) = monitor.dpi {
+            let path = current.paths.iter().find(|p| Topology::source_name(p).is_ok_and(|v|v.eq_ignore_ascii_case(&monitor.device)))
+                .ok_or("Display disappeared during DPI update")?;
+            set_dpi(path, dpi)?;
+        }
+    }
+    for _ in 0..15 {
+        let description = snapshot()?;
+        if matches(&description,&layout,true) {
+            let areas=layout.iter().filter_map(|m|m.work_area.as_ref().map(|a|(
+                RECT{left:m.x,top:m.y,right:m.x+m.width as i32,bottom:m.y+m.height as i32},
+                RECT{left:a.x,top:a.y,right:a.x+a.width,bottom:a.y+a.height}))).collect();
+            super::window_control::set_app_work_areas(areas)?;
+            return snapshot();
+        }
+        thread::sleep(Duration::from_millis(100));
+    }
+    Err("Windows did not confirm display layout and DPI".into())
+}
+
 pub fn run(args: &[String]) -> Result<(), String> {
+    if let [flag, data] = args {
+        if flag == "--layout" && data.len() <= 8192 {
+            let layout: Value = serde_json::from_str(data).map_err(|e|format!("Invalid layout: {e}"))?;
+            println!("{}", configure(&json!({"layout":layout}))?);
+            return Ok(());
+        }
+    }
     let mut topology = Topology::read()?;
     let (primary, layout) = match args {
         [] => {
