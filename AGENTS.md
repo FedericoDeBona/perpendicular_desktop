@@ -1,7 +1,8 @@
 # Regole di lavoro
 
-Prima di iniziare o riprendere il lavoro, leggi [docs/KNOWN_ISSUES.md](docs/KNOWN_ISSUES.md) per problemi, stato corrente e prossimi passi, poi [docs/RESTART_PLAN.md](docs/RESTART_PLAN.md) per requisiti e vincoli. Le istruzioni dell'utente hanno precedenza.
+Prima di iniziare o riprendere il lavoro, leggi [docs/KNOWN_ISSUES.md](docs/KNOWN_ISSUES.md) per problemi, stato corrente e prossimi passi, poi [docs/RESTART_PLAN.md](docs/RESTART_PLAN.md) per requisiti e vincoli e [docs/TODO.md](docs/TODO.md) per attività, priorità e stato di avanzamento. Le istruzioni dell'utente hanno precedenza.
 
+- Mantieni obbligatoriamente aggiornata docs/TODO.md quando cambia un requisito, una priorità, un blocco o l'esito del lavoro. Conserva gli ID e le attività concluse; indica stato, prossimo passo e criterio di completamento. Distingui implementazione, verifica nel clone e verifica nell'app principale. Segna FATTO solo con evidenza pertinente in VERIFICATION.md; per BLOCCATO o IMPOSSIBILE indica motivo, perimetro e cosa potrebbe cambiare l'esito. Se manca un meccanismo concreto di misura, segnala il limite all'utente senza inventare risultati o avviare prove prive di significato. Aggiorna anche KNOWN_ISSUES.md quando riguarda un difetto esistente, senza creare registri concorrenti dello stesso problema.
 - Aggiorna il registro dei problemi quando emerge un difetto o cambia l'esito di una verifica. Cerca e aggiorna la voce esistente prima di crearne una nuova; collega le evidenze in VERIFICATION.md. Distingui correzioni nel clone, verifiche circoscritte e distribuzione nell'app ordinaria. Chiudi una voce soltanto quando il suo criterio di chiusura è verificato; conserva gli esiti negativi nel diario delle verifiche.
 - Parti dai requisiti del prodotto. Linguaggi, librerie, protocolli e struttura interna richiedono una scelta motivata sul sistema effettivo.
 - Distingui requisiti dell'utente, ipotesi tecniche e capacità realmente verificate.

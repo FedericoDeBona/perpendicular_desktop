@@ -2,6 +2,8 @@
 
 Aggiornato il 25 ottobre 2026. Leggere questo file prima di iniziare o riprendere, poi [RESTART_PLAN.md](RESTART_PLAN.md). Qui sono descritti stato corrente, prossimi passi e criteri di chiusura. La cronologia delle prove e dei fallimenti resta in [VERIFICATION.md](VERIFICATION.md); gli esperimenti ritirati sono indicizzati separatamente in [RETIRED_EXPERIMENTS.md](RETIRED_EXPERIMENTS.md).
 
+Le attività richieste, incluse condivisione degli stessi file Mac e analisi delle prestazioni, sono raccolte nella [TODO obbligatoria](TODO.md), da leggere dopo il piano. La ricognizione documentale del 25 ottobre non cambia gli esiti delle verifiche: nessun nuovo test o difetto chiuso. La TODO rimanda agli ID di questo registro per i problemi già noti.
+
 ## Base corrente e priorità
 
 **Base principale dopo la pulizia del 25 ottobre:** `/Applications/Perpendicular.app`, versione0.2.0, collegamento `Perpendicular.app` sul Desktop. App, build e strumenti selezionano per default la IoT0795218c in `~/Library/Application Support/Perpendicular Memory IoT`. Driver grafico e RAM Microsoft-signed, Secure Boot/Code Integrity attivi, TESTSIGNINGfalse confermati dopo l'avvio dal pacchetto installato. RAM automatica attiva. [Promozione e pulizia](VERIFICATION.md#25-ottobre--pulizia-definitiva-e-promozione-iot-a-base-principale).

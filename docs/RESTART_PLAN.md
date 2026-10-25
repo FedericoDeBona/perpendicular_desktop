@@ -2,6 +2,8 @@
 
 Prima di riprendere leggere [KNOWN_ISSUES.md](KNOWN_ISSUES.md), poi questo piano. Aggiornare il registro quando cambia una verifica e conservare prove e fallimenti in [VERIFICATION.md](VERIFICATION.md). Questo documento descrive lo stato operativo; gli handoff superati restano nel diario e nella [versione precedente](https://github.com/FedericoDeBona/perpendicular_desktop/blob/d5c02e3/docs/RESTART_PLAN.md).
 
+Leggere e mantenere anche la [TODO obbligatoria](TODO.md): contiene priorità, feature richieste, blocchi e criteri di completamento. Ultima richiesta del 25 ottobre: documentare N+1/finestre 1:1, stessi file Mac in Windows e misure di grafica, disco/I/O, CPU e GPU. Per questo passaggio soltanto ragionamento e ricerca, nessun test o modifica della VM. La richiesta riprende esplicitamente anche le finestre delle singole app.
+
 ## Base principale
 
 Su richiesta esplicita dell'utente, il 25 ottobre la nuova IoT e l'ultimo pacchetto RAM diventano la base principale su `main`. Eliminati tutti i vecchi dischi VM, inclusa la sorgente Parallels, i relativi rollback/snapshot e i launcher superati. Non cercare di riavviare le vecchie VM dai loro metadati residui.
@@ -51,7 +53,7 @@ Non ricreare automaticamente clone o rollback eliminati. Non sostituire un runti
 
 ## Come proseguire
 
-Scegliere il prossimo difetto concreto pertinente al desktop o un piccolo incremento richiesto dall’utente. Definire il risultato osservabile e la verifica minima, completarlo nell’app reale e proseguire. Evitare nuove matrici driver, benchmark fence ripetuti, grandi harness o cambi di edizione Windows senza una necessità dimostrata.
+Scegliere il prossimo piccolo incremento fra le priorità della TODO, rispettando la richiesta corrente dell'utente. Definire il risultato osservabile e la verifica minima; quando si passa all'implementazione, completarlo nell’app reale e proseguire. Per le prestazioni individuare prima un meccanismo concreto di misura, dichiarandone i limiti; se manca, avvisare e fermare quella misura. Evitare nuove matrici driver, benchmark fence ripetuti, grandi harness o cambi di edizione Windows senza una necessità dimostrata.
 
 Conservare componenti separabili per controllo VM, collegamento guest, sessione, immagini/input e UI Mac. Swift/AppKit/Metal sul Mac e Rust nel guest sono la base attuale; nuove dipendenze o cambi architetturali richiedono una motivazione sul sistema effettivo. Consultare il vecchio progetto soltanto per una domanda precisa.
 
@@ -67,4 +69,4 @@ Per le finestre individuali conservare il requisito di geometria percepita 1:1, 
 
 N+1 è richiesto ma bloccato nella base attuale: KMD ufficiale con una sola uscita per adattatore e QEMU che rifiuta la seconda GPU 3D anche all’avvio. Non basta aumentare max_outputs e non sono stati attivati schermi fittizi. La direzione concordata prevede monitor Windows corrispondenti ai Mac più un’area desktop riservata e pulsanti per le uscite. È una proposta, non isolamento fra desktop Windows. Prima di estenderla qualificare due uscite, DPI e trasferimento di una finestra con dialogo. Non cambiare la topologia del desktop attuale come prerequisito di lavoro ordinario. Le osservazioni su Parallels sono evidenze statiche, non una ricostruzione verificata dei suoi interni.
 
-RDP e il vecchio DOD/2D restano abbandonati. La precedente richiesta di rimuovere residui di altri Tools è stata superata dall’ordine di procedere con display/grafica: non riprendere inventari o disinstallazioni per completismo. La priorità resta l’uso del desktop attuale.
+RDP e il vecchio DOD/2D restano abbandonati. La precedente richiesta di rimuovere residui di altri Tools è superata anche dalla nuova installazione IoT pulita, senza importazione da Parallels: non riprendere inventari o disinstallazioni per completismo. Le nuove priorità sono quelle della TODO; il desktop attuale resta la base da preservare.

@@ -2,7 +2,7 @@
 
 Launcher Mac delle app Windows di una VM locale, con accesso al desktop Windows accelerato. App principali, recenti/più usate, preferiti, ricerca e icone originali ad alta risoluzione conservate sul Mac.
 
-Prima di iniziare o riprendere leggere il [registro dei problemi](docs/KNOWN_ISSUES.md), poi il [piano di lavoro](docs/RESTART_PLAN.md). Il lavoro prosegue su `main` dalla base scelta dall’utente il 25 ottobre 2026.
+Prima di iniziare o riprendere leggere il [registro dei problemi](docs/KNOWN_ISSUES.md), poi il [piano di lavoro](docs/RESTART_PLAN.md) e la [TODO da mantenere obbligatoriamente aggiornata](docs/TODO.md). Il lavoro prosegue su `main` dalla base scelta dall’utente il 25 ottobre 2026.
 
 La base principale è **Perpendicular 0.2.0**, installata in `/Applications/Perpendicular.app`, con collegamento `Perpendicular.app` sul Desktop. App, strumenti di controllo e build selezionano per default la VM in `~/Library/Application Support/Perpendicular Memory IoT`.
 
@@ -12,6 +12,7 @@ La pulizia autorizzata ha eliminato i vecchi dischi VM e launcher. Restano un ba
 
 Restano aperti arresti HVF, saturazione storica delle risorse e gestione dello spazio host. Una breve verifica riuscita non certifica affidabilità generale o compatibilità con tutte le app. Esplora file ed Edge sono disponibili nel launcher e si aprono in finestre Mac tramite immagini GPU. Il difetto noto delle etichette mancanti in alcune catture resta aperto. N+1 è nuovamente richiesto ma non disponibile: il driver/runtime corrente non offre ancora le uscite necessarie. Creality/OpenGL resta rinviato.
 
+- [TODO: feature, correzioni, stati e criteri di completamento](docs/TODO.md)
 - [Requisiti, base attuale e prossimi passi](docs/RESTART_PLAN.md)
 - [Implementazione attuale, build e manutenzione](docs/IMPLEMENTATION.md)
 - [Problemi aperti e criteri di chiusura](docs/KNOWN_ISSUES.md)
