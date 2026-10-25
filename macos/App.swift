@@ -1001,6 +1001,10 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
             for id in Array(windows.keys) where !current.contains(id){windows.removeValue(forKey:id)?.retire();earlyFrames.removeValue(forKey:id)}
             for item in items{
                 guard let id=item["id"] as? String,let title=item["title"] as? String else{continue}
+                if item["macOwned"] as? Bool == true,let failure=item["cloakError"] as? String,!failure.isEmpty {
+                    let notice="Questa app resta visibile anche in Windows. Puoi continuare a usarla."
+                    if launcherNotice != notice {launcherNotice=notice}
+                }
                 if windows[id]==nil{
                     let role=WindowRole(rawValue:item["role"] as? String ?? "dialog") ?? .dialog
                     let controller=ApplicationWindow(id:id,title:title,role:role,bridge:bridge)

@@ -72,6 +72,7 @@ pub fn install(config: &Path) -> Result<(), String> {
     if std::fs::read(&executable).ok().as_deref() != Some(bytes.as_slice()) {
         std::fs::write(&executable, &bytes).map_err(error)?;
     }
+    super::cloak::install(&version)?;
     std::fs::write(
         root.join("connection.json"),
         serde_json::to_vec_pretty(&configuration).map_err(error)?,

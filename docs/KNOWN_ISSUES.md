@@ -1,6 +1,6 @@
 # Registro dei problemi
 
-Aggiornato il 25 ottobre 2026. Leggere questo file prima di iniziare o riprendere, poi [RESTART_PLAN.md](RESTART_PLAN.md). Qui sono descritti stato corrente, prossimi passi e criteri di chiusura. La cronologia delle prove e dei fallimenti resta in [VERIFICATION.md](VERIFICATION.md); gli esperimenti ritirati sono indicizzati separatamente in [RETIRED_EXPERIMENTS.md](RETIRED_EXPERIMENTS.md).
+Aggiornato il 26 ottobre 2026. Leggere questo file prima di iniziare o riprendere, poi [RESTART_PLAN.md](RESTART_PLAN.md). Qui sono descritti stato corrente, prossimi passi e criteri di chiusura. La cronologia delle prove e dei fallimenti resta in [VERIFICATION.md](VERIFICATION.md); gli esperimenti ritirati sono indicizzati separatamente in [RETIRED_EXPERIMENTS.md](RETIRED_EXPERIMENTS.md).
 
 Le attività richieste, incluse condivisione degli stessi file Mac e analisi delle prestazioni, sono raccolte nella [TODO obbligatoria](TODO.md), da leggere dopo il piano. La ricognizione documentale del 25 ottobre non cambia gli esiti delle verifiche: nessun nuovo test o difetto chiuso. La TODO rimanda agli ID di questo registro per i problemi già noti.
 
@@ -8,7 +8,7 @@ Comandi Mac e appunti trasversali testo/file sono ora requisiti espliciti in TOD
 
 ## Base corrente e priorità
 
-**Base principale dopo la pulizia del 25 ottobre:** `/Applications/Perpendicular.app`, ora versione0.2.5, collegamento `Perpendicular.app` sul Desktop. App, build e strumenti selezionano per default la IoT0795218c in `~/Library/Application Support/Perpendicular Memory IoT`. Driver grafico e RAM Microsoft-signed, Secure Boot/Code Integrity attivi, TESTSIGNINGfalse confermati dopo l’avvio della0.2.0; la0.2.1 ha conservato la medesima sessione Windows e il runtime. La0.2.2 applica il marchio a VM già spenta, senza avviarla. RAM automatica configurata. [Promozione e pulizia](VERIFICATION.md#25-ottobre--pulizia-definitiva-e-promozione-iot-a-base-principale).
+**Base principale dopo la pulizia del 25 ottobre:** `/Applications/Perpendicular.app`, ora versione0.2.6, collegamento `Perpendicular.app` sul Desktop. App, build e strumenti selezionano per default la IoT0795218c in `~/Library/Application Support/Perpendicular Memory IoT`. Driver grafico e RAM Microsoft-signed, Secure Boot/Code Integrity attivi, TESTSIGNINGfalse confermati dopo l’avvio della0.2.0; la0.2.1 ha conservato la medesima sessione Windows e il runtime. La0.2.2 applica il marchio a VM già spenta, senza avviarla. RAM automatica configurata. [Promozione e pulizia](VERIFICATION.md#25-ottobre--pulizia-definitiva-e-promozione-iot-a-base-principale).
 
 **Catalogo/impostazioni0.2.1:** unica pagina App con recenti in alto e catalogo completo, pannello processi rimosso, impostazioni CPU/RAM salvate per il prossimo avvio. Persistenza e applicazione dopo arresto controllate su fixture con il controller reale; nessun boot della VM a1 GB. Catalogo installato visibile, qualifica interattiva del pannello incompleta per chiusura del canale CUA, senza crash dell’app rilevato. TODO-019 conserva il limite; non è un nuovo difetto di prodotto dimostrato. [Evidenze](VERIFICATION.md#25-ottobre--catalogo-unico-e-impostazioni-cpuram).
 
@@ -23,6 +23,8 @@ Il ciclo RAM protetto 4→2→4 GiB con dati conservati resta la qualifica prece
 **Intervento prestazionale precedente:** correzione UI circoscritta installata/verificata nella0.2.4 (notifiche ripetute evitate e consegna diretta dei frame). Tentativi di ridurre l’attesa di presentazione respinti; presenter precedente conservato. Outlier UI32 ms e attribuzione guest/runtime ancora aperti, nessun beneficio di latenza inventato. [Esito pratico](reports/2026-10-25-graphics-latency-update.md), [verifica](VERIFICATION.md#25-ottobre--tentativi-di-riduzione-latenza-e-ui-024). PERF-001/WIN-004/GFX-007 non chiusi.
 
 **Aggiornamento corrente0.2.5:** percorso N+1 misto protetto installato nella main, con un Mac fisico e due uscite Windows (3D riservato+DOD app). Mapping stabile/DPI app192, testo, drag, resize, dialogo e Cancel verificati nell’app canonica. Desktop3D conservato2048×1152/DPI144; non necessita corrispondenza al Mac. Il precedente tentativo di forzarne il raster fallisce1610, senza chiudere GFX-006 in generale. Tre uscite nel clone erano una prova distinta. Trasferimento fra Mac di scala diversa, cambio monitor, riserva taskbar/Snap e guasti grafici rimangono aperti. [Evidenze0.2.5](VERIFICATION.md#25-ottobre--integrazione-n1-e-distribuzione-025).
+
+**Aggiornamento corrente0.2.6:** input per app cloaked implementato e distribuito; qualifica circoscritta su Notepad, dialoghi e navigazione Explorer. Secure Boot/CI conservati, nessuna modalità test. Limiti WGC e separazione delle app a istanza singola ancora aperti. [Evidenze](VERIFICATION.md#26-ottobre--input-per-finestre-cloaked-e-distribuzione-026).
 
 ## Come aggiornare il registro
 
@@ -195,11 +197,11 @@ Queste voci conservano limiti non risolti, senza richiedere di ripristinare codi
 
 ### WIN-004 — Finestra Mac visibile ma app Windows non attiva
 
-- **Cloaking, prova diretta main:** chiamata esterna rifiutata0x80070005; da hook limitato al thread dell’app di prova riesce. Foreground assegnato al target, ma hit test del mouse restituisce un’altra finestra sottostante: il percorso attuale non è utilizzabile con cloaking attivo. Nuovi frame ricevuti non equivalgono a input corretto. Ripristinata visibilità e chiusa regolarmente la sola prova; app0.2.5 invariata, nessun cloaking automatico distribuito. Prossimo passo: risolvere destinatario dell’input e distinta visibilità host senza bypassare la verifica. [Evidenze](VERIFICATION.md#25-ottobre--prova-diretta-di-cloaking-sulla-main-input-bloccante).
+- **Seguito0.2.6 distribuito:** attivazione nel processo target, mouse diretto al suo albero di controlli e visibilità host distinta. Notepad cloaked riceve clic/testo/Cmd+A/drag; Explorer naviga ma ricompare captureFrames0 dopo aggiornamenti a caldo (GFX-003 aperto). Corretto il filtro dei dialoghi già cloaked dal proprietario; Don't Save riuscito nel guest finale. Finestra Windows-only non esportata. Hook ARM64 per thread; fallback visibile osservato nella candidata mouse reale poi scartata. Compatibilità di altre app, menu e recupero/crash non qualificati: voce aperta. [Evidenze](VERIFICATION.md#26-ottobre--input-per-finestre-cloaked-e-distribuzione-026). Il precedente probe0.2.5 rifiutava la chiamata esterna e non aveva un input utilizzabile; il suo esito negativo resta nel diario.
 
 - **Qualifica main0.2.5 circoscritta:** aggiunto ripristino del first responder quando la finestra diventa key. Notepad riceve «Prova N+1 nella main» dopo il frame pronto; click Cancel sul dialogo restituisce il documento. Non qualificate tutte le app o ogni ripresa del focus; voce mantenuta aperta. [Evidenze](VERIFICATION.md#25-ottobre--integrazione-n1-e-distribuzione-025).
 
-- **Stato:** aperto, riprodotto nella build diagnostica sulla IoT principale; app installata non modificata e causa non isolata.
+- **Stato:** aperto per la qualifica generale; correzione circoscritta distribuita0.2.6 nella IoT principale.
 - **Verificato:** avvio Notepad dal launcher, immagine nella finestra Mac ma testo rifiutato dal controllo focus con messaggio «L’app non è attiva in Windows». «Apri Windows», click nell’editor e ritorno alla finestra Mac ripristinano la scrittura. Il recupero non è una correzione dell’attivazione.
 - **Prossimo passo:** correlare richiesta attivazione, foreground HWND guest e focus della finestra Mac, preservando il blocco dell’input verso un’app diversa.
 - **Chiusura:** apertura/ripresa dalla main porta alla corretta app attiva e riceve input senza passaggio manuale nel desktop; nessun input deviato o documento duplicato. TODO-017/011.

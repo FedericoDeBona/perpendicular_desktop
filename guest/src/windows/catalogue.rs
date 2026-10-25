@@ -114,6 +114,7 @@ unsafe extern "system" fn collect_children(hwnd: HWND, context: LPARAM) -> windo
 pub struct Activation {
     pidl: Vec<u16>,
     packaged_id: Option<String>,
+    new_explorer_window: bool,
 }
 impl Activation {
     // A verified registered package can be explicitly activated again after
@@ -147,6 +148,14 @@ impl Activation {
     }
 
     fn execute(&self) -> Result<(u32, u64), String> {
+        if self.new_explorer_window {
+            let windows=std::env::var_os("SystemRoot").ok_or("Windows directory unavailable")?;
+            std::process::Command::new(std::path::PathBuf::from(windows).join("explorer.exe"))
+                .arg("/n").spawn().map_err(error)?;
+            // Explorer hands activation to the shell process. Associate only a
+            // new authenticated HWND, never the short-lived launcher PID.
+            return Ok((0,0));
+        }
         unsafe {
             if let Some(app) = &self.packaged_id {
                 let manager: IApplicationActivationManager = CoCreateInstance(&ApplicationActivationManager, None, CLSCTX_LOCAL_SERVER).map_err(error)?;
@@ -373,7 +382,8 @@ impl Catalogue {
                 offset += length;
             }
             let packaged_id = self.identities.get(id).filter(|app| registered_package(app)).cloned();
-            Ok(Activation { pidl: owned, packaged_id })
+            Ok(Activation { pidl: owned, packaged_id,
+                new_explorer_window:self.identities.get(id).is_some_and(|value|primary_app(value)=="explorer") })
         }
     }
 }

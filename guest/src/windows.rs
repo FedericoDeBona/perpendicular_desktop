@@ -2,6 +2,7 @@ mod app_process;
 mod capture;
 mod catalogue;
 mod clipboard;
+mod cloak;
 mod display;
 mod display_topology;
 mod drivers;

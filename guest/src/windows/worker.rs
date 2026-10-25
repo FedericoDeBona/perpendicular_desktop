@@ -2,7 +2,7 @@ use super::{
     Configuration, app_process,
     capture::{self, Target},
     catalogue::{self, Catalogue},
-    clipboard, display, display_topology, error, execute, identity, window_control,
+    clipboard, cloak, display, display_topology, error, execute, identity, window_control,
     wire::{self, Outbox},
 };
 use serde_json::{Value, json};
@@ -36,6 +36,10 @@ struct Window {
     metadata: Value,
     parent: Option<String>,
     stop: Option<Arc<AtomicBool>>,
+    mac_owned: bool,
+    cloak: Option<cloak::Window>,
+    cloak_error: Option<String>,
+    capture_unavailable_since:Option<Instant>,
 }
 struct Launch {
     app: String,
@@ -51,6 +55,7 @@ struct ApplicationSession {
     gap_until: Option<Instant>,
     startup_until: Instant,
     activation: Option<u64>,
+    baseline: HashSet<usize>,
 }
 struct Worker {
     sid: String,
@@ -111,6 +116,11 @@ fn activate_window(hwnd: HWND) -> Result<(), String> {
             Err("Windows did not grant this window keyboard focus".into())
         }
     }
+}
+
+fn activate_surface(window:&Window)->Result<(),String> {
+    if let Some(scope)=window.cloak.as_ref().filter(|scope|scope.active()) {return scope.activate();}
+    activate_window(HWND(window.target.hwnd as _))
 }
 
 // Viewing a streamed window does not count as guest user input. Keep the
@@ -192,6 +202,7 @@ pub fn run(path: &Path) -> Result<(), String> {
                 if let Err(e) = worker.connected(stream, &config) {
                     log(e);
                 }
+                for window in worker.windows.values_mut() { window.cloak.take(); }
                 worker.release();
             }
             Err(e) => {
@@ -444,6 +455,7 @@ impl Worker {
             }
         }
         for window in self.windows.values_mut() {
+            window.cloak.take();
             if let Some(stop) = window.stop.take() {
                 stop.store(true, Ordering::Release);
             }
@@ -484,7 +496,7 @@ impl Worker {
                     let window = self.activation_window(window)?;
                     unsafe {
                         let _ = ShowWindow(HWND(window.target.hwnd as *mut _), SW_RESTORE);
-                        activate_window(HWND(window.target.hwnd as *mut _))?;
+                        activate_surface(window)?;
                     }
                     outbox.control(json!({"type":"activate","window":window.target.id}));
                     return Ok(json!({"accepted":true,"existing":true}));
@@ -497,8 +509,7 @@ impl Worker {
                     // The observation grace period is not evidence of a live
                     // launch. Pending activation is checked above; after a
                     // verified exit the user must be able to launch again.
-                    session.activation.is_some() || (!activation.is_packaged()
-                        && session.processes.iter().any(app_process::Process::alive))
+                    session.activation.is_some()
                 }) {
                     outbox.control(json!({"type":"launch_state","app":app,"state":"waiting"}));
                     return Ok(json!({"accepted":true,"existing":true,"ready":false}));
@@ -513,6 +524,7 @@ impl Worker {
                 let nonce = self.activation_serial;
                 let sender = self.activation_sender.clone();
                 let app_id = app.to_string();
+                let baseline = catalogue::windows().into_iter().collect();
                 std::thread::Builder::new().name("app-activation".into()).spawn(move || {
                     let result = activation.run();
                     let _ = sender.send(ActivationResult { app: app_id, nonce, result });
@@ -523,6 +535,7 @@ impl Worker {
                 self.applications.insert(app.into(), ApplicationSession {
                     processes, gap_until: Some(until), startup_until: until,
                     activation: Some(nonce),
+                    baseline,
                 });
                 self.next_process_scan = Instant::now();
                 self.pending.push(Launch {
@@ -574,7 +587,7 @@ impl Worker {
                             let action=value["action"].as_str().ok_or("Missing clipboard action")?;
                             let key=match action {"copy"=>0x43,"cut"=>0x58,"paste"=>0x56,_=>return Err("Unsupported clipboard action".into())};
                             if !unsafe {IsWindowEnabled(HWND(target.hwnd as *mut _)).as_bool()} {return Err("This app is waiting for a dialog".into());}
-                            activate_window(HWND(root_hwnd as *mut _))?;
+                            activate_surface(root)?;
                             self.release();
                             let sequence=clipboard::sequence();
                             if action=="paste" {clipboard::write(value["text"].as_str().ok_or("Missing clipboard text")?)?;}
@@ -590,7 +603,7 @@ impl Worker {
                         let active = self.activation_window(window)?;
                         unsafe {
                             let _ = ShowWindow(HWND(active.target.hwnd as *mut _), SW_RESTORE);
-                            activate_window(HWND(active.target.hwnd as *mut _))?;
+                            activate_surface(active)?;
                         }
                         if active.target.id != target.id {
                             outbox.control(json!({"type":"activate","window":active.target.id}));
@@ -613,6 +626,9 @@ impl Worker {
                         state["captureDevice"] = json!(*target.capture_device.lock().unwrap());
                         state["captureStopped"] = json!(window.stop.as_ref()
                             .map(|stop| stop.load(Ordering::Acquire)).unwrap_or(true));
+                        state["macOwned"] = json!(window.mac_owned);
+                        state["guestCloaked"] = json!(window.cloak.as_ref().is_some_and(cloak::Window::active));
+                        state["cloakError"] = json!(window.cloak_error);
                         return Ok(state);
                     }
                     "cancel_interaction" => {
@@ -742,6 +758,7 @@ impl Worker {
         if !self.applications.contains_key(app) && self.applications.len() >= 8 { return; }
         let session = self.applications.entry(app.into()).or_insert_with(|| ApplicationSession {
             processes: Vec::new(), gap_until: None, startup_until: Instant::now(), activation: None,
+            baseline:HashSet::new(),
         });
         if session.processes.len() >= 16 || session.processes.iter().any(|p| p.identity.pid == pid && p.identity.creation == creation) { return; }
         if let Some(process) = app_process::Process::open(pid, &self.sid, self.session)
@@ -799,22 +816,31 @@ impl Worker {
     fn application_for(&self, metadata: &Value) -> Option<String> {
         let pid = metadata["pid"].as_u64()? as u32;
         let creation = metadata["creation"].as_str()?.parse::<u64>().ok()?;
+        let raw=metadata["hwnd"].as_u64()? as usize;
+        let owner=metadata["owner"].as_u64().unwrap_or(0) as usize;
+        if let Some(parent)=self.windows.values().find(|w|w.target.hwnd==owner && w.target.valid()) {
+            return Some(parent.app.clone());
+        }
+        // An app identity or shared process alone never turns a window opened
+        // inside Windows into a Mac-owned window. Only admit a fresh result of
+        // an explicit launcher request, or a transient of the active Mac app.
+        let launching=|app:&String|self.pending.iter().any(|p|p.app==*app && p.deadline>Instant::now())
+            && !self.windows.values().any(|w|w.app==*app && !catalogue::transient(&w.metadata))
+            && self.applications.get(app).is_some_and(|s|!s.baseline.contains(&raw));
+        let transient_app=if catalogue::transient(metadata) {
+            self.windows.values().find(|w|w.mac_owned && w.target.hwnd==catalogue::foreground()).map(|w|w.app.clone())
+        } else {None};
         if metadata["class"] == "ApplicationFrameWindow" {
-            let raw = metadata["hwnd"].as_u64()? as usize;
             let mut matches = self.applications.keys().filter(|app| {
-                self.catalogue.hosted_content(app, raw, &self.sid, self.session).is_some()
+                launching(app) && self.catalogue.hosted_content(app, raw, &self.sid, self.session).is_some()
             });
             let app = matches.next()?;
             return matches.next().is_none().then(|| app.clone());
         }
-        let owner = metadata["owner"].as_u64().unwrap_or(0) as usize;
-        if let Some(parent) = self.windows.values().find(|w| w.target.hwnd == owner && w.target.valid()) {
-            return Some(parent.app.clone());
-        }
-        if let Some(app) = self.applications.keys().find(|app| self.catalogue.matches(app,
+        if let Some(app) = self.applications.keys().find(|app| (launching(app) || transient_app.as_ref()==Some(app)) && self.catalogue.matches(app,
             metadata["hwnd"].as_u64().unwrap_or(0) as usize)) { return Some(app.clone()); }
-        let mut candidates = self.applications.iter().filter(|(_, session)| {
-            session.processes.iter().any(|p| p.identity.pid == pid && p.identity.creation == creation)
+        let mut candidates = self.applications.iter().filter(|(app, session)| {
+            (launching(app) || transient_app.as_ref()==Some(app)) && session.processes.iter().any(|p| p.identity.pid == pid && p.identity.creation == creation)
         });
         let (app, _) = candidates.next()?;
         candidates.next().is_none().then(|| app.clone())
@@ -925,6 +951,35 @@ impl Worker {
         if refresh_minimum { self.next_minimum_scan = Instant::now() + Duration::from_secs(2); }
         for (id, mut details) in updated {
             if let Some(window) = self.windows.get_mut(&id) {
+                if window.mac_owned && window.cloak.is_none() && window.cloak_error.is_none()
+                    && window.target.capture_frames.load(Ordering::Acquire)>0
+                    && window.stop.as_ref().is_some_and(|stop|!stop.load(Ordering::Acquire)) {
+                    match cloak::Window::new(window.target.clone()).and_then(|mut scope|{scope.hide()?;Ok(scope)}) {
+                        Ok(scope)=>{window.cloak=Some(scope);changed=true;}
+                        Err(message)=>{
+                            log(format!("Window isolation unavailable hwnd={}: {message}",window.target.hwnd));
+                            window.cloak_error=Some(message);changed=true;
+                        }
+                    }
+                }
+                let mut cloaked=window.cloak.as_ref().is_some_and(cloak::Window::active);
+                if cloaked && window.stop.as_ref().is_none_or(|stop|stop.load(Ordering::Acquire)) {
+                    let since=window.capture_unavailable_since.get_or_insert_with(Instant::now);
+                    // Resize restarts WGC deliberately; retain isolation while it reconnects.
+                    if since.elapsed()>Duration::from_secs(3) {
+                        window.cloak.take();window.cloak_error=Some("Capture stopped; restored in Windows".into());cloaked=false;
+                    }
+                }else {window.capture_unavailable_since=None;}
+                if let Some(scope)=&window.cloak {scope.touch();}
+                if window.cloak.is_some() && !cloaked {
+                    window.cloak.take();window.cloak_error=Some("Window isolation expired; restored in Windows".into());
+                }
+                details["guestCloaked"]=json!(cloaked);
+                details["macOwned"]=json!(window.mac_owned);
+                details["cloakError"]=json!(window.cloak_error);
+                // DWM visibility and presentation of a Mac-owned window are
+                // separate. Never suppress our host window because we cloaked it.
+                if cloaked {details["visible"]=json!(unsafe{IsWindowVisible(HWND(window.target.hwnd as *mut _)).as_bool()});}
                 if refresh_minimum { window_control::describe_minimum(&mut details); }
                 else {
                     details["minWidth"] = window.metadata["minWidth"].clone();
@@ -963,7 +1018,11 @@ impl Worker {
         let Some(metadata) = catalogue::details(raw, &self.sid, self.session) else {
             return false;
         };
-        if metadata["cloaked"] == true { return false; }
+        let owner=metadata["owner"].as_u64().unwrap_or(0) as usize;
+        // DWM also cloaks owned dialogs when their Mac parent is cloaked.
+        // Admit that exact authenticated owner chain, not arbitrary hidden apps.
+        let mac_child=self.windows.values().any(|w|w.mac_owned && w.target.hwnd==owner && w.target.valid());
+        if metadata["cloaked"] == true && !mac_child { return false; }
         let hosted = if metadata["class"] == "ApplicationFrameWindow" {
             let Some(content) = self.catalogue.hosted_content(&app, raw, &self.sid, self.session) else { return false; };
             Some(content)
@@ -1049,6 +1108,10 @@ impl Worker {
                 metadata,
                 parent,
                 stop,
+                mac_owned:true,
+                cloak:None,
+                cloak_error:None,
+                    capture_unavailable_since:None,
             },
         );
         true
@@ -1073,13 +1136,14 @@ impl Worker {
                 "parent":w.parent,"role":w.metadata["role"],"x":w.metadata["x"],"y":w.metadata["y"],
                 "z":w.metadata["z"],"visible":w.metadata["visible"],"minimized":w.metadata["minimized"],
                 "class":w.metadata["class"],"style":w.metadata["style"],"exStyle":w.metadata["exStyle"],
+                "macOwned":w.mac_owned,"guestCloaked":w.metadata["guestCloaked"],"cloakError":w.cloak_error,
                 "maxWidth":w.metadata["maxWidth"],"maxHeight":w.metadata["maxHeight"],
                 "minWidth":w.metadata["minWidth"],"minHeight":w.metadata["minHeight"],"resizable":w.metadata["resizable"]})
         }).collect();
         outbox.control(json!({"type":"windows","windows":windows,"epoch":self.epoch}));
     }
     fn save(&self) {
-        let mut values:Vec<Value>=self.windows.values().filter(|w| !catalogue::transient(&w.metadata)).map(|w|json!({"hwnd":w.target.hwnd,"pid":w.target.pid,"creation":w.target.creation.to_string(),"app":w.app,"hosted":w.target.hosted})).collect();
+        let mut values:Vec<Value>=self.windows.values().filter(|w| !catalogue::transient(&w.metadata)).map(|w|json!({"hwnd":w.target.hwnd,"pid":w.target.pid,"creation":w.target.creation.to_string(),"app":w.app,"hosted":w.target.hosted,"macOwned":w.mac_owned})).collect();
         let now = Instant::now();
         let unix = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis() as u64;
         for (app, session) in &self.applications {
@@ -1120,7 +1184,7 @@ impl Worker {
             let startup = value["startupUntil"].as_u64().unwrap_or(unix).saturating_sub(unix).min(30_000);
             self.applications.insert(app.into(), ApplicationSession { processes,
                 gap_until:Some(now+Duration::from_millis(gap.saturating_sub(unix).min(30_000))),
-                startup_until:now+Duration::from_millis(startup), activation: None });
+                startup_until:now+Duration::from_millis(startup), activation: None,baseline:HashSet::new() });
         }
         for value in values.into_iter().filter(|value| value["hwnd"].as_u64().is_some()).take(4) {
             let Some(raw) = value["hwnd"].as_u64() else {
@@ -1185,6 +1249,10 @@ impl Worker {
                     metadata,
                     parent: None,
                     stop: None,
+                    mac_owned:value["macOwned"]==true,
+                    cloak:None,
+                    cloak_error:None,
+                    capture_unavailable_since:None,
                 },
             );
         }
@@ -1205,6 +1273,39 @@ impl Worker {
         related: &[usize],
         value: &Value,
     ) -> Result<(), String> {
+        let kind=value["event"].as_str().ok_or("Missing input type")?;
+        if self.windows.get(&target.id).is_some_and(|w|w.cloak.as_ref().is_some_and(cloak::Window::active)) {
+            if kind=="leave" {return Ok(());}
+            // DefWindowProc's Alt-F4/title-button tracking requires a visible
+            // desktop hit target. Request the same authenticated system close.
+            if kind=="chord" && value["keys"]==json!([0x12,0x73]) {
+                if !target.valid(){return Err("Window retired".into());}
+                self.release();
+                unsafe {PostMessageW(Some(HWND(target.hwnd as _)),WM_CLOSE,WPARAM(0),LPARAM(0)).map_err(error)?;}
+                return Ok(());
+            }
+            if matches!(kind,"pointer"|"button"|"scroll") {
+                if !target.valid(){return Err("Window retired".into());}
+                let (generation,width,height,ox,oy)=*target.geometry.lock().unwrap();
+                if value["generation"].as_u64()!=Some(generation){return Err("Window geometry is updating".into());}
+                let coordinate=|name:&str,max:i32|value[name].as_i64().filter(|v|*v>=0 && *v<i64::from(max)).map(|v|v as i32).ok_or("Pointer outside content");
+                let mut point=POINT{x:coordinate("x",width)?+ox,y:coordinate("y",height)?+oy};
+                unsafe {
+                    if !IsWindowEnabled(HWND(target.hwnd as _)).as_bool(){return Err("This app is waiting for a dialog".into());}
+                    if !ClientToScreen(HWND(target.hwnd as _),&mut point).as_bool(){return Err("Pointer transform unavailable".into());}
+
+                }
+                let window=self.windows.get_mut(&target.id).ok_or("Window retired")?;
+                let result=window.cloak.as_mut().unwrap().pointer(kind,value["button"].as_str().unwrap_or("left"),value["down"]==true,
+                    point.x,point.y,value["delta"].as_i64().unwrap_or(0).clamp(-2400,2400) as i32);
+                if let Err(message)=result {
+                    window.cloak.take();window.cloak_error=Some(message.clone());
+                    log(format!("Restored guest visibility after input failure hwnd={}: {message}",target.hwnd));
+                    return Err("L’app è tornata visibile in Windows. Ripeti il clic per continuare.".into());
+                }
+                return Ok(());
+            }
+        }
         unsafe {
             let hwnd = HWND(target.hwnd as *mut _);
             if !IsWindowEnabled(hwnd).as_bool() {
@@ -1214,6 +1315,7 @@ impl Worker {
             let foreground = GetAncestor(GetForegroundWindow(), GA_ROOT).0 as usize;
             let needs_focus = kind == "key" || kind == "text" || kind == "chord";
             if needs_focus && !related.contains(&foreground) {
+                if let Some(scope)=self.windows.get(&target.id).and_then(|w|w.cloak.as_ref()) {scope.activate()?;}
                 activate_window(HWND(root as *mut _))?;
             }
             if needs_focus
@@ -1459,6 +1561,7 @@ impl Worker {
         }
     }
     fn release(&mut self) {
+        for window in self.windows.values_mut(){if let Some(scope)=window.cloak.as_mut(){scope.cancel();}}
         for key in self.pressed.drain() {
             let _ = send(keyboard(key, true));
         }
@@ -1470,6 +1573,13 @@ impl Worker {
         }
     }
     fn release_button(&mut self, button: &str) -> Result<(), String> {
+        for window in self.windows.values_mut() {
+            if let Some(scope)=window.cloak.as_mut() {
+                if let Err(message)=scope.release(button) {
+                    window.cloak.take();window.cloak_error=Some(message);
+                }
+            }
+        }
         let (key, flag) = match button {
             "left" => (VK_LBUTTON, MOUSEEVENTF_LEFTUP),
             "right" => (VK_RBUTTON, MOUSEEVENTF_RIGHTUP),
