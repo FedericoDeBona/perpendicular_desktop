@@ -160,7 +160,7 @@ Il driver ARM64 è fissato in `guest/graphics-driver.json`, dalla [release v0.4]
 
 ### Esperimenti di display e direzione corrente
 
-Il vecchio 2D non è una base approvata. I preparatori del runtime QEMU 11 e del driver DOD sono isolati in [experimental/display-reference](../experimental/display-reference/README.md), esclusi da app, guest e CD ordinari. Il comando locale di installazione DOD è stato rimosso dal guest. La build elimina l'eventuale vecchia risorsa `Display2D`; una configurazione storica `virtio2D` può soltanto usare Recovery, senza avviare quell'esperimento.
+Il vecchio 2D non è una base approvata. I preparatori QEMU11/DOD sono ritirati e sono stati rimossi dal ramo attivo nella pulizia del25ottobre, insieme alle altre prove; [indice e sorgenti storici](RETIRED_EXPERIMENTS.md). Il comando locale di installazione DOD era già rimosso dal guest. La build elimina l’eventuale vecchia risorsa Display2D; una configurazione storica virtio2D può soltanto usare Recovery.
 
 Il menu Display offre Standard e 3D sperimentale. Cambia profilo dopo l'arresto regolare della VM; durante il riavvio le scelte sono disabilitate. Standard/Recovery usano RAMFB e conservano il limite attuale di 800×600. Il selettore host non installa driver: dopo la preparazione DOD della copia di sviluppo, il pacchetto 3D firmato va eventualmente reinstallato prima di riprovare Native3D.
 

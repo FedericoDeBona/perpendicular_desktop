@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Build one host export hook against the current local Wire2 renderer profile."""
 import argparse,hashlib,json,pathlib,shlex,shutil,subprocess
-HERE=pathlib.Path(__file__).resolve().parent;REPO=HERE.parents[1]
+REPO=pathlib.Path(__file__).resolve().parents[1];HERE=REPO/'graphics/renderer'
 def sha(p):return hashlib.sha256(p.read_bytes()).hexdigest()
 def main():
  p=argparse.ArgumentParser();p.add_argument('--reference',type=pathlib.Path,required=True);p.add_argument('--output',type=pathlib.Path,required=True);a=p.parse_args()
@@ -25,8 +25,8 @@ def main():
  s=s.replace(needle,'#include "perp-wgc-export.inc"\n\n'+needle)
  needle='   hr = npt_shared_export_handle(ctx, blob_id, data_res_id, data_off, handle);';assert s.count(needle)==1
  s=s.replace(needle,'   if (!nt_handle) perp_wgc_export(ctx, blob_id, (const void *)(uintptr_t)handle);\n'+needle)
- source.write_text(s);shutil.copy2(HERE/'export.inc',source.parent/'perp-wgc-export.inc')
- run('diagnostics',['patch','-p1','--forward','--batch','-i',HERE/'timing-diagnostics.patch'],q/'source')
+ source.write_text(s);shutil.copy2(HERE/'wgc-export.inc',source.parent/'perp-wgc-export.inc')
+ run('diagnostics',['patch','-p1','--forward','--batch','-i',HERE/'wgc-export-timing.patch'],q/'source')
  records=json.loads((ref/'build/compile_commands.json').read_text());objects=[]
  for filename in ['npt_shared.c','snapshot.c','proxy-broker.c']:
   record=next(x for x in records if x['file'].endswith('/'+filename))
@@ -49,5 +49,5 @@ def main():
   subprocess.run(['codesign','--force','--sign','-','--timestamp=none',str(target)],check=True);subprocess.run(['codesign','--verify','--strict',str(target)],check=True)
   manifest['files'][name]=sha(target)
  manifest['experimental_wgc_gpu_export']=1;(runtime/'runtime.json').write_text(json.dumps(manifest,indent=2)+'\n')
- (q/'receipt.json').write_text(json.dumps({'baselineCodeSHA256':baseline,'sourceBefore':before,'sourceAfter':sha(source),'hook':sha(HERE/'export.inc'),'files':manifest['files'],'runtimeVerified':False},indent=2)+'\n');print(runtime)
+ (q/'receipt.json').write_text(json.dumps({'baselineCodeSHA256':baseline,'sourceBefore':before,'sourceAfter':sha(source),'hook':sha(HERE/'wgc-export.inc'),'files':manifest['files'],'runtimeVerified':False},indent=2)+'\n');print(runtime)
 if __name__=='__main__':main()

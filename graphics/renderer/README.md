@@ -153,6 +153,11 @@ Nel solo bundle privato, renderer rilocato/firmato c57051d36f4639cbbc4c3fc26f040
 
 ### Gate di completamento D3D11 sperimentale
 
-[experimental-d3d11-completion-gate.patch](experimental-d3d11-completion-gate.patch) estende soltanto GATE_WAIT al tipo ID3D11Fence, con lookup esplicito del tipo e riferimento conservato insieme alla scelta dei relativi slot COM. Il percorso D3D12 mantiene i propri slot, senza cast permissivi tra interfacce. La candidata guest e le prove hardware D3D11 sono descritte in [driver/README.md](../driver/README.md). Richiede l'abbinamento privato; nessuna qualifica D3D12 o del prodotto dal solo ramo preservato.
+[experimental-d3d11-completion-gate.patch](https://github.com/FedericoDeBona/perpendicular_desktop/blob/d5c02e3/graphics/renderer/experimental-d3d11-completion-gate.patch) estende soltanto GATE_WAIT al tipo ID3D11Fence, con lookup esplicito del tipo e riferimento conservato insieme alla scelta dei relativi slot COM. Il percorso D3D12 mantiene i propri slot, senza cast permissivi tra interfacce. La candidata guest e le prove hardware D3D11 sono descritte in [driver/README.md](../driver/README.md). Richiede l'abbinamento privato; nessuna qualifica D3D12 o del prodotto dal solo ramo preservato.
 
 La nuova readiness patch è guest-only: conferma la creazione della coda del gate prima di usarne l'ID. Non cambia i limiti degli snapshot: il desktop a più code resta non supportato. Il resize WGC corretto non dimostra il completamento del produttore DWM né la risoluzione del flicker; conservati anche dispatch fallito e arresto non pulito della precedente sessione. Nessuna promozione del runtime sperimentale nell'app ordinaria.
+
+
+## Pulizia del25ottobre
+
+I prototipi WGC/IVSHMEM e la candidata del gate D3D11 sono ritirati dal ramo attivo; i riferimenti precedenti descrivono prove storiche. Risultati e sorgenti sono nell’[indice degli esperimenti](../../docs/RETIRED_EXPERIMENTS.md). Il runtime corrente è conservato senza modifiche. Le parti host ancora compilate sono mantenute qui come `wgc-export.inc` e `wgc-export-timing.patch`, con ricetta `scripts/rebuild-native-export.py`; non abilitano da sole la cattura delle singole finestre. Sorgenti e ricette private host-7 restano disponibili per il renderer effettivamente in uso.
