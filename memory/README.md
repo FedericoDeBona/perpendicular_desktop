@@ -2,7 +2,7 @@
 
 Stato: opt-in, ciclo reale protetto verificato nella nuova Windows IoT ARM64
 LTSC pulita e controller automatico verificato anche nel desktop Native3D.
-Nessuna distribuzione nella VM ordinaria.
+La IoT è ora la VM principale di Perpendicular0.2.0, installata in Applicazioni.
 Stato prodotto: SYS-003 in
 [KNOWN_ISSUES](../docs/KNOWN_ISSUES.md).
 
@@ -84,7 +84,9 @@ server e backend. Il campo hvf_dynamic_memory_version=1 permette al frontend
 di rifiutare un vecchio runtime nativo incompatibile. Il flag non sostituisce
 la verifica reale. Il pacchetto può selezionare la VM tramite la chiave privata
 Info.plist PerpendicularMachineDirectory o l'override di ambiente omonimo
-PERPENDICULAR_MACHINE_DIRECTORY; il default ordinario rimane invariato.
+PERPENDICULAR_MACHINE_DIRECTORY; il default ordinario è ora la cartella IoT.
+Le build normali riutilizzano il runtime principale tramite copy-main-runtime.py,
+anziché ricostruirlo con il preparatore upstream.
 
 Le patch native aggiuntive conservano i tre handler HVF e il monitor della
 base64a5e90 (native-desktop.patch), espongono EGL headless tramite ANGLE Darwin

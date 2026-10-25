@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Package Homebrew QEMU/swtpm and their Mach-O dependency closure for this local build."""
+"""Low-level upstream QEMU/swtpm packager for explicit experiments.
+
+Does not include the main HVF RAM/native graphics changes. Normal application
+builds use copy-main-runtime.py and the installed qualified runtime instead.
+"""
 import hashlib
 import json
 import os

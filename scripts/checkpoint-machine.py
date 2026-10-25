@@ -105,7 +105,7 @@ def checkpoint(root, shutdown):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--root', type=Path, default=Path.home() / 'Library/Application Support/Perpendicular Restart')
+    parser.add_argument('--root', type=Path, default=Path.home() / 'Library/Application Support/Perpendicular Memory IoT')
     parser.add_argument('--shutdown', action='store_true', help='Request normal ACPI shutdown first, without forcing it')
     options = parser.parse_args()
     checkpoint(options.root.resolve(strict=True), options.shutdown)

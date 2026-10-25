@@ -16,9 +16,9 @@ xcrun swiftc -swift-version 6 -O -parse-as-library -target arm64-apple-macosx14.
     -o "$app/Contents/MacOS/Perpendicular"
 cp "$guest" guest/install.ps1 guest/install.cmd "$app/Contents/Resources/Guest/"
 if [[ "${SKIP_RUNTIME:-0}" != 1 ]]; then
-    python3 scripts/package-runtime.py "$app"
+    python3 scripts/copy-main-runtime.py --from-app "${PERPENDICULAR_RUNTIME_APP:-/Applications/Perpendicular.app}" --to-app "$app"
 fi
-if [[ -d .build/Native3D ]]; then
+if [[ "${SKIP_RUNTIME:-0}" == 1 && -d .build/Native3D ]]; then
     # RuntimeStore preserves the running VM's immutable copy. Always refresh
     # the next build; an existing bundle must not silently keep an old renderer.
     rm -rf "$app/Contents/Resources/Native3D"

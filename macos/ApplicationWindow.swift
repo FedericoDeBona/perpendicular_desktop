@@ -392,7 +392,7 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
         if transitionActive {trace("frame_transition_accepted")}
         let diagnosticSequence=(packet.header["sequence"] as? NSNumber)?.uint64Value ?? 0
         if (first || (1...3).contains(diagnosticSequence)),ProcessInfo.processInfo.environment["PERPENDICULAR_CAPTURE_DIAGNOSTIC"]=="1",let image=content.currentImage{
-            let directory=FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/Perpendicular Restart/QA")
+            let directory=FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/Perpendicular Memory IoT/QA")
             try? FileManager.default.createDirectory(at:directory,withIntermediateDirectories:true,attributes:[.posixPermissions:0o700])
             let name=id.replacingOccurrences(of:":",with:"-")+(first ? "":"-frame-\(diagnosticSequence)")
             try? NSBitmapImageRep(cgImage:image).representation(using:.png,properties:[:])?.write(to:directory.appendingPathComponent(name+".png"))
@@ -422,7 +422,7 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
         }
         guard let image else{return}
         rejectedDiagnosticFrames+=1
-        let directory=FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/Perpendicular Restart/QA")
+        let directory=FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/Perpendicular Memory IoT/QA")
         try? FileManager.default.createDirectory(at:directory,withIntermediateDirectories:true,attributes:[.posixPermissions:0o700])
         let sequence=(packet.header["sequence"] as? NSNumber)?.uint64Value ?? 0
         let name=id.replacingOccurrences(of:":",with:"-")+"-rejected-\(rejectedDiagnosticFrames)-frame-\(sequence)"

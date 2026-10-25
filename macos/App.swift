@@ -86,7 +86,7 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
             if let path=ProcessInfo.processInfo.environment["PERPENDICULAR_MACHINE_DIRECTORY"] ?? Bundle.main.object(forInfoDictionaryKey:"PerpendicularMachineDirectory") as? String {
                 guard path.hasPrefix("/") else{throw CocoaError(.fileReadInvalidFileName)}
                 directory=URL(fileURLWithPath:path,isDirectory:true)
-            }else{directory=FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/Perpendicular Restart")}
+            }else{directory=FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/Perpendicular Memory IoT")}
             launcherLibrary=try LauncherLibrary(directory:directory)
             launcherPreferences=launcherLibrary?.loadPreferences() ?? .init()
             apps=launcherLibrary?.loadCatalogue() ?? []

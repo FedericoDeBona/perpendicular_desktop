@@ -257,7 +257,7 @@ def prepare(source, root, image_tool, preferred_port, dry_run):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--source', type=Path, required=True, help='Existing offline VM directory containing config.json, or an ARM64 QEMU .utm bundle')
-    parser.add_argument('--root', type=Path, default=Path.home() / 'Library/Application Support/Perpendicular Restart',
+    parser.add_argument('--root', type=Path, default=Path.home() / 'Library/Application Support/Perpendicular Memory IoT',
                         help='New destination directory; it must not already exist')
     parser.add_argument('--qemu-img', type=Path, help='Existing qemu-img executable if it is not on PATH')
     parser.add_argument('--guest-port', type=int, default=17837, help='Preferred free loopback port (default: 17837)')

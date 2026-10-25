@@ -32,7 +32,7 @@ def receive_exact(connection, count):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--socket", type=Path, default=Path.home() / "Library/Application Support/Perpendicular Restart/Control/control.sock")
+    parser.add_argument("--socket", type=Path, default=Path.home() / "Library/Application Support/Perpendicular Memory IoT/Control/control.sock")
     commands = parser.add_subparsers(dest="command", required=True)
     for name in ("status", "memory_status", "display_info", "driver_info", "graphics_info", "geometry_snapshot", "application_status", "process_list"):
         commands.add_parser(name)
