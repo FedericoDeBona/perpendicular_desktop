@@ -4,6 +4,8 @@ Aggiornato il 25 ottobre 2026. Leggere questo file prima di iniziare o riprender
 
 Le attività richieste, incluse condivisione degli stessi file Mac e analisi delle prestazioni, sono raccolte nella [TODO obbligatoria](TODO.md), da leggere dopo il piano. La ricognizione documentale del 25 ottobre non cambia gli esiti delle verifiche: nessun nuovo test o difetto chiuso. La TODO rimanda agli ID di questo registro per i problemi già noti.
 
+Comandi Mac e appunti trasversali testo/file sono ora requisiti espliciti in TODO-017/018. Il testo ha un'implementazione e una prova storica circoscritta, mentre file, parità desktop/finestre e qualifica della main restano da completare. Sono attività di prodotto, non nuovi difetti già riprodotti; [ricognizione e limiti](VERIFICATION.md#25-ottobre--requisiti-comandi-mac-e-appunti-trasversali).
+
 ## Base corrente e priorità
 
 **Base principale dopo la pulizia del 25 ottobre:** `/Applications/Perpendicular.app`, versione0.2.0, collegamento `Perpendicular.app` sul Desktop. App, build e strumenti selezionano per default la IoT0795218c in `~/Library/Application Support/Perpendicular Memory IoT`. Driver grafico e RAM Microsoft-signed, Secure Boot/Code Integrity attivi, TESTSIGNINGfalse confermati dopo l'avvio dal pacchetto installato. RAM automatica attiva. [Promozione e pulizia](VERIFICATION.md#25-ottobre--pulizia-definitiva-e-promozione-iot-a-base-principale).

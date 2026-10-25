@@ -23,13 +23,15 @@ Ogni voce deve conservare stato corrente, requisito, ciò che è realmente noto,
 
 ## Quadro corrente
 
-Priorità 1–4 corrispondenti alle richieste dell'utente; le altre righe conservano difetti e risultati già noti. Non iniziare automaticamente tutte le attività insieme.
+Priorità 1–4 corrispondenti alla richiesta iniziale dell'utente; TODO-017/018 aggiungono l'integrazione dei comandi Mac e degli appunti richiesta successivamente. Le altre righe conservano difetti e risultati già noti. Non iniziare automaticamente tutte le attività insieme.
 
 | ID | Attività | Stato corrente | Riferimenti / dipendenze |
 | --- | --- | --- | --- |
 | TODO-001 | Schermi Windows N+1 | BLOCCATO nel driver/runtime corrente | WIN-003; serve prima una seconda uscita reale protetta. |
 | TODO-002 | Geometria, input e finestre Mac/Windows 1:1 | DA FARE; correzioni parziali precedenti | GFX-006, WIN-001/002/003; estensione multischermo dipende da 001. |
 | TODO-003 | Stessi file utente su Mac e Windows, senza copie | DA FARE; virtio-fs candidato, combinazione non qualificata | Backend macOS, client ARM64 firmato, compatibilità RAM. |
+| TODO-017 | Scorciatoie e comandi Mac nelle app Windows e in Perpendicular | DA FARE per completamento e qualifica main; base parziale presente | Cmd+C/V/X/T/Q e altri comandi comuni; destinazione secondo focus/contesto. |
+| TODO-018 | Copia/incolla di testo e file Mac ↔ Windows | DA FARE; testo già implementato e provato storicamente, file mancanti | Entrambe le direzioni, desktop e singole app; collegamento con TODO-003. |
 | TODO-004 | Tutti i tempi della pipeline grafica, desktop e singola app | DA FARE; strumentazione esistente incompleta | Copertura per stadio, correlazione e limiti di misura. |
 | TODO-005 | Misurare e migliorare disco/I/O quando utile | DA FARE | Meccanismi concreti identificati, non provati sul sistema. |
 | TODO-006 | Misurare CPU e costo della VM sempre accesa | DA FARE | Host e guest distinti; campionamento ARM virtuale da accertare. |
@@ -83,6 +85,48 @@ Lato Mac esiste un [backend macosvirtiofsd per QEMU](https://github.com/mheese/m
 4. Definire permessi macOS/TCC, eventuali file iCloud non ancora locali, accessi simultanei, locking, notifiche, salvataggi tramite rename, nomi/case, link e metadati. Dichiarare le differenze APFS/Windows rilevanti alle app; stesso file non implica identiche semantiche NTFS. Un collegamento di trasporto come virtio-vsock, da solo, non fornisce un filesystem.
 
 **Fatto quando:** sulla main protetta un documento aperto da entrambe le parti è lo stesso contenuto host, modifiche/rinomine visibili senza copia o sincronizzatore, cartelle standard e salvataggi delle app instradati correttamente, riavvio/riconnessione non creano cartelle alternative, RAM dinamica preservata. Prima prova futura limitata a una cartella temporanea e un file sacrificabile; poi estendere al requisito completo. Se il percorso senza SMB non è praticabile nel perimetro, documentare il blocco e avvisare prima di proporre un'alternativa: nessuna sostituzione silenziosa con copie o Samba.
+
+L'integrazione dei percorsi condivisi deve comprendere anche i riferimenti ai file negli appunti di TODO-018: un percorso Mac non diventa utilizzabile in Windows con il solo cambio della stringa. La condivisione dello stesso contenuto e il comando esplicito dell'utente per copiarlo in una destinazione sono operazioni distinte.
+
+## TODO-017 — Comandi e scorciatoie Mac nelle app Windows
+
+**Stato: DA FARE per completamento e qualifica nell'app principale; implementazione parziale già presente.** Requisito: usare le abituali scorciatoie Mac anche nelle finestre Windows, con menu e tastiera coerenti, senza dover cambiare abitudini passando da un sistema all'altro.
+
+Ricognizione del codice: `ApplicationContent.swift` intercetta combinazioni Command, inoltra molti comandi come Control, gestisce copia/taglia/incolla e traduce Cmd+Q in Alt+F4. `App.swift` ha il comando Quit di Perpendicular; il desktop usa un altro percorso input in `DesktopWindow.swift`. La [verifica del22 ottobre](VERIFICATION.md#22-ottobre--delete-scorciatoie-mac-e-appunti-di-testo) copre un giro di testo e alcuni tasti, non tutte le scorciatoie né la main attuale. Alt+F4 sulla finestra non dimostra di aver chiuso tutta l'app Windows e i suoi processi.
+
+**Comportamento richiesto e convenzione operativa da qualificare:**
+
+| Comando Mac | Risultato atteso nel contesto attivo |
+| --- | --- |
+| Cmd+C / Cmd+X / Cmd+V | Copia, taglia e incolla dell'app Windows con appunti accessibili anche dal Mac, secondo TODO-018. |
+| Cmd+T | Nuova scheda nell'app Windows che supporta le schede; rispettare il contesto dell'app e i comandi della UI Mac quando è quella ad avere il focus. |
+| Cmd+A / Cmd+Z / Cmd+Shift+Z | Seleziona tutto, annulla e ripristina secondo il comando equivalente dell'app. |
+| Cmd+S / Cmd+O / Cmd+N / Cmd+F | Salva, apri, nuovo e cerca dove supportati dall'app. |
+| Cmd+W | Chiude scheda/documento/finestra secondo il contesto, conservando i dialoghi di salvataggio. |
+| Cmd+Q | Nella singola app Windows, richiesta regolare di uscita dell'app; nel launcher/UI di Perpendicular, uscita da Perpendicular. La richiesta comprende entrambi i contesti: nessuno deve risultare irraggiungibile perché l'altro intercetta sempre la combinazione. |
+
+La distinzione per focus è la convenzione proposta per rendere concreta la richiesta; la politica di eventuale uscita combinata da app Windows e Perpendicular non è stata specificata. Prima dell'implementazione renderla esplicita, insieme al comportamento nel desktop completo, dove il contenitore Mac e l'app Windows in primo piano sono due destinazioni possibili. Non dedurre che Cmd+Q debba arrestare Windows: resta il requisito della VM accesa in background. Per l'uscita da Perpendicular definire anche chi mantiene il controllo RAM in background e il ripristino del collegamento alla riapertura.
+
+**Prossimo passo:** mappare comandi, focus e menu nei due percorsi desktop/singola app; riusare quanto già presente. Distinguere uscita dall'app Windows, chiusura della sua finestra e uscita dal frontend. Invio unico del comando, corretti press/release, modificatori rilasciati al cambio focus; preservare commutazione app e altre scorciatoie di sistema Mac. La chiusura deve lasciare operativi Salva/Annulla e non diventare una terminazione forzata implicita.
+
+**Fatto quando:** breve percorso sulla main con Cmd+C/V, Cmd+T in un'app con schede, Cmd+W e Cmd+Q nei contesti previsti, inclusa cancellazione di un'uscita con documento modificato. Risultato osservabile nella vera app Windows e nello stato di Perpendicular/VM; nessun comando duplicato, destinatario errato o tasto rimasto premuto. Verifiche future, non eseguite in questo passaggio.
+
+## TODO-018 — Appunti trasversali: testo e file Mac ↔ Windows
+
+**Stato: DA FARE per completamento; testo parziale già implementato, file da implementare.** Requisito: copiare/tagliare/incollare testo e copiare/incollare file nelle due direzioni, da app Mac verso Windows e viceversa, attraverso i comandi abituali. Coprire sia le finestre individuali sia il desktop Windows completo.
+
+**Stato noto:** `ApplicationWindow.swift` e `guest/src/windows/clipboard.rs` trasferiscono testo Unicode su richiesta, fino a256 KiB UTF-8, con controlli di focus, risposta tardiva e cambiamento degli appunti Mac. Il [giro reale del22 ottobre](VERIFICATION.md#22-ottobre--delete-scorciatoie-mac-e-appunti-di-testo) ha verificato Mac→Blocco note→Mac, Unicode e Delete nella base di allora. Non è una qualifica della IoT main attuale. Il codice non trasferisce file; il reader RFB del desktop riceve e scarta il messaggio clipboard invece di collegarlo agli appunti Mac. La capability `clipboard=true` del guest non dimostra supporto ai file o parità dei due percorsi.
+
+**Prossimi passi:**
+
+1. Completare e qualificare il testo nei due percorsi, incluse copie da menu/azione dell'app oltre al solo intercettare Cmd+C, Unicode, righe multiple e passaggio di focus. Definire eventuali limiti visibili senza sostituire gli appunti con dati vecchi o parziali; evitare aggiornamenti che si rimbalzano fra i sistemi.
+2. Esporre selezioni di file/cartelle compatibili con Finder, Explorer e i dialoghi delle app. Se il contenuto è condiviso da TODO-003, tradurre i riferimenti ai percorsi effettivamente accessibili. Per file residenti soltanto su uno dei due sistemi prevedere un trasferimento reale su richiesta con destinazione esplicita; non fingere che un percorso inaccessibile costituisca una copia riuscita.
+3. Gestire almeno selezioni multiple, cartelle, nomi Unicode, conflitti di nome, copia interrotta/disconnessione ed errori utilizzabili. Per i file grandi evitare caricamento integrale negli appunti o nel singolo messaggio; per file virtuali/promessi fornire il contenuto quando richiesto o dichiarare il limite. Il semplice testo del percorso non basta come supporto file.
+4. Tenere distinto copia da spostamento/taglia: nessuna cancellazione del file sorgente prima del completamento confermato. Preservare i dati già presenti e i nuovi appunti copiati dall'utente nel frattempo; non registrare i contenuti degli appunti nei log.
+
+L'interfaccia deve offrire la stessa operazione da menu e da tastiera. Drag-and-drop non viene considerato automaticamente completato dal supporto agli appunti: potrà essere aggiunto come requisito distinto. La condivisione di TODO-003 non è sostituita da un sincronizzatore o da copie periodiche.
+
+**Fatto quando:** sulla main protetta una breve operazione per direzione copia testo fra app reali e trasferisce un piccolo file con nome Unicode fra Finder ed Explorer, verificando contenuto e destinazione. Coprire entrambi i percorsi UI senza costruire una matrice estesa; aggiungere solo un caso mirato di annullamento/errore per la logica che può perdere dati. Percorsi condivisi e file locali non condivisi devono avere esito dichiarato; registrare separatamente i limiti ancora aperti. Nessuna di queste prove è stata eseguita per aggiornare la lista.
 
 ## TODO-004 — Tutti i tempi della pipeline grafica
 
@@ -206,3 +250,5 @@ Non è una promessa di unplug completo o footprint minimo fisso. La promozione h
 25 ottobre: registrate le nuove richieste e i meccanismi candidati da fonti primarie, letti i punti di misura nei sorgenti e collegati i difetti esistenti. Nessuna nuova misura o qualifica runtime. [Voce del diario](VERIFICATION.md#25-ottobre--todo-obbligatoria-e-ricognizione-documentale).
 
 Successiva revisione richiesta dall'utente: rimossa la voce su spazio/aggiornamenti/ripristino; conservati gli altri ID. Aggiunta TODO-016 per il difetto sync GPU e corretto GFX-007, che era stato confuso con i tentativi ritirati. [Revisione documentale](VERIFICATION.md#25-ottobre--revisione-todo-e-difetto-di-sincronizzazione-gpu).
+
+Aggiunte TODO-017/018 per comandi Mac e appunti testo/file bidirezionali, distinguendo codice e verifica storica dal lavoro ancora necessario sulla main. [Revisione documentale](VERIFICATION.md#25-ottobre--requisiti-comandi-mac-e-appunti-trasversali).

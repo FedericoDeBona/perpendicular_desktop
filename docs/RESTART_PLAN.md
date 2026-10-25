@@ -6,6 +6,8 @@ Leggere e mantenere anche la [TODO obbligatoria](TODO.md): contiene priorità, f
 
 Revisione successiva: l'utente rimuove TODO-010 dall'elenco operativo e richiede di esplicitare il difetto di sincronizzazione GPU già segnalato upstream. È ora TODO-016/GFX-007, aperto: i tentativi ritirati non ne costituiscono la soluzione. Lettura dell'issue e aggiornamento documentale, nessuna nuova prova o comunicazione esterna.
 
+Ulteriore requisito: comandi Mac nelle app Windows (fra cui Cmd+C/T/Q, con chiusura delle app Windows e uscita da Perpendicular nel contesto previsto) e appunti testo/file in entrambe le direzioni. TODO-017/018 distinguono supporto parziale esistente, convenzione di focus da qualificare e trasferimento file ancora mancante. Resta un aggiornamento della lista, senza implementazione o test.
+
 ## Base principale
 
 Su richiesta esplicita dell'utente, il 25 ottobre la nuova IoT e l'ultimo pacchetto RAM diventano la base principale su `main`. Eliminati tutti i vecchi dischi VM, inclusa la sorgente Parallels, i relativi rollback/snapshot e i launcher superati. Non cercare di riavviare le vecchie VM dai loro metadati residui.
