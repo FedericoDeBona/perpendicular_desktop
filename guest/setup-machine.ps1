@@ -1,5 +1,8 @@
 $ErrorActionPreference = 'Stop'
 try {
+    if (Test-Path -LiteralPath (Join-Path $PSScriptRoot 'Memory')) {
+        & (Join-Path $PSScriptRoot 'install-memory.ps1')
+    }
     if (Test-Path -LiteralPath (Join-Path $PSScriptRoot 'NetKVM')) {
         & (Join-Path $PSScriptRoot 'install-network.ps1')
     }

@@ -207,7 +207,7 @@ final class VirtualMachineController {
         }
         let resources=runtime.deletingLastPathComponent().deletingLastPathComponent()
         let native=nativeGraphicsEnabled ? try NativeGraphics(root:resources.appendingPathComponent("Native3D")):nil
-        if native != nil,configuration.dynamicMemory != nil {
+        if let native,configuration.dynamicMemory != nil,!native.supportsDynamicMemory {
             throw CocoaError(.executableRuntimeMismatch,userInfo:[NSLocalizedDescriptionKey:"This graphics runtime has not been qualified for dynamic RAM. Use the qualified Windows IoT memory runtime."])
         }
         let session=UUID().uuidString.replacingOccurrences(of:"-",with:"").lowercased()
@@ -233,11 +233,15 @@ final class VirtualMachineController {
             String(data: try! JSONSerialization.data(withJSONObject: object), encoding: .utf8)!
         }
         let c = configuration
+        // The default 512 GiB PCI window can exceed the HVF guest PA range.
+        // A 1 GiB aligned window fits this single GPU's 512 MiB BAR and keeps
+        // PCI enumeration available alongside the bounded hotplug region.
+        let pciWindow=native != nil && c.dynamicMemory != nil ? ",highmem-mmio-size=1G":""
         var arguments = [
             "-name", "Perpendicular Windows", "-uuid", c.id,
             "-L",runtime.deletingLastPathComponent().appendingPathComponent("share/qemu").path,
             "-k",c.keyboardLayout ?? "en-us",
-            "-machine", "virt,gic-version=3,highmem=on,pflash0=code,pflash1=vars",
+            "-machine", "virt,gic-version=3,highmem=on,pflash0=code,pflash1=vars\(pciWindow)",
             "-accel", native == nil ? "hvf":"hvf,ipa-granule-size=4096", "-cpu", "host", "-smp", String(c.cpus), "-m", String(c.memoryMiB),
             "-nodefaults", "-vga", "none",
             "-device", "qemu-xhci,id=xhci", "-device", "usb-kbd,bus=xhci.0",

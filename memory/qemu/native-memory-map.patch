@@ -1,0 +1,44 @@
+--- a/hw/arm/virt.c
++++ b/hw/arm/virt.c
+@@ -1848,6 +1848,20 @@
+     }
+ }
+ 
++/* Opt-in map for the bounded ARM64 HVF RAM runtime. Legacy virt places
++ * high PCI at >=256 GiB even when HVF exposes a smaller guest PA space. */
++static bool perp_hvf_small_pci_window(void)
++{
++#if defined(__APPLE__) && defined(__aarch64__)
++    const char *balloon = getenv("PERP_HVF_BALLOON_RECLAIM");
++    const char *memory = getenv("PERP_HVF_VIRTIO_MEM");
++    return balloon && !strcmp(balloon, "1") &&
++           memory && !strcmp(memory, "1");
++#else
++    return false;
++#endif
++}
++
+ static void virt_set_memmap(VirtMachineState *vms, int pa_bits)
+ {
+     MachineState *ms = MACHINE(vms);
+@@ -1900,7 +1914,9 @@
+         error_report("maxmem/slots too huge");
+         exit(EXIT_FAILURE);
+     }
+-    if (base < vms->memmap[VIRT_MEM].base + LEGACY_RAMLIMIT_BYTES) {
++    if (!(hvf_enabled() && perp_hvf_small_pci_window() &&
++          extended_memmap[VIRT_HIGH_PCIE_MMIO].size < DEFAULT_HIGH_PCIE_MMIO_SIZE) &&
++        base < vms->memmap[VIRT_MEM].base + LEGACY_RAMLIMIT_BYTES) {
+         base = vms->memmap[VIRT_MEM].base + LEGACY_RAMLIMIT_BYTES;
+     }
+ 
+@@ -2594,7 +2610,8 @@
+         return;
+     }
+ 
+-    if (size < DEFAULT_HIGH_PCIE_MMIO_SIZE) {
++    if (size < DEFAULT_HIGH_PCIE_MMIO_SIZE &&
++        !(size >= GiB && perp_hvf_small_pci_window())) {
+         char *sz = size_to_str(DEFAULT_HIGH_PCIE_MMIO_SIZE);
+         error_setg(errp, "highmem-mmio-size cannot be set to a lower value "
+                          "than the default (%s)", sz);

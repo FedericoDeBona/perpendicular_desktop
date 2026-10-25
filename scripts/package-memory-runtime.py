@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Put a built memory QEMU and its library closure in a new private app bundle.
 
-Preserves the existing graphics runtime, firmware, guest disks and configuration.
+Preserves renderer/server/backend, firmware, guest disks and configuration.
+With --native, replaces the native QEMU and updates its pinned manifest hash.
 Use only on a new, stopped development app, never a running runtime store.
 """
 import argparse
@@ -22,12 +23,14 @@ def main():
     parser.add_argument("--app", type=Path, required=True)
     parser.add_argument("--qemu", type=Path, required=True)
     parser.add_argument("--library-dir", type=Path, action="append", default=[])
+    parser.add_argument("--native", action="store_true", help="Package a QEMU preserving the current native desktop hooks")
     args = parser.parse_args()
     app = args.app.resolve(strict=True)
     source = args.qemu.resolve(strict=True)
     if app.suffix != ".app" or "Runtimes" in app.parts or source.is_relative_to(app):
         raise ValueError("A fresh development app and an external built QEMU are required")
-    executable = (app / "Contents/Resources/QEMU/bin/qemu-system-aarch64").resolve(strict=True)
+    resource = "Native3D" if args.native else "QEMU"
+    executable = (app / ("Contents/Resources/" + resource + "/bin/qemu-system-aarch64")).resolve(strict=True)
     if not executable.is_relative_to(app):
         raise ValueError("The app executable points outside its bundle")
     libraries = app / "Contents/Frameworks/Runtime/lib"
@@ -81,10 +84,16 @@ def main():
 
     copy(source, executable)
     console = app / "Contents/Resources/QEMU/Windows Console.app"
-    if console.exists():
+    if not args.native and console.exists():
         output("codesign", "--force", "--sign", "-", "--entitlements",
                str(Path(__file__).resolve().parents[1] / "macos/Hypervisor.entitlements"), str(console))
-    (app / "Contents/Resources/QEMU/memory-runtime.json").write_text(json.dumps({
+    if args.native:
+        manifest_path = app / "Contents/Resources/Native3D/runtime.json"
+        manifest = json.loads(manifest_path.read_text())
+        manifest["files"]["bin/qemu-system-aarch64"] = hashlib.sha256(executable.read_bytes()).hexdigest()
+        manifest["hvf_dynamic_memory_version"] = 1
+        manifest_path.write_text(json.dumps(manifest, indent=2) + "\n")
+    (app / ("Contents/Resources/" + resource + "/memory-runtime.json")).write_text(json.dumps({
         "schema": 1, "hvfMemoryVersion": 1, "graphicsQualified": False, "files": receipt,
     }, indent=2) + "\n")
     output("codesign", "--force", "--sign", "-", str(app))

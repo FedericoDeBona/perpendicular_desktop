@@ -12,21 +12,32 @@ import argparse
 parser=argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--graphics-driver-dir',type=Path,help='Stage the pinned ARM64 graphics driver in addition to guest tools')
 parser.add_argument('--network-driver-dir',type=Path,help='Stage the pinned ARM64 NetKVM driver for a fresh Windows install')
+parser.add_argument('--memory-driver-dir',type=Path,help='Directory containing the pinned Balloon and VioMem ARM64 subdirectories')
+parser.add_argument('--machine-directory',type=Path,default=Path.home()/'Library/Application Support/Perpendicular Restart')
 parser.add_argument('--remove-legacy',action='store_true',help='Stage the explicit one-time removal of previous Perpendicular agents and sharing')
 parser.add_argument('--dry-run',action='store_true',help='Verify inputs without creating or attaching a setup CD')
 arguments=parser.parse_args()
 
 repo=Path(__file__).resolve().parent.parent
-root=Path.home()/'Library/Application Support/Perpendicular Restart'
+root=arguments.machine_directory.resolve(strict=True)
 configuration=json.loads((root/'machine.json').read_text())
 executable=repo/'guest/target/aarch64-pc-windows-msvc/release/perpendicular-guest.exe'
 sources=[executable,repo/'guest/install.ps1',repo/'guest/install.cmd',repo/'guest/diagnostics.ps1']
-if arguments.network_driver_dir or arguments.graphics_driver_dir:
+if arguments.network_driver_dir or arguments.graphics_driver_dir or arguments.memory_driver_dir:
     sources += [repo/'guest/setup-machine.cmd',repo/'guest/setup-machine.ps1']
 if arguments.remove_legacy:
     sources += [repo/'guest/remove-legacy.ps1',repo/'guest/remove-legacy.cmd',repo/'guest/inspect-legacy.ps1']
 drivers=[]
 network_drivers=[]
+memory_drivers=[]
+if arguments.memory_driver_dir:
+    sources += [repo/'guest/install-memory.ps1',repo/'guest/memory-drivers.json']
+    memory_manifest=json.loads((repo/'guest/memory-drivers.json').read_text())
+    for name,expected in memory_manifest['members'].items():
+        path=arguments.memory_driver_dir/name
+        if hashlib.sha256(path.read_bytes()).hexdigest()!=expected:
+            raise RuntimeError('Memory driver does not match the pinned package: '+name)
+        memory_drivers.append((path,name))
 if arguments.network_driver_dir:
     sources += [repo/'guest/install-network.ps1',repo/'guest/network-driver.json']
     network_manifest=json.loads((repo/'guest/network-driver.json').read_text())
@@ -60,6 +71,8 @@ for source in drivers:
 for source in network_drivers:
     digest.update(source.read_bytes())
 digest.update(configuration['token'].encode())
+for source,name in memory_drivers:
+    digest.update(name.encode());digest.update(source.read_bytes())
 if arguments.dry_run:
     print('Setup inputs verified. No CD created or attached.')
     raise SystemExit(0)
@@ -75,6 +88,10 @@ if network_drivers:
     (setup/'NetKVM').mkdir(exist_ok=True,mode=0o700)
     for source in network_drivers:
         shutil.copy2(source,setup/'NetKVM'/source.name)
+for source,name in memory_drivers:
+    destination=setup/'Memory'/name
+    destination.parent.mkdir(parents=True,exist_ok=True,mode=0o700)
+    shutil.copy2(source,destination)
 (setup/'connection.json').write_text(json.dumps({'port':configuration['guestPort'],'token':configuration['token']}))
 (setup/'connection.json').chmod(0o600)
 iso=setup.with_suffix('.iso')
@@ -102,5 +119,5 @@ if arguments.remove_legacy:
     print('For the explicitly requested legacy-agent/sharing cleanup and bridge install, run D:\\remove-legacy.cmd instead.')
 if drivers:
     print('For the signed graphics driver, run D:\\install-graphics.cmd. This does not reinstall old guest integrations.')
-if drivers or network_drivers:
+if drivers or network_drivers or memory_drivers:
     print('For the staged drivers and bridge together, run D:\\setup-machine.cmd with normal Windows elevation.')

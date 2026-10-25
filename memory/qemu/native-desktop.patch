@@ -1,0 +1,555 @@
+--- a/ui/vnc.c
++++ b/ui/vnc.c
+@@ -26,6 +26,7 @@
+ 
+ #include "qemu/osdep.h"
+ #include "vnc.h"
++#include "ui/perpendicular-display/primary-monitor.h"
+ #include "vnc-jobs.h"
+ #include "trace.h"
+ #include "hw/qdev-core.h"
+@@ -2850,8 +2851,9 @@
+ 
+         trace_vnc_msg_client_set_desktop_size(vs, vs->ioc, w, h, screens);
+         if (dpy_ui_info_supported(vs->vd->dcl.con)) {
+-            QemuUIInfo info;
+-            memset(&info, 0, sizeof(info));
++            /* RFB carries pixels only. Keep physical size, origin and rate. */
++            QemuUIInfo info = *dpy_get_ui_info(vs->vd->dcl.con);
++            perp_primary_monitor_seed_size(&info.width_mm, &info.height_mm);
+             info.width = w;
+             info.height = h;
+             dpy_set_ui_info(vs->vd->dcl.con, &info, false);
+--- a/hw/display/virtio-gpu-base.c
++++ b/hw/display/virtio-gpu-base.c
+@@ -18,6 +18,8 @@
+ #include "qapi/error.h"
+ #include "qemu/error-report.h"
+ #include "hw/display/edid.h"
++#include "ui/perpendicular-display/perp-flexible-monitor.h"
++#include "ui/perpendicular-display/primary-monitor.h"
+ #include "trace.h"
+ 
+ void
+@@ -64,8 +66,19 @@
+         .refresh_rate = g->req_state[scanout].refresh_rate,
+     };
+ 
++    PerpPrimaryMonitor monitor;
++    bool primary_metadata = scanout == 0 && perp_primary_monitor_read(&monitor);
++    if (primary_metadata) {
++        info.width_mm = monitor.width_mm;
++        info.height_mm = monitor.height_mm;
++        info.name = "Mac Display";
++    }
+     edid->size = cpu_to_le32(sizeof(edid->edid));
+     qemu_edid_generate(edid->edid, sizeof(edid->edid), &info);
++    if (primary_metadata) {
++        perp_primary_monitor_edid_serial(edid->edid, sizeof(edid->edid), monitor.serial);
++    }
++    perp_flexible_monitor_edid(edid->edid, sizeof(edid->edid));
+ }
+ 
+ static void virtio_gpu_invalidate_display(void *opaque)
+--- a/target/arm/hvf/hvf.c
++++ b/target/arm/hvf/hvf.c
+@@ -40,6 +40,7 @@
+ #include "migration/vmstate.h"
+ 
+ #include "gdbstub/enums.h"
++#include "ui/perpendicular-display/perp-stp/emulate.h"
+ 
+ #define MDSCR_EL1_SS_SHIFT  0
+ #define MDSCR_EL1_MDE_SHIFT 15
+@@ -2167,6 +2168,19 @@
+             break;
+         }
+ 
++        if (!isv && (perp_hvf_stp_q_pci_hole(cpu, syndrome,
++                hvf_exit->exception.virtual_address,
++                hvf_exit->exception.physical_address) ||
++                perp_hvf_strh_post2_pci_hole(cpu, syndrome,
++                hvf_exit->exception.virtual_address,
++                hvf_exit->exception.physical_address) ||
++                perp_hvf_stp_s_pci_hole(cpu, syndrome,
++                hvf_exit->exception.virtual_address,
++                hvf_exit->exception.physical_address))) {
++            advance_pc = true;
++            break;
++        }
++
+         assert(isv);
+ 
+         if (iswrite) {
+--- /dev/null
++++ b/ui/perpendicular-display/perp-flexible-monitor.h
+@@ -0,0 +1,51 @@
++/* SPDX-License-Identifier: MIT */
++#ifndef PERP_FLEXIBLE_MONITOR_EDID_H
++#define PERP_FLEXIBLE_MONITOR_EDID_H
++#include <stdbool.h>
++#include <stddef.h>
++#include <stdint.h>
++#include <string.h>
++
++/* The signed Wire1 Windows driver does not reliably enumerate CTA extension
++ * modes. Put a secondary 4K timing in the base block and advertise continuous
++ * CVT reduced-blanking timings. Keep the host's preferred boot timing, monitor
++ * identity, physical size, name and extension blocks. This is a virtual monitor;
++ * the guest agent separately enforces the configured resize/pixel limits. */
++static inline bool perp_flexible_monitor_edid(uint8_t *edid, size_t size)
++{
++    static const uint8_t header[8] = {0,255,255,255,255,255,255,0};
++    static const uint8_t timing_4k60[18] = {
++        0x08,0xe8,0x00,0x30,0xf2,0x70,0x5a,0x80,0xb0,0x58,0x8a,0x00,
++        0,0,0,0,0,0x1e
++    };
++    if (size < 128 || memcmp(edid, header, sizeof(header)) ||
++        edid[18] != 1 || edid[19] != 4) return false;
++    unsigned sum = 0;
++    for (unsigned i = 0; i < 128; i++) sum += edid[i];
++    if (sum & 255) return false;
++    uint8_t *extra = NULL, *range = NULL;
++    for (unsigned i = 72; i <= 108; i += 18) {
++        if (edid[i] || edid[i+1] || edid[i+2]) continue;
++        if (edid[i+3] == 0xf7) extra = edid+i;
++        if (edid[i+3] == 0xfd) range = edid+i;
++    }
++    if (!extra || !range) return false;
++    memcpy(extra, timing_4k60, sizeof(timing_4k60));
++    memcpy(extra+12, edid+66, 3); /* preferred timing's physical dimensions */
++    edid[24] |= 1; /* continuous frequency */
++    range[4] = (range[4] & 2) | 8; /* retain vertical maximum offset */
++    range[5] = 1;
++    if (!(range[4] & 2) && range[6] < 125) range[6] = 125;
++    range[7] = 1;
++    range[8] = 255; /* +255 offset = 510 kHz */
++    range[9] = 255; /* 2550 MHz */
++    range[10] = 4; range[11] = 0x11; /* CVT 1.1 */
++    range[12] = 0; range[13] = 0; /* no active-width limit */
++    range[14] = 0xf0; range[15] = 0x50; /* four aspects, prefer 16:10, RB */
++    range[16] = 0; range[17] = 60;
++    sum = 0;
++    for (unsigned i = 0; i < 127; i++) sum += edid[i];
++    edid[127] = (uint8_t)(0-sum);
++    return true;
++}
++#endif
+--- /dev/null
++++ b/ui/perpendicular-display/primary-monitor.h
+@@ -0,0 +1,76 @@
++/* SPDX-License-Identifier: MIT
++ * Checked metadata for the one primary Mac monitor selected at VM startup.
++ * This carries physical size and a stable EDID identity, never a DPI override.
++ */
++#ifndef PERP_PRIMARY_MONITOR_H
++#define PERP_PRIMARY_MONITOR_H
++#include <stdbool.h>
++#include <stddef.h>
++#include <stdint.h>
++#include <stdlib.h>
++#include <string.h>
++
++typedef struct PerpPrimaryMonitor {
++    uint16_t width_mm, height_mm;
++    uint32_t serial;
++} PerpPrimaryMonitor;
++
++static inline bool perp_primary_monitor_mm(const char *text, uint16_t *value)
++{
++    unsigned parsed = 0, digits = 0;
++    if (!text || !*text) return false;
++    for (; *text; text++) {
++        if (*text < '0' || *text > '9' || ++digits > 4) return false;
++        parsed = parsed * 10 + (unsigned)(*text - '0');
++    }
++    /* EDID's base physical size fields hold at most 255 centimetres. */
++    if (parsed < 10 || parsed > 2550) return false;
++    *value = (uint16_t)parsed;
++    return true;
++}
++
++static inline bool perp_primary_monitor_read(PerpPrimaryMonitor *result)
++{
++    PerpPrimaryMonitor monitor = {0};
++    const char *id = getenv("PERP_PRIMARY_MONITOR_ID");
++    if (!perp_primary_monitor_mm(getenv("PERP_PRIMARY_MONITOR_WIDTH_MM"), &monitor.width_mm) ||
++        !perp_primary_monitor_mm(getenv("PERP_PRIMARY_MONITOR_HEIGHT_MM"), &monitor.height_mm) ||
++        !id || strlen(id) != 36) return false;
++    /* Public UUID -> stable 32-bit numeric EDID serial. Not a security token;
++     * EDID's serial field cannot preserve a full UUID or promise no collisions. */
++    uint32_t hash = 2166136261u;
++    for (unsigned i = 0; i < 36; i++) {
++        unsigned char ch = (unsigned char)id[i];
++        if (i == 8 || i == 13 || i == 18 || i == 23) {
++            if (ch != '-') return false;
++        } else {
++            if (ch >= 'A' && ch <= 'F') ch = (unsigned char)(ch + ('a' - 'A'));
++            if (!((ch >= '0' && ch <= '9') || (ch >= 'a' && ch <= 'f'))) return false;
++        }
++        hash = (hash ^ ch) * 16777619u;
++    }
++    monitor.serial = hash ? hash : 1;
++    *result = monitor;
++    return true;
++}
++
++static inline void perp_primary_monitor_seed_size(uint16_t *width_mm, uint16_t *height_mm)
++{
++    PerpPrimaryMonitor monitor;
++    if ((!*width_mm || !*height_mm) && perp_primary_monitor_read(&monitor)) {
++        *width_mm = monitor.width_mm;
++        *height_mm = monitor.height_mm;
++    }
++}
++
++static inline void perp_primary_monitor_edid_serial(uint8_t *edid, size_t size, uint32_t serial)
++{
++    if (size < 128) return;
++    /* Preserve the descriptor slots: the flexible-mode patch needs 0xf7/0xfd.
++     * qemu_edid_info.serial would consume one of those slots with text. */
++    for (unsigned i = 0; i < 4; i++) edid[12 + i] = (uint8_t)(serial >> (8 * i));
++    unsigned sum = 0;
++    for (unsigned i = 0; i < 127; i++) sum += edid[i];
++    edid[127] = (uint8_t)(0 - sum);
++}
++#endif
+--- /dev/null
++++ b/ui/perpendicular-display/perp-stp/emulate.h
+@@ -0,0 +1,212 @@
++/* SPDX-License-Identifier: GPL-2.0-or-later */
++#ifndef PERP_HVF_STP_PCI_HOLE_H
++#define PERP_HVF_STP_PCI_HOLE_H
++#include "exec/ioport.h"
++#include "exec/cpu-common.h"
++#include "exec/memory.h"
++#include "exec/target_page.h"
++#include "decode.h"
++
++/* Debug translation is for instruction observation only. Intermediate page
++ * table reads may dispatch MMIO, as in the separate observation diagnostic. */
++static bool perp_stp_q_code(CPUState *cpu, uint32_t *word)
++{
++    CPUARMState *env = &ARM_CPU(cpu)->env;
++    MemTxAttrs attrs = MEMTXATTRS_UNSPECIFIED;
++    hwaddr page, offset;
++    AddressSpace *as;
++    MemoryRegionSection section;
++    MemoryRegion *mr;
++    uint8_t code[4];
++    int index;
++    bool ok = false;
++    if (env->pc & 3) {
++        return false;
++    }
++    page = cpu_get_phys_page_attrs_debug(cpu, env->pc & TARGET_PAGE_MASK, &attrs);
++    offset = env->pc & ~TARGET_PAGE_MASK;
++    if (page == (hwaddr)-1 || page > UINT64_MAX - offset) {
++        return false;
++    }
++    index = cpu_asidx_from_attrs(cpu, attrs);
++    if (index < 0 || index >= cpu->num_ases) {
++        return false;
++    }
++    as = cpu_get_address_space(cpu, index);
++    if (!as || !as->root) {
++        return false;
++    }
++    section = memory_region_find(as->root, page + offset, 4);
++    mr = section.mr;
++    if (mr && memory_region_is_ram(mr) && !memory_region_is_ram_device(mr) &&
++        !mr->rom_device && mr->ram_block &&
++        int128_ge(section.size, int128_make64(4))) {
++        /* Hotadded RAM may contain executable guest pages. Never fault in
++         * an unplugged block merely to decode the faulting instruction. */
++        RamDiscardManager *rdm = memory_region_get_ram_discard_manager(mr);
++        MemoryRegionSection instruction = section;
++        instruction.size = int128_make64(4);
++        if (rdm && !ram_discard_manager_is_populated(rdm, &instruction)) {
++            memory_region_unref(mr);
++            return false;
++        }
++        const uint8_t *backing = memory_region_get_ram_ptr(mr);
++        if (backing) {
++            memcpy(code, backing + section.offset_within_region, 4);
++            *word = ldl_le_p(code);
++            ok = true;
++        }
++    }
++    if (mr) {
++        memory_region_unref(mr);
++    }
++    return ok;
++}
++
++static bool perp_hvf_stp_pair_pci_hole(CPUState *cpu, uint64_t syndrome,
++                                     uint64_t va, uint64_t pa, bool single)
++{
++    const char *option = getenv(single ? "PERP_HVF_STP_S_PCI_HOLE" :
++                                       "PERP_HVF_STP_Q_PCI_HOLE");
++    CPUARMState *env;
++    MemoryRegionSection section;
++    MemoryRegion *mr;
++    hv_simd_fp_uchar16_t first, second;
++    uint8_t bytes[32];
++    uint32_t word;
++    uint64_t effective_address;
++    int64_t offset;
++    unsigned rt, rt2, rn;
++    MemTxResult result;
++    unsigned element_bytes = single ? 4 : 16;
++    unsigned length = element_bytes * 2;
++    static unsigned logged[2];
++    bool hole;
++
++    if (!option || strcmp(option, "1") || !bql_locked() ||
++        !perp_store_hole_fault(syndrome, va, pa, length) ||
++        !cpu || !cpu->cpu_ases || cpu->num_ases <= 0) {
++        return false;
++    }
++    cpu_synchronize_state(cpu);
++    env = &ARM_CPU(cpu)->env;
++    if (!env->aarch64 || arm_current_el(env) != 0 ||
++        arm_cpu_data_is_big_endian(env) ||
++        ((arm_sctlr(env, 0) & SCTLR_A) && (va & (element_bytes - 1))) ||
++        !perp_stp_q_code(cpu, &word) ||
++        !(single ? perp_stp_s_decode(word, &rt, &rt2, &rn, &offset) :
++                   perp_stp_q_decode(word, &rt, &rt2, &rn, &offset)) ||
++        !(single ? perp_stp_s_address(env->xregs[rn], offset, &effective_address) :
++                   perp_stp_q_address(env->xregs[rn], offset, &effective_address)) ||
++        effective_address != va) {
++        return false;
++    }
++    /* The hardware FAR must equal checked Xn + scaled signed imm7; Xn is never
++     * written back. The fault supplies the first operand's VA/IPA. The complete
++     * access must stay in one minimum 4K page; no debugger operand translation
++     * or assumption across stage1/stage2 page boundaries is used. */
++    section = memory_region_find(address_space_memory.root, pa, length);
++    mr = section.mr;
++    hole = mr && mr->ops == &unassigned_io_ops &&
++           !strcmp(memory_region_name(mr), "gpex_mmio_window") &&
++           !memory_region_is_ram(mr) && !mr->rom_device &&
++           int128_ge(section.size, int128_make64(length));
++    if (!hole) {
++        if (mr) {
++            memory_region_unref(mr);
++        }
++        return false;
++    }
++    if (hv_vcpu_get_simd_fp_reg(cpu->accel->fd, HV_SIMD_FP_REG_Q0 + rt,
++                               &first) != HV_SUCCESS ||
++        hv_vcpu_get_simd_fp_reg(cpu->accel->fd, HV_SIMD_FP_REG_Q0 + rt2,
++                               &second) != HV_SUCCESS) {
++        memory_region_unref(mr);
++        return false;
++    }
++    memcpy(bytes, &first, element_bytes);
++    memcpy(bytes + element_bytes, &second, element_bytes);
++    /* Dispatch exactly the pair width using scalar ISV bus semantics.
++     * The referenced FlatView overlap is entirely the GPEX unassigned handler,
++     * whose write callback ignores writes. No GPU mapping is kept or invented. */
++    result = address_space_write(&address_space_memory, pa,
++                                 MEMTXATTRS_UNSPECIFIED, bytes, length);
++    memory_region_unref(mr);
++    if (result != MEMTX_OK) {
++        return false;
++    }
++    if (logged[single]++ < 64) {
++        error_report("%s emulated=1 bytes=%u", single ?
++                     "perpendicular-hvf-stp-s-hole-v1" :
++                     "perpendicular-hvf-stp-hole-v1", length);
++    }
++    return true;
++}
++
++static bool perp_hvf_stp_q_pci_hole(CPUState *cpu, uint64_t syndrome,
++                                   uint64_t va, uint64_t pa)
++{
++    return perp_hvf_stp_pair_pci_hole(cpu, syndrome, va, pa, false);
++}
++
++static bool perp_hvf_stp_s_pci_hole(CPUState *cpu, uint64_t syndrome,
++                                   uint64_t va, uint64_t pa)
++{
++    return perp_hvf_stp_pair_pci_hole(cpu, syndrome, va, pa, true);
++}
++
++/* Separate default-off admission for the one observed halfword post-index
++ * store. Original STP scope and all unknown-instruction assertions remain. */
++static bool perp_hvf_strh_post2_pci_hole(CPUState *cpu, uint64_t syndrome,
++                                        uint64_t va, uint64_t pa)
++{
++    const char *option = getenv("PERP_HVF_STRH_POST_PCI_HOLE");
++    CPUARMState *env;
++    MemoryRegionSection section;
++    MemoryRegion *mr;
++    uint32_t word;
++    unsigned rt, rn;
++    uint8_t bytes[2];
++    MemTxResult result;
++    static unsigned logged;
++    bool hole;
++
++    if (!option || strcmp(option, "1") || !bql_locked() ||
++        !perp_store_hole_fault(syndrome, va, pa, sizeof(bytes)) ||
++        !cpu || !cpu->cpu_ases || cpu->num_ases <= 0) {
++        return false;
++    }
++    cpu_synchronize_state(cpu);
++    env = &ARM_CPU(cpu)->env;
++    if (!env->aarch64 || arm_current_el(env) != 0 ||
++        arm_cpu_data_is_big_endian(env) ||
++        ((arm_sctlr(env, 0) & SCTLR_A) && (va & 1)) ||
++        !perp_stp_q_code(cpu, &word) ||
++        !perp_strh_post2_decode(word, &rt, &rn) ||
++        env->xregs[rn] != va || va > UINT64_MAX - 2) {
++        return false;
++    }
++    section = memory_region_find(address_space_memory.root, pa, sizeof(bytes));
++    mr = section.mr;
++    hole = mr && mr->ops == &unassigned_io_ops &&
++           !strcmp(memory_region_name(mr), "gpex_mmio_window") &&
++           !memory_region_is_ram(mr) && !mr->rom_device &&
++           int128_ge(section.size, int128_make64(sizeof(bytes)));
++    if (!hole) {
++        if (mr) memory_region_unref(mr);
++        return false;
++    }
++    /* WZR is zero. Store low 16 bits before updating Xn; the synchronized
++     * dirty CPU state is flushed by the existing HVF advance-PC path. */
++    stw_le_p(bytes, rt == 31 ? 0 : env->xregs[rt]);
++    result = address_space_write(&address_space_memory, pa,
++                                 MEMTXATTRS_UNSPECIFIED, bytes, sizeof(bytes));
++    memory_region_unref(mr);
++    if (result != MEMTX_OK) return false;
++    env->xregs[rn] = va + 2;
++    if (logged++ < 64) {
++        error_report("perpendicular-hvf-strh-post2-hole-v1 emulated=1 bytes=2");
++    }
++    return true;
++}
++#endif
+--- /dev/null
++++ b/ui/perpendicular-display/perp-stp/decode.h
+@@ -0,0 +1,121 @@
++/* SPDX-License-Identifier: GPL-2.0-or-later */
++#ifndef PERP_HVF_STP_PCI_HOLE_DECODE_H
++#define PERP_HVF_STP_PCI_HOLE_DECODE_H
++#include <stdbool.h>
++#include <stdint.h>
++
++/* Only A64 STP Qt, Qt2, [Xn, #imm], signed-offset mode, no writeback.
++ * The signed imm7 is scaled by the 16-byte SIMD element size. */
++static inline bool perp_stp_q_decode(uint32_t word, unsigned *rt,
++                                   unsigned *rt2, unsigned *rn,
++                                   int64_t *offset)
++{
++    int immediate;
++
++    if ((word & UINT32_C(0xffc00000)) != UINT32_C(0xad000000)) {
++        return false;
++    }
++    *rt = word & 31;
++    *rt2 = (word >> 10) & 31;
++    *rn = (word >> 5) & 31;
++    immediate = (word >> 15) & 127;
++    if (immediate & 64) {
++        immediate -= 128;
++    }
++    *offset = (int64_t)immediate * 16; /* No signed shift or narrowing cast. */
++    return *rn != 31; /* SP and its alignment rules are deliberately excluded. */
++}
++
++/* Fail closed rather than wrapping a guest address. The original Xn is never
++ * changed; cross-page qualification applies to the resulting access, not Xn. */
++static inline bool perp_stp_q_address(uint64_t base, int64_t offset,
++                                    uint64_t *address)
++{
++    uint64_t amount;
++
++    if (offset < -1024 || offset > 1008 || offset % 16 != 0) {
++        return false;
++    }
++    if (offset < 0) {
++        amount = (uint64_t)-offset; /* Range above excludes INT64_MIN. */
++        if (base < amount) {
++            return false;
++        }
++        *address = base - amount;
++    } else {
++        amount = (uint64_t)offset;
++        if (base > UINT64_MAX - amount) {
++            return false;
++        }
++        *address = base + amount;
++    }
++    return true;
++}
++
++/* Separately admitted A64 STP St, St2, [Xn, #imm], no writeback.
++ * Only the low 32 bits of each SIMD register are stored; scale is four. */
++static inline bool perp_stp_s_decode(uint32_t word, unsigned *rt,
++                                   unsigned *rt2, unsigned *rn,
++                                   int64_t *offset)
++{
++    int immediate;
++    if ((word & UINT32_C(0xffc00000)) != UINT32_C(0x2d000000)) {
++        return false;
++    }
++    *rt = word & 31;
++    *rt2 = (word >> 10) & 31;
++    *rn = (word >> 5) & 31;
++    immediate = (word >> 15) & 127;
++    if (immediate & 64) immediate -= 128;
++    *offset = (int64_t)immediate * 4;
++    return *rn != 31;
++}
++
++static inline bool perp_stp_s_address(uint64_t base, int64_t offset,
++                                    uint64_t *address)
++{
++    uint64_t amount;
++    if (offset < -256 || offset > 252 || offset % 4 != 0) return false;
++    if (offset < 0) {
++        amount = (uint64_t)-offset;
++        if (base < amount) return false;
++        *address = base - amount;
++    } else {
++        amount = (uint64_t)offset;
++        if (base > UINT64_MAX - amount) return false;
++        *address = base + amount;
++    }
++    return true;
++}
++
++/* Only the observed STRH Wt, [Xn], #2 form. Exclude SP and writeback
++ * overlap, whose architectural result is constrained-unpredictable. */
++static inline bool perp_strh_post2_decode(uint32_t word, unsigned *rt,
++                                        unsigned *rn)
++{
++    if ((word & UINT32_C(0xfffffc00)) != UINT32_C(0x78002400)) {
++        return false;
++    }
++    *rt = word & 31;
++    *rn = (word >> 5) & 31;
++    return *rn != 31 && *rn != *rt;
++}
++
++static inline bool perp_store_hole_fault(uint64_t syndrome, uint64_t va,
++                                         uint64_t pa, unsigned bytes)
++{
++    unsigned fsc = syndrome & 63;
++    /* Lower-EL A64 data abort, IL=1, ISV=0, write; no CM/S1PTW/FnV/EA. */
++    return (bytes == 2 || bytes == 8 || bytes == 32) && (syndrome >> 26) == 0x24 && (syndrome & (UINT64_C(1) << 25)) &&
++           !(syndrome & ((UINT64_C(1) << 24) | (UINT64_C(1) << 10) |
++                         (UINT64_C(1) << 9) | (UINT64_C(1) << 8) |
++                         (UINT64_C(1) << 7))) && (syndrome & 64) &&
++           fsc >= 4 && fsc <= 7 &&
++           (va & 4095) == (pa & 4095) && (va & 4095) <= 4096 - bytes &&
++           va <= UINT64_MAX - (bytes - 1) && pa <= UINT64_MAX - (bytes - 1);
++}
++static inline bool perp_stp_q_fault(uint64_t syndrome, uint64_t va, uint64_t pa)
++{
++    return perp_store_hole_fault(syndrome, va, pa, 32);
++}
++#endif

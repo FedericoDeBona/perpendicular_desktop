@@ -1,0 +1,34 @@
+--- a/ui/meson.build
++++ b/ui/meson.build
+@@ -70,7 +70,11 @@
+ 
+ if opengl.found()
+   egl_headless_ss = ss.source_set()
+-  egl_headless_ss.add(when: [egl, opengl, gbm, pixman],
++  egl_headless_deps = [egl, opengl, pixman]
++  if host_os != 'darwin'
++    egl_headless_deps += [gbm]
++  endif
++  egl_headless_ss.add(when: egl_headless_deps,
+                       if_true: files('egl-headless.c'))
+   ui_modules += {'egl-headless' : egl_headless_ss}
+ endif
+--- a/ui/egl-helpers.c
++++ b/ui/egl-helpers.c
+@@ -737,6 +737,16 @@
+         error_setg(errp, "egl: egl_init_ctx failed");
+         return false;
+     }
++#elif defined(__APPLE__)
++    if (qemu_egl_init_dpy_cocoa(mode) < 0) {
++        error_setg(errp, "egl: ANGLE display init failed");
++        return false;
++    }
++    qemu_egl_rn_ctx = qemu_egl_init_ctx();
++    if (!qemu_egl_rn_ctx) {
++        error_setg(errp, "egl: ANGLE context init failed");
++        return false;
++    }
+ #elif defined(CONFIG_GBM)
+     if (egl_rendernode_init(rendernode, mode) < 0) {
+         error_setg(errp, "egl: render node init failed");

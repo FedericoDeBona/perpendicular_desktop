@@ -6,6 +6,7 @@ struct NativeGraphics {
     let root:URL
     private let manifest:[String:Any]
     var executable:URL {root.appendingPathComponent("bin/qemu-system-aarch64")}
+    var supportsDynamicMemory:Bool {manifest["hvf_dynamic_memory_version"] as? Int == 1}
 
     init(root:URL)throws{
         self.root=root

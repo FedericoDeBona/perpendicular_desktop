@@ -69,3 +69,21 @@ Esplora file ha un target namespace `::{…}`: non è un drive mancante. Il filt
 Un frame accettato, metadati della stessa misura e completamento Metal possono arrivare in ordini diversi. La transizione iniziale li riconcilia senza attendere un secondo frame di una finestra statica. Il solo timeout dell’attesa non invalida l’ID già richiesto; errori effettivi, geometrie in corso e immagini respinte mantengono i propri blocchi. Questa correzione non risolve contenuti WGC incompleti o tutte le catture ferme.
 
 Il pannello Schermi usa il risultato effettivo di display_info. La base corrente espone una sola uscita: N+1 richiede ancora un driver/runtime compatibile con più uscite. Le prove negative e il prossimo passo sono in WIN-003; non sono state cambiate protezioni o simulate uscite per rendere visibile un controllo.
+
+
+## RAM dinamica opzionale
+
+Il percorso [RAM](../memory/README.md) combina virtio-mem e balloon con backing
+HVF esplicitamente qualificato. Il guest espone GlobalMemoryStatusEx; il
+frontend distingue richieste, memoria aggiunta/rimossa dal guest e ownership
+balloon. Non deduce il successo da QMP e non forza la rimozione di blocchi in
+uso. La politica mantiene una riserva, riduce gradualmente in background ed
+espande alla riapertura o sotto pressione guest, senza sospendere la VM.
+
+La configurazione dynamicMemory è opzionale: il default ordinario resta fisso.
+Native3D richiede il manifest hvf_dynamic_memory_version1 e la mappa PCI
+corrispondente; un runtime precedente viene rifiutato. Il nuovo pacchetto IoT
+seleziona la sua directory privata mediante Info.plist, senza hardcodificarla
+nel sorgente. Installer e media guest controllano i pin dei due driver ARM64
+Microsoft-signed in memory-drivers.json. Stato delle qualifiche e tentativi
+falliti sono in SYS-003 e VERIFICATION, distinti dalla distribuzione ordinaria.

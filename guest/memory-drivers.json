@@ -1,0 +1,17 @@
+{
+  "schema": 1,
+  "balloonVersion": "100.100.104.27100",
+  "virtioMemVersion": "100.104.104.30400",
+  "balloonSource": "https://github.com/utmapp/qemu/releases/download/v10.0.12-utm/utm-guest-tools-0.1.274.iso",
+  "virtioMemSource": "https://fedorapeople.org/groups/virt/virtio-win/direct-downloads/upstream-virtio/attestation-virtio-win-prewhql-0.1-304.zip",
+  "members": {
+    "Balloon/balloon.inf": "306d9cafc5f9cabe53e3b3ac9bce529549b8a8f58cad97ac2b2022279694d0b8",
+    "Balloon/balloon.sys": "e09f77c5540a07e8be78648a78a14edc68668aabc9fd115975fe9524c67e2baa",
+    "Balloon/balloon.cat": "5ee2fc7d02eb3e359a60341327fb565ddd96e8d84b4e9bba027e100241da0a0e",
+    "VioMem/viomem.inf": "003f60ce0f603c87b390ad6a9993f3eca0835c9b4af36ebfde837e9e0f31d015",
+    "VioMem/viomem.sys": "0d14aaeee24f273ed6baf43e3e374d2fef46c6ef6a077b6a4c0dd3205afe9957",
+    "VioMem/viomem.cat": "96ee0a1e1165b3ce7f54d6cf695f077a3981f38acf47c44e0f83c6d638a7c872"
+  },
+  "balloonArchiveSHA256": "ab6add47a4ed992f5920f14e96f68d60566e6f731e2cf816c3d38ab2b78f407a",
+  "virtioMemArchiveSHA256": "06f964f45788451063e2d59e077847d9cfc40e3ab1e6a2e7348b5bf6e6f36587"
+}
