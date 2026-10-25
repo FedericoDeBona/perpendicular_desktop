@@ -8,7 +8,7 @@ Comandi Mac e appunti trasversali testo/file sono ora requisiti espliciti in TOD
 
 ## Base corrente e priorità
 
-**Base principale dopo la pulizia del 25 ottobre:** `/Applications/Perpendicular.app`, ora versione0.2.3, collegamento `Perpendicular.app` sul Desktop. App, build e strumenti selezionano per default la IoT0795218c in `~/Library/Application Support/Perpendicular Memory IoT`. Driver grafico e RAM Microsoft-signed, Secure Boot/Code Integrity attivi, TESTSIGNINGfalse confermati dopo l’avvio della0.2.0; la0.2.1 ha conservato la medesima sessione Windows e il runtime. La0.2.2 applica il marchio a VM già spenta, senza avviarla. RAM automatica configurata. [Promozione e pulizia](VERIFICATION.md#25-ottobre--pulizia-definitiva-e-promozione-iot-a-base-principale).
+**Base principale dopo la pulizia del 25 ottobre:** `/Applications/Perpendicular.app`, ora versione0.2.4, collegamento `Perpendicular.app` sul Desktop. App, build e strumenti selezionano per default la IoT0795218c in `~/Library/Application Support/Perpendicular Memory IoT`. Driver grafico e RAM Microsoft-signed, Secure Boot/Code Integrity attivi, TESTSIGNINGfalse confermati dopo l’avvio della0.2.0; la0.2.1 ha conservato la medesima sessione Windows e il runtime. La0.2.2 applica il marchio a VM già spenta, senza avviarla. RAM automatica configurata. [Promozione e pulizia](VERIFICATION.md#25-ottobre--pulizia-definitiva-e-promozione-iot-a-base-principale).
 
 **Catalogo/impostazioni0.2.1:** unica pagina App con recenti in alto e catalogo completo, pannello processi rimosso, impostazioni CPU/RAM salvate per il prossimo avvio. Persistenza e applicazione dopo arresto controllate su fixture con il controller reale; nessun boot della VM a1 GB. Catalogo installato visibile, qualifica interattiva del pannello incompleta per chiusura del canale CUA, senza crash dell’app rilevato. TODO-019 conserva il limite; non è un nuovo difetto di prodotto dimostrato. [Evidenze](VERIFICATION.md#25-ottobre--catalogo-unico-e-impostazioni-cpuram).
 
@@ -20,7 +20,7 @@ Il ciclo RAM protetto 4→2→4 GiB con dati conservati resta la qualifica prece
 
 **Aggiornamento0.2.3:** RAM massima come unico controllo principale, iniziale in Avanzate. Avvio utente1 GB seguito da hotplug fino a4 GB e un nuovo accesso automatico protetto verificati; SYS-004 chiuso, SYS-001 ricomparso. CUA continua a fermarsi sul pannello: DiagnosticReports conferma crash di SkyComputerUseService in Array.remove(at:); TODO-019 mantiene il limite di qualifica UI. [Evidenze](VERIFICATION.md#25-ottobre--ram-semplificata-e-accesso-windows).
 
-**Richiesta prestazionale corrente:** [analisi pipeline desktop/singola app](reports/2026-10-25-graphics-pipeline.md) consegnata con timestamp GPU/presentazione frontend, scarti e limiti. Diagnostica solo nella build temporanea sulla VM main; app ordinaria conservata. TODO-004/007 aperte per guest/runtime mancanti; nessuna ottimizzazione. PERF-001 resta distinto, WIN-004 focus riprodotto.
+**Richiesta prestazionale corrente:** correzione UI circoscritta installata/verificata nella0.2.4 (notifiche ripetute evitate e consegna diretta dei frame). Tentativi di ridurre l’attesa di presentazione respinti; presenter precedente conservato. Outlier UI32 ms e attribuzione guest/runtime ancora aperti, nessun beneficio di latenza inventato. [Esito pratico](reports/2026-10-25-graphics-latency-update.md), [verifica](VERIFICATION.md#25-ottobre--tentativi-di-riduzione-latenza-e-ui-024). PERF-001/WIN-004/GFX-007 non chiusi.
 
 ## Come aggiornare il registro
 
@@ -135,6 +135,8 @@ Queste voci conservano limiti non risolti, senza richiedere di ripristinare codi
 - **Evidenze:** [arresti e recupero](VERIFICATION.md#24-ottobre--confronto-dwm-non-qualificato-fast-fail-e-recupero), [sorgenti ritirati](RETIRED_EXPERIMENTS.md).
 
 ### GFX-003 — Cattura ferma dopo cambio compositore
+
+- **Nuova evidenza durante i tentativi di latenza:** alcune riconnessioni dello stesso Notepad producono `windowGPU.reason=pixel-hash`, con sorgente associata al marker ma hash guest/host diversi prima del presenter. Conservati i controlli, nessun ACK di successo del frame non verificato; nessuna causa attribuita automaticamente alle candidate. Chiusura del solo documento temporaneo e nuova apertura consentono la verifica finale nella0.2.4; non è recupero qualificato dello stesso documento e non chiude il problema. [Diario](VERIFICATION.md#25-ottobre--tentativi-di-riduzione-latenza-e-ui-024).
 
 - **Seguito launcher:** la riapertura ha mostrato anche un errore transitorio di disponibilità dell’immagine GPU, recuperato dalla riconnessione; causa non isolata, non confondere con l’attesa del presenter corretta in WIN-002. Conservata la prova negativa. Il pacchetto finale riapre le due finestre con primo frame presentato e gate concluso, senza errore GPU registrato nel tratto; aggiunta diagnostica privata `windowGPU` per un’eventuale ricomparsa, senza fallback o indebolire hash/identità. [Evidenze](VERIFICATION.md#25-ottobre--launcher-windows-cache-persistente-e-limite-n1).
 - **Stato:** aperto nel percorso individuale. Windows contiene 79 mentre la cattura mostra 78; riavviare il worker recupera il contenuto senza riavviare l’app. Recupero automatico non verificato.

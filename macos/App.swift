@@ -206,7 +206,7 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
     }
     private func acceptMachineState(_ state:MachineRuntimeState){
         let changed=machineState != state
-        machineState=state
+        if changed {machineState=state}
         if state == .stopped,changed {
             bridge?.disconnect()
             for window in Array(windows.values) {window.retire()}
@@ -225,7 +225,16 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
                     if !Task.isCancelled,self.machine === machine,self.machineStateRevision == revision,
                        self.machineOperation == nil,!self.restarting {
                         self.acceptMachineState(state)
-                        self.vmMemoryState=state.pid != nil ? (self.memoryController?.state ?? [:]):[:]
+                        let memory=state.pid != nil ? (self.memoryController?.state ?? [:]):[:]
+                        // Only these fields are displayed. Device counters and
+                        // the polling timestamp must not invalidate the entire
+                        // SwiftUI launcher while a Windows frame is arriving.
+                        let fields:Set<String>=["ready","actualMiB","guestAvailableMiB","pending","error"]
+                        let visible=memory.filter{fields.contains($0.key)}
+                        let prior=self.vmMemoryState.filter{fields.contains($0.key)}
+                        let changed = !NSDictionary(dictionary:prior).isEqual(to:visible)
+                        if changed {self.vmMemoryState=memory}
+                        PipelineTrace.record("ui-state-poll","memory",["published":changed])
                     }
                 }
                 do {try await Task.sleep(for:.seconds(2))}catch{return}
@@ -586,8 +595,12 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
             }
             var states:[String:GuestApplicationState]=[:]
             for row in rows {if let state=GuestApplicationState(row) {states[state.id]=state}}
-            self.applicationStates=states;self.applicationStatusAvailable=true
-            self.activeApps=Set(states.values.filter{$0.running || !$0.windows.isEmpty}.map(\.id))
+            let changed=self.applicationStates != states
+            if changed {self.applicationStates=states}
+            if !self.applicationStatusAvailable {self.applicationStatusAvailable=true}
+            let active=Set(states.values.filter{$0.running || !$0.windows.isEmpty}.map(\.id))
+            if self.activeApps != active {self.activeApps=active}
+            PipelineTrace.record("ui-state-poll","applications",["published":changed])
         }
     }
     func applicationStateLabel(_ id:String)->String {

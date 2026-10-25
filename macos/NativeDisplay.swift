@@ -106,7 +106,8 @@ final class NativeDisplayReader:@unchecked Sendable {
             guard let frame=importFrame(entry.frame,number:number) else{close("Unsupported graphics frame.");return}
             PipelineTrace.record("desktop-imported",frame.traceID)
             entry.delivered=true
-            Task{@MainActor [receive] in receive(frame)}
+            PipelineTrace.record("desktop-main-enqueued",frame.traceID)
+            FrameDelivery.main{[receive] in receive(frame)}
         }
     }
     private func importFrame(_ frame:ndt_frame,number:UInt64)->NativeDisplayFrame?{

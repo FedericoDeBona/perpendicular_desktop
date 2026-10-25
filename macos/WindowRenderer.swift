@@ -16,7 +16,7 @@ private final class DrawableAccess:@unchecked Sendable {
             PipelineTrace.record("drawable-call",traceID)
             let drawable=autoreleasepool{layer.nextDrawable()}
             PipelineTrace.record("drawable-return",traceID,["available":drawable != nil])
-            Task { @MainActor in completed(drawable) }
+            FrameDelivery.main{completed(drawable)}
         }
     }
 }
@@ -97,6 +97,7 @@ final class WindowRenderer {
         layer.backgroundColor=NSColor.clear.cgColor
         layer.maximumDrawableCount=2;layer.allowsNextDrawableTimeout=true
         layer.presentsWithTransaction=false
+        PipelineTrace.record("presenter-config",traceRenderer,["directFrameDispatch":FrameDelivery.direct,"displaySync":layer.displaySyncEnabled])
     }
     func resize(_ bounds:NSSize,scale:Double){
         let next=CGSize(width:max(1,(bounds.width*scale).rounded()),height:max(1,(bounds.height*scale).rounded()))
@@ -232,7 +233,7 @@ final class WindowRenderer {
         dirty=drawableSize != targetDrawableSize || layer.contentsScale != targetScale
         drawable.addPresentedHandler { [weak self] presented in
             PipelineTrace.record("drawable-presented",requestID,["sourceID":sourceID,"presentedTime":presented.presentedTime])
-            Task{@MainActor [weak self] in
+            FrameDelivery.main{[weak self] in
                 guard let self,self.size == NSSize(width:width,height:height),
                       self.targetDrawableSize == drawableSize,self.targetScale == renderedScale else{return}
                 self.onPresented?(presentedID)
@@ -247,7 +248,7 @@ final class WindowRenderer {
             withExtendedLifetime(frameSurface){}
             let failed=buffer.status == .error
             let message=buffer.error?.localizedDescription
-            Task{@MainActor [weak self] in
+            FrameDelivery.main{[weak self] in
                 guard let self else{return}
                 self.drawing=false
                 if failed {self.onError?(message ?? "The graphics device could not present this window.")}

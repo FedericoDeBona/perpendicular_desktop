@@ -25,3 +25,8 @@ Anche la documentazione operativa è stata ripulita: rimossi i resoconti separat
 In particolare il difetto Wait/Signal riprodotto con il driver ufficiale v0.4 e [segnalato nell'issue8](https://github.com/osy/kvm-guest-drivers-windows/issues/8#issuecomment-6374085762) resta aperto in GFX-007 e TODO-016. Qui sono ritirati soltanto i tentativi kernel/UMD/gate che cercavano di correggerlo; la sincronizzazione GPU non è una valutazione conclusa con successo.
 
 La nuova richiesta di launcher riprende soltanto il percorso immagini GPU già presente nel worker installato: ora è nei sorgenti attivi `guest/src/windows/gpu.rs`, `macos/NativeWindowFrames.swift` e `macos/NativeTransport/gpu-receiver.*`, con endpoint legato alla VM selezionata. Non è il ripristino dei prototipi IVSHMEM o delle candidate kernel ritirate.
+
+
+## 25 ottobre — Pacing del frontend a richiesta (non distribuito)
+
+Due varianti CAMetalDisplayLink e una di presentazione con transazione UI sono escluse dalla0.2.4: troppi timestamp di presentazione zero oppure nessun beneficio qualificato/primo frame individuale bianco. Non è una conclusione generale sulle API Apple. Sorgenti e raw conservati privatamente in Research/Graphics-Latency-20261025; presenter precedente e VSync attivo mantenuti. La0.2.4 distribuisce soltanto consegna diretta alla UI e riduzione delle pubblicazioni di stato invariato. [Esiti e limiti](reports/2026-10-25-graphics-latency-update.md), [verifica](VERIFICATION.md#25-ottobre--tentativi-di-riduzione-latenza-e-ui-024).

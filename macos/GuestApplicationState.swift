@@ -1,5 +1,5 @@
-struct GuestApplicationState {
-    struct Window {let id:String;let stopped:Bool}
+struct GuestApplicationState:Equatable {
+    struct Window:Equatable {let id:String;let stopped:Bool}
     let id:String
     let activationPending:Bool
     let processes:Set<String>

@@ -2,6 +2,15 @@ import Foundation
 import CryptoKit
 import Network
 
+/// Frame delivery has one coalesced UI drain. Dispatching directly to the main
+/// queue avoids creating an unstructured Swift task for each producer callback.
+enum FrameDelivery {
+    static let direct=true
+    static func main(_ work:@escaping @MainActor @Sendable ()->Void){
+        DispatchQueue.main.async{work()}
+    }
+}
+
 struct GuestPacket: @unchecked Sendable {
     let header: [String: Any]
     let pixels: Data
@@ -139,7 +148,10 @@ final class GuestConnection: @unchecked Sendable {
         if frames.count >= 16, frames[window] == nil { lock.unlock(); connection.cancel(); return }
         frames[window]=value
         let wake = !drainScheduled; drainScheduled=true; lock.unlock()
-        if wake { Task { @MainActor [self] in drain() } }
+        if wake {
+            PipelineTrace.record("wgc-main-enqueued",value.surface?.traceID ?? "")
+            FrameDelivery.main{[self] in drain()}
+        }
     }
     @MainActor private func drain() {
         lock.lock(); let pending=frames; frames.removeAll(keepingCapacity:true); drainScheduled=false; lock.unlock()
