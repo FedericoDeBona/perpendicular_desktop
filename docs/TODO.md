@@ -4,7 +4,9 @@ Ultimo aggiornamento: **25 ottobre 2026**. Responsabile dell'aggiornamento: l'ag
 
 Questo è l'elenco operativo delle attività. [KNOWN_ISSUES.md](KNOWN_ISSUES.md) conserva diagnosi e dettagli dei difetti, [VERIFICATION.md](VERIFICATION.md) le evidenze e i fallimenti, [RESTART_PLAN.md](RESTART_PLAN.md) la base operativa. Gli ID qui sotto sono stabili e rimandano ai problemi esistenti: non sostituiscono né duplicano il registro dei difetti.
 
-**Ultimi interventi: RAM semplificata nella0.2.3 (TODO-019, qualifica UI parziale) e accesso automatico ripristinato/verificato (TODO-021).** Avvio utente a1 GB e successivo avvio protetto con login automatico osservati; Windows vede circa4 GB dopo hotplug. Nessun nuovo benchmark di reclaim. TODO-020 resta completato, gli altri stati invariati.
+**Ultima richiesta: report dettagliato sull’apertura di Explorer nel desktop VM, consegnato con prove reali e limiti; nessuna ottimizzazione applicata.** PERF-001 aperto. [Rapporto](reports/2026-10-25-explorer-opening.md).
+
+**Interventi precedenti: RAM semplificata nella0.2.3 (TODO-019, qualifica UI parziale) e accesso automatico ripristinato/verificato (TODO-021).** Avvio utente a1 GB e successivo avvio protetto con login automatico osservati; Windows vede circa4 GB dopo hotplug. Nessun nuovo benchmark di reclaim. TODO-020 resta completato, gli altri stati invariati.
 
 ## Regole di aggiornamento e stati
 
@@ -36,9 +38,9 @@ Priorità 1–4 corrispondenti alla richiesta iniziale dell'utente; TODO-017/018
 | TODO-017 | Scorciatoie e comandi Mac nelle app Windows e in Perpendicular | DA FARE per completamento e qualifica main; base parziale presente | Cmd+C/V/X/T/Q e altri comandi comuni; destinazione secondo focus/contesto. |
 | TODO-018 | Copia/incolla di testo e file Mac ↔ Windows | DA FARE; testo già implementato e provato storicamente, file mancanti | Entrambe le direzioni, desktop e singole app; collegamento con TODO-003. |
 | TODO-004 | Tutti i tempi della pipeline grafica, desktop e singola app | DA FARE; strumentazione esistente incompleta | Copertura per stadio, correlazione e limiti di misura. |
-| TODO-005 | Misurare e migliorare disco/I/O quando utile | DA FARE | Meccanismi concreti identificati, non provati sul sistema. |
-| TODO-006 | Misurare CPU e costo della VM sempre accesa | DA FARE | Host e guest distinti; campionamento ARM virtuale da accertare. |
-| TODO-007 | Misurare GPU e costo della traduzione grafica | DA FARE | Tempi Metal/ETW candidati; contatori effettivi da accertare. |
+| TODO-005 | Misurare e migliorare disco/I/O quando utile | IN CORSO: primo rilievo Explorer | QMP misurato; attribuzione per thread/fault e code ancora incompleta. |
+| TODO-006 | Misurare CPU e costo della VM sempre accesa | IN CORSO: primo rilievo Explorer | CPU processi e Time Profiler QEMU; stack guest/idle/energia non qualificati. |
+| TODO-007 | Misurare GPU e costo della traduzione grafica | IN CORSO: contatori desktop osservati | Tempi GPU dell’apertura non ottenuti; nessuna attribuzione inventata. |
 | TODO-016 | Correggere la sincronizzazione GPU Wait/Signal | BLOCCATO per una soluzione protetta qualificata; difetto aperto | GFX-007; segnalazione upstream nell'issue8, distinta dagli esperimenti ritirati. |
 | TODO-008 | Catture complete, aggiornate e risorse grafiche rilasciate | DA FARE | GFX-001/003/004, difetti aperti. |
 | TODO-009 | Arresto/riavvio affidabile e gestione degli errori | DA FARE | SYS-001. |
@@ -149,7 +151,9 @@ L'interfaccia deve offrire la stessa operazione da menu e da tastiera. Drag-and-
 
 ## TODO-004 — Tutti i tempi della pipeline grafica
 
-**Stato: DA FARE; copertura parziale già nel codice.** Occorrono due rapporti distinti: **desktop Windows → finestra desktop Mac** e **singola app Windows → propria finestra Mac**. Obiettivo: attribuire latenza e lavoro ai componenti, individuare il collo di bottiglia e ottimizzare solo dopo una misura utile.
+**Analisi Explorer consegnata sulla main0.2.3:** [rapporto dettagliato](reports/2026-10-25-explorer-opening.md), PERF-001. Tre aperture con sequenza visiva completa, più una esplorativa esclusa dai confronti; clock correlati, CPU guest/host, QMP I/O e contatori grafici, memoria/swap. Finestra e contenuto completo separati. Nessuna ottimizzazione o modifica del pacchetto. **Copertura generale ancora incompleta:** tempi interni UI/DWM/driver/GPU non tutti separabili e percorso finestre individuali escluso. **Prossimo passo:** scelta dell’utente; raccomandato confronto sulla pressione di memoria prima di cambiare componenti. Non segnare FATTO l’intera TODO per il solo rapporto. [Verifica](VERIFICATION.md#25-ottobre--analisi-apertura-explorer-nel-desktop-vm).
+
+**Stato: IN CORSO, prima analisi circoscritta all’apertura di Explorer nel desktop della VM su richiesta esplicita.** Rapporto della breve prova reale fino al contenuto visibile consegnato, con tempi osservabili e limiti dichiarati; nessuna ottimizzazione applicata in questo passaggio. Il percorso delle app in finestre Mac è escluso da questa analisi. Occorrono due rapporti distinti: **desktop Windows → finestra desktop Mac** e **singola app Windows → propria finestra Mac**. Obiettivo: attribuire latenza e lavoro ai componenti, individuare il collo di bottiglia e ottimizzare solo dopo una misura utile.
 
 Ricognizione dei sorgenti, non nuova verifica runtime:
 
@@ -182,9 +186,9 @@ Il difetto Wait/Signal di TODO-016 condiziona l'interpretazione delle misure gue
 
 ## TODO-005 — Disco e I/O
 
-**Stato: DA FARE. Ha senso analizzarlo, ma non è ancora dimostrato che sia un collo di bottiglia.** Il percorso configurato è filesystem Windows → NVMe virtuale → QEMU/block layer → qcow2 → file host/APFS → storage Mac; cache e flush esistono in più livelli. Il dispositivo NVMe presentato al guest non è passthrough del disco fisico. Le future cartelle condivise di TODO-003 avranno un percorso distinto dal disco Windows.
+**Stato: IN CORSO, primo rilievo concreto nell’apertura Explorer main.** Letture/scritture e tempi medi del nodo disco QMP misurati; attività globale VM, non attribuita tutta a Explorer. Medie circa0,4–1,0 ms in lettura, senza dimostrare assenza di outlier o di paging. Nessun benchmark disco né cambio di cache/flush. [Rapporto](reports/2026-10-25-explorer-opening.md). Non è ancora isolato il contributo causale del disco. Il percorso configurato è filesystem Windows → NVMe virtuale → QEMU/block layer → qcow2 → file host/APFS → storage Mac; cache e flush esistono in più livelli. Il dispositivo NVMe presentato al guest non è passthrough del disco fisico. Le future cartelle condivise di TODO-003 avranno un percorso distinto dal disco Windows.
 
-**Meccanismi:** [QMP query-blockstats](https://github.com/qemu/qemu/blob/master/qapi/block-core.json) espone operazioni, byte e tempi cumulativi anche sui nodi sottostanti; differenze tra campioni danno tassi e tempi medi, non automaticamente la latenza di ogni richiesta. Per dettagli esistono i [trace-event QEMU](https://www.qemu.org/docs/master/devel/tracing.html), da scegliere nel build effettivo. Sul Mac, [Instruments File Activity](https://developer.apple.com/documentation/xcode/reducing-disk-writes) distingue attività logica e I/O fisico con durate. Nel guest, ETW File/Disk I/O e, solo per una domanda concreta, [DiskSpd ARM64](https://github.com/microsoft/diskspd) su un piccolo file temporaneo. Esistenza documentata degli strumenti, disponibilità locale e copertura non ancora provate.
+**Meccanismi:** [QMP query-blockstats](https://github.com/qemu/qemu/blob/master/qapi/block-core.json) espone operazioni, byte e tempi cumulativi anche sui nodi sottostanti; differenze tra campioni danno tassi e tempi medi, non automaticamente la latenza di ogni richiesta. Per dettagli esistono i [trace-event QEMU](https://www.qemu.org/docs/master/devel/tracing.html), da scegliere nel build effettivo. Sul Mac, [Instruments File Activity](https://developer.apple.com/documentation/xcode/reducing-disk-writes) distingue attività logica e I/O fisico con durate. Nel guest, ETW File/Disk I/O e, solo per una domanda concreta, [DiskSpd ARM64](https://github.com/microsoft/diskspd) su un piccolo file temporaneo. QMP disponibile e usato nel rilievo Explorer; attribuzione ETW dettagliata e DiskSpd non qualificati in questo passaggio.
 
 **Prossimo passo:** scegliere un'operazione utile, per esempio avvio app o apertura/salvataggio documento, e associare attesa guest, code QEMU, attività qcow2/APFS e flush. Distinguere cache calda/fredda e paginazione dovuta alla RAM da vero costo storage. Limitare durata, spazio e scritture; mai fare benchmark direttamente sull'immagine VM dal lato host mentre è in uso.
 
@@ -192,7 +196,7 @@ Il difetto Wait/Signal di TODO-016 condiziona l'interpretazione delle misure gue
 
 ## TODO-006 — CPU, idle e impatto sul Mac
 
-**Stato: DA FARE.** Non dare per scontato che la CPU sia irrilevante: la VM sempre accesa deve costare poco anche senza finestre aperte. Separare vCPU Windows, QEMU/HVF, renderer/server, servizio guest, polling e UI Mac; distinguere lavoro CPU da tempo trascorso in attesa.
+**Stato: IN CORSO, primi tempi CPU Explorer/host e Time Profiler QEMU sulla main.** Il profiler host vede soprattutto il confine HVF e non attribuisce le funzioni Windows; WPR tentato senza ottenere ETL utilizzabile, non impossibilità generale ARM dichiarata. Idle, risvegli ed energia non qualificati. [Rapporto](reports/2026-10-25-explorer-opening.md). Non dare per scontato che la CPU sia irrilevante: la VM sempre accesa deve costare poco anche senza finestre aperte. Separare vCPU Windows, QEMU/HVF, renderer/server, servizio guest, polling e UI Mac; distinguere lavoro CPU da tempo trascorso in attesa.
 
 **Meccanismi:** Time Profiler e stato dei thread in Instruments sul lato host; tempi CPU di processo/thread Windows e trace ETW scheduler/context switch sul lato guest. Il comando guest `gpu::clock` già espone QPC/frequenza e CPU del worker: non rappresenta tutta la VM. Il campionamento CPU WPR non è garantito nella nostra IoT virtualizzata: la [FAQ Microsoft ARM](https://learn.microsoft.com/en-us/windows/arm/faq) documenta persino vincoli di canale per VM Hyper-V ARM. Non trasferire automaticamente quella disponibilità a HVF, né cambiare LTSC in Insider per profilare. Se manca il campionamento, usare tempi processo/thread e confini espliciti per le sole domande che possono risolvere, dichiarando la minore attribuzione.
 
@@ -202,7 +206,7 @@ Il difetto Wait/Signal di TODO-016 condiziona l'interpretazione delle misure gue
 
 ## TODO-007 — GPU e traduzione grafica
 
-**Stato: DA FARE.** Distinguere CPU di driver/renderer/traduzione da esecuzione GPU Metal, copie, sincronizzazione e attesa della presentazione; l'utilizzo della GPU virtuale non descrive da solo il lavoro della GPU Apple.
+**Stato: IN CORSO, contatori e attese pending dello scanout osservati su Explorer.** Percorso desktop attivo, ma traccia Metal dell’apertura non utilizzabile: nessun tempo GPU o per-encoder dichiarato misurato. [Rapporto](reports/2026-10-25-explorer-opening.md). Distinguere CPU di driver/renderer/traduzione da esecuzione GPU Metal, copie, sincronizzazione e attesa della presentazione; l'utilizzo della GPU virtuale non descrive da solo il lavoro della GPU Apple.
 
 **Meccanismi:** timeline di TODO-004, Metal System Trace e tempi command buffer. I contatori dettagliati sono condizionati da [counterSets/supportsCounterSampling](https://developer.apple.com/documentation/metal/mtldevice/countersets) del dispositivo e dai confini supportati; non promettere cache/banda/occupancy prima di averne accertato l'esposizione. Analogamente, query timestamp D3D o eventi ETW del guest non diventano automaticamente tempi fisici Apple attendibili.
 

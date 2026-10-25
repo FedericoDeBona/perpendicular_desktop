@@ -14,6 +14,8 @@ Ulteriore requisito: comandi Mac nelle app Windows (fra cui Cmd+C/T/Q, con chius
 
 **Icona applicata:** TODO-020 completato nella0.2.2 su richiesta esplicita: marchio Carbone e cobalto compilato nativamente in Assets.car, ICNS e simbolo launcher. Finder mostra icona e versione corrette; runtime e machine.json conservati. Installazione a frontend e VM già spenti, entrambi lasciati spenti; nessun boot per verificare un’icona. Precedente app0.2.1 conservata in Research/Icon-Main-20261025/previous-app. La verifica interattiva delle impostazioni TODO-019 resta distinta.
 
+**Richiesta corrente — analisi Explorer:** rapporto del25 ottobre consegnato in [docs/reports/2026-10-25-explorer-opening.md](reports/2026-10-25-explorer-opening.md), prove solo nel desktop VM, nessun uso delle finestre integrate e nessuna ottimizzazione. PERF-001 riprodotto: finestra prima del contenuto, forte contesto di memoria/swap e lavoro CPU; cause ancora da isolare. Le misure GPU/guest incomplete sono dichiarate. Attendere la scelta dell’utente prima di implementare; la proposta prioritaria è un confronto sulla pressione di memoria con RAM effettiva controllata. Non ripetere tutte le aperture per completismo.
+
 ## Base principale
 
 Su richiesta esplicita dell'utente, il 25 ottobre la nuova IoT e l'ultimo pacchetto RAM diventano la base principale su `main`. Eliminati tutti i vecchi dischi VM, inclusa la sorgente Parallels, i relativi rollback/snapshot e i launcher superati. Non cercare di riavviare le vecchie VM dai loro metadati residui.

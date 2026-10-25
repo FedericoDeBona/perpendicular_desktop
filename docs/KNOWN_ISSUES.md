@@ -20,6 +20,8 @@ Il ciclo RAM protetto 4→2→4 GiB con dati conservati resta la qualifica prece
 
 **Aggiornamento0.2.3:** RAM massima come unico controllo principale, iniziale in Avanzate. Avvio utente1 GB seguito da hotplug fino a4 GB e un nuovo accesso automatico protetto verificati; SYS-004 chiuso, SYS-001 ricomparso. CUA continua a fermarsi sul pannello: DiagnosticReports conferma crash di SkyComputerUseService in Array.remove(at:); TODO-019 mantiene il limite di qualifica UI. [Evidenze](VERIFICATION.md#25-ottobre--ram-semplificata-e-accesso-windows).
 
+**Richiesta prestazionale corrente:** analisi Explorer nel desktop consegnata, PERF-001 riprodotto; nessuna correzione applicata. Tempi visivi e limiti nel [rapporto](reports/2026-10-25-explorer-opening.md). TODO-004/005/006/007 distinguono le prime misure dalle attribuzioni e dai tempi GPU ancora mancanti.
+
 ## Come aggiornare il registro
 
 - Aggiornare la voce esistente conservandone l’ID; crearne una soltanto per un difetto distinto.
@@ -29,7 +31,18 @@ Il ciclo RAM protetto 4→2→4 GiB con dati conservati resta la qualifica prece
 
 ## Problemi pertinenti al desktop
 
+### PERF-001 — Explorer nel desktop compare prima del contenuto completo
+
+- **Stato:** difetto prestazionale riprodotto nella main0.2.3; analisi consegnata, nessuna ottimizzazione applicata. Percorso desktop Native3D, senza usare finestre integrate/WGC.
+- **Verificato:** Home con osservazione leggera: finestra Win32 rilevata1,39 s, primo frame vicino al riferimento completo entro5,41 s. Home con profiler CPU host:3,25/11,06 s. Questo PC, nuovo processo:3,63/9,71 s, poi ulteriore caricamento fino a circa13,20 s. Condizioni diverse, non una distribuzione statistica o un A/B controllato.
+- **Diagnosi circoscritta:** UI bianca e poi progressiva; pubblicazioni/ACK continuano. Carico Explorer significativo; swap host effettivo elevato sul Mac8 GiB e QEMU con molto contenuto non residente nel rilievo successivo. Nessuna attribuzione causale esclusiva a RAM, CPU, disco o GFX-007. Timestamp GPU/stadi guest completi non ottenuti.
+- **Prossimo passo:** scelta dell’utente dopo il report; raccomandato un confronto con pressione host e RAM effettiva controllate, poi attribuzione CPU/paging guest. Non modificare driver, protezioni o caching per tentativi.
+- **Chiusura:** causa del ritardo identificata e intervento verificato sul medesimo percorso con criterio di contenuto visivo completo e condizioni confrontabili; conservare i limiti di osservabilità.
+- **Evidenze:** [rapporto dettagliato](reports/2026-10-25-explorer-opening.md), [diario](VERIFICATION.md#25-ottobre--analisi-apertura-explorer-nel-desktop-vm).
+
 ### GFX-004 — Risorse grafiche indisponibili e recupero incompleto
+
+- **Rilievo Explorer main0.2.3:** nelle aperture desktop il live sale circa23→33→43 e poi fino a51. Nessun nuovo rifiuto/saturazione nelle finestre di misura; poche aperture e processi/cache diversi non provano un leak o rilascio generale. [Rapporto PERF-001](reports/2026-10-25-explorer-opening.md).
 
 - **Stato:** aperto, causa non isolata. In una sessione desktop il registro delle risorse raggiunge live256, rifiuta nuove registrazioni e il presenter diventa nero. Un reset adattatore recupera il percorso, senza dimostrare una correzione.
 - **Verificato:** nel successivo uso di Calcolatrice, Settings/HDR e video le risorse passano da 40 a un picco di 79 e scendono a 37, con pending0/rejected0. La prova precede il ripristino del driver ufficiale; non qualifica durata indefinita né identifica la causa della saturazione. Il diario conserva anche perdita device, timeout e recuperi delle vecchie catture WGC.
