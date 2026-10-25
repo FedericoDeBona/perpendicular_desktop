@@ -22,4 +22,6 @@ I vecchi dischi e checkpoint rimossi non sono recuperabili da Git. Rimangono la 
 
 Anche la documentazione operativa è stata ripulita: rimossi i resoconti separati delle valutazioni concluse, gli handoff di build eliminate e le vecchie istruzioni kernel/WARP/RDP. README, implementazione, registro dei problemi e guide grafiche descrivono la base attuale. I problemi non risolti restano nel registro con il loro ambito e gli stessi ID; la rimozione di un esperimento non equivale alla soluzione dei suoi difetti.
 
+In particolare il difetto Wait/Signal riprodotto con il driver ufficiale v0.4 e [segnalato nell'issue8](https://github.com/osy/kvm-guest-drivers-windows/issues/8#issuecomment-6374085762) resta aperto in GFX-007 e TODO-016. Qui sono ritirati soltanto i tentativi kernel/UMD/gate che cercavano di correggerlo; la sincronizzazione GPU non è una valutazione conclusa con successo.
+
 La nuova richiesta di launcher riprende soltanto il percorso immagini GPU già presente nel worker installato: ora è nei sorgenti attivi `guest/src/windows/gpu.rs`, `macos/NativeWindowFrames.swift` e `macos/NativeTransport/gpu-receiver.*`, con endpoint legato alla VM selezionata. Non è il ripristino dei prototipi IVSHMEM o delle candidate kernel ritirate.

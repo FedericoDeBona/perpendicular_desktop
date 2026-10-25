@@ -29,4 +29,6 @@ Le ricevute private identificano quali input appartengono a ogni build. Non appl
 
 I controlli C accanto alle patch verificano confini circoscritti del broker; non qualificano il driver, tutte le app Windows o la durata della VM. Saturazione delle risorse, recupero e guasti WGC restano nel [registro](../../docs/KNOWN_ISSUES.md). Le candidate fence/DWM e IVSHMEM restano ritirati; non riattivarli per il normale resize o per la libreria. Il percorso finestre ripreso è in NativeWindowFrames e guest/src/windows/gpu.rs; non è il ripristino dell’intero prototipo storico.
 
+Il difetto Wait/Signal del driver ufficiale v0.4, [segnalato upstream](https://github.com/osy/kvm-guest-drivers-windows/issues/8#issuecomment-6374085762), resta aperto in GFX-007/TODO-016. Ritirati sono i tentativi di correzione; né il loro ritiro né un gate di pubblicazione circoscritto dimostrano corretto ordinamento di tutto il lavoro GPU.
+
 Le ricette dei vecchi build, le prove Wire1 e gli esperimenti fence sono stati tolti da questa guida. Restano nel [diario](../../docs/VERIFICATION.md) e nella [versione storica](https://github.com/FedericoDeBona/perpendicular_desktop/blob/3589194/graphics/renderer/README.md), con i fallimenti e i limiti originali.

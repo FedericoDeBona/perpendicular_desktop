@@ -34,14 +34,14 @@ Priorità 1–4 corrispondenti alle richieste dell'utente; le altre righe conser
 | TODO-005 | Misurare e migliorare disco/I/O quando utile | DA FARE | Meccanismi concreti identificati, non provati sul sistema. |
 | TODO-006 | Misurare CPU e costo della VM sempre accesa | DA FARE | Host e guest distinti; campionamento ARM virtuale da accertare. |
 | TODO-007 | Misurare GPU e costo della traduzione grafica | DA FARE | Tempi Metal/ETW candidati; contatori effettivi da accertare. |
+| TODO-016 | Correggere la sincronizzazione GPU Wait/Signal | BLOCCATO per una soluzione protetta qualificata; difetto aperto | GFX-007; segnalazione upstream nell'issue8, distinta dagli esperimenti ritirati. |
 | TODO-008 | Catture complete, aggiornate e risorse grafiche rilasciate | DA FARE | GFX-001/003/004, difetti aperti. |
 | TODO-009 | Arresto/riavvio affidabile e gestione degli errori | DA FARE | SYS-001. |
-| TODO-010 | Prevenire esaurimento spazio e preservare ripristino | DA FARE; backup attuale già presente | SYS-002; stato vivo non migrabile. |
 | TODO-011 | Qualificare launcher e riconnessione delle singole app sulla main | DA FARE; correzioni nel clone | APP-002, WIN-001/002. |
 | TODO-012 | RAM dinamica reale con Windows protetto | FATTO nel perimetro documentato | SYS-003; ciclo Native3D 4→2→4 GiB, unplug parziale ammesso. |
 | TODO-013 | Base unica main/default e pulizia autorizzata | FATTO | App 0.2.0 + IoT principale; restano difetti grafici. |
 | TODO-014 | Creality/OpenGL | RINVIATO dall'utente | APP-001. |
-| TODO-015 | IVSHMEM e vecchi driver candidati | Valutazione FATTA / esperimenti RITIRATI | TRN-001, GFX-002/005/007. |
+| TODO-015 | IVSHMEM e vecchi driver candidati | Valutazione FATTA / esperimenti RITIRATI | TRN-001, GFX-002/005; il difetto sync GFX-007 resta TODO-016. |
 
 Vincoli comuni: preservare `/Applications/Perpendicular.app` e la IoT principale; **Secure Boot e Code Integrity attivi, TESTSIGNING disattivato nella soluzione finale**. Nessun driver non accettato con queste protezioni costituisce un completamento. La VM deve poter restare accesa in background. Dischi, credenziali e tracce private restano fuori Git. Preferire il controllo tramite guest tool, evitando uso superfluo del computer use.
 
@@ -113,6 +113,8 @@ La tabella è una lista di punti d'osservazione: alcune operazioni si sovrappong
 
 QPC Windows e orologio monotono Mac non sono direttamente sottraibili: [QPC misura intervalli nello stesso sistema/VM](https://learn.microsoft.com/en-us/windows/win32/sysinfo/acquiring-high-resolution-time-stamps). Servono correlazione e calibrazione offset/deriva con incertezza esplicita, mantenendo le durate locali quando non c'è sincronizzazione affidabile. Il callback CPU non coincide necessariamente con l'istante GPU o con la visualizzazione.
 
+Il difetto Wait/Signal di TODO-016 condiziona l'interpretazione delle misure guest: una risposta query di completamento non dimostra da sola che le dipendenze fra produttore e consumer siano state rispettate. Non classificare come più veloce un percorso che legge prima del momento consentito.
+
 **Fatto quando:** per entrambi i percorsi una breve azione reale produce una timeline correlata, durate e code per stadio, distribuzione dei tempi e frame persi; i tratti mancanti sono evidenziati e il collo di bottiglia è sostenuto dai dati. Riportare numero di campioni e overhead della strumentazione, evitando percentili estremi senza campioni sufficienti. Una misura software di presentazione non è una misura fisica fino alla luce emessa dal display: quest'ultima richiede strumentazione esterna. Se un tratto non è osservabile, avvisare senza sostituirlo con zero o dichiarare copertura totale.
 
 ## TODO-005 — Disco e I/O
@@ -145,6 +147,18 @@ QPC Windows e orologio monotono Mac non sono direttamente sottraibili: [QPC misu
 
 **Fatto quando:** costo grafico attribuito con limiti espliciti e, se il collo di bottiglia è correggibile, confronto concreto prima/dopo. Se non sono disponibili contatori o timestamp utili, avvisare e limitare l'analisi alle parti osservabili; nessuna stima presentata come misura hardware.
 
+## TODO-016 — Sincronizzazione GPU: Wait/Signal non rispettato
+
+**Stato: difetto APERTO; soluzione protetta qualificata BLOCCATA nella combinazione attuale.** È [GFX-007](KNOWN_ISSUES.md#gfx-007--fence-waitsignal-e-pubblicazione-gpu), non un esperimento concluso. Le candidate kernel/UMD e il gate host sono stati ritirati, ma il difetto che cercavano di correggere resta da risolvere.
+
+**Evidenza già acquisita:** con il driver ARM64 Microsoft-signed v0.4, due device sullo stesso adattatore e una query EVENT nuova, un Wait sul valore1 lascia eseguire Clear/Copy e leggere i nuovi pixel mentre la fence è ancora0. Quindi non è soltanto una query che risponde prematuramente. Prova del 23 ottobre sul nostro host Neptune/DXMT modificato: non una riproduzione su UTM intatto né una nuova prova sulla IoT oggi principale. [Diario della riproduzione](VERIFICATION.md#23-ottobre--wait-d3d11-non-trattiene-query-e-scrittura-dei-pixel).
+
+**Segnalazione esterna:** [nostro commento nell'issue8 di osy/kvm-guest-drivers-windows](https://github.com/osy/kvm-guest-drivers-windows/issues/8#issuecomment-6374085762), pubblicato il23 ottobre. L'issue era già stata aperta da un altro utente per testo XAML mancante con v0.3; il nostro contributo documenta il distinto errore Wait/Signal su v0.4. Al controllo documentale del25 ottobre l'issue è aperta e l'ultimo dei due commenti è ancora il nostro, senza risposta successiva. Non è una conferma del maintainer di causa o correzione.
+
+**Prossimo passo / sblocco:** valutare una correzione upstream o una modifica compatibile del percorso scheduler WDDM → esecuzione host, distinguendo ordine di invio, autorizzazione all'esecuzione e completamento. Per distribuire serve una coppia driver/runtime accettata con Secure Boot/CI e modalità test disattivata; nessuna soluzione così qualificata è documentata. Le prove circoscritte delle candidate non bastano: una provocava arresti DWM. La verifica sul pacchetto main sarà necessaria quando si riprenderà il lavoro, non in questo aggiornamento documentale; non ripetere ora il probe o riattivare candidate ritirate.
+
+**Fatto quando:** il lavoro successivo a Wait resta fermo fino al Signal nel caso minimo pertinente, poi il percorso reale tra produttore/consumer conserva immagini complete e aggiornate, senza regressioni DWM e con protezioni attive. Non basta che GetData restituisca successo. Il legame con ogni caso di testo mancante, WGC stale o flicker resta da dimostrare separatamente: non attribuirli tutti a questa causa per deduzione.
+
 ## Altri problemi da non perdere
 
 Queste voci derivano dal registro corrente; non sono nuove promesse di funzionalità.
@@ -160,12 +174,6 @@ Prossimo passo: quando si affronta il singolo difetto, conservare un caso reale 
 **Stato: DA FARE.** [SYS-001](KNOWN_ISSUES.md#sys-001--arresto-hvf-durante-riavvio-o-arresto): assertion HVF durante shutdown/restart, anche con driver ufficiale. Un successivo avvio e un controllo disco riusciti non isolano la causa.
 
 Prossimo passo: al guasto pertinente preservare istruzione/MMIO e contesto, poi correggere il percorso identificato. **Fatto quando:** il passaggio prima difettoso riesce con la correzione causale e l'app comunica perdita/recupero della sessione in modo utilizzabile. Preservare documento e identità della finestra in riconnessione; evitare duplicazioni o input rimasto premuto.
-
-### TODO-010 — Spazio disponibile, aggiornamenti e ripristino
-
-**Stato: DA FARE per la prevenzione; backup attuale già verificato.** [SYS-002](KNOWN_ISSUES.md#sys-002--spazio-host-esaurito-durante-le-scritture-vm): la pulizia ha recuperato spazio, ma non gestisce un futuro esaurimento durante le scritture.
-
-Prossimo passo: controllo e avviso sullo spazio host, gestione dell'errore I/O nel prodotto, procedura di aggiornamento che preservi runtime in uso e stato coerente disco/EFI/TPM/configurazione. **Fatto quando:** errore gestito senza perdita dati e ripristino praticabile. Il backup completo offline esistente è un risultato conservato; non va ricreato o ripristinato solo per compilare la lista. Migrazione e snapshot dello stato vivo sono **non supportati dal reclaim attuale** e bloccati esplicitamente: non presentarli come funzionalità disponibile né aggiungerli implicitamente al requisito.
 
 ### TODO-011 — Launcher e finestre già aperte sulla main
 
@@ -191,8 +199,10 @@ Non è una promessa di unplug completo o footprint minimo fisso. La promozione h
 
 ### TODO-015 — Esperimenti già valutati
 
-**IVSHMEM: valutazione FATTA, decisione di non adozione (TRN-001).** Frame reali verificati, vantaggio generale su TCP+LZ4 non dimostrato. Non è un componente mancante da implementare automaticamente. **Candidate DWM/driver auto-firmate: RITIRATE** (GFX-002/005/007); non appartengono alla soluzione protetta attuale. Storia e motivi in [RETIRED_EXPERIMENTS.md](RETIRED_EXPERIMENTS.md) e nel diario.
+**IVSHMEM: valutazione FATTA, decisione di non adozione (TRN-001).** Frame reali verificati, vantaggio generale su TCP+LZ4 non dimostrato. Non è un componente mancante da implementare automaticamente. **Candidate DWM/driver auto-firmate: RITIRATE** (GFX-002/005 e tentativi storici di GFX-007); non appartengono alla soluzione protetta attuale. Il difetto di sincronizzazione GPU GFX-007 resta aperto in TODO-016: il ritiro dei tentativi non ne costituisce la soluzione. Storia e motivi in [RETIRED_EXPERIMENTS.md](RETIRED_EXPERIMENTS.md) e nel diario.
 
 ## Ultimo aggiornamento documentale
 
 25 ottobre: registrate le nuove richieste e i meccanismi candidati da fonti primarie, letti i punti di misura nei sorgenti e collegati i difetti esistenti. Nessuna nuova misura o qualifica runtime. [Voce del diario](VERIFICATION.md#25-ottobre--todo-obbligatoria-e-ricognizione-documentale).
+
+Successiva revisione richiesta dall'utente: rimossa la voce su spazio/aggiornamenti/ripristino; conservati gli altri ID. Aggiunta TODO-016 per il difetto sync GPU e corretto GFX-007, che era stato confuso con i tentativi ritirati. [Revisione documentale](VERIFICATION.md#25-ottobre--revisione-todo-e-difetto-di-sincronizzazione-gpu).

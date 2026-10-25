@@ -48,6 +48,7 @@ Il ciclo RAM protetto 4→2→4 GiB con dati conservati resta la qualifica prece
 
 ### SYS-002 — Spazio host esaurito durante le scritture VM
 
+- **Priorità:** su richiesta del25 ottobre rimossa TODO-010 dall'elenco operativo; questa voce conserva l'incidente storico, senza dichiararlo corretto né riproporne automaticamente il lavoro. [Revisione](VERIFICATION.md#25-ottobre--revisione-todo-e-difetto-di-sincronizzazione-gpu).
 - **Stato:** spazio recuperato e immagine riparata nel clone; prevenzione nel prodotto ancora aperta.
 - **Verificato:** con 103 MiB liberi QEMU termina per `aio failed: No space left on device`. Riparati due cluster non referenziati, nessuna corruzione residua, Windows riavviato con volume Healthy. La pulizia successiva libera 25.051.377.664 byte, con circa 46,4 GB disponibili al controllo del 25 ottobre; questo valore è un rilievo storico, non una misura aggiornata a ogni lettura.
 - **Prossimo passo:** prima di distribuire definire controllo e segnalazione dello spazio host per evitare una terminazione cieca durante le scritture.
@@ -82,7 +83,7 @@ Il ciclo RAM protetto 4→2→4 GiB con dati conservati resta la qualifica prece
 - **Chiusura:** acquisizione completa nel passaggio difettoso e causa del solo acquisitore identificata con evidenza indipendente.
 - **Evidenze:** [artefatto acquisito](VERIFICATION.md#24-ottobre--seconda-candidata-resize-geometrie-effettive-e-pulizia-autorizzata), [riscontro utente](VERIFICATION.md#24-ottobre--riscontro-utente-fullscreen-senza-anomalie-visibili).
 
-## Finestre individuali ed esperimenti ritirati
+## Finestre individuali, sincronizzazione GPU ed esperimenti ritirati
 
 Queste voci conservano limiti non risolti, senza richiedere di ripristinare codice, dischi o protezioni delle prove eliminate. Il percorso individuale è ripreso dalla nuova richiesta di launcher; i vecchi esperimenti kernel e IVSHMEM restano ritirati. Riprendere una prova tecnica soltanto per una necessità concreta del percorso attivo.
 
@@ -117,10 +118,13 @@ Queste voci conservano limiti non risolti, senza richiedere di ripristinare codi
 
 ### GFX-007 — Fence Wait/Signal e pubblicazione GPU
 
-- **Stato:** candidate ritirate; integrazione affidabile e beneficio reale non qualificati. Controlli circoscritti hanno verificato attesa fino a Signal e pubblicazione dopo completamento, ma la candidata DWM provoca GFX-002.
-- **Prossimo passo, se ripreso:** risolvere la causa del guasto e dimostrare un beneficio su un difetto reale; non ripetere benchmark già superati senza modifica pertinente.
-- **Chiusura:** eliminazione del problema concreto nell’app reale con driver/runtime compatibili, senza regressione DWM.
-- **Evidenze:** [pubblicazione GPU](VERIFICATION.md#24-ottobre--pubblicazione-dopo-il-completamento-gpu-del-produttore), [fallimento DWM](VERIFICATION.md#24-ottobre--confronto-dwm-non-qualificato-fast-fail-e-recupero), [controlli e sorgenti storici](RETIRED_EXPERIMENTS.md).
+- **Stato:** difetto aperto; soluzione protetta qualificata non disponibile nel lavoro documentato. Sono ritirati i tentativi di correzione, non il problema. La precedente sintesi «candidate ritirate» ometteva il difetto osservato con il driver ufficiale. Attività esplicita in TODO-016.
+- **Verificato il23 ottobre:** con driver ARM64 Microsoft-signed v0.4, due device hardware e query EVENT nuova, Wait(fence,1) non trattiene Clear/Copy: pixel nuovi leggibili con fence ancora0, poi Signal porta il valore a1. Host Neptune/DXMT con modifiche locali, non UTM intatto. È un errore di ordinamento reale oltre al feedback query; la sua causa interna completa e il legame con tutti i guasti XAML/WGC non sono dimostrati. Nessun nuovo probe sulla IoT principale in questa revisione.
+- **Upstream:** [commento di FedericoDeBona nell'issue8](https://github.com/osy/kvm-guest-drivers-windows/issues/8#issuecomment-6374085762), pubblicato su autorizzazione il23 ottobre. Issue aperta al controllo del25 ottobre, due commenti e nessuna risposta successiva al nostro. La issue originale tratta v0.3/XAML, il nostro commento il distinto Wait/Signal v0.4; nessuna conferma del maintainer attribuita per deduzione.
+- **Tentativi distinti:** controlli circoscritti delle candidate hanno verificato attesa fino a Signal e pubblicazione dopo completamento, ma la candidata DWM provoca GFX-002. Non sono una soluzione adottata né una qualifica del driver ufficiale attuale.
+- **Prossimo passo / sblocco:** correzione del collegamento fra scheduling WDDM e autorizzazione all'esecuzione host, oppure candidata upstream compatibile. La coppia finale driver/runtime deve conservare Secure Boot/CI e TESTSIGNINGfalse. Indagine possibile, distribuzione bloccata fino alla qualifica; non ripetere ora prove o riattivare driver ritirati per questo aggiornamento documentale.
+- **Chiusura:** ordinamento Wait/Signal rispettato nel caso prima difettoso e percorso reale produttore/consumer corretto nell'app principale protetta, senza regressione DWM. Un GetData riuscito o il ritiro dell'esperimento non bastano.
+- **Evidenze:** [riproduzione ufficiale v0.4](VERIFICATION.md#23-ottobre--wait-d3d11-non-trattiene-query-e-scrittura-dei-pixel), [segnalazione autorizzata](VERIFICATION.md#23-ottobre--confine-dello-scheduler-e-segnalazione-autorizzata-al-driver), [pubblicazione candidata](VERIFICATION.md#24-ottobre--pubblicazione-dopo-il-completamento-gpu-del-produttore), [fallimento DWM](VERIFICATION.md#24-ottobre--confronto-dwm-non-qualificato-fast-fail-e-recupero), [revisione documentale](VERIFICATION.md#25-ottobre--revisione-todo-e-difetto-di-sincronizzazione-gpu), [sorgenti storici](RETIRED_EXPERIMENTS.md).
 
 ### WIN-001 — Spostamenti casuali nel drag delle finestre individuali
 

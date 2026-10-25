@@ -4,6 +4,8 @@ Prima di riprendere leggere [KNOWN_ISSUES.md](KNOWN_ISSUES.md), poi questo piano
 
 Leggere e mantenere anche la [TODO obbligatoria](TODO.md): contiene priorità, feature richieste, blocchi e criteri di completamento. Ultima richiesta del 25 ottobre: documentare N+1/finestre 1:1, stessi file Mac in Windows e misure di grafica, disco/I/O, CPU e GPU. Per questo passaggio soltanto ragionamento e ricerca, nessun test o modifica della VM. La richiesta riprende esplicitamente anche le finestre delle singole app.
 
+Revisione successiva: l'utente rimuove TODO-010 dall'elenco operativo e richiede di esplicitare il difetto di sincronizzazione GPU già segnalato upstream. È ora TODO-016/GFX-007, aperto: i tentativi ritirati non ne costituiscono la soluzione. Lettura dell'issue e aggiornamento documentale, nessuna nuova prova o comunicazione esterna.
+
 ## Base principale
 
 Su richiesta esplicita dell'utente, il 25 ottobre la nuova IoT e l'ultimo pacchetto RAM diventano la base principale su `main`. Eliminati tutti i vecchi dischi VM, inclusa la sorgente Parallels, i relativi rollback/snapshot e i launcher superati. Non cercare di riavviare le vecchie VM dai loro metadati residui.
