@@ -6,26 +6,21 @@ extension Notification.Name {
 }
 
 private enum LibrarySection:String,CaseIterable,Identifiable {
-    case home="Per te",recent="Recenti",all="Tutte le app",displays="Schermi"
+    case apps="App",displays="Schermi",settings="Impostazioni"
     var id:Self {self}
-    var symbol:String {switch self {case .home:"square.grid.2x2";case .recent:"clock";case .all:"square.stack.3d.up";case .displays:"display.2"}}
+    var symbol:String {switch self {case .apps:"square.grid.2x2";case .displays:"display.2";case .settings:"gearshape"}}
 }
 
 @MainActor
 struct Launcher:View {
     @ObservedObject var model:ApplicationModel
     @State private var search=""
-    @State private var section=LibrarySection.home
+    @State private var section=LibrarySection.apps
     @FocusState private var searchFocused:Bool
     private var results:[WindowsApplication] {
         let query=search.trimmingCharacters(in:.whitespacesAndNewlines)
         if !query.isEmpty {return model.apps.filter{$0.matches(query)}}
-        switch section {
-        case .home:return model.launcherPreferences.suggested(model.apps)
-        case .recent:return model.launcherPreferences.recent(model.apps)
-        case .all:return model.apps
-        case .displays:return []
-        }
+        return model.apps
     }
     var body:some View {
         HStack(spacing:0){
@@ -35,7 +30,7 @@ struct Launcher:View {
                 HStack(spacing:24){
                     Text(search.isEmpty ? section.rawValue:"Risultati").font(.system(size:27,weight:.semibold,design:.rounded)).tracking(-0.6)
                     Spacer(minLength:8)
-                    searchField.frame(width:240)
+                    if section == .apps {searchField.frame(width:240)}
                 }.padding(.horizontal,32).padding(.top,28).padding(.bottom,26)
                 if let notice=model.launcherNotice {
                     HStack(spacing:10){
@@ -46,28 +41,32 @@ struct Launcher:View {
                     }.padding(12).background(.orange.opacity(0.07),in:RoundedRectangle(cornerRadius:12))
                         .padding(.horizontal,32).padding(.bottom,18)
                 }
-                if section == .displays && search.isEmpty {displays}
+                if section == .settings {MachineSettingsPanel(model:model)}
+                else if section == .displays {displays}
                 else if results.isEmpty {
                     VStack(spacing:14){
                         if model.catalogueLoading {ProgressView().controlSize(.regular)}
                         else {
-                            Image(systemName:section == .recent && search.isEmpty ? "clock":"magnifyingglass").font(.system(size:32,weight:.ultraLight)).foregroundStyle(.tertiary)
-                            Text(section == .recent && search.isEmpty ? "Nessuna app recente":"Nessuna app").font(.system(size:16,weight:.medium)).foregroundStyle(.secondary)
+                            Image(systemName:"magnifyingglass").font(.system(size:32,weight:.ultraLight)).foregroundStyle(.tertiary)
+                            Text("Nessuna app").font(.system(size:16,weight:.medium)).foregroundStyle(.secondary)
                         }
                     }.frame(maxWidth:.infinity,maxHeight:.infinity)
                 }else{
                     ScrollView {
-                        LazyVGrid(columns:[GridItem(.adaptive(minimum:112,maximum:145),spacing:18)],alignment:.leading,spacing:22){
-                            ForEach(results){app in
-                                LibraryAppTile(app:app,icon:model.applicationIcons[app.id],opening:model.openingApps.contains(app.id),active:model.activeApps.contains(app.id),enabled:model.connected){model.launch(app)}
-                                    .contextMenu{
-                                        Button(model.launcherPreferences.pinned.contains(app.id) ? "Rimuovi dai preferiti":"Aggiungi ai preferiti"){model.togglePin(app)}
-                                        Divider()
-                                        Button("Mostra processi"){model.showProcesses(for:app.id)}
-                                        Button("Chiudi finestre"){model.closeApplication(app)}.disabled(!model.activeApps.contains(app.id))
+                        VStack(alignment:.leading,spacing:24){
+                            if search.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty {
+                                let recent=Array(model.launcherPreferences.recent(model.apps).prefix(6))
+                                if !recent.isEmpty {
+                                    VStack(alignment:.leading,spacing:8){
+                                        Text("Aperte di recente").font(.system(size:15,weight:.semibold)).padding(.horizontal,10)
+                                        appGrid(recent)
                                     }
-                                    .onAppear{model.applicationBecameVisible(app)}
-                                    .onDisappear{model.applicationBecameHidden(app)}
+                                    Divider().padding(.horizontal,10)
+                                }
+                            }
+                            VStack(alignment:.leading,spacing:8){
+                                Text(search.isEmpty ? "Tutte le app":"\(results.count) risultati").font(.system(size:15,weight:.semibold)).padding(.horizontal,10)
+                                appGrid(results)
                             }
                         }.padding(.horizontal,26).padding(.bottom,32)
                     }
@@ -77,10 +76,10 @@ struct Launcher:View {
         }
         .background(Color(nsColor:.windowBackgroundColor))
         .frame(minWidth:800,minHeight:510)
-        .background(Button(""){searchFocused=true}.keyboardShortcut("f",modifiers:.command).hidden())
-        .sheet(isPresented:$model.processPanelVisible){GuestProcessesPanel(model:model)}
+        .background(Button(""){section = .apps;searchFocused=true}.keyboardShortcut("f",modifiers:.command).hidden())
         .onAppear{searchFocused=true}
-        .onReceive(NotificationCenter.default.publisher(for:.launcherFocusSearch)){_ in searchFocused=true}
+        .onReceive(NotificationCenter.default.publisher(for:.launcherFocusSearch)){_ in section = .apps;searchFocused=true}
+        .onReceive(NotificationCenter.default.publisher(for:.launcherShowSettings)){_ in section = .settings;search="";searchFocused=false}
         .onExitCommand{if !search.isEmpty {search=""}}
     }
     private var sidebar:some View {
@@ -115,7 +114,7 @@ struct Launcher:View {
                 if model.machineOperation != nil {ProgressView().controlSize(.mini)}
                 Menu {
                     Button("Aggiorna app",action:model.refresh).disabled(!model.connected || model.catalogueLoading)
-                    Button("Processi"){model.showProcesses()}.disabled(!model.connected)
+                    Button("Impostazioni…"){section = .settings;search="";searchFocused=false}
                     Divider()
                     Button("Avvia Windows",action:model.startWindows).disabled(!model.canStartWindows)
                     Button("Spegni Windows",action:model.shutdownWindows).disabled(!model.canStopWindows)
@@ -124,6 +123,19 @@ struct Launcher:View {
                     .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
             }.padding(.horizontal,23).padding(.bottom,22)
         }.frame(width:196).frame(maxHeight:.infinity)
+    }
+    private func appGrid(_ apps:[WindowsApplication])->some View {
+        LazyVGrid(columns:[GridItem(.adaptive(minimum:112,maximum:145),spacing:18)],alignment:.leading,spacing:22){
+            ForEach(apps){app in
+                LibraryAppTile(app:app,icon:model.applicationIcons[app.id],opening:model.openingApps.contains(app.id),active:model.activeApps.contains(app.id),enabled:model.connected){model.launch(app)}
+                    .contextMenu{
+                        Button(model.launcherPreferences.pinned.contains(app.id) ? "Rimuovi dai preferiti":"Aggiungi ai preferiti"){model.togglePin(app)}
+                        Button("Chiudi finestre"){model.closeApplication(app)}.disabled(!model.activeApps.contains(app.id))
+                    }
+                    .onAppear{model.applicationBecameVisible(app)}
+                    .onDisappear{model.applicationBecameHidden(app)}
+            }
+        }
     }
     private var searchField:some View {
         HStack(spacing:8){

@@ -25,6 +25,12 @@ struct MachineConfiguration: Codable {
     let keyboardLayout:String?
     let tpmStateFile:String?
     let dynamicMemory:DynamicMemoryConfiguration?
+    var settings:MachineSettings {
+        .init(cpus:cpus,initialMemoryMiB:memoryMiB,automaticMemory:dynamicMemory != nil,
+              maximumMemoryMiB:memoryMiB+(dynamicMemory?.hotplugMiB ?? 2048),
+              backgroundMemoryMiB:dynamicMemory?.backgroundMiB ?? min(memoryMiB,1536),
+              reserveMemoryMiB:dynamicMemory?.reserveMiB ?? 512)
+    }
 }
 
 @MainActor
@@ -101,6 +107,22 @@ final class VirtualMachineController {
     var nativeGraphicsEnabled:Bool {configuration.graphics == "native3D" && configuration.recoveryDisplay != true}
     var virtualDisplayEnabled:Bool {nativeGraphicsEnabled}
     var desktopIsKey:Bool {desktop?.window.isKeyWindow == true}
+
+    func applyingPendingSettings()async throws->VirtualMachineController {
+        guard await observedState() == .stopped else{return self}
+        guard let settings=try MachineSettingsStore.pending(in:directory,machineID:configuration.id) else{return self}
+        let file=directory.appendingPathComponent("machine.json")
+        let bytes=try MachineSettingsStore.merged(settings,with:Data(contentsOf:file),machineID:configuration.id)
+        // Preserve disk, firmware, TPM, token and unknown fields. Validate the
+        // complete result before writing, and never edit live QEMU arguments.
+        let next=try JSONDecoder().decode(MachineConfiguration.self,from:bytes)
+        try next.dynamicMemory?.validate(baseMiB:next.memoryMiB)
+        try bytes.write(to:file,options:.atomic)
+        try FileManager.default.setAttributes([.posixPermissions:0o600],ofItemAtPath:file.path)
+        let controller=try VirtualMachineController(directory:directory,runtime:runtime)
+        try MachineSettingsStore.clear(in:directory)
+        return controller
+    }
 
     func withRecoveryDisplay(_ enabled:Bool)throws->VirtualMachineController {
         try withDisplay(graphics:nil,recovery:enabled)

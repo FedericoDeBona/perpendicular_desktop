@@ -2,7 +2,7 @@
 
 Stato: opt-in, ciclo reale protetto verificato nella nuova Windows IoT ARM64
 LTSC pulita e controller automatico verificato anche nel desktop Native3D.
-La IoT è ora la VM principale di Perpendicular0.2.0, installata in Applicazioni.
+La IoT è ora la VM principale di Perpendicular0.2.1, installata in Applicazioni.
 Stato prodotto: SYS-003 in
 [KNOWN_ISSUES](../docs/KNOWN_ISSUES.md).
 

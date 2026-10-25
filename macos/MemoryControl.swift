@@ -1,18 +1,5 @@
 import Foundation
 
-struct DynamicMemoryConfiguration:Codable,Sendable {
-    let hotplugMiB:Int
-    let backgroundMiB:Int
-    let reserveMiB:Int
-    func validate(baseMiB:Int)throws {
-        guard (1024...16384).contains(baseMiB),hotplugMiB>=128,hotplugMiB<=8192,
-              hotplugMiB%128==0,backgroundMiB>=1024,backgroundMiB<=baseMiB+hotplugMiB,
-              (256...2048).contains(reserveMiB) else {
-            throw NSError(domain:"Memory",code:1,userInfo:[NSLocalizedDescriptionKey:"Invalid dynamic Windows RAM limits."])
-        }
-    }
-}
-
 /// Targets are requests. Only device ACKs, current guest totals and host reclaim
 /// counters describe completion. Pinned virtio-mem blocks may remain plugged.
 @MainActor
@@ -43,6 +30,7 @@ final class RuntimeMemoryController {
             }
         }
     }
+    func stop(){task?.cancel();task=nil;guestReady=false}
     private struct Guest:Sendable {let total:UInt64;let available:UInt64}
     private struct Snapshot:Sendable {
         let actual:UInt64,plugged:UInt64,requested:UInt64,reusable:UInt64,discarded:UInt64
@@ -93,6 +81,7 @@ final class RuntimeMemoryController {
             let socket=machine.controlSocket,id=machine.configuration.id
             let observed=try await Task.detached {try Self.snapshot(socket:socket,id:id,pid:pid)}.value
             let guest=try await guestMemory()
+            guard !Task.isCancelled else{return}
             let base=UInt64(machine.configuration.memoryMiB)*Self.MiB
             let capacity=base+UInt64(config.hotplugMiB)*Self.MiB
             guard observed.plugged<=UInt64(config.hotplugMiB)*Self.MiB,

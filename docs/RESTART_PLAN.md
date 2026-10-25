@@ -8,18 +8,20 @@ Revisione successiva: l'utente rimuove TODO-010 dall'elenco operativo e richiede
 
 Ulteriore requisito: comandi Mac nelle app Windows (fra cui Cmd+C/T/Q, con chiusura delle app Windows e uscita da Perpendicular nel contesto previsto) e appunti testo/file in entrambe le direzioni. TODO-017/018 distinguono supporto parziale esistente, convenzione di focus da qualificare e trasferimento file ancora mancante. Resta un aggiornamento della lista, senza implementazione o test.
 
+**Lavoro successivo autorizzato:** TODO-019 implementato e installato nella0.2.1: catalogo unico, ultime app in alto, rimozione del pannello processi e impostazioni VM. Modifiche CPU/RAM persistite privatamente per il prossimo avvio, applicate soltanto a VM confermata spenta; nessuna modifica delle risorse correnti o riavvio. Controlli di configurazione riusciti e catalogo osservato; verifica interattiva delle impostazioni interrotta da errore CUA. L’utente vuole provare personalmente1 GB iniziale: non anticipare quel boot né qualificarlo per deduzione. Precedente frontend0.2.0 conservato in Research/Launcher-Settings-20261025/previous-app; build qualificata originale e backup offline conservati.
+
 ## Base principale
 
 Su richiesta esplicita dell'utente, il 25 ottobre la nuova IoT e l'ultimo pacchetto RAM diventano la base principale su `main`. Eliminati tutti i vecchi dischi VM, inclusa la sorgente Parallels, i relativi rollback/snapshot e i launcher superati. Non cercare di riavviare le vecchie VM dai loro metadati residui.
 
-- App ordinaria: `/Applications/Perpendicular.app`, **versione0.2.0**, frontend `fe8ede76a178`. Collegamento sul Desktop `Perpendicular.app`.
+- App ordinaria: `/Applications/Perpendicular.app`, **versione0.2.1**, frontend `35aaa71e4eea`. Collegamento sul Desktop `Perpendicular.app`.
 - VM principale: UUID `0795218c-79fc-4e25-92ab-d68bfb803381`, `~/Library/Application Support/Perpendicular Memory IoT`. Disco, EFI e TPM nuovi, installazione IoTEnterpriseS ARM64 LTSC2024 build26100.1742 dalla ISO dell'utente, senza Tools importati da Parallels.
 - RAM: base2048 MiB, capacità hotplug2048 MiB, background minimo1536 MiB, riserva512 MiB. Il minimo non garantisce un footprint fisso; blocchi pinned possono restare presenti.
 - Runtime attivo: `Runtimes/a51229550d5c…`, QEMU `bc411d2f1aca`, renderer `2dee2e93f270`, server `135dd051bbc7`, backend `3fff2d025a3f`. Copia autonoma immutabile nella sola VM principale. Conservare l'intera app installata e il runtime in uso.
 - Windows protetto: SecureBoot1, CI49157/enabled, TESTSIGNINGfalse; Balloon271, VioMem304 e VioGpu3D ufficiale v0.4 tutti Running dopo la promozione. Bridge tramite servizio PerpendicularRestart Running nella nuova IoT; non riattivare i vecchi task dei clone eliminati.
 - Backup completo offline: `Perpendicular Memory IoT/Backups/main-20261025T135153Z`, disco/EFI/TPM/configurazione/Launcher,12 file verificati con SHA256. È il backup della IoT protetta, non il vecchio checkpoint pre-Secure-Boot.
 
-`scripts/build-macos.sh` produce `.build/Perpendicular.app`, versione0.2.0, riutilizzando per default il runtime verificato di `/Applications/Perpendicular.app` tramite copy-main-runtime.py. Un altro riferimento richiede PERPENDICULAR_RUNTIME_APP esplicito e supporto RAM compatibile. Il vecchio package-runtime.py resta un preparatore upstream per esperimenti, non il default. App, control_guest.py, bootstrap-guest.py e checkpoint-machine.py selezionano la IoT senza override privati.
+`scripts/build-macos.sh` produce `.build/Perpendicular.app`, versione0.2.1, riutilizzando per default il runtime verificato di `/Applications/Perpendicular.app` tramite copy-main-runtime.py. Un altro riferimento richiede PERPENDICULAR_RUNTIME_APP esplicito e supporto RAM compatibile. Il vecchio package-runtime.py resta un preparatore upstream per esperimenti, non il default. App, control_guest.py, bootstrap-guest.py e checkpoint-machine.py selezionano la IoT senza override privati.
 
 La build qualificata originale `Perpendicular Research/Memory-20261025/build-native` resta conservata come riferimento; non è il launcher ordinario. Conservati `~/.local/share/perpendicular-memory-20261025` (sorgenti/build QEMU e dipendenze), Research/Memory (ricette/evidenze/driver), WGC-GPU-20261024/host-7 (renderer ancora usato), altri riferimenti e test incerti. Non eliminare cartelle dal solo nome storico WGC/IVSHMEM/GPU: possono contenere sorgenti o input ancora utili. Il repository e i test versionati restano integri.
 

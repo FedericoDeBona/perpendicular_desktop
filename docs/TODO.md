@@ -4,7 +4,7 @@ Ultimo aggiornamento: **25 ottobre 2026**. Responsabile dell'aggiornamento: l'ag
 
 Questo è l'elenco operativo delle attività. [KNOWN_ISSUES.md](KNOWN_ISSUES.md) conserva diagnosi e dettagli dei difetti, [VERIFICATION.md](VERIFICATION.md) le evidenze e i fallimenti, [RESTART_PLAN.md](RESTART_PLAN.md) la base operativa. Gli ID qui sotto sono stabili e rimandano ai problemi esistenti: non sostituiscono né duplicano il registro dei difetti.
 
-**Passaggio attuale: sola documentazione e ricerca. Nessun test, benchmark, installazione o modifica della VM richiesto o eseguito per compilare questa lista.** Le prove minime descritte sono criteri per il lavoro futuro. Le voci aperte non sono già in implementazione.
+**Passaggio attuale: implementazione esplicitamente richiesta di TODO-019, catalogo unico e impostazioni VM.** Le precedenti revisioni della lista erano soltanto documentali. Le altre attività restano nei rispettivi stati; la prova di avvio con1 GB è riservata all'utente, non eseguita automaticamente.
 
 ## Regole di aggiornamento e stati
 
@@ -30,6 +30,7 @@ Priorità 1–4 corrispondenti alla richiesta iniziale dell'utente; TODO-017/018
 | TODO-001 | Schermi Windows N+1 | BLOCCATO nel driver/runtime corrente | WIN-003; serve prima una seconda uscita reale protetta. |
 | TODO-002 | Geometria, input e finestre Mac/Windows 1:1 | DA FARE; correzioni parziali precedenti | GFX-006, WIN-001/002/003; estensione multischermo dipende da 001. |
 | TODO-003 | Stessi file utente su Mac e Windows, senza copie | DA FARE; virtio-fs candidato, combinazione non qualificata | Backend macOS, client ARM64 firmato, compatibilità RAM. |
+| TODO-019 | Catalogo unico, recenti in alto e impostazioni VM al posto dei processi | IN CORSO: implementato/installato0.2.1, qualifica UI parziale | Catalogo osservato; configurazione verificata su fixture; verifica interattiva pannello interrotta da errore CUA. |
 | TODO-017 | Scorciatoie e comandi Mac nelle app Windows e in Perpendicular | DA FARE per completamento e qualifica main; base parziale presente | Cmd+C/V/X/T/Q e altri comandi comuni; destinazione secondo focus/contesto. |
 | TODO-018 | Copia/incolla di testo e file Mac ↔ Windows | DA FARE; testo già implementato e provato storicamente, file mancanti | Entrambe le direzioni, desktop e singole app; collegamento con TODO-003. |
 | TODO-004 | Tutti i tempi della pipeline grafica, desktop e singola app | DA FARE; strumentazione esistente incompleta | Copertura per stadio, correlazione e limiti di misura. |
@@ -56,6 +57,14 @@ Il [limite WIN-003](KNOWN_ISSUES.md#win-003--monitor-n1-e-drag-fra-scale-diverse
 **Prossimo passo:** individuare supporto multischermo effettivo in un driver ARM64 accettato dalle protezioni oppure nel supporto di più adattatori del runtime. Prima milestone: due uscite indipendenti realmente enumerate e utilizzabili da Windows. Poi mappatura stabile delle identità Mac/Windows e dell'uscita riservata, collegamento/scollegamento monitor e scale diverse.
 
 **Fatto quando:** N+1 reale nell'app principale, con finestra e relativo dialogo trasferibili fra schermi di scala diversa mantenendo contenuto, posizione e input. Non contare uscite fittizie o soli ACK di configurazione. Un eventuale limite del percorso scelto va riportato con versioni e alternative, senza ridurre le protezioni.
+
+## TODO-019 — Catalogo unico e impostazioni VM
+
+**Stato: implementato e distribuito nella0.2.1; qualifica interattiva completa ancora IN CORSO.** Catalogo unico osservato nell'app installata, con recenti in alto e tutte le app; rimossi pannello processi, accessi e gestione UI associata. Impostazioni disponibile nella barra laterale, menu e Cmd+virgola. Chiusura del canale CUA durante l'apertura del pannello impedisce di qualificare tutti i controlli; l'app rimane viva/collegata. Nessun nuovo difetto del prodotto dimostrato.
+
+CPU, RAM all'avvio (anche1024 MB), RAM automatica, limite totale, minimo in background e riserva devono essere modificabili. Mostrare separatamente impostazioni salvate per il prossimo avvio e valori attuali. Le modifiche salvate a VM accesa restano in un file privato separato: applicazione a machine.json soltanto dopo arresto confermato e prima del nuovo avvio. Preservare identità, disco, EFI/TPM, token, campi sconosciuti e runtime protetto; nessun riavvio automatico o prova a1 GB da parte dell'agente. Riassociare controller RAM e callback al controller VM ricaricato.
+
+**Verificato:** build e firma, store con salvataggio differito/validazione/preservazione campi, controller reale su fixture temporanea: nessuna applicazione con PID vivo e stato non verificabile; applicazione della configurazione1 GB solo a stato spento, senza boot. Sulla main:47 app, nuovo catalogo visibile, stesso PID Windows, machine.json e binari guest/runtime conservati, nessuna modifica in attesa. **Prossimo passo:** completare soltanto la verifica interattiva del pannello quando lo strumento UI torna disponibile, senza ripetere i controlli già riusciti. **Fatto quando:** anche controlli/salvataggio nel pannello installato verificati. L'utente può effettuare il boot a1 GB; questo resta distinto e non è anticipato dall'agente. Il funzionamento RAM già qualificato di TODO-012 non qualifica quel boot. [Evidenze](VERIFICATION.md#25-ottobre--catalogo-unico-e-impostazioni-cpuram).
 
 ## TODO-002 — Finestre native Mac 1:1 con le finestre Windows
 

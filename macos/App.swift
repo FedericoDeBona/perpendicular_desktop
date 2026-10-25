@@ -28,13 +28,12 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
     @Published private(set) var loadingIconID:String?
     @Published private(set) var applicationStates:[String:GuestApplicationState]=[:]
     @Published private(set) var applicationStatusAvailable=false
-    @Published private(set) var guestProcesses:[GuestProcess]=[]
-    @Published private(set) var processesLoading=false
-    @Published var processNotice:String?
-    @Published var processPanelVisible=false
-    @Published var processFilterApp:String?
-    @Published private(set) var terminatingProcesses:Set<String>=[]
-    private var processRequest=UUID()
+    @Published private(set) var vmSettings:MachineSettings?
+    @Published private(set) var currentVMSettings:MachineSettings?
+    @Published private(set) var settingsPending=false
+    @Published var settingsNotice:String?
+    @Published private(set) var settingsFailed=false
+    @Published private(set) var vmMemoryState:[String:Any]=[:]
     private var applicationStatusTask:Task<Void,Never>?
     private var applicationStatusBusy=false
     private var receivedWindows:Set<String>=[]
@@ -95,23 +94,14 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
             else {runtime=try RuntimeStore.prepare(contents:Bundle.main.bundleURL.appendingPathComponent("Contents"),directory:directory)}
             machine=try VirtualMachineController(directory:directory,runtime:runtime)
             try NativeWindowFrames.shared.prepare(directory:directory,machineID:machine.configuration.id)
-            machine.onDesktopSize={ [weak self] size in self?.desktopSize=size;self?.scheduleDesktopResize() }
             bridge=try GuestBridge(port:machine.configuration.guestPort,token:machine.configuration.token,individualWindows:true)
-            if let configuration=machine.configuration.dynamicMemory {
-                memoryController=RuntimeMemoryController(machine:machine,bridge:bridge,configuration:configuration){[weak self] in
-                    guard let self,NSApp.isActive,!NSApp.isHidden else{return false}
-                    return self.machine?.desktopState["visible"] as? Bool == true || self.windows.values.contains{$0.window.isVisible}
-                }
-                memoryController?.start()
-            }
+            configureMachineControllers();loadVMSettings()
             bridge.onConnection={ [weak self] value in
                 guard let self else{return};self.connected=value;self.status=value ? "Windows connected":"Reconnecting to Windows…"
                 self.launcherEpoch=UUID();self.catalogueLoading=false;self.loadingIconID=nil;self.failedIcons=[]
                 self.focusWarnedWindows=[]
                 self.applicationStatusTask?.cancel();self.applicationStatusTask=nil;self.applicationStatusBusy=false
                 self.applicationStates=[:];self.applicationStatusAvailable=false;self.receivedWindows=[];self.failedWindows=[]
-                self.processRequest=UUID();self.processesLoading=false;self.guestProcesses=[];self.terminatingProcesses=[]
-                if !value {self.processNotice="Windows non è collegato. I processi non sono verificabili."}
                 for task in self.openingTasks.values {task.cancel()}
                 self.openingTasks=[:];self.openingApps=[]
                 if !value {
@@ -163,6 +153,7 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
         let main=NSMenu();let appItem=NSMenuItem();main.addItem(appItem)
         let menu=NSMenu();appItem.submenu=menu
         let applications=NSMenuItem(title:"Libreria",action:#selector(showApplications),keyEquivalent:"l");applications.target=self;menu.addItem(applications)
+        let settings=NSMenuItem(title:"Impostazioni…",action:#selector(showSettings),keyEquivalent:",");settings.target=self;menu.addItem(settings)
         let show=NSMenuItem(title:"Apri Windows",action:#selector(showWindows),keyEquivalent:"");show.target=self;menu.addItem(show)
         let displayItem=NSMenuItem(title:"Display",action:nil,keyEquivalent:"")
         let displayMenu=NSMenu();displayItem.submenu=displayMenu;menu.addItem(displayItem)
@@ -199,8 +190,9 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
     func applicationShouldTerminateAfterLastWindowClosed(_ sender:NSApplication)->Bool{false}
     func applicationShouldHandleReopen(_ sender:NSApplication,hasVisibleWindows flag:Bool)->Bool{showApplications();return false}
     @objc func showApplications(){launcher.makeKeyAndOrderFront(nil);NSApp.activate(ignoringOtherApps:true);NotificationCenter.default.post(name:.launcherFocusSearch,object:nil)}
+    @objc func showSettings(){launcher.makeKeyAndOrderFront(nil);NSApp.activate(ignoringOtherApps:true);NotificationCenter.default.post(name:.launcherShowSettings,object:nil)}
     @objc func closeCurrentWindow(){(NSApp.keyWindow ?? NSApp.mainWindow)?.performClose(nil)}
-    func applicationWillTerminate(_ notification:Notification){machineStateTask?.cancel();localControl?.stop();bridge?.command("release");machine?.closeDesktop()}
+    func applicationWillTerminate(_ notification:Notification){machineStateTask?.cancel();memoryController?.stop();localControl?.stop();bridge?.command("release");machine?.closeDesktop()}
     var desktopAvailable:Bool {machine != nil}
     var canStartWindows:Bool {machine != nil && machineState == .stopped && machineOperation == nil && !restarting}
     var canStopWindows:Bool {machine != nil && machineState.pid != nil && machineOperation == nil && !restarting}
@@ -229,20 +221,63 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
                     let revision=self.machineStateRevision
                     let state=await machine.observedState()
                     if !Task.isCancelled,self.machine === machine,self.machineStateRevision == revision,
-                       self.machineOperation == nil,!self.restarting {self.acceptMachineState(state)}
+                       self.machineOperation == nil,!self.restarting {
+                        self.acceptMachineState(state)
+                        self.vmMemoryState=state.pid != nil ? (self.memoryController?.state ?? [:]):[:]
+                    }
                 }
                 do {try await Task.sleep(for:.seconds(2))}catch{return}
             }
         }
     }
-    @objc func startWindows(){
+    private func configureMachineControllers(){
+        memoryController?.stop();memoryController=nil;vmMemoryState=[:]
+        machine.onDesktopSize={ [weak self] size in self?.desktopSize=size;self?.scheduleDesktopResize() }
+        if let configuration=machine.configuration.dynamicMemory,let bridge {
+            memoryController=RuntimeMemoryController(machine:machine,bridge:bridge,configuration:configuration){[weak self] in
+                guard let self,NSApp.isActive,!NSApp.isHidden else{return false}
+                return self.machine?.desktopState["visible"] as? Bool == true || self.windows.values.contains{$0.window.isVisible}
+            }
+            memoryController?.guestReady=guestCapabilities["memoryStatus"] == true
+            memoryController?.start()
+        }
+    }
+    private func loadVMSettings(){
+        guard let machine else{return}
+        currentVMSettings=machine.configuration.settings
+        do {
+            let pending=try MachineSettingsStore.pending(in:machine.directory,machineID:machine.configuration.id)
+            vmSettings=pending ?? currentVMSettings;settingsPending=pending != nil
+        }catch {
+            vmSettings=currentVMSettings;settingsPending=false
+            settingsFailed=true;settingsNotice=error.localizedDescription
+        }
+    }
+    func saveVMSettings(_ settings:MachineSettings){
         guard let machine,machineOperation == nil,!restarting else{return}
+        do {
+            try MachineSettingsStore.save(settings,in:machine.directory,machineID:machine.configuration.id,current:machine.configuration.settings)
+            loadVMSettings();settingsFailed=false
+            settingsNotice=settingsPending ? "Impostazioni salvate. Saranno applicate al prossimo avvio di Windows.":"Modifiche in attesa annullate. Restano i valori attuali."
+        }catch{settingsFailed=true;settingsNotice=error.localizedDescription}
+    }
+    private func prepareMachineForStart()async throws->VirtualMachineController {
+        let previous=machine!
+        let next=try await previous.applyingPendingSettings()
+        if next !== previous {
+            previous.closeDesktop();machine=next
+            configureMachineControllers();loadVMSettings()
+        }
+        return next
+    }
+    @objc func startWindows(){
+        guard machine != nil,machineOperation == nil,!restarting else{return}
         machineStateRevision=UUID();machineOperation="Avvio di Windows…";launcherNotice=nil
         Task{@MainActor [weak self] in
             guard let self else{return}
             defer{self.machineOperation=nil}
-            do {try await machine.start();try NativeWindowFrames.shared.publishEndpoint();self.acceptMachineState(await machine.observedState())}
-            catch {self.acceptMachineState(await machine.observedState());self.launcherNotice="Non riesco ad avviare Windows. "+error.localizedDescription}
+            do {let machine=try await self.prepareMachineForStart();try await machine.start();try NativeWindowFrames.shared.publishEndpoint();self.acceptMachineState(await machine.observedState())}
+            catch {self.acceptMachineState(await self.machine.observedState());self.launcherNotice="Non riesco ad avviare Windows. "+error.localizedDescription}
         }
     }
     @objc func forceStopWindows(){
@@ -272,11 +307,11 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
         }
     }
     @objc func showWindows(){
-        guard let machine,machineOperation == nil,!restarting else{return}
+        guard machine != nil,machineOperation == nil,!restarting else{return}
         machineStateRevision=UUID();machineOperation="Apertura desktop Windows…"
         Task{@MainActor [weak self] in
             guard let self else{return};defer{self.machineOperation=nil}
-            do {try await machine.showDesktop();self.acceptMachineState(await machine.observedState())}
+            do {let machine=try await self.prepareMachineForStart();try await machine.showDesktop();self.acceptMachineState(await machine.observedState())}
             catch {self.launcherNotice="Non riesco ad aprire il desktop Windows. "+error.localizedDescription;self.showApplications()}
         }
     }
@@ -320,6 +355,7 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
                 "machineState":machineStateLabel,"machineOperation":machineOperation as Any? ?? NSNull(),
                 "status":status,"displayStatus":displayStatus,"primaryMatchesHost":sharedDisplay != nil,
                 "memory":memoryController?.state ?? ["enabled":false],
+                "vmSettings":["pending":settingsPending,"initialMemoryMiB":vmSettings?.initialMemoryMiB ?? 0,"maximumMemoryMiB":vmSettings?.maximumMemoryMiB ?? 0,"cpus":vmSettings?.cpus ?? 0],
                 "windowCount":windows.count,"capabilities":guestCapabilities,
                 "frameChannel":bridge?.separateFrames ?? false,
                 "windowGPU":NativeWindowFrames.shared.diagnostics,
@@ -440,9 +476,10 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
                 }
                 previous.closeDesktop()
                 self.machine=try previous.withDisplay(graphics:graphics,recovery:recovery)
+                self.configureMachineControllers();self.loadVMSettings()
                 self.recoveryItem.state=recovery ? .on:.off
                 for item in self.displayItems {item.state=self.machine.configuration.graphics == item.representedObject as? String ? .on:.off}
-                try await self.machine.start();try await self.machine.showDesktop()
+                let machine=try await self.prepareMachineForStart();try await machine.start();try await machine.showDesktop()
                 self.status="Starting Windows…"
             }catch {self.status=error.localizedDescription}
         }
@@ -551,49 +588,6 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
         if state.windows.contains(where:{receivedWindows.contains($0.id)}) {return "Finestra disponibile"}
         if !state.windows.isEmpty {return "In attesa dell’immagine"}
         return state.running ? "In esecuzione · senza finestra":"Nessun processo rilevato"
-    }
-    func showProcesses(for app:String?=nil){
-        processFilterApp=app;processPanelVisible=true;refreshProcesses()
-    }
-    func refreshProcesses(){
-        guard connected,!processesLoading,guestCapabilities["processControl"] == true else{return}
-        processesLoading=true;let request=UUID();processRequest=request;let epoch=launcherEpoch
-        bridge.command("process_list",timeout:.seconds(6)){[weak self] result in
-            guard let self,self.launcherEpoch == epoch,self.processRequest == request else{return}
-            self.processesLoading=false
-            switch result {
-            case .success(let reply):
-                guard let value=reply["value"] as? [String:Any],let rows=value["processes"] as? [[String:Any]],rows.count<=512 else {
-                    self.processNotice="Elenco dei processi non valido.";return
-                }
-                self.guestProcesses=rows.compactMap(GuestProcess.init);self.processNotice=nil
-                self.terminatingProcesses.formIntersection(Set(self.guestProcesses.map(\.id)))
-            case .failure(let error):self.processNotice=error.localizedDescription
-            }
-        }
-    }
-    func terminateProcess(_ process:GuestProcess){
-        guard connected,process.canTerminate,!terminatingProcesses.contains(process.id) else{return}
-        let alert=NSAlert();alert.messageText="Termina \(process.name)?"
-        alert.informativeText="I dati non salvati di questo processo andranno persi. Viene terminato soltanto il processo \(process.pid)."
-        alert.addButton(withTitle:"Annulla");alert.addButton(withTitle:"Termina processo")
-        guard let parent=launcher else{return}
-        // The process panel is already a sheet; attach confirmation to it.
-        let owner=parent.sheets.first ?? parent
-        let epoch=launcherEpoch
-        alert.beginSheetModal(for:owner){[weak self] response in
-            guard response == .alertSecondButtonReturn,let self,self.connected,self.launcherEpoch == epoch else{return}
-            self.terminatingProcesses.insert(process.id)
-            self.bridge.command("process_terminate",["pid":process.pid,"creation":process.creation],timeout:.seconds(6)){[weak self] result in
-                guard let self,self.launcherEpoch == epoch else{return}
-                self.terminatingProcesses.remove(process.id)
-                switch result {
-                case .failure(let error):self.processNotice=error.localizedDescription
-                case .success:self.processNotice="Arresto richiesto. Attendo la conferma dall’elenco Windows."
-                }
-                self.refreshApplicationStates();self.refreshProcesses()
-            }
-        }
     }
     func closeApplication(_ app:WindowsApplication){
         guard connected else{return};let epoch=launcherEpoch
