@@ -1,0 +1,17 @@
+--- a/hw/display/virtio-ramfb.c
++++ b/hw/display/virtio-ramfb.c
+@@ -118,6 +118,14 @@
+         return;
+     }
+ 
++    /* Opt-in mixed display identity: the signed DOD matches SUBSYS_1100
++     * exactly. Keep that identity on the separate 2D GPU; the newer signed
++     * 3D package wins the generic match on this accelerated adapter. */
++    if (g_strcmp0(getenv("PERP_VIRTIO_MIXED_DISPLAYS"), "1") == 0 &&
++        object_dynamic_cast(OBJECT(vpci_dev), "virtio-ramfb-gl")) {
++        pci_set_word(vpci_dev->pci_dev.config + PCI_SUBSYSTEM_ID, 0x1101);
++    }
++
+     /* init ramfb */
+     vramfb->ramfb = ramfb_setup(errp);
+     graphic_console_set_hwops(g->scanout[0].con, &virtio_ramfb_ops, vramfb);

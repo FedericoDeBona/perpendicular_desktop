@@ -1,3 +1,4 @@
 # Unified diffs use a literal space on blank context lines.
 graphics/renderer/*.patch whitespace=-blank-at-eol
+graphics/monitor/*.patch whitespace=-blank-at-eol
 experimental/wgc-gpu/*.patch whitespace=-blank-at-eol

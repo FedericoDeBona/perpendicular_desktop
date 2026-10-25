@@ -1,5 +1,7 @@
 # Parallels: più schermi Windows e finestre integrate sul Mac
 
+> Seguito sperimentale successivo: superato nel clone il blocco iniziale della strada mista protetta3D+DOD, con tre uscite reali, pixel/input e nuovo boot. N+1 integrato/main resta da completare; le conclusioni statiche su Parallels qui sotto restano circoscritte. [Evidenze aggiornate](../VERIFICATION.md#25-ottobre--todo-001-alternative-protette-e-associazione-per-dispositivo).
+
 Ricerca del 25 ottobre 2026, richiesta per TODO-001 dopo la prova negativa degli adattatori misti. Analisi statica con REA/Ghidra dei componenti installati di **Parallels Desktop 27.0.3, build 58680**, integrata con fonti primarie online. Nessuna VM avviata, nessun Tools installato, nessuna modifica alla main o alle protezioni Windows.
 
 ## Risposta pratica

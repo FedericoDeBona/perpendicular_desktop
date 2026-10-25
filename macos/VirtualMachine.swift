@@ -25,6 +25,9 @@ struct MachineConfiguration: Codable {
     let keyboardLayout:String?
     let tpmStateFile:String?
     let dynamicMemory:DynamicMemoryConfiguration?
+    /// Experimental protected layout: one accelerated desktop plus one DOD
+    /// adapter per Mac display. Enabled only after installing the signed pair.
+    let mixedDisplays:Bool?
     var settings:MachineSettings {
         .init(cpus:cpus,initialMemoryMiB:memoryMiB,automaticMemory:dynamicMemory != nil,
               maximumMemoryMiB:memoryMiB+(dynamicMemory?.hotplugMiB ?? 0),
@@ -229,8 +232,15 @@ final class VirtualMachineController {
         }
         let resources=runtime.deletingLastPathComponent().deletingLastPathComponent()
         let native=nativeGraphicsEnabled ? try NativeGraphics(root:resources.appendingPathComponent("Native3D")):nil
+        let hostDisplays=HostDisplay.current()
         if let native,configuration.dynamicMemory != nil,!native.supportsDynamicMemory {
             throw CocoaError(.executableRuntimeMismatch,userInfo:[NSLocalizedDescriptionKey:"This graphics runtime has not been qualified for dynamic RAM. Use the qualified Windows IoT memory runtime."])
+        }
+        if configuration.mixedDisplays == true && (!nativeGraphicsEnabled || native?.supportsMixedDisplays != true) {
+            throw CocoaError(.executableRuntimeMismatch,userInfo:[NSLocalizedDescriptionKey:"Il runtime non supporta la configurazione multischermo protetta."])
+        }
+        if configuration.mixedDisplays == true && !(1...15).contains(hostDisplays.count) {
+            throw CocoaError(.executableRuntimeMismatch,userInfo:[NSLocalizedDescriptionKey:"La configurazione multischermo richiede da uno a quindici schermi Mac rilevati."])
         }
         let session=UUID().uuidString.replacingOccurrences(of:"-",with:"").lowercased()
         let displayDirectory=URL(fileURLWithPath:"/tmp/perpendicular-display-\(getuid())-\(session.prefix(8))")
@@ -292,12 +302,19 @@ final class VirtualMachineController {
             // ordinary apps; use the next PCI BAR size for this local 3D path.
             // Windows caches the monitor's initial mode envelope. Include the
             // full display, not only its work area, so fullscreen also fits.
-            let fullDisplay=HostDisplay.current().first.map {
+            let fullDisplay=hostDisplays.first.map {
                 NSSize(width:$0.frame.width*$0.scale,height:$0.frame.height*$0.scale)
             } ?? NSSize(width:1280,height:800)
             let scale=min(1,4096/fullDisplay.width,4096/fullDisplay.height,sqrt(8_388_608/(fullDisplay.width*fullDisplay.height)))
             let initialDisplay=NSSize(width:max(640,(fullDisplay.width*scale).rounded()),height:max(480,(fullDisplay.height*scale).rounded()))
             arguments += ["-device","virtio-ramfb-gl,id=display0,addr=0x8,disable-legacy=on,neptune=on,blob=on,hostmem=512M,max_outputs=1,xres=\(Int(initialDisplay.width)),yres=\(Int(initialDisplay.height))"]
+            if c.mixedDisplays == true {
+                for (index,host) in hostDisplays.enumerated() {
+                    let size=host.guestPixelSize
+                    let slot=String(9+index,radix:16)
+                    arguments += ["-device","virtio-gpu-pci,id=appdisplay\(index),addr=0x\(slot),disable-legacy=on,max_outputs=1,xres=\(Int(size.width)),yres=\(Int(size.height))"]
+                }
+            }
         }else{arguments += ["-device","ramfb"]}
         if let memory=c.dynamicMemory {
             let index=arguments.firstIndex(of:"-m")!+1
@@ -307,6 +324,9 @@ final class VirtualMachineController {
                 "-device","virtio-mem-pci,id=vmem0,memdev=vmemram,requested-size=0,block-size=2M,dynamic-memslots=off"]
         }
         var launchEnvironment=native?.environment(directory:displayDirectory,session:session,primary:HostDisplay.current().first(where:\.primary))
+        // Never inherit an experiment flag into an ordinary VM. The runtime
+        // changes the primary PCI identity only for this explicit configuration.
+        if native != nil {launchEnvironment?["PERP_VIRTIO_MIXED_DISPLAYS"]=c.mixedDisplays == true ? "1":"0"}
         if c.dynamicMemory != nil {
             launchEnvironment=(launchEnvironment ?? [:]).merging(["PERP_HVF_BALLOON_RECLAIM":"1","PERP_HVF_VIRTIO_MEM":"1"]){_,new in new}
         }

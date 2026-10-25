@@ -3,6 +3,7 @@ mod capture;
 mod catalogue;
 mod clipboard;
 mod display;
+mod display_topology;
 mod drivers;
 mod execute;
 mod gpu_log;
@@ -33,7 +34,12 @@ pub fn run() -> Result<(), String> {
         Some("install") => service::install(Path::new(args.get(1).ok_or("missing configuration")?)),
         Some("service") => service::run(),
         Some("worker") => worker::run(Path::new(args.get(1).ok_or("missing configuration")?)),
-        _ => Err("Expected install, service or worker".into()),
+        Some("display-topology") => display_topology::run(&args[1..]),
+        Some("graphics-info") if args.len() == 1 => {
+            println!("{}", display::graphics());
+            Ok(())
+        }
+        _ => Err("Expected install, service, worker, display-topology or graphics-info".into()),
     }
 }
 
