@@ -1,174 +1,135 @@
 # Registro dei problemi
 
-Aggiornato il 25 ottobre 2026. **Leggere questo file prima di iniziare o riprendere il lavoro.** È il riferimento per lo stato corrente dei problemi; [RESTART_PLAN.md](RESTART_PLAN.md) definisce requisiti e vincoli, [VERIFICATION.md](VERIFICATION.md) conserva le prove complete e i tentativi falliti.
+Aggiornato il 25 ottobre 2026. Leggere questo file prima di iniziare o riprendere, poi [RESTART_PLAN.md](RESTART_PLAN.md). Qui sono descritti stato corrente, prossimi passi e criteri di chiusura. La cronologia delle prove e dei fallimenti resta in [VERIFICATION.md](VERIFICATION.md); gli esperimenti ritirati sono indicizzati separatamente in [RETIRED_EXPERIMENTS.md](RETIRED_EXPERIMENTS.md).
 
-L'obiettivo resta rendere affidabili driver, accelerazione 3D e presentazione delle finestre, dimostrando benefici nell'app reale. Non è completato. Le candidate auto-firmate restano nella VM separata; nessuna promozione nell'app o nella VM ordinaria è stata qualificata.
+## Base corrente e priorità
+
+Si prosegue su `main` dal desktop diretto «Apri Windows», pacchetto privato build-11 e VM di sviluppo c9f319b7. Driver ufficiale Microsoft-signed cfbc713754c7, Secure Boot attivo, TESTSIGNING disattivato e Code Integrity attiva. Resize reale 1920×1280, 1440×1676, fullscreen 2880×1800 e ritorno verificati con riscontro Windows/scanout; l’utente conferma assenza di bande. `nativeActive=true`, `frameChannel=false`. [Prova attuale](VERIFICATION.md#25-ottobre--resize-con-driver-ufficiale-e-protezioni-ripristinate).
+
+La pulizia autorizzata ha rimosso vecchi clone, rollback, build e prototipi, recuperando circa 25,1 GB reali. Restano VM attuale, VM ordinaria e sorgente originaria, pacchetto/runtime in uso, sorgenti corrispondenti e un checkpoint recente. Il checkpoint precede la riattivazione di Secure Boot; percorsi e vincoli di ripristino sono nel piano. Nessuna nuova distribuzione nell’app/VM ordinaria è stata qualificata. [Ricevute e limiti](VERIFICATION.md#25-ottobre--pulizia-delle-vecchie-prove-e-base-corrente).
+
+Il lavoro successivo deve riguardare un difetto concreto del desktop o un piccolo incremento richiesto. Finestre individuali e N+1 sono rinviati; le candidate auto-firmate non sono selezionate e non vanno riattivate per il resize. Le loro anomalie restano documentate senza diventare una lista di prove da ripetere. La pulizia dei documenti operativi non chiude alcun problema grafico.
+
+README, implementazione e guide grafiche sono stati ripuliti anche dalle istruzioni superate e dai riferimenti operativi alle build eliminate. [Revisione della documentazione e controlli](VERIFICATION.md#25-ottobre--pulizia-completa-della-documentazione-operativa).
 
 ## Come aggiornare il registro
 
-- Cercare il problema esistente e aggiornare quella voce, mantenendone l'ID. Creare una nuova voce soltanto per un problema distinto.
-- Indicare manifestazione, stato verificato, prossimo passo e criterio di chiusura. Distinguere osservazioni dell'utente, risultati misurati e ipotesi tecniche.
-- Collegare le evidenze nel diario, senza copiarne qui tutta la cronologia. Conservare lì anche fallimenti e limiti; artefatti e dati privati delle VM restano fuori dal repository.
-- Un test di laboratorio riuscito o una correzione nel clone non chiudono un problema del prodotto. Segnalare esplicitamente distribuzione e verifiche ancora mancanti.
-- Aggiornare la voce a ogni cambiamento pertinente; non aggiungere prove ripetitive soltanto per cambiare lo stato. Le istruzioni più recenti dell'utente prevalgono sulle priorità qui riportate.
+- Aggiornare la voce esistente conservandone l’ID; crearne una soltanto per un difetto distinto.
+- Distinguere requisito utente, ipotesi, risultato misurato e distribuzione effettiva. Collegare le prove nel diario senza accumulare qui i vecchi handoff.
+- Chiudere solo dopo verifica del criterio indicato. Una riuscita di laboratorio o nel clone non qualifica l’app ordinaria o l’affidabilità generale.
+- Conservare fallimenti nel diario e dati privati fuori Git. Non ripetere test senza modifiche pertinenti o nuove evidenze.
 
-## Priorità corrente
+## Problemi pertinenti al desktop
 
-**Richiesta aggiornata: uso dentro la VM tramite «Apri Windows».** L’utente riferisce un desktop molto fluido e piacevole; dare ora priorità a driver, presentazione del desktop e uso quotidiano in questa modalità. Finestre individuali Mac↔Windows e topologia N+1/debug monitor sono rinviate. I prototipi WGC→GPU e IVSHMEM/codec/dirty region sono ritirati dal ramo attivo e recuperabili nella cronologia Git. Il riscontro è una valutazione d’uso, non una nuova misura di latenza o prova di affidabilità generale. [Cambio di priorità e riscontro](VERIFICATION.md#24-ottobre--priorità-al-desktop-windows-diretto).
+### GFX-004 — Risorse grafiche indisponibili e recupero incompleto
 
-Ordine aggiornato nella nuova chat: (1) breve riproduzione in «Apri Windows» dei contenuti Settings/Calcolatrice durante input, menu, scroll e resize; (2) correggere soltanto cause concrete distinguendo app, composizione Windows e presentazione Mac; se il difetto non compare, registrare il limite e proseguire; (3) modalità desktop dedicata senza catalogo obbligatorio o catture individuali automatiche; (4) sessione/input dopo riapertura; (5) **solo +1**, un monitor Windows con vera risoluzione adattata alla vista Mac e al fullscreen, scala Retina/input coerenti, richieste seriali e risposte effettive. Nessun monitor N aggiuntivo in questa fase. Conservare la candidata DWM instabile disattivata e APP-001 rinviato. Questi sono requisiti, non capacità già qualificate.
+- **Stato:** aperto, causa non isolata. In una sessione desktop il registro delle risorse raggiunge live256, rifiuta nuove registrazioni e il presenter diventa nero. Un reset adattatore recupera il percorso, senza dimostrare una correzione.
+- **Verificato:** nel successivo uso di Calcolatrice, Settings/HDR e video le risorse passano da 40 a un picco di 79 e scendono a 37, con pending0/rejected0. La prova precede il ripristino del driver ufficiale; non qualifica durata indefinita né identifica la causa della saturazione. Il diario conserva anche perdita device, timeout e recuperi delle vecchie catture WGC.
+- **Prossimo passo:** se il guasto ricompare nel desktop, correlare risorse ancora possedute da guest, renderer e contesti usciti prima di cambiare limiti o aggiungere retry.
+- **Chiusura:** guasto identificato e risorse rilasciate, con desktop nuovamente utilizzabile senza spegnere l’intera VM.
+- **Evidenze:** [saturazione e recupero](VERIFICATION.md#24-ottobre--ripristino-del-resize-personalizzato-del-desktop), [app reali e rilascio risorse](VERIFICATION.md#25-ottobre--verifica-del-desktop-accelerato-app-reali-e-rilascio-risorse).
 
-**Incremento precedente verificato nel clone (build-4, storico):** pacchetto privato DesktopFocus/build-4 apre direttamente il desktop; controllo VM/guest disponibile, frameChannel=false, nessuna finestra individuale. Worker5588/d6d0da93aebc differisce dal precedente3df: ripristino catture soltanto dopo richiesta esplicita del canale finestre. Stesso QEMU25490 e documento Notepad7936; nessun reboot/driver/ordinario modificato. Finestra1920×1200↔fullscreen2880×1740 confermati nel guest e nello scanout nativo; chiusura viewer con VM accesa e riapertura/input riusciti. Corretto conflitto fra query display e configurazione. [Prove e limiti](VERIFICATION.md#24-ottobre--desktop-dedicato-e-primo-resize-su-un-solo-monitor).
+### GFX-006 — Risoluzione e DPI errati dopo installazione a caldo
 
-**Richiesta corretta dall’utente e stato corrente:** Windows deve adattare il desktop alla finestra tramite driver; l’adattamento inverso build-5 è rifiutato e rimosso. Seconda candidata KMD caricata nel clone (oem16.inf, SYS9c64a219412b), frontend DesktopFocus/build-9: vista960×640@2→Windows/scanout1920×1280, stretta720×838@2→1440×1676, fullscreen1440×900@2→2880×1800 e ritorno. Finestre senza bande, cornice Mac conservata, nativeActive=true. La prima candidata TRUE→TRUE era intermittente ed è sostituita da una reale transizione monitor solo al cambio raster. **Riscontro visivo dell’utente:** fullscreen senza bande nere o altre anomalie percepite. Il resize e l’uso fullscreen nel clone hanno quindi anche un riscontro diretto positivo; l’anomalia nelle acquisizioni automatiche resta separata, senza un difetto visibile confermato nell’app. DPI/dimensione percepita e distribuzione ordinaria non qualificati. Secure Boot0/TESTSIGNING autorizzati soltanto nel clone; UMD/helper originali. Notepad originale skdf/4caratteri preservato. [Prova finale, fallimenti e limiti](VERIFICATION.md#24-ottobre--seconda-candidata-resize-geometrie-effettive-e-pulizia-autorizzata).
+- **Stato:** aperto per la procedura di aggiornamento; recupero dopo avvio completo verificato nel clone. L’installazione a caldo può lasciare 1024×768/DPI96 e fallire l’applicazione di un modo pur accettato nella verifica API.
+- **Prossimo passo:** prima di distribuire un aggiornamento definire il riavvio necessario e confermare geometria/DPI effettivi prima di riabilitare input e trasformazioni condivise.
+- **Chiusura:** aggiornamento e riavvio eventualmente richiesto portano al display concordato; l’app non presenta come applicata una modalità non osservata.
+- **Evidenze:** [installazione e recupero](VERIFICATION.md#24-ottobre--gate-pronto-prima-delluso-e-frame-valido-al-resize), [avvio protetto della base corrente](VERIFICATION.md#25-ottobre--resize-con-driver-ufficiale-e-protezioni-ripristinate).
 
+### SYS-001 — Arresto HVF durante riavvio o arresto
 
-**Seguito del25ottobre:** l’utente conferma il resize e chiede di continuare su driver/acceleratore se restano problemi. Avvio completo del clone con build-9 e stesso SYS9c64a219412b confermati. Breve uso desktop: Calcolatrice78+9=87, ripristino finestra, Impostazioni Schermo/HDR e anteprima video aggiornata; nessun contenuto mancante persistente osservato. Rilascio risorse37 dopo picco79, zero rifiuti/chiusure cattura nella sessione corrente. Non è la soluzione causale dei guasti storici: GFX-001/004 restano aperti nei rispettivi ambiti. Conservata la combinazione funzionante, nessuna nuova patch grafica o candidata DWM attivata. [Prove e limiti](VERIFICATION.md#25-ottobre--verifica-del-desktop-accelerato-app-reali-e-rilascio-risorse).
+- **Stato:** aperto; assertion `(isv)` in `hvf_vcpu_exec`/hvf.c2378 osservata anche con KMD ufficiale. Nessuna causa attribuita al resize.
+- **Verificato:** ricomparsa durante sostituzione/arresto del 25 ottobre; verifica offline del disco senza errori e successivo avvio con protezioni attive riuscito. Anche arresti ACPI completi riusciti; non sono una soluzione causale.
+- **Prossimo passo:** se ricompare, conservare istruzione/MMIO e contesto del medesimo guasto prima di cambiare il gestore HVF.
+- **Chiusura:** causa identificata e medesimo passaggio prima difettoso completato con il runtime corretto.
+- **Evidenze:** [diario del ripristino protezioni](VERIFICATION.md#25-ottobre--resize-con-driver-ufficiale-e-protezioni-ripristinate).
 
-**Stato corrente dopo richiesta di ripristino protezioni:** entrambe mantenute, senza scegliere una regressione del resize. DesktopFocus/build-11 usa il KMD ufficiale Microsoft-signed cfbc713754c7; frontend pubblica il target prima di un ciclo monitor0×0→target, con verifica effettiva Windows dopo l’invio finale. SecureBoot1, TESTSIGNING=false/Code Integrity enabled verificati dopo avvio; certificato di prova rimosso da Root/TrustedPublisher. Nel solo clone:1920×1280,1440×1676, fullscreen2880×1800 e ritorno confermati Windows/scanout, nativeActive=true, finestra senza bande e click Start riuscito. KMD custom conservato come esperimento non selezionato. Nessuna distribuzione ordinaria. App/VM accesi, documenti preservati; questo stato supera l’handoff build-9 sopra. [Prove e tentativi falliti](VERIFICATION.md#25-ottobre--resize-con-driver-ufficiale-e-protezioni-ripristinate).
+### SYS-002 — Spazio host esaurito durante le scritture VM
 
-**Pulizia autorizzata del25ottobre:** l’utente approva la base corrente e chiede di proseguire da `main`, eliminando vecchie prove di codice e dischi VM. Rimossi37 file di prototipi, vecchio clone Driver Trial, rollback intermedi e build superate; recuperati circa25,1GB reali. Conservati VM attuale, VM ordinaria e sorgente originaria, build-11/runtime in uso, sorgente del worker installato, host-7 e un checkpoint completo recente. Nessun riavvio: stesso QEMU13146, controllo e scanout1440×1676/nativeActive=true dopo la rimozione. Nessuna chiusura dei GFX aperti per effetto della pulizia. [Ricevute e limiti](VERIFICATION.md#25-ottobre--pulizia-delle-vecchie-prove-e-base-corrente), [sorgenti ritirati](RETIRED_EXPERIMENTS.md). Le vecchie indicazioni di conservazione dei clone/rollback nelle sezioni storiche sono superate da questa richiesta.
+- **Stato:** spazio recuperato e immagine riparata nel clone; prevenzione nel prodotto ancora aperta.
+- **Verificato:** con 103 MiB liberi QEMU termina per `aio failed: No space left on device`. Riparati due cluster non referenziati, nessuna corruzione residua, Windows riavviato con volume Healthy. La pulizia successiva libera 25.051.377.664 byte, con circa 46,4 GB disponibili al controllo del 25 ottobre; questo valore è un rilievo storico, non una misura aggiornata a ogni lettura.
+- **Prossimo passo:** prima di distribuire definire controllo e segnalazione dello spazio host per evitare una terminazione cieca durante le scritture.
+- **Chiusura:** spazio insufficiente gestito senza perdita dati e con errore utilizzabile nell’app; il recupero manuale non basta.
+- **Evidenze:** [incidente e recupero](VERIFICATION.md#24-ottobre--driver-per-risoluzioni-personalizzate-preparazione-e-installazione-nel-clone), [pulizia autorizzata](VERIFICATION.md#25-ottobre--pulizia-delle-vecchie-prove-e-base-corrente).
 
-## Problemi aperti
+## Limite delle acquisizioni automatiche
 
-### GFX-001 — Flicker e contenuti mancanti in Settings e Calcolatrice
+### GFX-008 — Screenshot fullscreen con fasce bianche e frammenti
 
-- **Stato:** aperto nel percorso delle finestre WGC; nessuna nuova riproduzione persistente nel desktop diretto attuale. Il difetto storico riguarda flicker in Settings e pulsanti Calcolatrice senza cifre dopo input, anche con compositore Windows standard. Il riscontro positivo sul desktop non chiude il diverso percorso WGC.
-- **Verificato:** alcuni PNG già ricevuti dal Mac contengono cifre mancanti prima del disegno Metal. Sei campioni completi coincidono prima/dopo compressione, ma il difetto non è comparso in quei campioni: la compressione non è esclusa per il caso parziale. Il successo delle fence non dimostra la soluzione del flicker.
-- **Priorità desktop:** breve prova Settings/Calcolatrice nel desktop: testi/cifre/menu completi e scroll aggiornato, nessuna riproduzione delle cifre mancanti persistenti; transizione di layout alla massimizzazione osservata, non qualifica assenza di flicker. [Prova corrente](VERIFICATION.md#24-ottobre--desktop-dedicato-e-primo-resize-su-un-solo-monitor). Conservare una riproduzione concreta prima di cambiare driver; il riscontro positivo dell’utente non chiude il caso WGC né dimostra una correzione nel driver. [Cambio di priorità](VERIFICATION.md#24-ottobre--priorità-al-desktop-windows-diretto).
-- **Prossimo passo:** seguire produzione, cattura e lettura della superficie nel passaggio già difettoso, solo se pertinente alla modalità attiva. Un confronto con DWM candidato richiede prima GFX-002 risolto e una cattura effettivamente aggiornata (GFX-003).
-- **Chiusura:** lo stesso passaggio prima difettoso presenta contenuti completi e aggiornati nell'app reale, con componenti identificati e poche verifiche pertinenti di input/resize. Una schermata completa isolata non basta.
-- **Evidenze:** [VERIFICATION.md](VERIFICATION.md), sezioni «confronto dei pixel prima e dopo il trasporto», «gate pronto prima dell'uso e frame valido al resize» e «confronto DWM non qualificato, fast-fail e recupero»; [driver](../graphics/driver/README.md).
+- **Stato:** limite delle acquisizioni CUA con causa non isolata; nessun difetto fullscreen visibile confermato dall’utente. Non blocca il resize corrente.
+- **Verificato:** Windows e scanout concordano su 2880×1800; le acquisizioni fullscreen risultano frammentate, quelle in finestra complete. L’utente conferma direttamente assenza di bande nere o anomalie percepite. Riaprire il binding CUA può uscire dal fullscreen: un’immagine pulita successiva non prova la soluzione dell’acquisizione.
+- **Prossimo passo:** approfondire soltanto se serve una cattura fullscreen affidabile o compare un difetto visibile. Non modificare driver/presenter per il solo screenshot.
+- **Chiusura:** acquisizione completa nel passaggio difettoso e causa del solo acquisitore identificata con evidenza indipendente.
+- **Evidenze:** [artefatto acquisito](VERIFICATION.md#24-ottobre--seconda-candidata-resize-geometrie-effettive-e-pulizia-autorizzata), [riscontro utente](VERIFICATION.md#24-ottobre--riscontro-utente-fullscreen-senza-anomalie-visibili).
 
-### GFX-002 — Arresti del compositore con il driver di completamento candidato
+## Finestre individuali ed esperimenti ritirati
 
-- **Stato:** aperto; attivazione sperimentale nel compositore disabilitata. Non promuovere la candidata.
-- **Verificato:** DWM cambia PID durante la prova; Windows registra arresti ripetuti in `neptune_umd_arm64.DLL`, payload `05ebb1b2a56b`, eccezione `c0000409`, RVA `1108b8`. La mappa con sezioni PE identiche identifica un helper CRT condiviso `__scrt_fastfail/_invoke_watson`; il chiamante e la causa non sono ancora individuati. Non è una diagnosi di buffer overflow.
-- **Prossimo passo:** individuare chiamante e contesto del fast-fail con diagnostica mirata prima di altre varianti funzionali o riattivazioni DWM. Conservare il recupero con marker standard; la procedura temporanea non deve contare processi WMI già terminati.
-- **Chiusura:** causa isolata e corretta, poi breve percorso reale con il compositore candidato, nuova cattura e ripristino riusciti. I test fence da soli non qualificano DWM.
-- **Evidenze:** [VERIFICATION.md](VERIFICATION.md), «confronto DWM non qualificato, fast-fail e recupero»; [limite della candidata nel produttore DWM](../graphics/driver/README.md).
+Queste voci conservano limiti non risolti, senza richiedere di ripristinare codice, dischi o protezioni delle prove eliminate. Il percorso individuale è rinviato; riprenderlo soltanto su priorità esplicita o necessità concreta del desktop.
 
-### GFX-003 — Cattura ferma su un'immagine vecchia dopo il cambio del compositore
+### GFX-001 — Flicker e cifre mancanti nelle catture WGC
 
-- **Stato:** aperto; recupero manuale circoscritto verificato.
-- **Verificato:** Calcolatrice contiene 79 e risponde ai messaggi Windows mentre il Mac mostra 78. Riavviare il solo worker con DWM standard recupera 79 senza riavviare l'app. Il recupero automatico di questo caso non è verificato.
-- **Seguito solo GPU:** dopo reconnect primo frame GPU vuoto/incompleto e hash coerente con la sorgente; il gate iniziale non lo mostra. Apertura del desktop/attivazione della finestra di prova seguite da nuova immagine completa e testo visibile, senza passare a TCP. Focus/input iniziale resta intermittente; causa non isolata e nessuna soluzione generale dichiarata. [Evidenze](VERIFICATION.md#24-ottobre--richiesta-solo-gpu-rimozione-fallback-e-riavvio-frontend).
-- **Sintomo simile, causa distinta verificata nella candidata GPU:** una finestra successiva era rifiutata dal proprietario globale mai rilasciato; il frontend mostrava solo «non è ancora pronta». Gate rimosso e ACK reso specifico per immagine; stesso documento/HWND tornato visibile, seconda app chiusa/riaperta con tre hash esatti per cattura. Correzione distribuita soltanto nel clone build-7. Non chiude il caso di immagine vecchia dopo cambio compositore. [Evidenze](VERIFICATION.md#24-ottobre--finestra-aperta-ma-non-pronta-correzione-del-proprietario-gpu).
-- **Prossimo passo:** individuare come riconoscere la sessione WGC non più valida e ricrearla, mantenendo identità della finestra, sequenze dei frame e stato dell'input coerenti.
-- **Chiusura:** dopo un cambio del compositore la stessa app torna a produrre frame aggiornati senza riavvio manuale del worker, duplicazione delle finestre o uso di frame della vecchia sessione.
-- **Evidenze:** [VERIFICATION.md](VERIFICATION.md), «confronto DWM non qualificato, fast-fail e recupero».
+- **Stato:** aperto nel percorso individuale, non riprodotto in modo persistente nel desktop diretto attuale. PNG già ricevuti dal Mac mostravano cifre mancanti prima del disegno Metal; i campioni completi con hash uguali non escludono la compressione nel caso parziale.
+- **Prossimo passo, se ripreso:** conservare una riproduzione pertinente e seguire produzione, cattura e lettura della superficie, senza riattivare per deduzione la candidata DWM.
+- **Chiusura:** stesso passaggio prima difettoso completo e aggiornato nell’app reale, con componenti identificati e breve verifica di input/resize.
+- **Evidenze:** [pixel prima/dopo trasporto](VERIFICATION.md#24-ottobre--confronto-dei-pixel-prima-e-dopo-il-trasporto), [riscontro desktop](VERIFICATION.md#25-ottobre--verifica-del-desktop-accelerato-app-reali-e-rilascio-risorse).
 
-### GFX-004 — Risorse grafiche indisponibili e recupero incompleto dopo i guasti
+### GFX-002 — Arresti DWM con driver candidato
 
-- **Stato:** aperto; causa non isolata. Un riavvio completo del clone ripristina il percorso, ma non è recupero automatico.
-- **Verificato:** dopo gli arresti ripetuti anche DWM standard registra `MILERR_NO_HARDWARE_DEVICE`; una nuova cattura fallisce nella creazione dello staging con `E_OUTOFMEMORY`, pur riportando device status `S_OK`. Il solo ripristino del marker/worker non basta sempre. Non è dimostrata una specifica perdita di memoria.
-- **Nuova osservazione nel clone WGC GPU:** il broker chiude globalmente la cattura dopo `producer completion timeout` e rifiuta nuovi contesti; WGC resta in starting con `0x887A0004`. Il controllo si riconnette ma i frame non recuperano. Rapporto causale fra hook sperimentale e guasto non isolato. Ripristino del runtime precedente e nuovo boot riportano una finestra hardware utilizzabile; non è recupero automatico. [Prova e ripristino](VERIFICATION.md#24-ottobre--prova-wgc-gpu-non-qualificata-e-ripristino-tcp).
-- **Seguito WGC GPU:** nuova sessione con layout/cache finali e sola diagnostica aggiuntiva presenta frame esatti e fallback, senza timeout durante il tratto osservato. Nessuna correzione causale del timeout verificata; non chiudere questa voce per la riuscita. [Evidenze](VERIFICATION.md#24-ottobre--wgc-gpu-primi-frame-esatti-fallback-e-confronto-breve).
-- **Seguito desktop:** presenter in failed=true, registration refused registry full/live256, uscita nera. Reset del solo adattatore con pnputil ripristina failed=false, live6 e nativeActive=true; collegamento guest interrotto, poi riconnesso con worker1892; testo ripristinato tramite Annulla. Nessuna soluzione causale della saturazione, nessun reboot. [Evidenze](VERIFICATION.md#24-ottobre--ripristino-del-resize-personalizzato-del-desktop).
-- **Verifica desktop del25ottobre:** stesso driver di resize dopo avvio completo; Calcolatrice, Settings/HDR e video senza saturazione. Risorse tracciate40 prima delle app, picco79,37 dopo chiusura;14 ritiri individuali e15 ritiri di contesto cumulativi al rilievo. failed=false/closed=false, pending0 e rejected0. Nessun incremento dei limiti o reset adattatore. Il recupero del contatore non identifica la causa del precedente live256 né qualifica durata indefinita. [Evidenze](VERIFICATION.md#25-ottobre--verifica-del-desktop-accelerato-app-reali-e-rilascio-risorse).
-- **Prossimo passo:** correlare le risorse ancora possedute da guest, renderer e contesti usciti, usando il guasto conservato; circoscrivere il componente che non recupera prima di cambiare limiti o aggiungere retry.
-- **Chiusura:** il guasto identificato rilascia le risorse e consente una nuova cattura e una finestra utilizzabile senza spegnere l'intera VM.
-- **Evidenze:** [VERIFICATION.md](VERIFICATION.md), ultimo confronto DWM. Il recupero dopo boot mostra Calcolatrice con il valore 12 e 11 frame presentati, senza errore; questo non chiude la voce.
+- **Stato:** esperimento ritirato, causa non risolta. La candidata non è il driver corrente. Arresti in `neptune_umd_arm64.DLL`, payload 05ebb1b2a56b, eccezione c0000409 / RVA1108b8; il fast-fail CRT è identificato, il chiamante no. Non è una diagnosi di buffer overflow.
+- **Prossimo passo, se ripreso:** individuare chiamante e contesto prima di altre varianti o attivazioni DWM.
+- **Chiusura:** causa isolata e corretta, poi percorso reale con cattura aggiornata e recupero riusciti. I controlli fence non qualificano DWM.
+- **Evidenze:** [arresti e recupero](VERIFICATION.md#24-ottobre--confronto-dwm-non-qualificato-fast-fail-e-recupero), [sorgenti ritirati](RETIRED_EXPERIMENTS.md).
 
-### GFX-005 — Desktop di recupero nero nel percorso multi_ring
+### GFX-003 — Cattura ferma dopo cambio compositore
 
-- **Stato:** aperto, limitato al percorso sperimentale. Non estendere questa diagnosi a ogni configurazione del desktop.
-- **Verificato:** il renderer ora rifiuta esplicitamente la cattura iniziale non supportata senza terminare il worker o impedire nuovi contesti; il desktop resta nero. La correzione del rifiuto non implementa la cattura su più code.
-- **Prossimo passo:** definire un percorso di cattura compatibile con lo scheduling effettivo, mantenendo i controlli che vietano snapshot non sicuri.
-- **Chiusura:** il desktop di recupero mostra contenuti aggiornati ed è utilizzabile nella configurazione grafica proposta per il prodotto, anche quando una singola finestra non funziona.
-- **Evidenze:** [VERIFICATION.md](VERIFICATION.md) e [driver](../graphics/driver/README.md), «Pacchetto ARM64X e limite della cattura multi_ring»; [renderer](../graphics/renderer/README.md).
+- **Stato:** aperto nel percorso individuale. Windows contiene 79 mentre la cattura mostra 78; riavviare il worker recupera il contenuto senza riavviare l’app. Recupero automatico non verificato.
+- **Prossimo passo, se ripreso:** riconoscere la sessione WGC invalida e ricrearla conservando identità, sequenze e input.
+- **Chiusura:** frame aggiornati dopo cambio compositore senza riavvio manuale del worker, duplicati o immagini della vecchia sessione.
+- **Evidenze:** [caso e recupero](VERIFICATION.md#24-ottobre--confronto-dwm-non-qualificato-fast-fail-e-recupero). Il diverso blocco del proprietario GPU, corretto nel prototipo poi ritirato, resta distinto nel diario.
 
-### GFX-006 — Risoluzione e DPI errati dopo installazione del driver a caldo
+### GFX-005 — Desktop nero nella candidata multi_ring
 
-- **Stato:** aperto; recupero dopo avvio completo verificato nel clone.
-- **Verificato:** dopo l'installazione Windows può tornare1024×768/DPI96; la verifica della modalità 2880×1740 riesce ma l'applicazione restituisce errore. Riconnettere il frontend non basta; un nuovo avvio ripristina 2880×1740/DPI192.
-- **Prossimo passo:** prima di distribuire il pacchetto definire quando l'aggiornamento richiede riavvio e confermare la topologia prima di riabilitare geometria e input condivisi.
-- **Chiusura:** aggiornamento e riavvio eventualmente richiesto portano al display concordato; l'app non presenta come confermata una geometria non applicata.
-- **Evidenze:** [VERIFICATION.md](VERIFICATION.md), «gate pronto prima dell'uso e frame valido al resize».
+- **Stato:** esperimento ritirato, cattura multi_ring non implementata. Il rifiuto iniziale contiene il guasto e conserva nuovi contesti, ma non rende disponibile lo snapshot nativo.
+- **Prossimo passo, se ripreso:** definire cattura compatibile con lo scheduling senza ammettere snapshot non sicuri.
+- **Chiusura:** desktop aggiornato e utilizzabile nella configurazione proposta anche quando una cattura individuale fallisce.
+- **Evidenze:** [rifiuto e limite](VERIFICATION.md#24-ottobre--pacchetto-completo-dwm-e-rifiuto-iniziale-della-cattura).
 
-### GFX-008 — Acquisizione fullscreen con fasce bianche e frammenti
+### GFX-007 — Fence Wait/Signal e pubblicazione GPU
 
-- **Stato:** limite delle acquisizioni automatiche conservato, causa non isolata; nessun difetto fullscreen visibile confermato dall’utente. Non blocca il resize già verificato nel clone.
-- **Verificato:** con seconda candidata resize, Windows e scanout2880×1800; vista/layer/presentation frame1440×900punti@2, drawable2880×1800. CUA restituisce immagine ridotta e fasce bianche/frammentate in alto/destra. Le acquisizioni in finestra normale e stretta sono complete senza bande. Riaprire il binding CUA restituisce un’immagine pulita ma fa uscire dal fullscreen: non prova una correzione del caso.
-- **Riscontro indipendente:** l’utente riferisce direttamente che in fullscreen non vede bande nere né altre anomalie. È una verifica visiva d’uso positiva, distinta dagli screenshot CUA; non prova la causa tecnica dell’artefatto acquisito. [Riscontro](VERIFICATION.md#24-ottobre--riscontro-utente-fullscreen-senza-anomalie-visibili).
-- **Prossimo passo:** conservare la combinazione funzionante. Approfondire l’acquisizione soltanto se serve una cattura fullscreen affidabile o compare un difetto visibile; nessuna nuova patch del driver o del presenter motivata dal solo screenshot.
-- **Chiusura:** immagine fullscreen completa e aggiornata nel passaggio prima difettoso; eventuale problema del solo acquisitore identificato con evidenza indipendente.
-- **Evidenze:** [resize, diagnostica e limiti](VERIFICATION.md#24-ottobre--seconda-candidata-resize-geometrie-effettive-e-pulizia-autorizzata).
+- **Stato:** candidate ritirate; integrazione affidabile e beneficio reale non qualificati. Controlli circoscritti hanno verificato attesa fino a Signal e pubblicazione dopo completamento, ma la candidata DWM provoca GFX-002.
+- **Prossimo passo, se ripreso:** risolvere la causa del guasto e dimostrare un beneficio su un difetto reale; non ripetere benchmark già superati senza modifica pertinente.
+- **Chiusura:** eliminazione del problema concreto nell’app reale con driver/runtime compatibili, senza regressione DWM.
+- **Evidenze:** [pubblicazione GPU](VERIFICATION.md#24-ottobre--pubblicazione-dopo-il-completamento-gpu-del-produttore), [fallimento DWM](VERIFICATION.md#24-ottobre--confronto-dwm-non-qualificato-fast-fail-e-recupero), [controlli e sorgenti storici](RETIRED_EXPERIMENTS.md).
 
-### SYS-001 — Arresto del runtime HVF durante il riavvio del clone
+### WIN-001 — Spostamenti casuali nel drag delle finestre individuali
 
-- **Stato:** aperto; ricomparso durante selezione del driver ufficiale/arresto del25ottobre, nessuna causa isolata.
-- **Verificato:** QEMU55266 termina con assertion `isv` in `hvf_vcpu_exec`/hvf.c2378 durante un riavvio Windows, con KMD originale ancora Running. Nessuna attribuzione al nuovo driver di resize. Successivi arresti ACPI completi riusciti.
-- **Seguito25ottobre:** stessa assertion `(isv)`/hvf.c2378 durante sostituzione/arresto; controllo offline qemu-img senza errori, driver ufficiale e successivo Secure Boot attivo funzionanti. Nessun restore dati né correzione causale dichiarata. [Diario](VERIFICATION.md#25-ottobre--resize-con-driver-ufficiale-e-protezioni-ripristinate).
-- **Prossimo passo:** se ricompare, conservare istruzione/MMIO e contesto del medesimo guasto prima di cambiare il gestore HVF. Non allargare la prova del resize in un nuovo esperimento del runtime.
-- **Chiusura:** causa identificata e medesimo passaggio prima difettoso completato con il runtime corretto; un singolo boot riuscito non chiude il problema.
-- **Evidenze:** [preparazione del resize](VERIFICATION.md#24-ottobre--driver-per-risoluzioni-personalizzate-preparazione-e-installazione-nel-clone).
+- **Stato:** causa corretta e verificata nel clone, commit 21d206b; distribuzione ordinaria e altre configurazioni non qualificate. Posizione/metadati mouse sono acquisiti prima dell’accodamento, evitando coordinate ricostruite dopo lo spostamento della finestra Mac.
+- **Prossimo passo / chiusura, se ripreso:** confezionare e qualificare il percorso individuale destinato all’utente. Il passaggio fra monitor resta WIN-003.
+- **Evidenze:** [diario delle verifiche](VERIFICATION.md), correzione del drag del 24 ottobre.
 
-### SYS-002 — Spazio host esaurito durante la prova driver
+### WIN-002 — Resize individuale in attesa del frame
 
-- **Stato:** spazio recuperato e immagine riparata nel clone; prevenzione nel prodotto aperta.
-- **Verificato:**103MiB liberi sul Mac, errore CRC creando il task Windows e QEMU terminato per `aio failed: No space left on device`. Rimossi esclusivamente ISO/cache e copie generate ricostruibili; dischi, checkpoint e sorgenti preservati. Recuperati2,2GiB al rilievo; qemu-img ripara due cluster non referenziati, zero corruzioni, verifica finale senza errori. Windows riavviato, volume Healthy e hash del SYS compilato esatto.
-- **Pulizia autorizzata successiva:** eliminati11 rollback intermedi del clone del24ottobre, recuperati1.642.475.520byte; conservati primo/ultimo rollback, checkpoint pre-SecureBoot/driver e VM attuale. Prima della rimozione verificato che il disco attivo non abbia backing file. Circa20GB liberi al rilievo. [Ricevuta e limiti](VERIFICATION.md#24-ottobre--seconda-candidata-resize-geometrie-effettive-e-pulizia-autorizzata).
-- **Pulizia25ottobre:** rimossi clone Driver Trial e vecchi checkpoint/build su nuova richiesta esplicita; aumento dello spazio libero25.051.377.664byte nella ricevuta, circa46,4GB disponibili al controllo successivo. VM attuale senza backing file e file aperti esclusi dalla rimozione; un checkpoint recente conservato. Nessuna gestione automatica dello spazio implementata. [Evidenze](VERIFICATION.md#25-ottobre--pulizia-delle-vecchie-prove-e-base-corrente).
-- **Prossimo passo:** conservare spazio sufficiente durante la verifica corrente; prima di distribuire definire controllo e segnalazione dello spazio host che impediscano una terminazione cieca durante le scritture.
-- **Chiusura:** caso di spazio insufficiente gestito senza perdita dati e con errore utilizzabile nell’app; il solo recupero manuale non chiude il problema.
-- **Evidenze:** [diario e recupero](VERIFICATION.md#24-ottobre--driver-per-risoluzioni-personalizzate-preparazione-e-installazione-nel-clone).
+- **Stato:** caso corretto nel clone, commit 36378af; distribuzione ordinaria non qualificata. Il worker pubblica il frame già disponibile nel nuovo rettangolo prima di ricreare il pool WGC.
+- **Prossimo passo / chiusura, se ripreso:** breve verifica del percorso individuale nel pacchetto destinato all’utente; non confondere questo guasto con il resize del desktop corrente.
+- **Evidenze:** [frame valido al resize](VERIFICATION.md#24-ottobre--gate-pronto-prima-delluso-e-frame-valido-al-resize).
 
-## Correzioni nel clone: distribuzione ancora da completare
+### TRN-001 — Valutazione IVSHMEM
 
-### WIN-001 — Drag Mac/Windows con spostamenti casuali
+- **Stato:** valutazione di fattibilità chiusa con decisione di non adozione; prototipi e vecchi handoff rimossi. Non è un difetto del desktop corrente, che non usa IVSHMEM.
+- **Risultato conservato:** memoria condivisa, pubblicazione/notifica e frame reali verificati nel clone; sul testo provato IVSHMEM raw non supera TCP+LZ4. Dirty region e compressione non hanno dimostrato un miglioramento generale di latenza. Nessuna promessa zero-copy o soluzione GFX.
+- **Criterio soddisfatto:** prova end-to-end e confronto circoscritto con decisione motivata; nessun altro benchmark necessario per chiudere l’esperimento.
+- **Evidenze:** [confronto e decisione](VERIFICATION.md#24-ottobre--ivshmem-frame-esatti-confronto-breve-e-decisione), [indice storico](RETIRED_EXPERIMENTS.md).
 
-- **Stato:** causa concreta corretta e verificata nel clone; non dichiarare risolto in ogni configurazione o nell'app ordinaria.
-- **Correzione:** posizione e metadati del mouse sono conservati prima dell'accodamento; `NSEvent.cgEvent` poteva ricostruire le coordinate usando l'origine della finestra già spostata. Commit `21d206b`.
-- **Verificato:** prova AppKit e breve uso reale di Settings/Calcolatrice sul primario Retina, spostamenti coerenti e input successivo funzionante.
-- **Da completare / chiusura:** confezionare e qualificare la correzione nel pacchetto destinato all'utente. Il passaggio fra monitor non è verificato: resta WIN-003.
-- **Evidenze:** [VERIFICATION.md](VERIFICATION.md), correzione del drag del 24 ottobre; [RESTART_PLAN.md](RESTART_PLAN.md), «Ripresa dopo prova utente: drag e flicker».
+## Capacità rinviate
 
-### WIN-002 — Resize che resta in attesa del nuovo frame
+### WIN-003 — Monitor N+1 e drag fra scale diverse
 
-- **Stato:** caso corretto e verificato nel clone; distribuzione ordinaria da completare.
-- **Correzione:** quando la texture WGC contiene già il nuovo rettangolo, il worker legge e pubblica quel frame prima di ricreare il pool. Commit `36378af`, worker `8042269f942a`.
-- **Verificato:** lo stesso rimpicciolimento di Calcolatrice da 644×1252 a 644×1232, prima bloccato, presenta il nuovo frame senza input o redraw aggiuntivo.
-- **Da completare / chiusura:** qualificare il percorso nel pacchetto destinato all'utente con una breve prova pertinente; il successo del resize non chiude flicker o recupero generale.
-- **Evidenze:** [VERIFICATION.md](VERIFICATION.md), «gate pronto prima dell'uso e frame valido al resize».
+- **Stato:** rinviato. Desktop attuale con una sola uscita; secondo monitor, DPI e trasferimenti non qualificati. Direzione concordata: monitor Windows corrispondenti ai Mac più area «Apri Windows» riservata e pulsanti debug; non è isolamento dei desktop Windows.
+- **Prossimo passo / chiusura, se ripreso:** qualificare due uscite reali, poi trasferire finestra e dialogo fra aree e scale conservando immagine, posizione e input. Non cambiare topologia come prerequisito del desktop attuale.
+- **Evidenze:** [requisiti rinviati](RESTART_PLAN.md#direzioni-rinviate), [valutazione](VERIFICATION.md#24-ottobre--valutazione-n1-monitor-isolamento-e-gpu-per-schermo).
 
-### GFX-007 — Fence Wait/Signal e completamento delle scritture GPU
+### APP-001 — Creality / OpenGL
 
-- **Stato:** correzioni sperimentali verificate in laboratorio; integrazione affidabile e beneficio reale ancora aperti.
-- **Verificato:** Wait passa dal callback runtime precedentemente vuoto al contesto di scheduling; il controllo resta pendente con fence0 e termina dopo Signal indipendente. Il controllo di pubblicazione individua anche fence1 con vecchi pixel; con gate di completamento e renderer abbinato restituisce i pixel corretti. Le chiamate restano asincrone. Corretto anche l'uso del ring prima della conferma di creazione.
-- **Da completare / chiusura:** risolvere GFX-002 e dimostrare che la correzione elimina un problema concreto come GFX-001 nel pacchetto reale. Non ripetere i controlli già superati senza una modifica pertinente; non dedurre stabilità generale dalla riuscita dei test.
-- **Evidenze:** [test Wait](https://github.com/FedericoDeBona/perpendicular_desktop/blob/d5c02e3/tests/WindowsFenceWaitChecks.cs), [test pubblicazione](https://github.com/FedericoDeBona/perpendicular_desktop/blob/d5c02e3/tests/WindowsFencePublicationChecks.cs), [driver](../graphics/driver/README.md), [renderer](../graphics/renderer/README.md), [VERIFICATION.md](VERIFICATION.md). La [segnalazione upstream](https://github.com/osy/kvm-guest-drivers-windows/issues/8) conserva il difetto originario, non certifica le candidate locali.
-
-## Esperimento di trasporto separato
-
-### TRN-001 — IVSHMEM non disponibile nel QEMU macOS attuale
-
-- **Stato:** chiusa la valutazione di fattibilità richiesta, con esito di non adozione per il prodotto; seguito combinato provato, poi terminato durante il successivo esperimento WGC GPU. Mapping/pubblicazione/riuso/notifica, frame WGC esatti e fallback verificati nel clone separato. Il QEMU ordinario resta privo del device; nessuna distribuzione o qualifica generale.
-- **Verificato:** QEMU Native3D 10.0.12/hash `64a5e90ee941` locale, incluso nel bundle e nel runtime del clone non registra `ivshmem-plain`. La patch proposta non si applica direttamente allo snapshot associato: file rinominato `ivshmem-pci.c`, hunk Kconfig incompatibile; resta anche un gate Meson su EVENTFD. La patch esclude il doorbell su macOS. Sorgente driver KMDF con configurazioni ARM64 e API mapping/MMIO individuato; pacchetto Fedora ARM64 del2022 individuato (SYS Aarch64, INF e CAT con certificato Microsoft); catalogo Valid, installazione exit0 e servizio Running verificati nel nuovo clone con Secure Boot1, SYS0188b04ec1e2 senza modifiche o nuova firma.
-- **Incremento host:** device distinto `perp-ivshmem-plain`, BAR0 conservata (rimossa dalla patch originale senza doorbell), BAR2 e notifica MMIO→socket Unix; 1186 input verificati, baseline ricostruita con codice identico al QEMU corrente, pattern bidirezionali e notifica riusciti via qtest/HVF, senza dischi. Non è una prova di store/barriere Windows.
-- **Incremento Windows:** user mapping64MiB noncached, sfida4096byte letta correttamente, due payload completi alla notifica MMIO→socket. Slot1 trattenuto2s: tentativo di riuso respinto dal probe e byte invariati; dopo ACK1 pubblicazione2/ACK2 riuscita. Barriere esplicite guest/Mac, nessun polling del ricevitore. È una verifica della piccola prova, non del trasporto frame Rust.
-- **Incremento frame:** overlay Rust/Swift solo privato: tre slot con epoch e copie grezze, MMIO→socket→buffer Metal posseduto, ACK TCP esistente per confronto a una consegna pendente. Blocco note hardware 2178×1303/11.674.880 byte presentato e testo digitato leggibile; dopo disabilitazione IVSHMEM stessa finestra su TCP raw, ID e testo conservati, input successivo visibile. Nessuna copia GPU Windows eliminata.
-- **Confronto conclusivo:** stesso Blocco note2178×1303/11.674.880 byte, tre brevi attività identiche. Mediana selezione WGC→callback Metal: IVSHMEM 19,50 ms, TCP raw 237,63 ms, TCP+LZ4 16,10 ms; p95: 95,10/324,32/33,54 ms. Tre hash completi uguali, sequenze ricevute senza buchi e tutte presentate; raw accorpa più acquisizioni prima della pubblicazione. Sei tempi SystemRelativeTime negativi del primo confronto conservati e non qualificati; nuova misura parte dal QPC di selezione, esclude input→schermo. CPU/clock e confini dei conteggi nel documento dedicato.
-- **Decisione / seguito:** TCP+LZ4 rimane ordinario; IVSHMEM evita il payload TCP ma non supera LZ4 sul testo provato. Nessuna migrazione controllo né modifica grafica. Eventuale contenuto poco comprimibile o integrazione robusta richiedono un seguito esplicito, non altre prove per chiudere questo esperimento. Servizio normale ripristinato, zero worker/task temporanei, ACPI/checkpoint 143841Z pulito; disco/EFI e binari ordinari invariati.
-- **Ricerca compressione richiesta in seguito:** selezionato un unico candidato, LZ4 block indipendente con lz4_flex 0.14.0/decoder Apple già presenti. Esaminati anche Zstd fast e QOI/QOIR, senza nuovi benchmark. Il vantaggio della compressione su IVSHMEM resta un'ipotesi: conclusione raw conservata; al momento della ricerca non erano implementati codec o nuova sessione, poi aggiunti nel seguito sotto. [Scelta e proposta minima](IVSHMEM_EVALUATION.md#compressione-su-ivshmem-un-solo-candidato), [fonti e limiti](VERIFICATION.md#24-ottobre--ivshmem-ricerca-compressione-e-selezione-di-lz4).
-- **Prova dirty regions eseguita:** overlay privato ReportOnly con readback completo come oracolo. In 23 frame di aggiornamenti piccoli, 19 patch esatte, 3 ricostruzioni insufficienti (679/309/461byte) inviate full e 1 reset base full; 23 ricevuti/presentati con hash completi uguali. Aggiornamento testo 359.064 byte contro 11.674.880 raw; campione inclusi full −81,92% di payload. Validazione guest mediana 60,54 ms, readback e copia base Mac completi: nessun vantaggio di latenza qualificato. Nessuno skip visibile nel tratto, causa della copertura non isolata. Fallback TCP/stessa finestra e input E riusciti; servizio ripristinato, ACPI/checkpoint 150806Z, ordinario invariato. [Prova e limiti](IVSHMEM_EVALUATION.md#prova-dei-rettangoli-grezzi-nel-clone), [diario](VERIFICATION.md#24-ottobre--ivshmem-prova-rettangoli-con-riferimento-completo-e-tre-coperture-insufficienti). Prima di eliminare l'oracolo o ridurre il readback, qualificare la copertura nei casi falliti; niente rendering parziale o deduzioni sui GFX.
-- **Prova combinata storica, ora terminata:** LZ4 su full/rettangoli con ramo raw piccolo; 18 frame ricevuti/presentati, 12 hash complete uguali, 6 successivi senza hash; una copertura insufficiente di 471 byte protetta da full. Limite SHA ai primi 12 frame, confronto guest completo mantenuto sempre: validazione senza hash mediana 65,04 ms nel piccolo campione, nessun miglioramento di latenza dimostrato. In quella sessione Blocco note era pronto all’uso nel frontend privato; menu di ritorno TCP+LZ4 presente ma non attivato. Primo boot non collegato, ACPI scaduto e QMP quit del solo clone; secondo boot collegato senza restore. Allora servizio standard del clone **Stopped**, worker temporaneo **de10af3968c0** attivo; stato superato dal ripristino del seguito GPU sotto. Ordinario disco/EFI/binari invariati. [Stato, costo e limiti](IVSHMEM_EVALUATION.md#prova-interattiva-combinata-lasciata-accesa), [evidenze e ripristino](VERIFICATION.md#24-ottobre--ivshmem-lz4-e-rettangoli-avvio-per-prova-utente).
-- **Alternativa WGC→GPU, primo percorso verificato nel seguito:** precedenti fallimenti conservati. Nuova sessione passa tre hash pixel, presentazione/input GPU e fallback manuale stessa finestra/documento su TCP+LZ4. Frame successivi senza readback pixel nel worker; due copie GPU restano. Confronto identico97/97 frame: mediana50,89/58,29ms e p95 139,68/136,54ms (GPU/TCP+LZ4), worker CPU0,531/0,766s. Migliore mediana nel campione, nessuna superiorità generale o soluzione GFX. Stato successivo richiesto: solo immagini GPU senza fallback manuale/automatico; handoff corrente build-7/host-7 e worker3dfd6b8d422e, servizio Stopped e Worker senza trigger. Rimosso il limite del proprietario globale non rilasciato, ACK per pacchetto; due finestre e riapertura circoscritte verificate. [Correzione del blocco](VERIFICATION.md#24-ottobre--finestra-aperta-ma-non-pronta-correzione-del-proprietario-gpu). Il confronto precedente resta storico, non ripetuto dopo la rimozione. [Riavvio solo GPU](VERIFICATION.md#24-ottobre--richiesta-solo-gpu-rimozione-fallback-e-riavvio-frontend). Nessuna modifica driver/ordinario. [Prototipo](https://github.com/FedericoDeBona/perpendicular_desktop/blob/d5c02e3/experimental/wgc-gpu/README.md), [diario e handoff](VERIFICATION.md#24-ottobre--wgc-gpu-primi-frame-esatti-fallback-e-confronto-breve).
-- **Criterio soddisfatto nel clone:** stessa memoria osservata da Windows/Mac, pubblicazione completa prima della notifica e nessun riuso durante la lettura; frame reale e fallback TCP verificati; breve confronto raw/raw e contro TCP+LZ4 con decisione motivata anche se negativa. Nessuna promessa zero-copy completo o soluzione GFX per deduzione.
-- **Evidenze:** [confronto conclusivo e limiti](VERIFICATION.md#24-ottobre--ivshmem-frame-esatti-confronto-breve-e-decisione), con rimandi ai passaggi precedenti; [valutazione e contratto](IVSHMEM_EVALUATION.md).
-
-## Limiti e lavoro rinviato
-
-### WIN-003 — Più monitor e drag fra scale diverse
-
-- **Stato:** integrazione completa dei monitor Windows non disponibile; geometria e drag recenti verificati soltanto sul primario Retina. La presenza di un secondo monitor Mac non è una prova di supporto.
-- **Direzione utente valutata:** N monitor guest corrispondenti ai Mac più area «Apri Windows» riservata, con trasferimenti espliciti; proposta accettata dall’utente, richiesti anche pulsanti per aprire le singole uscite Windows a scopo debug; preferita topologia stabile rispetto a un unico monitor ridimensionato per finestra. N+1 nella stessa sessione non isola i desktop: riserva via policy Perpendicular è proposta, non garanzia di invisibilità degli altri monitor. Una GPU multi-output è prima scelta da verificare; driver diversi richiedono adattatori distinti e non isolano DWM. Attuale QEMU max_outputs=1/configurazione guest solo primario. [Requisiti e vincoli](RESTART_PLAN.md#direzione-concordata--monitor-mac-più-area-windows-riservata-wgc-su-gpu), [fonti/evidenze](VERIFICATION.md#24-ottobre--valutazione-n1-monitor-isolamento-e-gpu-per-schermo).
-- **Priorità aggiornata:** N+1 e finestre Mac individuali rinviati mentre si consolida «Apri Windows»; non cambiare topologia come prerequisito del desktop attuale. [Decisione](VERIFICATION.md#24-ottobre--priorità-al-desktop-windows-diretto).
-- **Prossimo passo / chiusura, quando ripreso:** qualificare due uscite reali e DPI nel clone prima di N+1; poi trasferire una finestra con dialogo/documento fra area riservata e integrazione Mac, e verificare un passaggio fra monitor con immagine, posizione e input coerenti. L’export WGC→GPU resta prova distinta e può partire sul singolo monitor. Non allargare le prove del drag sul primario per compensare questa capacità mancante.
-- **Riferimenti:** [requisiti monitor e scala](RESTART_PLAN.md), [limiti del prodotto](../README.md), [VERIFICATION.md](VERIFICATION.md).
-
-### APP-001 — Compatibilità specifica di Creality / OpenGL
-
-- **Stato:** rinviato per richiesta esplicita dell'utente. L'avvio dell'area di lavoro in modalità software non qualifica il rendering OpenGL o l'uso completo dell'app.
-- **Prossimo passo:** riprendere soltanto su nuova priorità dell'utente o necessità concreta del percorso attivo; conservare le evidenze senza riaprire configurazioni o prove specifiche per completismo.
-- **Riferimenti:** [RESTART_PLAN.md](RESTART_PLAN.md) e [VERIFICATION.md](VERIFICATION.md), prove Creality e successivo rinvio.
+- **Stato:** rinviato su richiesta dell’utente. Apertura in modalità software non qualifica il rendering OpenGL o l’uso completo dell’app.
+- **Prossimo passo / chiusura:** riprendere solo su priorità esplicita o necessità concreta, poi qualificare il percorso reale richiesto.
+- **Evidenze:** [piano](RESTART_PLAN.md) e [prove Creality nel diario](VERIFICATION.md).

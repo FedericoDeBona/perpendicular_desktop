@@ -4,11 +4,11 @@ Prima di riprendere leggere [KNOWN_ISSUES.md](KNOWN_ISSUES.md), poi questo piano
 
 ## Base scelta dall’utente
 
-Il25ottobre l’utente approva resize, driver ufficiale e protezioni ripristinate, chiede pulizia delle vecchie prove e indica di proseguire da questo ramo. Base Git: `main`, risultato funzionale d5c02e3. Nessun ritorno ai prototipi driver/RDP/IVSHMEM per deduzione.
+Il 25 ottobre l’utente approva resize, driver ufficiale e protezioni ripristinate, chiede pulizia delle vecchie prove e indica di proseguire da questo ramo. Base Git: `main`, risultato funzionale d5c02e3. Nessun ritorno ai prototipi driver/RDP/IVSHMEM per deduzione.
 
-La VM di sviluppo corrente è c9f319b7-6689-45ac-8003-b8e5fbaebbb8, nella cartella privata `~/Library/Application Support/Perpendicular IVSHMEM Trial`. Il nome storico non indica che il desktop usi IVSHMEM. App aperta: `~/Library/Application Support/Perpendicular Research/DesktopFocus-20261024/build-11/Perpendicular Desktop.app`, frontend984011369cc5. Worker desktopd6d0da93aebc, PerpendicularRestart Manual/Stopped nel solo clone; non avviare un secondo worker. Sorgente e binario corrispondenti conservati privatamente in DesktopFocus-20261024/current-guest-source.
+La VM di sviluppo corrente è c9f319b7-6689-45ac-8003-b8e5fbaebbb8, nella cartella privata `~/Library/Application Support/Perpendicular IVSHMEM Trial`. Il nome storico non indica che il desktop usi IVSHMEM. App aperta: `~/Library/Application Support/Perpendicular Research/DesktopFocus-20261024/build-11/Perpendicular Desktop.app`, frontend `984011369cc5`. Worker desktop `d6d0da93aebc`, PerpendicularRestart Manual/Stopped nel solo clone; non avviare un secondo worker. Sorgente e binario corrispondenti conservati privatamente in DesktopFocus-20261024/current-guest-source.
 
-Driver Windows ufficiale v0.4 Microsoft-signed cfbc713754c7 Running; SecureBoot1, TESTSIGNING=false e Code Integrity attiva. QEMU64a5e90ee941, renderer2dee2e93f270/server135dd051bbc7, backend3fff2d025a3f. Runtime autonomo nella directory Runtimes/7f4667e8… della VM corrente; sorgenti/ricette host-7 conservati. Nessuna dipendenza di avvio dai vecchi clone o build rimossi. La VM ordinaria Perpendicular Restart e la sorgente originaria restano conservate; non sono state aggiornate o sostituite automaticamente.
+Driver Windows ufficiale v0.4 Microsoft-signed cfbc713754c7 Running; Secure Boot attivo, TESTSIGNING=false e Code Integrity attiva. QEMU `64a5e90ee941`, renderer `2dee2e93f270` / server `135dd051bbc7`, backend `3fff2d025a3f`. Runtime autonomo nella directory Runtimes/7f4667e8… della VM corrente; sorgenti/ricette host-7 conservati. Nessuna dipendenza di avvio dai vecchi clone o build rimossi. La VM ordinaria Perpendicular Restart e la sorgente originaria restano conservate; non sono state aggiornate o sostituite automaticamente.
 
 ## Requisiti attivi
 
@@ -22,17 +22,19 @@ Driver Windows ufficiale v0.4 Microsoft-signed cfbc713754c7 Running; SecureBoot1
 
 ## Percorso verificato e limiti
 
-Il frontend pubblica il target, attende1s, invia uscita0×0, attende1s e ripubblica il target. La prima pubblicazione aggiorna il modo custom prima dell’invalidazione della cache monitor. La sola sequenza0×0→target era insufficiente. Il writer seriale conserva la riconnessione prima di uno stop accodato; l’app legge/applica e conferma dopo l’invio finale. Nessun cambio a QEMU/UMD/helper per questa correzione.
+Il frontend pubblica il target, attende 1 s, invia uscita 0×0, attende 1 s e ripubblica il target. La prima pubblicazione aggiorna il modo custom prima dell’invalidazione della cache monitor. La sola sequenza 0×0→target era insufficiente. Il writer seriale conserva la riconnessione prima di uno stop accodato; l’app legge/applica e conferma dopo l’invio finale. Nessun cambio a QEMU/UMD/helper per questa correzione.
 
-Dopo avvio con Secure Boot:1920×1280 iniziale, finestra720×838punti@2→1440×1676, fullscreen1440×900@2→2880×1800 e ritorno1440×1676. Windows/scanout concordano, nativeActive=true, frameChannel=false e click Start riuscito. L’utente ha confermato assenza di bande fullscreen; GFX-008 riguarda soltanto acquisizioni automatiche, senza difetto visibile confermato. Non inseguirlo con nuove patch del renderer.
+Dopo avvio con Secure Boot: 1920×1280 iniziale, finestra 720×838 punti@2→1440×1676, fullscreen 1440×900@2→2880×1800 e ritorno 1440×1676. Windows/scanout concordano, nativeActive=true, frameChannel=false e click Start riuscito. L’utente ha confermato assenza di bande fullscreen; GFX-008 riguarda soltanto acquisizioni automatiche, senza difetto visibile confermato. Non inseguirlo con nuove patch del renderer.
 
 SYS-001/HVF, saturazione storica delle risorse e guasti WGC rimangono aperti secondo il registro. Il rilascio osservato e gli avvii riusciti non ne isolano la causa. Non cambiare limiti né riattivare la candidata DWM senza una riproduzione pertinente. Creality/OpenGL resta rinviato.
 
 ## Pulizia e dati da conservare
 
-Pulizia autorizzata del25ottobre: vecchio clone Driver Trial, checkpoint intermedi e build/prototipi superati rimossi. Un solo checkpoint completo recente conservato: `Perpendicular IVSHMEM Trial/Rollback/before-graphics-20261025T090714Z`, driver ufficiale e TESTSIGNING off, immediatamente prima di riattivare Secure Boot. Il suo EFI precede SecureBootEnable01; un eventuale ripristino deve tenerne conto e non va eseguito automaticamente. VM corrente, VM ordinaria e sorgente originaria restano distinte e preservate.
+Pulizia autorizzata del 25 ottobre: vecchio clone Driver Trial, checkpoint intermedi e build/prototipi superati rimossi. Un solo checkpoint completo recente conservato: `Perpendicular IVSHMEM Trial/Rollback/before-graphics-20261025T090714Z`, driver ufficiale e TESTSIGNING off, immediatamente prima di riattivare Secure Boot. Il suo EFI precede SecureBootEnable=01; un eventuale ripristino deve tenerne conto e non va eseguito automaticamente. VM corrente, VM ordinaria e sorgente originaria restano distinte e preservate.
 
 Build-11, runtime in uso, sorgenti del guest installato e host-7, ricevute e risultati delle prove sono conservati. I vecchi esperimenti non sono più sorgenti attivi: [indice e recupero da Git](RETIRED_EXPERIMENTS.md). Le parti dell’export host ancora compilate nel renderer sono in graphics/renderer, senza ripristinare la cattura WGC individuale.
+
+Le istruzioni operative sono state riscritte intorno alla base attuale anche in README, IMPLEMENTATION e guide grafiche. Le valutazioni concluse e le vecchie ricette sono consultabili da Git tramite l’indice; il diario rimane cronologico e contiene comandi, percorsi e stati validi al momento della singola prova, non istruzioni da eseguire sulla VM corrente.
 
 Non ricreare i dischi/rollback eliminati né usare vecchi helper di ripristino riferiti a worker o clone rimossi. Prima di altra pulizia verificare dipendenze, file aperti e identità della VM; conservare documenti e modifiche utente. Dischi, credenziali, certificati e artefatti generati restano fuori Git. Ricevuta privata: Perpendicular Research/Cleanup-20261025/cleanup-receipt.json.
 
@@ -50,7 +52,7 @@ Per una nuova distribuzione distinguere sempre il pacchetto privato funzionante 
 
 Finestre Windows individuali sul Mac, WGC→GPU, monitor N+1 e launcher rimangono direzioni future, senza dipendenza dal completamento della pulizia. Le prove IVSHMEM/LZ4/dirty region e driver test-signed sono ritirate dal ramo attivo; risultati negativi e sorgenti storici sono recuperabili, non promossi.
 
-Per le finestre individuali conservare il requisito di geometria percepita1:1, controlli Windows sulle principali, popup/tooltip associati al proprietario e controlli Mac sui veri dialoghi. Resize al rilascio con anteprima locale; posizione/input e frame della geometria confermata devono usare lo stesso modello. Riconnettere la stessa app e documento senza duplicazioni. Se ripreso il trasporto solo GPU, non reintrodurre fallback pixel TCP/WARP per nascondere guasti.
+Per le finestre individuali conservare il requisito di geometria percepita 1:1, controlli Windows sulle principali, popup/tooltip associati al proprietario e controlli Mac sui veri dialoghi. Resize al rilascio con anteprima locale; posizione/input e frame della geometria confermata devono usare lo stesso modello. Riconnettere la stessa app e documento senza duplicazioni. Se ripreso il trasporto solo GPU, non reintrodurre fallback pixel TCP/WARP per nascondere guasti.
 
 La direzione N+1 concordata prevede monitor Windows corrispondenti ai Mac più un’area desktop riservata e pulsanti debug per le uscite. È una proposta, non isolamento fra desktop Windows. Prima di estenderla qualificare due uscite, DPI e trasferimento di una finestra con dialogo. Non cambiare la topologia del desktop attuale come prerequisito di lavoro ordinario. Le osservazioni su Parallels sono evidenze statiche, non una ricostruzione verificata dei suoi interni.
 
