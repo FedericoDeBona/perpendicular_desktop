@@ -4,6 +4,8 @@ Aggiornato il 25 ottobre 2026. Leggere questo file prima di iniziare o riprender
 
 ## Base corrente e priorità
 
+**Priorità RAM del 25 ottobre:** richiesta VM sempre accesa in background, con restituzione/riassegnazione della memoria a runtime. Prima valutazione circoscritta di ballooning e hotplug nel clone: driver balloon ARM64 Microsoft-signed caricato con Secure Boot e senza TESTSIGNING, ma riduzione QMP 4→3 GiB senza riduzione del footprint host; DIMM da 512 MiB aggiunto da QEMU ma non utilizzato da Windows. Nessuna politica automatica adottata. Vedere SYS-003 e [prove RAM](VERIFICATION.md#25-ottobre--ballooning-e-hotplug-ram-prima-valutazione-protetta). WGC e finestre individuali sono fuori da questa richiesta.
+
 Si prosegue su `main` con il nuovo launcher delle sole app Windows (Launcher-20261025/build-5) nella VM di sviluppo c9f319b7. Driver ufficiale Microsoft-signed cfbc713754c7, Secure Boot attivo, TESTSIGNING disattivato e Code Integrity attiva confermati anche dopo l’aggiornamento. Il runtime grafico è invariato. Il launcher usa frame GPU delle finestre e frameChannel=true; il desktop mantiene lo scanout nativo. Resize reale 1920×1280, 1440×1676, fullscreen 2880×1800 e ritorno restano la precedente verifica desktop, con riscontro utente senza bande, distinta dalle nuove prove di catalogo/finestre. [Resize](VERIFICATION.md#25-ottobre--resize-con-driver-ufficiale-e-protezioni-ripristinate), [launcher](VERIFICATION.md#25-ottobre--launcher-windows-cache-persistente-e-limite-n1).
 
 La pulizia autorizzata ha rimosso vecchi clone, rollback, build e prototipi, recuperando circa 25,1 GB reali. Restano VM attuale, VM ordinaria e sorgente originaria, pacchetto/runtime in uso, sorgenti corrispondenti e un checkpoint recente. Il checkpoint precede la riattivazione di Secure Boot; percorsi e vincoli di ripristino sono nel piano. Nessuna nuova distribuzione nell’app/VM ordinaria è stata qualificata. [Ricevute e limiti](VERIFICATION.md#25-ottobre--pulizia-delle-vecchie-prove-e-base-corrente).
@@ -52,6 +54,16 @@ README, implementazione e guide grafiche sono stati ripuliti anche dalle istruzi
 - **Prossimo passo:** prima di distribuire definire controllo e segnalazione dello spazio host per evitare una terminazione cieca durante le scritture.
 - **Chiusura:** spazio insufficiente gestito senza perdita dati e con errore utilizzabile nell’app; il recupero manuale non basta.
 - **Evidenze:** [incidente e recupero](VERIFICATION.md#24-ottobre--driver-per-risoluzioni-personalizzate-preparazione-e-installazione-nel-clone), [pulizia autorizzata](VERIFICATION.md#25-ottobre--pulizia-delle-vecchie-prove-e-base-corrente).
+
+### SYS-003 — RAM della VM non restituita al Mac a runtime
+
+- **Stato:** aperto; prima valutazione completata nel clone, nessuna soluzione di prodotto qualificata. La configurazione ordinaria resta a memoria fissa.
+- **Requisito:** VM sempre in esecuzione in background, consumo RAM ridotto quando possibile e memoria nuovamente disponibile al bisogno; Secure Boot attivo e TESTSIGNING disattivato nello stato finale.
+- **Verificato:** driver VirtIO Balloon ARM64 100.100.104.27100, catalogo Microsoft valido, caricato/Running con protezioni attive. QMP raggiunge 3 GiB da 4 GiB e consente il ritorno, ma il footprint QEMU non diminuisce. Avviso runtime sul backing host >4 KiB. In una prova isolata sul Mac, MADV_DONTNEED su 64 MiB condivisi non riduce il footprint; MADV_FREE_REUSABLE lo riduce di 64 MiB e FREE_REUSE permette la riscrittura. Questa prova nativa non qualifica una correzione nella VM.
+- **Hotplug:** QEMU accetta un DIMM da 512 MiB e la richiesta di rimozione, ma Windows 11 Pro ARM64 conserva 4.183.988 KiB visibili; ACPI\\PNP0C80 ha problema 28 (driver assente), e il DIMM resta presente dopo la richiesta di rimozione. Il solo successo QMP non prova né aggiunta né rimozione nel guest.
+- **Prossimo passo:** correzione circoscritta del balloon nel runtime macOS, con gestione sicura delle sottopagine guest da 4 KiB rispetto alle pagine host da 16 KiB e del ritorno in uso prima del deflate; verificare un solo ciclo con memoria recuperabile sul Mac e contenuto guest conservato. Non sostituire globalmente il discard o rimuovere pagine ancora usate. Il percorso DIMM richiede prima supporto effettivo Windows; non cambiare edizione o protezioni per deduzione. Non aggiungere una politica automatica finché il recupero host non funziona.
+- **Chiusura:** ciclo runtime di restituzione/riassegnazione effettiva, breve uso guest e recupero al bisogno verificati nell'app prevista, con protezioni attive; distinguere clone e distribuzione ordinaria.
+- **Evidenze:** [diario RAM](VERIFICATION.md#25-ottobre--ballooning-e-hotplug-ram-prima-valutazione-protetta). Esiti negativi e artefatti privati conservati.
 
 ### APP-002 — Esplora file assente e finestre riusate non riconosciute
 
