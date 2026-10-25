@@ -90,7 +90,7 @@ static int perp_virtio_mem_discard(VirtIOMEM *vmem, uint64_t offset, size_t size
 static char *perp_virtio_mem_stats(Object *obj, Error **errp)
 {
     VirtIOMEM *vmem = VIRTIO_MEM(obj);
-    return g_strdup_printf("{\"enabled\":%s,\"discardedBytes\":%" PRIu64
+    return g_strdup_printf("{\"version\":1,\"enabled\":%s,\"discardedBytes\":%" PRIu64
         ",\"pluggedBytes\":%" PRIu64 ",\"requestedBytes\":%" PRIu64 "}",
         perp_virtio_mem_enabled() ? "true" : "false",
         vmem->perp_hvf_discarded_bytes, vmem->size, vmem->requested_size);

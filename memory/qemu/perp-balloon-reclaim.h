@@ -193,11 +193,18 @@ static bool perp_balloon_page(MemoryRegion *mr, hwaddr mr_offset,
 
 static char *perp_balloon_stats(Object *obj, Error **errp)
 {
-    return g_strdup_printf("{\"enabled\":%s,\"reclaimedBytes\":%" PRIu64
+    VirtIOBalloon *balloon = VIRTIO_BALLOON(obj);
+    MachineState *machine = MACHINE(qdev_get_machine());
+    uint64_t ram = machine->ram_size + get_plugged_memory_size();
+    uint64_t inflated = (uint64_t)balloon->actual << VIRTIO_BALLOON_PFN_SHIFT;
+    return g_strdup_printf("{\"version\":1,\"enabled\":%s,\"reclaimedBytes\":%" PRIu64
         ",\"reusedBytes\":%" PRIu64 ",\"reusableBytes\":%" PRIu64
-        ",\"failures\":%" PRIu64 ",\"trackedHostPages\":%u}",
+        ",\"failures\":%" PRIu64 ",\"ramBytes\":%" PRIu64
+        ",\"baseBytes\":%" PRIu64 ",\"inflatedBytes\":%" PRIu64
+        ",\"trackedHostPages\":%u}",
         perp_balloon_pages ? "true" : "false", perp_balloon_reclaimed,
         perp_balloon_reused, perp_balloon_reusable, perp_balloon_failures,
+        ram, (uint64_t)machine->ram_size, inflated,
         perp_balloon_pages ? g_hash_table_size(perp_balloon_pages) : 0);
 }
 #else

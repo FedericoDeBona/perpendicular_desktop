@@ -24,6 +24,7 @@ struct MachineConfiguration: Codable {
     let recoveryDisplay:Bool?
     let keyboardLayout:String?
     let tpmStateFile:String?
+    let dynamicMemory:DynamicMemoryConfiguration?
 }
 
 @MainActor
@@ -46,6 +47,7 @@ final class VirtualMachineController {
         self.runtime = runtime
         configuration = try JSONDecoder().decode(MachineConfiguration.self,
             from: Data(contentsOf: directory.appendingPathComponent("machine.json")))
+        try configuration.dynamicMemory?.validate(baseMiB:configuration.memoryMiB)
         guard configuration.graphics == nil || ["standard","virtio2D","native3D"].contains(configuration.graphics!) else{
             throw CocoaError(.coderReadCorrupt,userInfo:[NSLocalizedDescriptionKey:"Unknown Windows graphics configuration."])
         }
@@ -205,6 +207,9 @@ final class VirtualMachineController {
         }
         let resources=runtime.deletingLastPathComponent().deletingLastPathComponent()
         let native=nativeGraphicsEnabled ? try NativeGraphics(root:resources.appendingPathComponent("Native3D")):nil
+        if native != nil,configuration.dynamicMemory != nil {
+            throw CocoaError(.executableRuntimeMismatch,userInfo:[NSLocalizedDescriptionKey:"This graphics runtime has not been qualified for dynamic RAM. Use the qualified Windows IoT memory runtime."])
+        }
         let session=UUID().uuidString.replacingOccurrences(of:"-",with:"").lowercased()
         let displayDirectory=URL(fileURLWithPath:"/tmp/perpendicular-display-\(getuid())-\(session.prefix(8))")
         try FileManager.default.createDirectory(at:displayDirectory,withIntermediateDirectories:false,attributes:[.posixPermissions:0o700])
@@ -248,7 +253,7 @@ final class VirtualMachineController {
             "-drive", "if=none,id=bootstrap,media=cdrom,readonly=on",
             "-device", "usb-bot,id=usbcd,bus=xhci.0", "-device", "scsi-cd,drive=bootstrap,bus=usbcd.0",
             "-chardev", "socket,id=tpmchar,path=\(tpmSocket)", "-tpmdev", "emulator,id=tpm,chardev=tpmchar",
-            "-device", native == nil ? "tpm-tis-device,tpmdev=tpm,ppi=off":"tpm-tis-device,tpmdev=tpm",
+            "-device", native == nil && c.dynamicMemory == nil ? "tpm-tis-device,tpmdev=tpm,ppi=off":"tpm-tis-device,tpmdev=tpm",
             "-display", nativeGraphicsEnabled ? "egl-headless,gl=es":"none", "-vnc", "unix:\(desktopSocket)",
             "-qmp", "unix:\(controlSocket),server=on,wait=off",
             "-monitor", "none", "-serial", "file:\(directory.path)/serial.log", "-rtc", "base=localtime"
@@ -268,8 +273,19 @@ final class VirtualMachineController {
             let initialDisplay=NSSize(width:max(640,(fullDisplay.width*scale).rounded()),height:max(480,(fullDisplay.height*scale).rounded()))
             arguments += ["-device","virtio-ramfb-gl,id=display0,addr=0x8,disable-legacy=on,neptune=on,blob=on,hostmem=512M,max_outputs=1,xres=\(Int(initialDisplay.width)),yres=\(Int(initialDisplay.height))"]
         }else{arguments += ["-device","ramfb"]}
+        if let memory=c.dynamicMemory {
+            let index=arguments.firstIndex(of:"-m")!+1
+            arguments[index]="\(c.memoryMiB)M,slots=2,maxmem=\(c.memoryMiB+memory.hotplugMiB)M"
+            arguments += ["-device","virtio-balloon-pci,id=balloon0,deflate-on-oom=on",
+                "-object","memory-backend-ram,id=vmemram,size=\(memory.hotplugMiB)M",
+                "-device","virtio-mem-pci,id=vmem0,memdev=vmemram,requested-size=0,block-size=2M,dynamic-memslots=off"]
+        }
+        var launchEnvironment=native?.environment(directory:displayDirectory,session:session,primary:HostDisplay.current().first(where:\.primary))
+        if c.dynamicMemory != nil {
+            launchEnvironment=(launchEnvironment ?? [:]).merging(["PERP_HVF_BALLOON_RECLAIM":"1","PERP_HVF_VIRTIO_MEM":"1"]){_,new in new}
+        }
         machine = try launch("qemu-system-aarch64",arguments,log:"qemu.log",executable:native?.executable,
-            environment:native?.environment(directory:displayDirectory,session:session,primary:HostDisplay.current().first(where:\.primary)))
+            environment:launchEnvironment)
         let endpoint=nativeGraphicsEnabled ? NativeDisplayEndpoint(socketPath:displayDirectory.appendingPathComponent("native-display.sock").path,
             serverPID:machine!.processIdentifier,expectedUID:getuid(),sessionHi:UInt64(session.prefix(16),radix:16)!,sessionLo:UInt64(session.suffix(16),radix:16)!,epoch:1):nil
         let state=DesktopLaunch(machineID:c.id,pid:machine!.processIdentifier,socket:desktopSocket,native:endpoint)

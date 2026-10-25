@@ -14,6 +14,7 @@ mod window_control;
 mod wire;
 mod gpu;
 mod worker;
+mod memory;
 
 use serde::{Deserialize, Serialize};
 use std::path::Path;

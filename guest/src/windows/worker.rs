@@ -217,7 +217,7 @@ impl Worker {
         outbox.control(
             json!({"type":"hello","protocol":1,"token":config.token,"epoch":self.epoch,
             "sid":self.sid,"session":self.session,"version":env!("CARGO_PKG_VERSION"),
-            "capabilities":{"capture":"wgc-hardware-readback-with-software-recovery","windows":4,"transients":12,"windowRoles":true,"input":true,"catalogue":true,"appIcon":true,"frameChannel":true,"gpuFramesOnly":true,"frameEncodings":[],"displayInfo":true,"driverInfo":true,"graphicsInfo":true,"displayConfigure":true,"sharedGeometry":true,"processControl":true,"clipboard":true,"clipboardTextBytes":262144,"applicationStatus":true,"execute":true,"executeTimeoutSeconds":60,"executeOutputBytes":65536,"displayEvents":self.display_observer.is_some()}}),
+            "capabilities":{"capture":"wgc-hardware-readback-with-software-recovery","windows":4,"transients":12,"windowRoles":true,"input":true,"catalogue":true,"appIcon":true,"frameChannel":true,"gpuFramesOnly":true,"frameEncodings":[],"displayInfo":true,"driverInfo":true,"graphicsInfo":true,"displayConfigure":true,"sharedGeometry":true,"processControl":true,"clipboard":true,"clipboardTextBytes":262144,"applicationStatus":true,"memoryStatus":true,"execute":true,"executeTimeoutSeconds":60,"executeOutputBytes":65536,"displayEvents":self.display_observer.is_some()}}),
         );
         let (sender, receiver) = mpsc::sync_channel(128);
         let state = outbox.clone();
@@ -333,6 +333,13 @@ impl Worker {
                             });
                         });
                     }
+                    continue;
+                }
+                if command["operation"] == "memory_status" {
+                    outbox.control(match super::memory::status() {
+                        Ok(value) => json!({"type":"reply","request":request,"ok":true,"result":value}),
+                        Err(message) => json!({"type":"reply","request":request,"ok":false,"message":message}),
+                    });
                     continue;
                 }
                 if command["operation"] == "execute" {

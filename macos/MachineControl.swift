@@ -4,6 +4,11 @@ import Darwin
 enum MachineControl {
     static func execute(socket path:String, operation:String, arguments:[String:Any]=[:],
                         expectedUUID:String?=nil,expectedPID:Int32?=nil) throws -> [String:Any] {
+        try value(socket:path,operation:operation,arguments:arguments,
+                  expectedUUID:expectedUUID,expectedPID:expectedPID) as? [String:Any] ?? [:]
+    }
+    static func value(socket path:String, operation:String, arguments:[String:Any]=[:],
+                      expectedUUID:String?=nil,expectedPID:Int32?=nil) throws -> Any {
         let fd=socket(AF_UNIX,SOCK_STREAM,0)
         guard fd>=0 else { throw failure("Cannot open machine control.") }
         defer { close(fd) }
@@ -42,7 +47,7 @@ enum MachineControl {
                 buffer.append(contentsOf:bytes.prefix(size))
             }
         }
-        func exchange(_ command:[String:Any]) throws -> [String:Any] {
+        func exchange(_ command:[String:Any]) throws -> Any {
             var bytes=try JSONSerialization.data(withJSONObject:command);bytes.append(10)
             try bytes.withUnsafeBytes { pointer in
                 var offset=0
@@ -53,14 +58,14 @@ enum MachineControl {
             }
             while true {
                 let reply=try receive()
-                if let result=reply["return"] {return result as? [String:Any] ?? [:]}
+                if let result=reply["return"] {return result}
                 if let error=reply["error"] as? [String:Any] {throw failure(error["desc"] as? String ?? "Machine command failed.")}
             }
         }
         _=try receive()
         _=try exchange(["execute":"qmp_capabilities"])
         if let expectedUUID {
-            let identity=try exchange(["execute":"query-uuid"])
+            let identity=try exchange(["execute":"query-uuid"]) as? [String:Any] ?? [:]
             guard (identity["UUID"] as? String)?.lowercased()==expectedUUID.lowercased() else {
                 throw failure("Machine control belongs to a different virtual machine.")
             }

@@ -52,6 +52,7 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
     private var launcher:NSWindow!
     private var machine:VirtualMachineController!
     private var bridge:GuestBridge!
+    private var memoryController:RuntimeMemoryController?
     private var localControl:MacLocalControl?
     private var guestCapabilities:[String:Bool]=[:]
     private var windows:[String:ApplicationWindow]=[:]
@@ -81,7 +82,10 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
 
     func applicationDidFinishLaunching(_ notification:Notification){
         do{
-            let directory=FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/Perpendicular Restart")
+            let directory:URL
+            if let path=ProcessInfo.processInfo.environment["PERPENDICULAR_MACHINE_DIRECTORY"],path.hasPrefix("/") {
+                directory=URL(fileURLWithPath:path,isDirectory:true)
+            }else{directory=FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/Perpendicular Restart")}
             launcherLibrary=try LauncherLibrary(directory:directory)
             launcherPreferences=launcherLibrary?.loadPreferences() ?? .init()
             apps=launcherLibrary?.loadCatalogue() ?? []
@@ -92,6 +96,13 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
             try NativeWindowFrames.shared.prepare(directory:directory,machineID:machine.configuration.id)
             machine.onDesktopSize={ [weak self] size in self?.desktopSize=size;self?.scheduleDesktopResize() }
             bridge=try GuestBridge(port:machine.configuration.guestPort,token:machine.configuration.token,individualWindows:true)
+            if let configuration=machine.configuration.dynamicMemory {
+                memoryController=RuntimeMemoryController(machine:machine,bridge:bridge,configuration:configuration){[weak self] in
+                    guard let self,NSApp.isActive,!NSApp.isHidden else{return false}
+                    return self.machine?.desktopState["visible"] as? Bool == true || self.windows.values.contains{$0.window.isVisible}
+                }
+                memoryController?.start()
+            }
             bridge.onConnection={ [weak self] value in
                 guard let self else{return};self.connected=value;self.status=value ? "Windows connected":"Reconnecting to Windows…"
                 self.launcherEpoch=UUID();self.catalogueLoading=false;self.loadingIconID=nil;self.failedIcons=[]
@@ -293,7 +304,7 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
               let command=request["command"] as? String else {
             localResponse(["ok":false,"error":"Expected a JSON command."],reply:reply);return
         }
-        let allowed:Set<String>=["status","execute","display_info","driver_info","graphics_info","geometry_snapshot","application_status","process_list","process_terminate"]
+        let allowed:Set<String>=["status","memory_status","execute","display_info","driver_info","graphics_info","geometry_snapshot","application_status","process_list","process_terminate"]
         guard allowed.contains(command) else {
             localResponse(["ok":false,"error":"This local command is not supported."],reply:reply);return
         }
@@ -307,6 +318,7 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
             localResponse(["ok":true,"result":["connected":connected,"machineRunning":running,
                 "machineState":machineStateLabel,"machineOperation":machineOperation as Any? ?? NSNull(),
                 "status":status,"displayStatus":displayStatus,"primaryMatchesHost":sharedDisplay != nil,
+                "memory":memoryController?.state ?? ["enabled":false],
                 "windowCount":windows.count,"capabilities":guestCapabilities,
                 "frameChannel":bridge?.separateFrames ?? false,
                 "windowGPU":NativeWindowFrames.shared.diagnostics,
@@ -357,7 +369,7 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
         if command == "geometry_snapshot" {
             localGeometrySnapshot(Array(windows.keys.sorted())[...],rows:[],epoch:displayEpoch,reply:reply);return
         }
-        let capabilities=["display_info":"displayInfo","driver_info":"driverInfo","graphics_info":"graphicsInfo"]
+        let capabilities=["memory_status":"memoryStatus","display_info":"displayInfo","driver_info":"driverInfo","graphics_info":"graphicsInfo"]
         guard let capability=capabilities[command],guestCapabilities[capability] == true else {
             localResponse(["ok":false,"error":"The connected guest does not support this query."],reply:reply);return
         }
@@ -850,7 +862,8 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
             displayEpoch=value["epoch"] as? String
             invalidateDisplay("Checking Windows display…")
             let capabilities=value["capabilities"] as? [String:Any] ?? [:]
-            guestCapabilities=Dictionary(uniqueKeysWithValues:["execute","displayInfo","driverInfo","graphicsInfo","sharedGeometry","appIcon","applicationStatus","processControl","clipboard"].map{($0,capabilities[$0] as? Bool == true)})
+            guestCapabilities=Dictionary(uniqueKeysWithValues:["memoryStatus","execute","displayInfo","driverInfo","graphicsInfo","sharedGeometry","appIcon","applicationStatus","processControl","clipboard"].map{($0,capabilities[$0] as? Bool == true)})
+            memoryController?.guestReady=guestCapabilities["memoryStatus"] == true
             startApplicationStatusUpdates()
             pumpApplicationIcons()
             displayReadable=capabilities["displayInfo"] as? Bool == true

@@ -25,6 +25,11 @@ def main():
         raise ValueError("Use a private QEMU tree outside the repository")
     path = source / "hw/virtio/virtio-balloon.c"
     text = path.read_text()
+    text = replace(text, '#include "qemu/osdep.h"',
+                   '#include "qemu/osdep.h"\n#include "hw/mem/memory-device.h"')
+    anchor = "    MachineState *machine = MACHINE(qdev_get_machine());"
+    text = replace(text, anchor, anchor + "\n    if (perp_balloon_reclaim_enabled()) {\n"
+        "        return machine->ram_size + get_plugged_memory_size();\n    }")
     text = replace(text, "static bool virtio_balloon_inhibited(void)",
                    '#include "perp-balloon-reclaim.h"\n\nstatic bool virtio_balloon_inhibited(void)')
     text = replace(text, "static void virtio_balloon_handle_output(VirtIODevice *vdev, VirtQueue *vq)",
