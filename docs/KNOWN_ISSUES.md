@@ -195,6 +195,8 @@ Queste voci conservano limiti non risolti, senza richiedere di ripristinare codi
 
 ### WIN-004 — Finestra Mac visibile ma app Windows non attiva
 
+- **Cloaking, prova diretta main:** chiamata esterna rifiutata0x80070005; da hook limitato al thread dell’app di prova riesce. Foreground assegnato al target, ma hit test del mouse restituisce un’altra finestra sottostante: il percorso attuale non è utilizzabile con cloaking attivo. Nuovi frame ricevuti non equivalgono a input corretto. Ripristinata visibilità e chiusa regolarmente la sola prova; app0.2.5 invariata, nessun cloaking automatico distribuito. Prossimo passo: risolvere destinatario dell’input e distinta visibilità host senza bypassare la verifica. [Evidenze](VERIFICATION.md#25-ottobre--prova-diretta-di-cloaking-sulla-main-input-bloccante).
+
 - **Qualifica main0.2.5 circoscritta:** aggiunto ripristino del first responder quando la finestra diventa key. Notepad riceve «Prova N+1 nella main» dopo il frame pronto; click Cancel sul dialogo restituisce il documento. Non qualificate tutte le app o ogni ripresa del focus; voce mantenuta aperta. [Evidenze](VERIFICATION.md#25-ottobre--integrazione-n1-e-distribuzione-025).
 
 - **Stato:** aperto, riprodotto nella build diagnostica sulla IoT principale; app installata non modificata e causa non isolata.
