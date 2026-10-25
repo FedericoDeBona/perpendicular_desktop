@@ -38,6 +38,7 @@ final class VirtualMachineController {
     private var desktop:DesktopWindow?
     private var displayControl:DesktopConnection?
     private var displayRequest:UUID?
+    private(set) var desktopResolutionPending=false
     let controlSocket: String
 
     init(directory: URL, runtime: URL) throws {
@@ -142,14 +143,19 @@ final class VirtualMachineController {
     func requestDesktopResolution(_ size:NSSize){
         guard let launch=desktopLaunch() else{return}
         displayControl?.stop()
+        let request=UUID();displayRequest=request;desktopResolutionPending=true
         // This publishes the custom mode to virtio-gpu. The guest's driver
         // helper applies it; RFB's framebuffer acknowledgement is not proof
         // of the Windows mode, which ApplicationModel reads back separately.
-        let client=DesktopConnection(path:launch.socket,receive:{_,_,_ in},layout:{_ in},failed:{_ in})
+        let client=DesktopConnection(path:launch.socket,receive:{_,_,_ in},layout:{_ in},failed:{[weak self] _ in
+            guard let self,self.displayRequest == request else{return};self.desktopResolutionPending=false
+        })
         displayControl=client;client.requestPixels(false)
-        client.setScreens([DesktopScreen(id:0,x:0,y:0,width:Int(size.width),height:Int(size.height))]);client.start()
+        client.setScreens([DesktopScreen(id:0,x:0,y:0,width:Int(size.width),height:Int(size.height))],reconnectMonitor:nativeGraphicsEnabled,submitted:{[weak self] in
+            guard let self,self.displayRequest == request else{return};self.desktopResolutionPending=false
+        });client.start()
     }
-    func finishDesktopResolution(){displayControl?.stop();displayControl=nil}
+    func finishDesktopResolution(){displayRequest=nil;desktopResolutionPending=false;displayControl?.stop();displayControl=nil}
     func closeDesktop(){finishDesktopResolution();desktop?.stop();desktop?.window.close();desktop=nil}
     func synchronizePrimaryDisplay(){
         // The v0.4 native driver keeps the modes advertised at boot. Sending

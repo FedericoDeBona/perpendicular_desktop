@@ -25,6 +25,8 @@ Ordine aggiornato nella nuova chat: (1) breve riproduzione in «Apri Windows» d
 
 **Seguito del25ottobre:** l’utente conferma il resize e chiede di continuare su driver/acceleratore se restano problemi. Avvio completo del clone con build-9 e stesso SYS9c64a219412b confermati. Breve uso desktop: Calcolatrice78+9=87, ripristino finestra, Impostazioni Schermo/HDR e anteprima video aggiornata; nessun contenuto mancante persistente osservato. Rilascio risorse37 dopo picco79, zero rifiuti/chiusure cattura nella sessione corrente. Non è la soluzione causale dei guasti storici: GFX-001/004 restano aperti nei rispettivi ambiti. Conservata la combinazione funzionante, nessuna nuova patch grafica o candidata DWM attivata. [Prove e limiti](VERIFICATION.md#25-ottobre--verifica-del-desktop-accelerato-app-reali-e-rilascio-risorse).
 
+**Stato corrente dopo richiesta di ripristino protezioni:** entrambe mantenute, senza scegliere una regressione del resize. DesktopFocus/build-11 usa il KMD ufficiale Microsoft-signed cfbc713754c7; frontend pubblica il target prima di un ciclo monitor0×0→target, con verifica effettiva Windows dopo l’invio finale. SecureBoot1, TESTSIGNING=false/Code Integrity enabled verificati dopo avvio; certificato di prova rimosso da Root/TrustedPublisher. Nel solo clone:1920×1280,1440×1676, fullscreen2880×1800 e ritorno confermati Windows/scanout, nativeActive=true, finestra senza bande e click Start riuscito. KMD custom conservato come esperimento non selezionato. Nessuna distribuzione ordinaria. App/VM accesi, documenti preservati; questo stato supera l’handoff build-9 sopra. [Prove e tentativi falliti](VERIFICATION.md#25-ottobre--resize-con-driver-ufficiale-e-protezioni-ripristinate).
+
 ## Problemi aperti
 
 ### GFX-001 — Flicker e contenuti mancanti in Settings e Calcolatrice
@@ -93,8 +95,9 @@ Ordine aggiornato nella nuova chat: (1) breve riproduzione in «Apri Windows» d
 
 ### SYS-001 — Arresto del runtime HVF durante il riavvio del clone
 
-- **Stato:** aperto, osservazione circoscritta durante la preparazione del resize.
+- **Stato:** aperto; ricomparso durante selezione del driver ufficiale/arresto del25ottobre, nessuna causa isolata.
 - **Verificato:** QEMU55266 termina con assertion `isv` in `hvf_vcpu_exec`/hvf.c2378 durante un riavvio Windows, con KMD originale ancora Running. Nessuna attribuzione al nuovo driver di resize. Successivi arresti ACPI completi riusciti.
+- **Seguito25ottobre:** stessa assertion `(isv)`/hvf.c2378 durante sostituzione/arresto; controllo offline qemu-img senza errori, driver ufficiale e successivo Secure Boot attivo funzionanti. Nessun restore dati né correzione causale dichiarata. [Diario](VERIFICATION.md#25-ottobre--resize-con-driver-ufficiale-e-protezioni-ripristinate).
 - **Prossimo passo:** se ricompare, conservare istruzione/MMIO e contesto del medesimo guasto prima di cambiare il gestore HVF. Non allargare la prova del resize in un nuovo esperimento del runtime.
 - **Chiusura:** causa identificata e medesimo passaggio prima difettoso completato con il runtime corretto; un singolo boot riuscito non chiude il problema.
 - **Evidenze:** [preparazione del resize](VERIFICATION.md#24-ottobre--driver-per-risoluzioni-personalizzate-preparazione-e-installazione-nel-clone).

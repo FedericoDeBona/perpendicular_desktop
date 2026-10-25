@@ -734,9 +734,15 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
             self.machine?.requestDesktopResolution(mode)
             // The driver's resolution event and application are asynchronous.
             // Keep one transaction pending and verify actual Windows geometry.
-            for _ in 0..<5 {
+            var checks=0
+            let deadline=ProcessInfo.processInfo.systemUptime+12
+            while checks<5 && ProcessInfo.processInfo.systemUptime<deadline {
                 try? await Task.sleep(for:.milliseconds(300))
                 guard !Task.isCancelled,self.connected,self.displayEpoch == epoch,self.desktopResizeRequest == request else{return}
+                // Keep this transaction until the monitor is reattached. A
+                // newer request must not race the previous final host raster.
+                if self.machine?.desktopResolutionPending == true {continue}
+                checks+=1
                 let matched=await withCheckedContinuation { continuation in
                     self.bridge.command("display_info",timeout:.seconds(5)){result in
                         guard self.displayEpoch == epoch,self.desktopResizeRequest == request else{continuation.resume(returning:false);return}
