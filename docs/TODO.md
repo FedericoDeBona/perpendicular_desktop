@@ -31,6 +31,7 @@ Priorità 1–4 corrispondenti alla richiesta iniziale dell'utente; TODO-017/018
 | TODO-002 | Geometria, input e finestre Mac/Windows 1:1 | DA FARE; correzioni parziali precedenti | GFX-006, WIN-001/002/003; estensione multischermo dipende da 001. |
 | TODO-003 | Stessi file utente su Mac e Windows, senza copie | DA FARE; virtio-fs candidato, combinazione non qualificata | Backend macOS, client ARM64 firmato, compatibilità RAM. |
 | TODO-019 | Catalogo unico, recenti in alto e impostazioni VM al posto dei processi | IN CORSO: implementato/installato0.2.1, qualifica UI parziale | Catalogo osservato; configurazione verificata su fixture; verifica interattiva pannello interrotta da errore CUA. |
+| TODO-020 | Integrare l'icona Perpendicular «Carbone e cobalto» | DA FARE; asset ricevuti dalla chat design | Documento Icon Composer e fallback ICNS pronti; non ancora nel bundle installato. |
 | TODO-017 | Scorciatoie e comandi Mac nelle app Windows e in Perpendicular | DA FARE per completamento e qualifica main; base parziale presente | Cmd+C/V/X/T/Q e altri comandi comuni; destinazione secondo focus/contesto. |
 | TODO-018 | Copia/incolla di testo e file Mac ↔ Windows | DA FARE; testo già implementato e provato storicamente, file mancanti | Entrambe le direzioni, desktop e singole app; collegamento con TODO-003. |
 | TODO-004 | Tutti i tempi della pipeline grafica, desktop e singola app | DA FARE; strumentazione esistente incompleta | Copertura per stadio, correlazione e limiti di misura. |
@@ -96,6 +97,14 @@ Lato Mac esiste un [backend macosvirtiofsd per QEMU](https://github.com/mheese/m
 **Fatto quando:** sulla main protetta un documento aperto da entrambe le parti è lo stesso contenuto host, modifiche/rinomine visibili senza copia o sincronizzatore, cartelle standard e salvataggi delle app instradati correttamente, riavvio/riconnessione non creano cartelle alternative, RAM dinamica preservata. Prima prova futura limitata a una cartella temporanea e un file sacrificabile; poi estendere al requisito completo. Se il percorso senza SMB non è praticabile nel perimetro, documentare il blocco e avvisare prima di proporre un'alternativa: nessuna sostituzione silenziosa con copie o Samba.
 
 L'integrazione dei percorsi condivisi deve comprendere anche i riferimenti ai file negli appunti di TODO-018: un percorso Mac non diventa utilizzabile in Windows con il solo cambio della stringa. La condivisione dello stesso contenuto e il comando esplicito dell'utente per copiarlo in una destinazione sono operazioni distinte.
+
+## TODO-020 — Icona Perpendicular «Carbone e cobalto»
+
+**Stato: DA FARE; consegna asset ricevuta dalla chat design il25 ottobre.** Integrare al prossimo aggiornamento delle icone il disegno finale, mantenendo simbolo originale e due gruppi separati base/stelo, dello stesso cobalto con Liquid Glass su fondo carbone. L'app0.2.1 installata non incorpora ancora questa consegna.
+
+Riferimenti locali: documento pronto `/Users/federico/Desktop/Perpendicular Design/Perpendicular.icon`; sorgenti `design/brand/Perpendicular.icon`, palette e guida in `design/brand/`. PNG, ICNS e palette esportati nella cartella Desktop indicata. Il fallback ICNS è statico; la struttura dei materiali dinamici rimane nel documento nativo. Sorgenti presenti al controllo di sola lettura, non modificati o aggiunti al commit di questo promemoria.
+
+**Prossimo passo:** integrare icona e metadati nel confezionamento del bundle Mac, verificando il percorso nativo Icon Composer e il fallback compatibile con il minimo macOS supportato. Conservare i due gruppi, colori e geometria ricevuti; non dichiarare materiale dinamico ottenuto con il solo ICNS. **Fatto quando:** nuova build installata con il marchio corretto in Finder/Dock e una verifica visiva pertinente; documentare separatamente l'eventuale supporto limitato al fallback. Nessun intervento VM/driver richiesto. [Consegna registrata](VERIFICATION.md#25-ottobre--consegna-asset-carbone-e-cobalto).
 
 ## TODO-017 — Comandi e scorciatoie Mac nelle app Windows
 
