@@ -8,7 +8,7 @@ Comandi Mac e appunti trasversali testo/file sono ora requisiti espliciti in TOD
 
 ## Base corrente e priorità
 
-**Base principale dopo la pulizia del 25 ottobre:** `/Applications/Perpendicular.app`, ora versione0.2.2, collegamento `Perpendicular.app` sul Desktop. App, build e strumenti selezionano per default la IoT0795218c in `~/Library/Application Support/Perpendicular Memory IoT`. Driver grafico e RAM Microsoft-signed, Secure Boot/Code Integrity attivi, TESTSIGNINGfalse confermati dopo l’avvio della0.2.0; la0.2.1 ha conservato la medesima sessione Windows e il runtime. La0.2.2 applica il marchio a VM già spenta, senza avviarla. RAM automatica configurata. [Promozione e pulizia](VERIFICATION.md#25-ottobre--pulizia-definitiva-e-promozione-iot-a-base-principale).
+**Base principale dopo la pulizia del 25 ottobre:** `/Applications/Perpendicular.app`, ora versione0.2.3, collegamento `Perpendicular.app` sul Desktop. App, build e strumenti selezionano per default la IoT0795218c in `~/Library/Application Support/Perpendicular Memory IoT`. Driver grafico e RAM Microsoft-signed, Secure Boot/Code Integrity attivi, TESTSIGNINGfalse confermati dopo l’avvio della0.2.0; la0.2.1 ha conservato la medesima sessione Windows e il runtime. La0.2.2 applica il marchio a VM già spenta, senza avviarla. RAM automatica configurata. [Promozione e pulizia](VERIFICATION.md#25-ottobre--pulizia-definitiva-e-promozione-iot-a-base-principale).
 
 **Catalogo/impostazioni0.2.1:** unica pagina App con recenti in alto e catalogo completo, pannello processi rimosso, impostazioni CPU/RAM salvate per il prossimo avvio. Persistenza e applicazione dopo arresto controllate su fixture con il controller reale; nessun boot della VM a1 GB. Catalogo installato visibile, qualifica interattiva del pannello incompleta per chiusura del canale CUA, senza crash dell’app rilevato. TODO-019 conserva il limite; non è un nuovo difetto di prodotto dimostrato. [Evidenze](VERIFICATION.md#25-ottobre--catalogo-unico-e-impostazioni-cpuram).
 
@@ -17,6 +17,8 @@ Comandi Mac e appunti trasversali testo/file sono ora requisiti espliciti in TOD
 Eliminati su autorizzazione esplicita16 vecchi launcher,12 vecchi dischi/copie (incluso Parallels),10 buffer generati e5 runtime IoT inattivi. Recuperati circa95 GB netti. Preservati disco/EFI/TPM della IoT, backup offline completo SHA256, build qualificata originale build-native, repository, sorgenti e Research/test incerti. Vecchi nomi nelle cartelle residue non indicano VM ancora avviabili. Percorsi e ripristino nel piano.
 
 Il ciclo RAM protetto 4→2→4 GiB con dati conservati resta la qualifica precedente del runtime ora promosso, non una nuova prova estesa durante la pulizia. WGC, N+1 e i problemi grafici non sono risolti dalla promozione. Nel controllo dell'app installata il desktop nativo è visibile, ma Windows rimane2048×1152 e l'app segnala mancata conferma della risoluzione richiesta: GFX-006 resta aperto. Le precedenti prove di resize/fullscreen approvate dall'utente appartengono al clone poi eliminato e restano nel diario.
+
+**Aggiornamento0.2.3:** RAM massima come unico controllo principale, iniziale in Avanzate. Avvio utente1 GB seguito da hotplug fino a4 GB e un nuovo accesso automatico protetto verificati; SYS-004 chiuso, SYS-001 ricomparso. CUA continua a fermarsi sul pannello: DiagnosticReports conferma crash di SkyComputerUseService in Array.remove(at:); TODO-019 mantiene il limite di qualifica UI. [Evidenze](VERIFICATION.md#25-ottobre--ram-semplificata-e-accesso-windows).
 
 ## Come aggiornare il registro
 
@@ -45,6 +47,8 @@ Il ciclo RAM protetto 4→2→4 GiB con dati conservati resta la qualifica prece
 
 ### SYS-001 — Arresto HVF durante riavvio o arresto
 
+- **Nuova ricorrenza:** riavvio per verificare autologon: assertion `(isv)`, hvf.c2184, uscita QEMU28213. Successivo avvio35616 con1 GB iniziale e login automatico riuscito; non è una correzione HVF. [Evidenze](VERIFICATION.md#25-ottobre--ram-semplificata-e-accesso-windows).
+
 - **Seguito launcher:** ricomparsa durante l’arresto regolare del vecchio pacchetto; controllo offline qcow2 con check-errors=0, nessuna riparazione o restore, successivo arresto/avvio riuscito. [Evidenze](VERIFICATION.md#25-ottobre--launcher-windows-cache-persistente-e-limite-n1).
 - **Stato:** aperto; assertion `(isv)` in `hvf_vcpu_exec`/hvf.c2378 osservata anche con KMD ufficiale. Nessuna causa attribuita al resize.
 - **Verificato:** ricomparsa durante sostituzione/arresto del 25 ottobre; verifica offline del disco senza errori e successivo avvio con protezioni attive riuscito. Anche arresti ACPI completi riusciti; non sono una soluzione causale.
@@ -71,6 +75,14 @@ Il ciclo RAM protetto 4→2→4 GiB con dati conservati resta la qualifica prece
 - **Native3D:** nel pacchetto finale, 4→2→4 GiB senza reboot; footprint3.862.152.032→3.361.448.704 byte, circa478 MiB recuperati. Rimossi fisicamente1034 MiB hotadded;1014 MiB restano pinned e sono compensati dal balloon. Tutta la capacità ritorna, reusable0/failures0. Probe128 MiB integro per48 letture, anche durante il ritorno; nuova allocazione256 MiB verificata. Desktop1920×1280 nativo, menu Start dopo il ciclo, protezioni confermate. Preservati renderer/server/backend; corrette esclusione EGL Darwin e mappa PCI alta per questo opt-in.
 - **Criterio verificato nello sviluppo:** ciclo runtime completo nell'app IoT prevista, contenuto conservato, ritorno al bisogno e protezioni confermati. Promozione nell’app ordinaria eseguita il25 ottobre; la IoT diventa il default e i vecchi dischi sono eliminati per autorizzazione esplicita. Runtime/driver conservati, avvio protetto e controller attivo confermati; nessuna nuova qualifica estesa WGC/resize.
 - **Evidenze:** [prima valutazione negativa](VERIFICATION.md#25-ottobre--ballooning-e-hotplug-ram-prima-valutazione-protetta), [IoT pulita e RAM reale](VERIFICATION.md#25-ottobre--iot-pulita-balloon-hotplug-e-controllo-automatico), [promozione ordinaria](VERIFICATION.md#25-ottobre--pulizia-definitiva-e-promozione-iot-a-base-principale).
+
+### SYS-004 — Accesso automatico IoT esaurito
+
+- **Stato:** chiuso sulla main dopo ripristino autorizzato e nuovo avvio reale senza password. Credenziale invariata in LSA, AutoAdminLogon1, nessun contatore né password plaintext; Secure Boot/CI attivi e TestSigningfalse.
+- **Evidenza:** setup originale limitato a8 accessi automatici. Sulla main AutoAdminLogon0, AutoLogonCount assente e password Winlogon assente; credenziale originale ancora valida e login riuscito. Esaurimento coerente con il setup/documentazione Microsoft, senza contatore residuo che provi il numero effettivo di accessi. Nessun nesso dimostrato con1 GB RAM.
+- **Prossimo passo:** nessun test aggiuntivo; riaprire soltanto su ricorrenza osservata. Script di ripristino in scripts/restore-autologon.ps1, nessuna password negli argomenti.
+- **Chiusura:** accesso automatico reale nella main, protezioni boot conservate e nessuna password cambiata o pubblicata.
+- **Evidenze:** [semplificazione RAM e accesso](VERIFICATION.md#25-ottobre--ram-semplificata-e-accesso-windows).
 
 ### APP-002 — Esplora file assente e finestre riusate non riconosciute
 

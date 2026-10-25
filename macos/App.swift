@@ -212,6 +212,8 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
             for window in Array(windows.values) {window.retire()}
             windows=[:];earlyFrames=[:];windowApps=[:]
             machine?.closeDesktop();status="Windows spento"
+        }else if case .running=state,!connected {
+            status="Windows acceso · collegamento in attesa"
         }
     }
     private func startMachineObservation(){
@@ -253,9 +255,10 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
             settingsFailed=true;settingsNotice=error.localizedDescription
         }
     }
-    func saveVMSettings(_ settings:MachineSettings){
+    func saveVMSettings(_ requested:MachineSettings){
         guard let machine,machineOperation == nil,!restarting else{return}
         do {
+            var settings=requested;settings.useAutomaticMemoryPolicy()
             try MachineSettingsStore.save(settings,in:machine.directory,machineID:machine.configuration.id,current:machine.configuration.settings)
             loadVMSettings();settingsFailed=false
             settingsNotice=settingsPending ? "Impostazioni salvate. Saranno applicate al prossimo avvio di Windows.":"Modifiche in attesa annullate. Restano i valori attuali."

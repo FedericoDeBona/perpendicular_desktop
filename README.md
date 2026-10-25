@@ -4,11 +4,13 @@ Launcher Mac delle app Windows di una VM locale, con accesso al desktop Windows 
 
 Prima di iniziare o riprendere leggere il [registro dei problemi](docs/KNOWN_ISSUES.md), poi il [piano di lavoro](docs/RESTART_PLAN.md) e la [TODO da mantenere obbligatoriamente aggiornata](docs/TODO.md). Il lavoro prosegue su `main` dalla base scelta dall’utente il 25 ottobre 2026.
 
-La base principale è **Perpendicular 0.2.2**, installata in `/Applications/Perpendicular.app`, con collegamento `Perpendicular.app` sul Desktop. App, strumenti di controllo e build selezionano per default la VM in `~/Library/Application Support/Perpendicular Memory IoT`.
+La base principale è **Perpendicular 0.2.3**, installata in `/Applications/Perpendicular.app`, con collegamento `Perpendicular.app` sul Desktop. App, strumenti di controllo e build selezionano per default la VM in `~/Library/Application Support/Perpendicular Memory IoT`.
 
 La0.2.2 integra l’icona finale «Carbone e cobalto»: documento Icon Composer compilato con i due livelli, fallback ICNS e simbolo nel launcher. Icona e versione osservate nel Finder dopo installazione; nessun avvio della VM per questa modifica.
 
-La sezione Impostazioni sostituisce il pannello dei processi. Permette anche RAM iniziale di1 GB: è una configurazione disponibile per la prova dell’utente, non un avvio già qualificato. I valori salvati restano separati dalla configurazione corrente finché Windows non è spento; il salvataggio non riavvia né riduce la memoria della sessione aperta. Catalogo installato osservato; verifica automatica completa del pannello interrotta da errore dello strumento UI. [Verifiche e limiti](docs/VERIFICATION.md#25-ottobre--catalogo-unico-e-impostazioni-cpuram).
+La sezione Impostazioni sostituisce il pannello dei processi. La0.2.3 mostra un solo controllo principale **RAM massima**, inclusivo della RAM iniziale, che resta sotto Avanzate. Minimo e riserva sono automatici. Il limite riguarda la RAM Windows: grafica e servizi aggiungono consumo sul Mac. I valori salvati si applicano soltanto al prossimo avvio dopo arresto confermato. Base1 GB e aggiunta automatica fino a4 GB osservate nella main protetta; qualifica visiva completa del nuovo pannello ancora limitata dal crash del servizio di automazione UI.
+
+Ripristinato l’accesso automatico Windows senza scadenza, con password originale conservata in LSA: nuovo avvio al desktop senza reinserirla, Secure Boot/CI attivi e modalità test disattivata. Il riavvio ha riprodotto il difetto HVF già noto, distinto dall’accesso automatico. [Verifiche e limiti](docs/VERIFICATION.md#25-ottobre--ram-semplificata-e-accesso-windows).
 
 Questa VM è una nuova Windows 11 IoT Enterprise LTSC ARM64, senza importare i Tools Parallels. Desktop Native3D, driver Microsoft-signed, Secure Boot e Code Integrity attivi, modalità test disattivata. La [RAM dinamica](memory/README.md) è abilitata nella configurazione principale: ciclo effettivo 4→2→4 GiB senza riavvio e dati conservati verificato prima della promozione. Hot-unplug può rimanere parziale per pagine pinned; il balloon compensa senza rimuoverle forzatamente.
 

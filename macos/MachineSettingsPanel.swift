@@ -8,11 +8,15 @@ extension Notification.Name {
 struct MachineSettingsPanel:View {
     @ObservedObject var model:ApplicationModel
     @State private var draft=MachineSettings(cpus:1,initialMemoryMiB:2048,automaticMemory:true,maximumMemoryMiB:4096,backgroundMemoryMiB:1536,reserveMemoryMiB:512)
+    @State private var advanced=false
     private func number(_ key:WritableKeyPath<MachineSettings,Int>)->Binding<Int>{
         Binding(get:{draft[keyPath:key]},set:{draft[keyPath:key]=$0;model.settingsNotice=nil})
     }
     private func memory(_ value:Int)->String {
         value%1024 == 0 ? "\(value/1024) GB":"\(value) MB"
+    }
+    private func choices(from minimum:Int,through maximum:Int,current:Int)->[Int]{
+        Array(Set([1024,1536,2048,3072,4096,6144,8192,12288,16384,current].filter{minimum...maximum ~= $0})).sorted()
     }
     var body:some View {
         ScrollView {
@@ -26,33 +30,31 @@ struct MachineSettingsPanel:View {
                     }
                     GroupBox {
                         VStack(alignment:.leading,spacing:16){
-                            Stepper(value:number(\.cpus),in:1...MachineSettings.cpuLimit){LabeledContent("Processori",value:"\(draft.cpus)")}
-                            Divider()
-                            Stepper(value:number(\.initialMemoryMiB),in:1024...MachineSettings.memoryLimitMiB,step:128){
-                                LabeledContent("RAM all’avvio",value:memory(draft.initialMemoryMiB))
+                            Picker("Processori",selection:number(\.cpus)){
+                                ForEach(1...MachineSettings.cpuLimit,id:\.self){Text("\($0)").tag($0)}
                             }
-                            Text("Puoi scegliere 1 GB (1024 MB) per la tua prova. L’avvio con questa quantità non è ancora stato verificato su questa VM.")
-                                .font(.caption).foregroundStyle(.secondary)
                         }.padding(12)
-                    }label:{Label("Avvio",systemImage:"power")}
+                    }label:{Label("Processori",systemImage:"cpu")}
                     GroupBox {
                         VStack(alignment:.leading,spacing:16){
-                            Toggle("RAM automatica",isOn:$draft.automaticMemory)
-                            Text("Aggiunge memoria quando serve e cerca di restituirla al Mac in background.")
+                            Picker("RAM massima",selection:number(\.maximumMemoryMiB)){
+                                ForEach(choices(from:draft.initialMemoryMiB,through:min(MachineSettings.memoryLimitMiB,draft.initialMemoryMiB+8192),current:draft.maximumMemoryMiB),id:\.self){Text(memory($0)).tag($0)}
+                            }
+                            Text("È il limite totale della RAM di Windows, inclusa quella iniziale. Perpendicular aggiunge e restituisce memoria automaticamente.")
                                 .font(.caption).foregroundStyle(.secondary)
-                            if draft.automaticMemory {
-                                Divider()
-                                Stepper(value:number(\.maximumMemoryMiB),in:1152...MachineSettings.memoryLimitMiB,step:128){
-                                    LabeledContent("Limite RAM",value:memory(draft.maximumMemoryMiB))
+                            Text("La VM usa anche memoria per grafica e servizi: il consumo complessivo sul Mac può essere superiore a questo limite.")
+                                .font(.caption).foregroundStyle(.secondary)
+                            if draft.maximumMemoryMiB == draft.initialMemoryMiB {
+                                Text("Con il massimo uguale alla RAM iniziale, la memoria rimane fissa.").font(.caption).foregroundStyle(.secondary)
+                            }
+                            DisclosureGroup("Avanzate",isExpanded:$advanced){
+                                VStack(alignment:.leading,spacing:10){
+                                    Picker("RAM all’avvio",selection:number(\.initialMemoryMiB)){
+                                        ForEach(choices(from:max(1024,draft.maximumMemoryMiB-8192),through:draft.maximumMemoryMiB,current:draft.initialMemoryMiB),id:\.self){Text(memory($0)).tag($0)}
+                                    }
+                                    Text("Quantità con cui Windows si avvia prima che la gestione automatica sia disponibile.").font(.caption).foregroundStyle(.secondary)
                                 }
-                                Stepper(value:number(\.backgroundMemoryMiB),in:1024...MachineSettings.memoryLimitMiB,step:128){
-                                    LabeledContent("Minimo in background",value:memory(draft.backgroundMemoryMiB))
-                                }
-                                Stepper(value:number(\.reserveMemoryMiB),in:256...2048,step:128){
-                                    LabeledContent("Riserva disponibile",value:memory(draft.reserveMemoryMiB))
-                                }
-                                Text("Il limite include la RAM iniziale. Il minimo è un obiettivo: Windows può trattenere memoria ancora in uso. La riserva lascia spazio alle nuove richieste delle app.")
-                                    .font(.caption).foregroundStyle(.secondary)
+                                .padding(.top,10)
                             }
                         }.padding(12)
                     }label:{Label("Memoria",systemImage:"memorychip")}
@@ -60,14 +62,12 @@ struct MachineSettingsPanel:View {
                         GroupBox {
                             VStack(spacing:12){
                                 LabeledContent("Windows",value:model.machineStateLabel)
-                                LabeledContent("Processori configurati",value:"\(current.cpus)")
-                                LabeledContent("RAM iniziale configurata",value:memory(current.initialMemoryMiB))
+                                LabeledContent("RAM all’avvio",value:memory(current.initialMemoryMiB))
+                                LabeledContent("RAM massima",value:memory(current.automaticMemory ? current.maximumMemoryMiB:current.initialMemoryMiB))
                                 if model.vmMemoryState["ready"] as? Bool == true {
                                     Divider()
                                     if let value=model.vmMemoryState["actualMiB"] as? UInt64 {LabeledContent("RAM assegnata",value:memory(Int(value)))}
                                     if let value=model.vmMemoryState["guestAvailableMiB"] as? UInt64 {LabeledContent("Disponibile in Windows",value:memory(Int(value)))}
-                                    if let value=model.vmMemoryState["pluggedMiB"] as? UInt64 {LabeledContent("RAM aggiunta",value:memory(Int(value)))}
-                                    if let value=model.vmMemoryState["balloonMiB"] as? UInt64 {LabeledContent("Nel balloon",value:memory(Int(value)))}
                                     if model.vmMemoryState["pending"] as? Bool == true {Text("Adattamento della memoria in corso").font(.caption).foregroundStyle(.secondary)}
                                 }else if current.automaticMemory {
                                     Text(model.vmMemoryState["error"] as? String ?? "I valori della memoria saranno disponibili quando Windows sarà collegato.")

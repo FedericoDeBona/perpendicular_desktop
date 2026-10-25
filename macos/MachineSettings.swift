@@ -25,6 +25,11 @@ struct MachineSettings:Codable,Equatable,Sendable {
     var dynamicMemory:DynamicMemoryConfiguration? {
         automaticMemory ? .init(hotplugMiB:maximumMemoryMiB-initialMemoryMiB,backgroundMiB:backgroundMemoryMiB,reserveMiB:reserveMemoryMiB):nil
     }
+    mutating func useAutomaticMemoryPolicy(){
+        automaticMemory=maximumMemoryMiB>initialMemoryMiB
+        backgroundMemoryMiB=1024
+        reserveMemoryMiB=512
+    }
     func validate()throws {
         guard (1...Self.cpuLimit).contains(cpus) else{throw Self.failure("Scegli da 1 a \(Self.cpuLimit) processori.")}
         guard (1024...Self.memoryLimitMiB).contains(initialMemoryMiB),initialMemoryMiB%128==0 else {

@@ -27,7 +27,7 @@ struct MachineConfiguration: Codable {
     let dynamicMemory:DynamicMemoryConfiguration?
     var settings:MachineSettings {
         .init(cpus:cpus,initialMemoryMiB:memoryMiB,automaticMemory:dynamicMemory != nil,
-              maximumMemoryMiB:memoryMiB+(dynamicMemory?.hotplugMiB ?? 2048),
+              maximumMemoryMiB:memoryMiB+(dynamicMemory?.hotplugMiB ?? 0),
               backgroundMemoryMiB:dynamicMemory?.backgroundMiB ?? min(memoryMiB,1536),
               reserveMemoryMiB:dynamicMemory?.reserveMiB ?? 512)
     }

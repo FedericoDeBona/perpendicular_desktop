@@ -7,7 +7,12 @@ import Foundation
         defer{try? FileManager.default.removeItem(at:root)}
         let current=MachineSettings(cpus:1,initialMemoryMiB:2048,automaticMemory:true,maximumMemoryMiB:4096,backgroundMemoryMiB:1536,reserveMemoryMiB:512)
         var future=current;future.initialMemoryMiB=1024
+        future.useAutomaticMemoryPolicy()
+        precondition(future.automaticMemory && future.backgroundMemoryMiB==1024 && future.reserveMemoryMiB==512 && future.initialMemoryMiB==1024 && future.maximumMemoryMiB==4096)
         try future.validate()
+        var capped=future;capped.maximumMemoryMiB=capped.initialMemoryMiB;capped.useAutomaticMemoryPolicy()
+        try capped.validate()
+        precondition(!capped.automaticMemory && capped.dynamicMemory == nil)
         let original=Data(#"{"id":"fixture","cpus":1,"memoryMiB":2048,"disk":"keep-disk","variables":"keep-efi","tpmStateFile":"keep-tpm","token":"sentinel","extra":{"keep":true},"dynamicMemory":{"hotplugMiB":2048,"backgroundMiB":1536,"reserveMiB":512}}"#.utf8)
         let file=root.appendingPathComponent("machine.json")
         try original.write(to:file)
