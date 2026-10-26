@@ -69,6 +69,7 @@ struct MixedDisplayPlan {
     let hosts:[HostDisplay]
     let devices:[String]
     let scale:Int
+    let unavailableHosts:Int
 
     static func rasterScale(_ hosts:[HostDisplay])->Int {
         hosts.allSatisfy{fits($0.frame.size,scale:2)} ? 2:1
@@ -84,15 +85,25 @@ struct MixedDisplayPlan {
     private static func failure(_ text:String)->NSError {NSError(domain:"Displays",code:1,userInfo:[NSLocalizedDescriptionKey:text])}
 
     init(hosts:[HostDisplay],bindings:AppDisplayBindings,topology:[String:Any])throws {
-        guard !hosts.isEmpty,hosts.count==bindings.displays.count,
-              Set(bindings.displays.map(\.hostID)).count==hosts.count,
-              Set(bindings.displays.map(\.slot)).count==hosts.count,
-              let paths=topology["paths"] as? [[String:Any]],paths.count==hosts.count+1,
-              let monitors=(topology["monitors"] as? [String:Any])?["displays"] as? [[String:Any]] else {
-            throw Self.failure("La configurazione degli schermi non è completa. Riavvia Windows dopo aver collegato gli schermi.")
+        guard !hosts.isEmpty,
+              Set(bindings.displays.map(\.hostID)).count==bindings.displays.count,
+              Set(bindings.displays.map(\.slot)).count==bindings.displays.count,
+              let paths=topology["paths"] as? [[String:Any]],(2...16).contains(paths.count),
+              let monitors=(topology["monitors"] as? [String:Any])?["displays"] as? [[String:Any]],
+              monitors.count==paths.count else {
+            throw Self.failure("Impossibile verificare la configurazione degli schermi Windows.")
         }
-        let scale=Self.rasterScale(hosts)
-        guard hosts.allSatisfy({Self.fits($0.frame.size,scale:scale) && $0.stableID != nil}) else {
+        // A newly attached Mac must not invalidate an already working output.
+        // Admit only bindings whose real guest adapter is healthy. Keep every
+        // other active guest output in the layout, without mapping it to a Mac.
+        let available=hosts.filter { host in
+            guard let binding=bindings.displays.first(where:{$0.hostID==host.stableID}),
+                  (9...23).contains(binding.slot) else{return false}
+            return paths.contains{($0["pciAddress"] as? Int)==binding.slot<<16 && $0["service"] as? String=="VioGpuDod" && $0["problem"] as? Int==0}
+        }
+        guard !available.isEmpty else{throw Self.failure("Nessuno schermo per le app è disponibile. Riavvia Windows per aggiornare gli schermi collegati.")}
+        let scale=Self.rasterScale(available)
+        guard available.allSatisfy({Self.fits($0.frame.size,scale:scale) && $0.stableID != nil}) else {
             throw Self.failure("La dimensione di uno schermo supera il limite grafico corrente.")
         }
         func path(slot:Int,service:String)throws->[String:Any] {
@@ -115,8 +126,8 @@ struct MixedDisplayPlan {
         var devices:[String]=[]
         // Place the reserved desktop against the leftmost app monitor. The
         // app monitors themselves preserve the actual Mac arrangement.
-        let anchor=hosts.min{a,b in a.frame.minX == b.frame.minX ? a.frame.maxY>b.frame.maxY:a.frame.minX<b.frame.minX}!
-        for host in hosts {
+        let anchor=available.min{a,b in a.frame.minX == b.frame.minX ? a.frame.maxY>b.frame.maxY:a.frame.minX<b.frame.minX}!
+        for host in available {
             guard let binding=bindings.displays.first(where:{$0.hostID==host.stableID}),
                   (9...23).contains(binding.slot) else {throw Self.failure("Gli schermi sono cambiati. Riavvia Windows per aggiornarli.")}
             let device=try path(slot:binding.slot,service:"VioGpuDod")["device"] as! String
@@ -130,8 +141,17 @@ struct MixedDisplayPlan {
                 "height":Int((host.frame.height*CGFloat(scale)).rounded()),"primary":false,"dpi":96*scale,"workArea":area])
             devices.append(device)
         }
-        guard Set(devices).count==hosts.count,monitors.count==layout.count else {throw Self.failure("Le uscite Windows non sono distinte.")}
-        self.layout=layout;self.hosts=hosts;self.devices=devices;self.scale=scale
+        for monitor in monitors where !layout.contains(where:{$0["device"] as? String==monitor["device"] as? String}) {
+            guard let device=monitor["device"] as? String,let w=monitor["width"] as? Int,let h=monitor["height"] as? Int,
+                  let adapter=paths.first(where:{$0["device"] as? String==device}),adapter["service"] as? String=="VioGpuDod",
+                  let address=adapter["pciAddress"] as? Int,bindings.displays.contains(where:{$0.slot<<16==address}) else {
+                throw Self.failure("Un’uscita Windows non corrisponde alla configurazione della macchina.")
+            }
+            let right=layout.map{($0["x"] as? Int ?? 0)+($0["width"] as? Int ?? 0)}.max() ?? width
+            layout.append(["device":device,"x":right,"y":0,"width":w,"height":h,"primary":false])
+        }
+        guard Set(devices).count==available.count,monitors.count==layout.count else {throw Self.failure("Le uscite Windows non sono distinte.")}
+        self.layout=layout;self.hosts=available;self.devices=devices;self.scale=scale;self.unavailableHosts=hosts.count-available.count
     }
 
     func mappings(snapshot:[String:Any])throws->[SharedDisplay] {

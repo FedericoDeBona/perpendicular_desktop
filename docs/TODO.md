@@ -1,5 +1,7 @@
 # TODO — feature e correzioni
 
+**Priorità corrente: stabilità dell'intero percorso app native, richiesta esplicita del26 ottobre.** Avvio, cambi schermi e attese «non pronta» devono essere affrontati insieme (TODO-001/002/008, WIN-002/003, GFX-003). Primo blocco riprodotto: tre monitor Mac contro una sola uscita app nella VM; il controllo tutto-o-niente disabilitava ogni lancio. Ora il mapping ammette soltanto le uscite reali verificate e conserva l'uso di quelle disponibili. Prima distribuzione:1/3 monitor pronto, Notepad aperto/12frame/transition=false, nessun reboot. Restano da configurare le altre uscite e qualificare recupero/riapertura su più app; non dichiarato completato dalla singola apertura. [Evidenze](VERIFICATION.md#26-ottobre--stabilizzazione-del-percorso-app-native).
+
 Ultimo aggiornamento: **26 ottobre 2026**. Responsabile dell'aggiornamento: l'agente che lavora al progetto, a ogni cambiamento pertinente, come richiesto in [AGENTS.md](../AGENTS.md).
 
 Questo è l'elenco operativo delle attività. [KNOWN_ISSUES.md](KNOWN_ISSUES.md) conserva diagnosi e dettagli dei difetti, [VERIFICATION.md](VERIFICATION.md) le evidenze e i fallimenti, [RESTART_PLAN.md](RESTART_PLAN.md) la base operativa. Gli ID qui sotto sono stabili e rimandano ai problemi esistenti: non sostituiscono né duplicano il registro dei difetti.

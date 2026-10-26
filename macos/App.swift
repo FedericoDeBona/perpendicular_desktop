@@ -369,7 +369,8 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
             localResponse(["ok":true,"result":["connected":connected,"machineRunning":running,
                 "machineState":machineStateLabel,"machineOperation":machineOperation as Any? ?? NSNull(),
                 "status":status,"displayStatus":displayStatus,"primaryMatchesHost":sharedDisplay != nil,
-                "mappedDisplays":sharedDisplays.count,"displaySetupComplete":machine?.mixedDisplaysEnabled == true ? !sharedDisplays.isEmpty:sharedDisplay != nil,
+                "mappedDisplays":sharedDisplays.count,"displaySetupComplete":machine?.mixedDisplaysEnabled == true ? sharedDisplays.count==HostDisplay.current().count:sharedDisplay != nil,
+                "appLaunchReady":machine?.mixedDisplaysEnabled != true || !sharedDisplays.isEmpty,
                 "memory":memoryController?.state ?? ["enabled":false],
                 "vmSettings":["pending":settingsPending,"initialMemoryMiB":vmSettings?.initialMemoryMiB ?? 0,"maximumMemoryMiB":vmSettings?.maximumMemoryMiB ?? 0,"cpus":vmSettings?.cpus ?? 0],
                 "windowCount":windows.count,"capabilities":guestCapabilities,
@@ -805,7 +806,9 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
                             }else{monitor["label"]="Desktop Windows";monitor["appScreen"]=false}
                             return monitor
                         }
-                        self.displayStatus="\(mappings.count) schermi Mac collegati, desktop Windows separato."
+                        self.displayStatus=plan.unavailableHosts==0 ? "\(mappings.count) schermi Mac collegati, desktop Windows separato.":
+                            "\(mappings.count) di \(mappings.count+plan.unavailableHosts) schermi pronti. Puoi aprire le app sugli schermi disponibili; riavvia Windows per aggiungere gli altri."
+                        if plan.unavailableHosts>0 {self.launcherNotice=self.displayStatus}
                         for window in self.windows.values {
                             window.setSharedDisplays(mappings);window.setDisplayUpdating(false)
                             if self.machine.desktopIsKey != true,let first=mappings.first {window.placeOnAppDisplayIfNeeded(first)}
