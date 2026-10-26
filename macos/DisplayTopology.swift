@@ -124,14 +124,17 @@ struct MixedDisplayPlan {
         // raster. Only the app displays need the common 1-DIP/1-point scale.
         var layout:[[String:Any]]=[["device":primaryName,"x":0,"y":0,"width":width,"height":height,"primary":true]]
         var devices:[String]=[]
-        // Place the reserved desktop against the leftmost app monitor. The
-        // app monitors themselves preserve the actual Mac arrangement.
+        // The app monitors preserve the actual Mac arrangement. Their group
+        // touches the reserved desktop independently of its changing width.
         let anchor=available.min{a,b in a.frame.minX == b.frame.minX ? a.frame.maxY>b.frame.maxY:a.frame.minX<b.frame.minX}!
+        // Keep app outputs to the left of x=0. Their right edge touches the
+        // primary, so Windows keeps a connected topology at every desktop size.
+        let appOriginX = -Int(((available.map{$0.frame.maxX}.max()!-anchor.frame.minX)*CGFloat(scale)).rounded())
         for host in available {
             guard let binding=bindings.displays.first(where:{$0.hostID==host.stableID}),
                   (9...23).contains(binding.slot) else {throw Self.failure("Gli schermi sono cambiati. Riavvia Windows per aggiornarli.")}
             let device=try path(slot:binding.slot,service:"VioGpuDod")["device"] as! String
-            let x=width+Int(((host.frame.minX-anchor.frame.minX)*CGFloat(scale)).rounded())
+            let x=appOriginX+Int(((host.frame.minX-anchor.frame.minX)*CGFloat(scale)).rounded())
             let y=Int(((anchor.frame.maxY-host.frame.maxY)*CGFloat(scale)).rounded())
             let work=host.workArea
             let area:[String:Int]=["x":x+Int(((work.minX-host.frame.minX)*CGFloat(scale)).rounded()),
@@ -147,8 +150,8 @@ struct MixedDisplayPlan {
                   let address=adapter["pciAddress"] as? Int,bindings.displays.contains(where:{$0.slot<<16==address}) else {
                 throw Self.failure("Un’uscita Windows non corrisponde alla configurazione della macchina.")
             }
-            let right=layout.map{($0["x"] as? Int ?? 0)+($0["width"] as? Int ?? 0)}.max() ?? width
-            layout.append(["device":device,"x":right,"y":0,"width":w,"height":h,"primary":false])
+            let left=(layout.compactMap{$0["x"] as? Int}.min() ?? 0)-w
+            layout.append(["device":device,"x":left,"y":0,"width":w,"height":h,"primary":false])
         }
         guard Set(devices).count==available.count,monitors.count==layout.count else {throw Self.failure("Le uscite Windows non sono distinte.")}
         self.layout=layout;self.hosts=available;self.devices=devices;self.scale=scale;self.unavailableHosts=hosts.count-available.count

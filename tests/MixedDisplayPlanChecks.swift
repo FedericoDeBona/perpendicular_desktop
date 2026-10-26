@@ -25,6 +25,11 @@ import AppKit
             _=try MixedDisplayPlan(hosts:[first],bindings:AppDisplayBindings(machineID:"test",pid:1,displays:[binding,binding]),topology:topology)
             preconditionFailure("Duplicate device identities must be rejected")
         } catch {}
+        var widerDesktop=desktop;widerDesktop["width"]=3500
+        let wider=try MixedDisplayPlan(hosts:[first],bindings:bindings,topology:["paths":[widerDesktop,app],"monitors":["displays":[widerDesktop,app]]])
+        precondition(connected.layout[1]["x"] as? Int==wider.layout[1]["x"] as? Int,
+                     "Resizing the reserved desktop must not move app displays")
+        precondition((wider.layout[1]["x"] as! Int)+(wider.layout[1]["width"] as! Int)==0,"App displays must touch the left of the primary without depending on its raster")
         let applied=connected.layout.map { fields -> [String:Any] in
             var actual=fields
             let area=fields["workArea"] ?? ["x":fields["x"]!,"y":fields["y"]!,"width":fields["width"]!,"height":fields["height"]!]

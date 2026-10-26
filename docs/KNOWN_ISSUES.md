@@ -67,6 +67,8 @@ Il ciclo RAM protetto 4→2→4 GiB con dati conservati resta la qualifica prece
 
 ### GFX-006 — Risoluzione e DPI errati dopo installazione a caldo
 
+- **Regressione0.2.9 corretta nel ciclo locale0.2.10:** il resize dinamico era escluso in modalità mista dalla0.2.8. Ora primaria verificata separatamente dai mapping, gruppo app contiguo a sinistra e indipendente dalla larghezza desktop. App ordinaria:1920×1280→1470×1782→fullscreen2940×1846→1470×1782, con scanout concorde, Start/testo e Notepad conservata. Nessun apply aggiuntivo durante i resize. GFX-006 generale resta aperto: icone Shell iniziali assenti in uno screenshot dopo reconnect, posizione/conservazione non qualificate; altre disposizioni e migrazione con app già aperte da verificare. [Diario](VERIFICATION.md#26-ottobre--regressione-della-risoluzione-dinamica-desktop-windows).
+
 - **Seguito promozione IoT:** desktop nativo visibile2048×1152, richiesta della vista non confermata e avviso nel launcher dopo riapertura. Nessuna modifica alla logica resize o al runtime grafico in questa pulizia; causa non isolata, nessuna regressione causale attribuita ai soli nuovi percorsi. Build qualificata originale conservata. [Diario](VERIFICATION.md#25-ottobre--pulizia-definitiva-e-promozione-iot-a-base-principale).
 - **Stato:** aperto per la procedura di aggiornamento e la conferma del modo; recupero dopo avvio completo precedentemente verificato nel clone. L’installazione a caldo può lasciare 1024×768/DPI96 e fallire l’applicazione di un modo pur accettato nella verifica API.
 - **Prossimo passo:** prima di distribuire un aggiornamento definire il riavvio necessario e confermare geometria/DPI effettivi prima di riabilitare input e trasformazioni condivise.
@@ -274,6 +276,8 @@ Queste voci conservano limiti non risolti, senza richiedere di ripristinare codi
 - **Evidenze:** [verifica e limiti](VERIFICATION.md#26-ottobre--cloaking-del-pulsante-nella-taskbar-windows).
 
 ### WIN-003 — Monitor N+1 e drag fra scale diverse
+
+- **0.2.10, desktop dinamico:** gruppo app a coordinate negative confermato su questi tre Mac scala2; raster della primaria ora segue vista/fullscreen senza spostare Notepad Mac nel ciclo verificato. Migrazione iniziale da destra a sinistra avvenuta con windows[]; app già aperte durante tale migrazione non qualificate. Restano disposizione fisica diversa e ricollocazione Shell/icone durante il reconnect della primaria: uno screenshot dopo il ritorno non mostra le icone iniziali, senza prova della loro posizione effettiva. Prossimo passo mirato sul desktop, mantenendo il resize ripristinato. [Evidenze](VERIFICATION.md#26-ottobre--regressione-della-risoluzione-dinamica-desktop-windows).
 
 - **Altra causa comune riprodotta:** Apri Windows attivava il vecchio resize/reconnect della primaria e acceptDisplay sovrascriveva le mappe dei controller con il mapping singolo, pur lasciando mappedDisplays globale3. Finestre ricollocate sulla primaria, input sospeso. Candidata corretta conserva il raster del desktop completo e ne scala soltanto la vista in modalità mista; uno snapshot primario non può sostituire N+1. Apertura reale ora conserva posizioni/stato di entrambe le app,1lettura/0apply/1invalidazione iniziale invariati; taskbar senza le app Mac. [Diario](VERIFICATION.md#26-ottobre--riapertura-stabilizzazione-input-resize-e-schermi-fisici).
 

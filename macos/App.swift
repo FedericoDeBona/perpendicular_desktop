@@ -822,10 +822,15 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
             window.setSharedDisplays(mappings);window.setDisplayUpdating(false)
             if machine.desktopIsKey != true,let first=mappings.first {window.placeOnAppDisplayIfNeeded(first)}
         }
+        if let primary=launcherDisplays.first(where:{$0["primary"] as? Bool == true}),
+           let width=primary["width"] as? Int,let height=primary["height"] as? Int {
+            desktopConfirmed=NSSize(width:width,height:height)
+        }
         layoutChildren()
+        scheduleDesktopResize()
     }
     private func readMixedDisplay(attempt:Int=0){
-        guard connected,let epoch=displayEpoch,!mixedDisplayConfiguring else{return}
+        guard connected,let epoch=displayEpoch,!mixedDisplayConfiguring,desktopResizeRequest == nil else{return}
         guard guestCapabilities["displayTopology"] == true,let bindings=machine.appDisplayBindings else {
             failMixedDisplay("La configurazione multischermo richiede gli strumenti Windows aggiornati e un nuovo avvio.");return
         }
@@ -884,7 +889,7 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
         }
     }
     private func scheduleDesktopResize(){
-        guard desktopOnly,machine?.mixedDisplaysEnabled != true,connected,displayConfigurable,desktopResizeRequest == nil,desktopReadRequest == nil,
+        guard (desktopOnly || machine?.mixedDisplaysEnabled == true),connected,displayConfigurable,!mixedDisplayConfiguring,desktopResizeRequest == nil,desktopReadRequest == nil,
               desktopSize.width>0,desktopSize.height>0,
               machine?.desktopState["visible"] as? Bool == true else{return}
         desktopResizeTask?.cancel()
@@ -916,10 +921,14 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
                     self.bridge.command("display_info",timeout:.seconds(5)){result in
                         guard self.displayEpoch == epoch,self.desktopResizeRequest == request else{continuation.resume(returning:false);return}
                         if case .success(let reply)=result,let snapshot=reply["value"] as? [String:Any],
-                           let primary=(snapshot["displays"] as? [[String:Any]])?.first,
+                           let primary=(snapshot["displays"] as? [[String:Any]])?.first(where:{$0["primary"] as? Bool == true}),
                            primary["width"] as? Int == Int(mode.width),primary["height"] as? Int == Int(mode.height) {
                             self.machine?.finishDesktopResolution();self.desktopResizeRequest=nil
-                            self.desktopReadAgain=false;self.acceptDisplay(snapshot)
+                            self.desktopReadAgain=false
+                            if self.launcherNotice=="Windows non ha confermato la risoluzione richiesta." {self.launcherNotice=nil}
+                            if self.machine?.mixedDisplaysEnabled == true {
+                                self.desktopConfirmed=mode;self.readMixedDisplay()
+                            }else{self.acceptDisplay(snapshot)}
                             continuation.resume(returning:true)
                         }else if case .success=result {
                             // The monitor notification may complete after the
