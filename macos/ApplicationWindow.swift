@@ -98,9 +98,7 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
     private var placedDialog=false
     private var gesture:MouseGesture?
     private var inputBlocked=false
-    private var observedInputPending=0
     private var inputRequests=0
-    private var inputAccepted=0
     private var inputRejected=0
     private var lastInputEvent=""
     private var lastInputError=""
@@ -659,20 +657,15 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
     private func send(_ value:[String:Any]){
         var packet=value;packet["window"]=id
         let event=value["event"] as? String ?? ""
-        // Observe discrete actions without recording text or adding a pending
-        // reply for every pointer movement.
-        guard ["button","key","text","chord"].contains(event),observedInputPending<8 else {
-            bridge.command("input",packet);return
+        // Diagnostics must not reserve command slots or gate user input.
+        // Observe errors from the existing reply stream, without storing text.
+        if ["button","key","text","chord"].contains(event) {
+            inputRequests+=1;lastInputEvent=event
         }
-        observedInputPending+=1;inputRequests+=1;lastInputEvent=event
-        bridge.command("input",packet){[weak self] result in
-            guard let self else{return}
-            self.observedInputPending-=1
-            switch result {
-            case .success:self.inputAccepted+=1;self.lastInputError=""
-            case .failure(let error):self.inputRejected+=1;self.lastInputError=error.localizedDescription
-            }
-        }
+        bridge.command("input",packet)
+    }
+    func recordInputFailure(_ message:String){
+        inputRejected+=1;lastInputError=message
     }
     private func clearPresentationText(){
         presentationTextTimeout?.cancel();presentationTextTimeout=nil
@@ -1072,7 +1065,7 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
     var presentationState:[String:Any] {
         ["transitionActive":transitionActive,"displayUpdating":displayUpdating,
          "inputBlocked":inputBlocked,"deferredInputCount":deferredInput.count,
-         "inputRequests":inputRequests,"inputAccepted":inputAccepted,"inputRejected":inputRejected,
+         "inputRequests":inputRequests,"inputRejected":inputRejected,
          "lastInputEvent":lastInputEvent,"lastInputError":lastInputError,
          "keyWindow":window.isKeyWindow,"contentFocused":window.firstResponder === content,"inputSuspended":content.inputSuspended,
          "presentationTextBytes":presentationTextBytes,"presentationTextBuffered":presentationTextBuffered,

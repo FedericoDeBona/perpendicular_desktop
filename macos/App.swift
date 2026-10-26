@@ -1159,6 +1159,10 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
                let app=apps.first(where:{$0.id == id}) {beginOpening(app)}
         case "reply":
             if value["ok"] as? Bool == false,value["operation"] as? String == "input",
+               let id=value["window"] as? String,let message=value["message"] as? String {
+                windows[id]?.recordInputFailure(message)
+            }
+            if value["ok"] as? Bool == false,value["operation"] as? String == "input",
                value["message"] as? String == "Windows did not grant this window keyboard focus" {inputFocusFailed()}
         case "window_notice":
             // A recovery warning is not a stopped capture. It can arrive after
