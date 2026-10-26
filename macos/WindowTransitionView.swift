@@ -8,10 +8,10 @@ final class WindowTransitionView:NSVisualEffectView {
     private let title=NSTextField(labelWithString:"App Windows")
     private let detail=NSTextField(labelWithString:"Preparazione della finestra…")
     private let recoveryButton=NSButton(title:"Apri Windows",target:nil,action:nil)
-    private let revealButton=NSButton(title:"Mostra comunque",target:nil,action:nil)
+    private let revealButton=NSButton(title:"Riprova",target:nil,action:nil)
     private let actions=NSStackView()
     var recovery:(()->Void)?
-    var reveal:(()->Void)?
+    var retry:(()->Void)?
 
     override init(frame:NSRect){
         super.init(frame:frame)
@@ -59,9 +59,9 @@ final class WindowTransitionView:NSVisualEffectView {
         detail.stringValue=message;detail.isHidden=true;actions.isHidden=true;ring.isHidden=false;ring.start()
         setAccessibilityLabel(message)
     }
-    func stalled(_ message:String,canReveal:Bool){
+    func stalled(_ message:String,canRetry:Bool){
         detail.stringValue=message;detail.isHidden=false;ring.stop();ring.isHidden=true
-        revealButton.isHidden = !canReveal;actions.isHidden=false
+        revealButton.isHidden = !canRetry;actions.isHidden=false
         setAccessibilityLabel(message)
     }
     func finish(completed:@escaping @MainActor @Sendable ()->Void){
@@ -72,7 +72,7 @@ final class WindowTransitionView:NSVisualEffectView {
         },completionHandler:{Task{@MainActor in completed()}})
     }
     @objc private func openRecovery(){recovery?()}
-    @objc private func showContent(){reveal?()}
+    @objc private func showContent(){retry?()}
     override func resetCursorRects(){addCursorRect(bounds,cursor:.arrow)}
 }
 

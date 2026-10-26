@@ -355,11 +355,11 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
               let command=request["command"] as? String else {
             localResponse(["ok":false,"error":"Expected a JSON command."],reply:reply);return
         }
-        let allowed:Set<String>=["status","memory_status","execute","display_info","display_topology","driver_info","graphics_info","geometry_snapshot","application_status","process_list","process_terminate","pipeline_clock"]
+        let allowed:Set<String>=["status","memory_status","execute","display_info","display_topology","driver_info","graphics_info","geometry_snapshot","application_status","process_list","process_terminate","pipeline_clock","window_refresh"]
         guard allowed.contains(command) else {
             localResponse(["ok":false,"error":"This local command is not supported."],reply:reply);return
         }
-        let fields:Set<String>=command == "execute" ? ["command","executable","args","timeoutSeconds"]:command == "process_terminate" ? ["command","pid","creation"]:["command"]
+        let fields:Set<String>=command == "execute" ? ["command","executable","args","timeoutSeconds"]:command == "process_terminate" ? ["command","pid","creation"]:command == "window_refresh" ? ["command","window"]:["command"]
         guard Set(request.keys).isSubset(of:fields) else {
             localResponse(["ok":false,"error":"Unexpected command fields."],reply:reply);return
         }
@@ -376,6 +376,7 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
                 "windowCount":windows.count,"capabilities":guestCapabilities,
                 "frameChannel":bridge?.separateFrames ?? false,
                 "windowGPU":NativeWindowFrames.shared.diagnostics,
+                "windowGPUCache":NativeWindowFrames.shared.cacheDiagnostics,
                 "launcher":["apps":apps.map{["id":$0.id,"name":$0.name,"key":$0.key,"essential":$0.essential]},"iconCacheHits":iconCacheHits,"iconFetches":iconFetches,"cachedIcons":applicationIcons.count,"recent":launcherPreferences.recent(apps).map(\.id)],
                 "desktop":machine?.desktopState ?? [:],
                 "lastCommandRTTMilliseconds":bridge?.lastRoundTripMilliseconds ?? 0,
@@ -393,6 +394,13 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
                 case .failure(let error):self?.localResponse(["ok":false,"error":error.localizedDescription],reply:reply)
                 }
             };return
+        }
+        if command == "window_refresh" {
+            guard bridge.windowRefreshAvailable,let id=request["window"] as? String,windows[id] != nil else {
+                localResponse(["ok":false,"error":"Expected an active native window and current guest tools."],reply:reply);return
+            }
+            bridge.command(command,["window":id],timeout:.seconds(3)){[weak self] result in self?.localBridgeResponse(result,reply:reply)}
+            return
         }
         if command == "application_status" || command == "process_list" || command == "process_terminate" {
             let capability=command == "application_status" ? "applicationStatus":"processControl"
@@ -806,9 +814,11 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
                             }else{monitor["label"]="Desktop Windows";monitor["appScreen"]=false}
                             return monitor
                         }
+                        let previousStatus=self.displayStatus
                         self.displayStatus=plan.unavailableHosts==0 ? "\(mappings.count) schermi Mac collegati, desktop Windows separato.":
-                            "\(mappings.count) di \(mappings.count+plan.unavailableHosts) schermi pronti. Puoi aprire le app sugli schermi disponibili; riavvia Windows per aggiungere gli altri."
+                            "\(mappings.count) di \(mappings.count+plan.unavailableHosts) schermi pronti. Puoi aprire le app sugli schermi disponibili; spegni e avvia Windows da Perpendicular per aggiungere gli altri."
                         if plan.unavailableHosts>0 {self.launcherNotice=self.displayStatus}
+                        else if self.launcherNotice==previousStatus {self.launcherNotice=nil}
                         for window in self.windows.values {
                             window.setSharedDisplays(mappings);window.setDisplayUpdating(false)
                             if self.machine.desktopIsKey != true,let first=mappings.first {window.placeOnAppDisplayIfNeeded(first)}
@@ -1001,7 +1011,7 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
             })
             if guestCapabilities["applicationStatus"] != true,nextActiveApps != activeApps {activeApps=nextActiveApps}
             receivedWindows.formIntersection(current);failedWindows.formIntersection(current)
-            for id in Array(windows.keys) where !current.contains(id){windows.removeValue(forKey:id)?.retire();earlyFrames.removeValue(forKey:id)}
+            for id in Array(windows.keys) where !current.contains(id){windows.removeValue(forKey:id)?.retire();earlyFrames.removeValue(forKey:id);NativeWindowFrames.shared.retire(window:id)}
             for item in items{
                 guard let id=item["id"] as? String,let title=item["title"] as? String else{continue}
                 if item["macOwned"] as? Bool == true,let failure=item["cloakError"] as? String,!failure.isEmpty {
@@ -1013,7 +1023,7 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
                     let controller=ApplicationWindow(id:id,title:title,role:role,bridge:bridge)
                     controller.activateOnFirstShow=openingApps.contains(item["app"] as? String ?? "") && machine?.desktopIsKey != true
                     controller.onError={ [weak self] message in self?.status=message;self?.launcherNotice=message }
-                    controller.onClose={ [weak self] in self?.windows.removeValue(forKey:id) }
+                    controller.onClose={ [weak self] in self?.windows.removeValue(forKey:id);NativeWindowFrames.shared.retire(window:id) }
                     controller.onGeometry={ [weak self] in self?.layoutChildren() }
                     controller.onPointerExit={ [weak self] in self?.pointerExited(id) }
                     controller.onRecovery={ [weak self] in self?.showWindows() }

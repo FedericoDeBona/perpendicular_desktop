@@ -88,6 +88,7 @@ pub struct Target {
     pub progress: Arc<Progress>,
     pub capture_device: Mutex<Option<Value>>,
     pub readback_device_lost: AtomicBool,
+    pub refresh_requested: AtomicBool,
     // Generation, dimensions, and image origin relative to the Windows client origin.
     pub geometry: Mutex<(u64, i32, i32, i32, i32)>,
 }
@@ -105,7 +106,8 @@ impl Target {
             progress: Arc::new(Progress::default()),
             capture_device: Mutex::new(None),
             readback_device_lost: AtomicBool::new(false),
-            geometry: Mutex::new((0, 0, 0, 0, 0)),
+            refresh_requested: AtomicBool::new(false),
+            geometry: Mutex::new((self.geometry.lock().unwrap().0.saturating_add(1), 0, 0, 0, 0)),
         }
     }
     pub(super) fn set_phase(&self, phase: Phase) {
@@ -441,6 +443,14 @@ unsafe fn run(target: &Target, outbox: &Outbox, stop: &AtomicBool, driver:D3D_DR
                     target.set_phase(Phase::Waiting);
                     std::thread::sleep(Duration::from_millis(100));
                     continue;
+                }
+                if target.refresh_requested.swap(false,Ordering::AcqRel) {
+                    // Recreate on this capture thread, after any prior packet's
+                    // ACK, rather than racing a second producer for the HWND.
+                    pool.Recreate(&runtime,DirectXPixelFormat::B8G8R8A8UIntNormalized,2,size).map_err(error)?;
+                    target.progress.recreates.fetch_add(1,Ordering::Relaxed);
+                    generation=generation.saturating_add(1);previous=[0;6];native_gpu=None;
+                    let _=RedrawWindow(Some(hwnd),None,None,RDW_INVALIDATE|RDW_ALLCHILDREN|RDW_FRAME);
                 }
                 target.set_phase(Phase::Waiting);
                 let _ = ready.recv_timeout(Duration::from_millis(100));

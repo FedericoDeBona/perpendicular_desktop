@@ -228,7 +228,7 @@ impl Worker {
         outbox.control(
             json!({"type":"hello","protocol":1,"token":config.token,"epoch":self.epoch,
             "sid":self.sid,"session":self.session,"version":env!("CARGO_PKG_VERSION"),
-            "capabilities":{"capture":"wgc-hardware-readback-with-software-recovery","windows":4,"transients":12,"windowRoles":true,"input":true,"catalogue":true,"appIcon":true,"frameChannel":true,"gpuFramesOnly":true,"frameEncodings":[],"displayInfo":true,"displayTopology":true,"driverInfo":true,"graphicsInfo":true,"displayConfigure":true,"sharedGeometry":true,"processControl":true,"clipboard":true,"clipboardTextBytes":262144,"applicationStatus":true,"memoryStatus":true,"execute":true,"executeTimeoutSeconds":60,"executeOutputBytes":65536,"displayEvents":self.display_observer.is_some()}}),
+            "capabilities":{"capture":"wgc-hardware-readback-with-software-recovery","windows":4,"transients":12,"windowRoles":true,"input":true,"catalogue":true,"appIcon":true,"frameChannel":true,"windowRefresh":true,"gpuFramesOnly":true,"frameEncodings":[],"displayInfo":true,"displayTopology":true,"driverInfo":true,"graphicsInfo":true,"displayConfigure":true,"sharedGeometry":true,"processControl":true,"clipboard":true,"clipboardTextBytes":262144,"applicationStatus":true,"memoryStatus":true,"execute":true,"executeTimeoutSeconds":60,"executeOutputBytes":65536,"displayEvents":self.display_observer.is_some()}}),
         );
         let (sender, receiver) = mpsc::sync_channel(128);
         let state = outbox.clone();
@@ -488,6 +488,21 @@ impl Worker {
         }
         match value["operation"].as_str().ok_or("Missing operation")? {
             "catalogue" => Ok(self.catalogue.refresh()?),
+            "window_refresh" => {
+                let id=value["window"].as_str().ok_or("Missing window identity")?;
+                let window=self.windows.get_mut(id).ok_or("Window retired")?;
+                if !window.target.valid(){return Err("Window retired".into());}
+                if window.stop.as_ref().is_none_or(|s|s.load(Ordering::Acquire)) {
+                    outbox.retire(id);
+                    window.target=Arc::new(window.target.fresh_capture());
+                    window.stop=Some(capture::spawn(window.target.clone(),outbox.clone()));
+                    window.capture_unavailable_since=None;
+                    window.cloak_error=None;
+                }else {window.target.refresh_requested.store(true,Ordering::Release);}
+                log(format!("Window capture refresh requested hwnd={}",window.target.hwnd));
+                self.snapshot(outbox);
+                Ok(json!({"requested":true}))
+            }
             "launch" => {
                 let app = value["app"].as_str().ok_or("Missing app identity")?;
                 if let Some(window) = self.windows.values().find(|w| {
@@ -1092,6 +1107,7 @@ impl Worker {
             progress: Arc::new(capture::Progress::default()),
             capture_device: Mutex::new(None),
             readback_device_lost: AtomicBool::new(false),
+            refresh_requested: AtomicBool::new(false),
             geometry: Mutex::new((0, 0, 0, 0, 0)),
         });
         let stop = Some(capture::spawn(target.clone(), outbox.clone()));
@@ -1239,6 +1255,7 @@ impl Worker {
                 progress: Arc::new(capture::Progress::default()),
                 capture_device: Mutex::new(None),
             readback_device_lost: AtomicBool::new(false),
+                refresh_requested: AtomicBool::new(false),
                 geometry: Mutex::new((0, 0, 0, 0, 0)),
             });
             self.windows.insert(

@@ -141,7 +141,10 @@ final class GuestConnection: @unchecked Sendable {
     private func gpuFailure(_ window:String,_ message:String){
         NativeWindowTrace.record("gpu-only-error",["window":window,"message":message])
         Task{@MainActor [self] in packet(id,GuestPacket(header:["type":"window_error","window":window,"message":message]))}
-        // No ACK and no more frame reads; ordinary control remains available.
+        // Reject this image without ACK. Closing the failed channel lets the
+        // authenticated worker reconnect promptly with its documents intact;
+        // leaving it open stranded every window until a network timeout.
+        connection.cancel()
     }
     private func offer(_ window:String,_ value:GuestPacket) {
         lock.lock()
@@ -189,6 +192,7 @@ final class GuestBridge {
     var onPacket: ((GuestPacket) -> Void)?
     var onConnection: ((Bool) -> Void)?
     var connected: Bool { active != nil }
+    private(set) var windowRefreshAvailable=false
 
     init(port: UInt16, token: String, individualWindows:Bool=true) throws {
         self.individualWindows=individualWindows
@@ -238,6 +242,7 @@ final class GuestBridge {
             activeFrames=nil;frameChannel=nil;identity=incomingIdentity
             lastFrameTimings=[:];frameReceiveMilliseconds=0
             clients[id]?.authorize(frames:false)
+            windowRefreshAvailable=(h["capabilities"] as? [String:Any])?["windowRefresh"] as? Bool == true
             active=id;lastPacket=Date();onConnection?(true)
             if individualWindows,(h["capabilities"] as? [String:Any])?["frameChannel"] as? Bool == true {
                 let channel=UUID().uuidString.replacingOccurrences(of:"-",with:"").lowercased()
@@ -290,7 +295,7 @@ final class GuestBridge {
         clients.removeValue(forKey:id)
         if activeFrames == id {activeFrames=nil;if let active{clients[active]?.cancel()}}
         guard active==id else { return }
-        active=nil;identity=nil;frameChannel=nil;lastFrameTimings=[:];frameReceiveMilliseconds=0
+        active=nil;identity=nil;frameChannel=nil;lastFrameTimings=[:];frameReceiveMilliseconds=0;windowRefreshAvailable=false
         if let frame=activeFrames {activeFrames=nil;clients.removeValue(forKey:frame)?.cancel()}
         let pending=replies;replies.removeAll()
         sentAt.removeAll()

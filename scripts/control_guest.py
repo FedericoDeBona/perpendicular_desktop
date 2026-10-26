@@ -39,12 +39,16 @@ def main():
     terminate = commands.add_parser("process_terminate", help="Terminate one process using its exact identity from process_list.")
     terminate.add_argument("pid", type=int)
     terminate.add_argument("creation")
+    refresh = commands.add_parser("window_refresh", help="Request a fresh capture of one active native window, without closing its document.")
+    refresh.add_argument("window")
     execute = commands.add_parser("execute", help="Run an executable as the connected Windows user, without elevation.")
     execute.add_argument("--timeout-seconds", type=int, default=15, choices=range(1, 61), metavar="1..60")
     execute.add_argument("executable", help="Absolute Windows executable path.")
     execute.add_argument("args", nargs=argparse.REMAINDER)
     options = parser.parse_args()
     request = {"command": options.command}
+    if options.command == "window_refresh":
+        request["window"] = options.window
     if options.command == "execute":
         arguments = options.args[1:] if options.args[:1] == ["--"] else options.args
         request.update(executable=options.executable, args=arguments, timeoutSeconds=options.timeout_seconds)

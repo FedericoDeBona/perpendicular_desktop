@@ -7,7 +7,7 @@ use windows::{core::Interface,Win32::{Foundation::{HWND,POINT},Graphics::{Direct
 pub struct Gpu{texture:ID3D11Texture2D,query:ID3D11Query,width:u32,height:u32,nonce:[u8;24],checks_left:u8}
 impl Gpu{
  pub unsafe fn new(device:&ID3D11Device,width:u32,height:u32)->Result<Self,String>{unsafe{
-  if width<32||height==0||width>4096||height>=4096||u64::from(width)*u64::from(height)>4_000_000{return Err("GPU trial size bound".into());}
+  if width<32||height==0||width>4096||height>=4096||u64::from(width)*u64::from(height)>8_388_608{return Err("Window exceeds the GPU image limit".into());}
   let desc=D3D11_TEXTURE2D_DESC{Width:width.div_ceil(64)*64,Height:height.div_ceil(64)*64+1,MipLevels:1,ArraySize:1,Format:windows::Win32::Graphics::Dxgi::Common::DXGI_FORMAT_B8G8R8A8_UNORM,
    SampleDesc:windows::Win32::Graphics::Dxgi::Common::DXGI_SAMPLE_DESC{Count:1,Quality:0},Usage:D3D11_USAGE_DEFAULT,BindFlags:(D3D11_BIND_SHADER_RESOURCE|D3D11_BIND_RENDER_TARGET).0 as u32,CPUAccessFlags:0,MiscFlags:D3D11_RESOURCE_MISC_SHARED.0 as u32};
   let mut texture=None;device.CreateTexture2D(&desc,None,Some(&mut texture)).map_err(error)?;let texture=texture.ok_or("No GPU surface")?;

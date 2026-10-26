@@ -73,9 +73,11 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
     private var receivedSequence:UInt64=0
     private var acceptedSequence:UInt64=0
     private var transitionTimeout:Task<Void,Never>?
+    private var refreshRequested=false
+    private var dialogActivationPending=true
+    private var transitionStartedAt=0.0
     private var displayUpdating=false
     private var displayPriorRaster:NSSize?
-    private var allowTransparentFrame=false
     private var rejectedTransitionPacket:GuestPacket?
     private let bridge:GuestBridge
     private var sourceClosed=false
@@ -183,10 +185,11 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
         content.onFramePresented={ [weak self] id in self?.frameWasPresented(id) }
         content.onRenderError={ [weak self] message in self?.failFrameTransition();self?.onError?(message) }
         transitionView.recovery={ [weak self] in self?.onRecovery?() }
-        transitionView.reveal={ [weak self] in
-            guard let self else{return};self.allowTransparentFrame=true
-            if let packet=self.rejectedTransitionPacket {self.rejectedTransitionPacket=nil;self.present(packet)}
-            else {self.endFrameTransition()}
+        transitionView.retry={ [weak self] in
+            guard let self else{return}
+            self.transitionTimeout?.cancel();self.transitionActive=false
+            self.beginFrameTransition("Ripristino della finestra…")
+            self.requestFreshFrame(force:true)
         }
         (window as? GuestDocumentWindow)?.closeRequested={ [weak self] in self?.requestClose() }
         if role == .main {NSApp.addWindowsItem(window,title:title,filename:false)}
@@ -204,38 +207,54 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
             // Re-present its valid image only when the raster is unchanged.
             content.redrawCurrentFrame()
         }
-        if !updating {finishPresentedTransition()}
+        if !updating {finishPresentedTransition();if transitionActive {requestFreshFrame()}}
         trace(updating ? "frame_display_wait":"frame_display_ready")
     }
     private func beginFrameTransition(_ message:String){
         guard !role.transient,!transitionActive else{return}
         if hasFrame {content.clearModifiers();bridge.command("release")}
-        transitionActive=true;transitionID=UUID();allowTransparentFrame=false
+        transitionActive=true;transitionID=UUID();refreshRequested=false
+        transitionStartedAt=ProcessInfo.processInfo.systemUptime
         content.inputSuspended=true
         transitionAfterPresentation=content.presentationID+1
         content.resizeEnabled=false;transitionView.begin(message)
         transitionTimeout?.cancel();let identity=transitionID
         transitionTimeout=Task{@MainActor [weak self] in
-            try? await Task.sleep(for:.seconds(10))
+            try? await Task.sleep(for:.seconds(2))
             guard !Task.isCancelled,let self,self.transitionID == identity,self.transitionActive else{return}
+            self.finishPresentedTransition()
+            if self.transitionActive {self.requestFreshFrame()}
+            try? await Task.sleep(for:.seconds(8))
+            guard !Task.isCancelled,self.transitionID == identity,self.transitionActive else{return}
             // A delayed presentation is not a failed image. Keep the original
             // required ID so a static window can finish when its first command
             // or matching metadata arrives, without needing a second WGC frame.
             self.finishPresentedTransition()
             guard self.transitionActive else{return}
             self.transitionTimeout=nil
-            self.transitionView.stalled("La finestra sta impiegando più tempo.",canReveal:self.hasFrame || self.rejectedTransitionPacket != nil)
+            self.transitionView.stalled("La finestra non risponde. Puoi riprovare senza chiudere il documento.",canRetry:self.bridge.windowRefreshAvailable)
             self.trace("frame_transition_delayed")
         }
         trace("frame_transition_started")
         onGeometry?()
     }
+    private func requestFreshFrame(force:Bool=false){
+        guard transitionActive,!refreshRequested,!displayUpdating,!nativeResizing,
+              force || ProcessInfo.processInfo.systemUptime-transitionStartedAt>=2,
+              bridge.windowRefreshAvailable,!sourceClosed else{return}
+        refreshRequested=true
+        bridge.command("window_refresh",["window":id],timeout:.seconds(3)){[weak self] result in
+            guard let self else{return}
+            if case .failure(let error)=result {self.trace("frame_refresh_failed");self.onError?(error.localizedDescription)}
+        }
+        trace("frame_refresh_requested")
+    }
     func failFrameTransition(_ message:String="La finestra non è ancora pronta."){
         guard !role.transient else{return}
         if !transitionActive {beginFrameTransition(message)}
-        transitionTimeout?.cancel();transitionTimeout=nil
-        transitionAfterPresentation=content.presentationID+1
-        transitionView.stalled(message,canReveal:hasFrame || rejectedTransitionPacket != nil)
+        // Repeated error notices must not keep moving the presentation target
+        // or cancel the single bounded recovery already scheduled above.
+        transitionView.stalled(message,canRetry:bridge.windowRefreshAvailable)
         trace("frame_transition_stalled")
     }
     private func frameWasPresented(_ id:UInt64){
@@ -283,6 +302,7 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
         if inputBlocked || !deferredInput.isEmpty {cancelInput("The display changed before the pending input could be sent.")}
         else {gesture=nil}
         zoomRestore=nil;adjustedInitialPlacement=false;sharedDisplay=display
+        if display == nil {initialAppPlacementRequested=false}
         pixelScale=display.map{Double($0.pixelScale)} ?? fallbackPixelScale
         applySizeLimits()
         if display != nil {applySourceFrame()}else if hasFrame{applyFrameSize()}
@@ -387,6 +407,15 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
         if role.transient && hasFrame && visible && !minimized && owner.window.isVisible && !owner.window.isMiniaturized {
             window.orderFront(nil)
         }else if role.transient {window.orderOut(nil)}
+        // A dialog can receive its first frame before the owner's metadata.
+        // Transfer focus once, after attaching the real owner, without
+        // activating Perpendicular over another Mac application.
+        if role == .dialog,dialogActivationPending,hasFrame,window.isVisible {
+            dialogActivationPending=false
+            if owner.window.isKeyWindow {
+                window.makeKeyAndOrderFront(nil);window.makeFirstResponder(content)
+            }
+        }
     }
     func present(_ packet:GuestPacket){
         let first = !hasFrame
@@ -404,7 +433,7 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
         }
         let changed=nextSize != frameSize
         if first || changed {beginFrameTransition("Aggiornamento della finestra…")}
-        guard content.present(packet,requireSolidFrame:transitionActive && !allowTransparentFrame && !role.transient) else {
+        guard content.present(packet,requireSolidFrame:transitionActive && !role.transient) else {
             recordRejectedDiagnostic(packet)
             rejectedTransitionPacket=packet;trace("frame_transition_rejected");return
         }

@@ -56,12 +56,20 @@ final class NativeWindowFrames:@unchecked Sendable {
     private let failureLock=NSLock()
     private var broken=false
     private var failureDetails:[String:Any]=[:]
+    private var cacheDetails:[String:Any]=[:]
+    var cacheDiagnostics:[String:Any]{failureLock.lock();defer{failureLock.unlock()};return cacheDetails}
+    private func updateCacheDiagnostics(){
+        let value:[String:Any]=["resources":resources.count,"bytes":resources.reduce(0,{$0+$1.buffer.length}),
+                               "windows":Set(resources.compactMap(\.window)).count]
+        failureLock.lock();cacheDetails=value;failureLock.unlock()
+    }
     var diagnostics:[String:Any]{failureLock.lock();defer{failureLock.unlock()};return failureDetails}
     var isFailed:Bool{failureLock.lock();defer{failureLock.unlock()};return broken}
     private func fail(_ reason:String="gpu-command",details:[String:Any]=[:]){
         failureLock.lock();broken=true;failureDetails=details;failureDetails["reason"]=reason;failureLock.unlock()
     }
     private final class Resource:@unchecked Sendable {
+        var window:String?
         let width:Int,height:Int,stride:Int
         let buffer:any MTLBuffer
         let texture:any MTLTexture
@@ -145,10 +153,14 @@ final class NativeWindowFrames:@unchecked Sendable {
             let d=MTLTextureDescriptor.texture2DDescriptor(pixelFormat:.bgra8Unorm,width:width,height:height,mipmapped:false)
             d.storageMode = .shared;d.usage = .shaderRead
             guard let texture=buffer.makeTexture(descriptor:d,offset:0,bytesPerRow:stride) else{continue}
-            while resources.count>=16 || resources.reduce(0,{$0+$1.buffer.length})+length>128*1024*1024 {guard !resources.isEmpty else{break};resources.removeFirst()}
+            while resources.count>=32 || resources.reduce(0,{$0+$1.buffer.length})+length>256*1024*1024 {guard !resources.isEmpty else{break};resources.removeFirst()}
             resources.append(Resource(width:width,height:height,stride:stride,buffer:buffer,texture:texture))
+            updateCacheDiagnostics()
             NativeWindowTrace.record("gpu-resource",h)
         }
+    }
+    func retire(window:String){
+        queue.async{[self] in resources.removeAll{$0.window==window};updateCacheDiagnostics()}
     }
     func copy(_ header:[String:Any],completion:@escaping @Sendable (GuestFrameSurface?,[String:Any])->Void){
         let packet=GuestPacket(header:header)
@@ -168,6 +180,13 @@ final class NativeWindowFrames:@unchecked Sendable {
                       return (0..<32).map{String(format:"%02x",p[$0])}.joined()==marker
                   }),let output=GuestFrameSurface.allocate(width:w,height:h,stride:stride),
                   let command=commands?.makeCommandBuffer(),let blit=command.makeBlitCommandEncoder() else{var diagnostic=header;diagnostic["cachedResources"]=resources.map{["width":$0.width,"height":$0.height,"stride":$0.stride]};self.fail("resource-match-or-allocation",details:diagnostic);NativeWindowTrace.record("gpu-rejected",diagnostic);completion(nil,[:]);return}
+            if let window=header["window"] as? String {
+                resource.window=window
+                // Only the newest allocation for this authenticated window is
+                // reusable. In-flight copies retain their own Resource lease.
+                resources.removeAll{$0 !== resource && $0.window==window}
+                updateCacheDiagnostics()
+            }
             blit.copy(from:resource.texture,sourceSlice:0,sourceLevel:0,sourceOrigin:MTLOrigin(x:0,y:0,z:0),sourceSize:MTLSize(width:w,height:h,depth:1),
                       to:output.texture,destinationSlice:0,destinationLevel:0,destinationOrigin:MTLOrigin(x:0,y:0,z:0));blit.endEncoding()
             output.traceID=traceID

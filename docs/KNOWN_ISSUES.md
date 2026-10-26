@@ -75,6 +75,9 @@ Il ciclo RAM protetto 4→2→4 GiB con dati conservati resta la qualifica prece
 
 ### SYS-001 — Arresto HVF durante riavvio o arresto
 
+- **26 ottobre, stabilizzazione app:** arresto ACPI ancora fallito. Sample della stessa VM: main in perp_balloon_output_bh→pause_all_vcpus e vCPU in virtio_gpu_reset/reset_cond; dipendenza circolare concreta distinta dalle assertion HVF precedenti. Arresto forzato soltanto dopo nuovo consenso, poi nuovo boot. Motore non modificato, voce aperta; prossimo passo eliminare l’attesa del main loop durante il reset conservando la sicurezza del remapping RAM. [Evidenze](VERIFICATION.md#26-ottobre--stabilizzazione-del-percorso-app-native).
+
+
 - **Nuova ricorrenza:** riavvio per verificare autologon: assertion `(isv)`, hvf.c2184, uscita QEMU28213. Successivo avvio35616 con1 GB iniziale e login automatico riuscito; non è una correzione HVF. [Evidenze](VERIFICATION.md#25-ottobre--ram-semplificata-e-accesso-windows).
 
 - **Seguito launcher:** ricomparsa durante l’arresto regolare del vecchio pacchetto; controllo offline qcow2 con check-errors=0, nessuna riparazione o restore, successivo arresto/avvio riuscito. [Evidenze](VERIFICATION.md#25-ottobre--launcher-windows-cache-persistente-e-limite-n1).
@@ -158,6 +161,9 @@ Queste voci conservano limiti non risolti, senza richiedere di ripristinare codi
 
 ### GFX-003 — Cattura ferma dopo cambio compositore
 
+- **0.2.7 locale:** refresh della singola cattura, una richiesta automatica per transizione e Riprova; errore GPU chiude la pipe senza ACK per consentire riconnessione. Comando reale sulla stessa Notepad verificato (frame3→14, un recreate, nessun rilancio/documento perso); riconnessione frontend con testo preservato verificata. Causa GPU non risolta, timeout automatico non qualificato con un guasto riproducibile. [Evidenze](VERIFICATION.md#26-ottobre--stabilizzazione-del-percorso-app-native).
+
+
 - **Seguito riapertura Notepad locale,26 ottobre:** con la prima candidata solo input/taskbar f5c6ab5a, minimizza→libreria→Notepad riproduce pixel-hash sull'epocaCF8544CC. Riferimento del trasporto ora letto dalla stessa allocazione esportata, immutabile fino all'ACK; seconda lettura WGC conservata separatamente in transportReference. Nella candidata finale bad09cca la stessa sequenza mostra13frame, cloaking attivo e nessun nuovo errore per l'epoca49359717. Sorgente/export uguali nel campione: non dimostra che una mutazione WGC causasse il mismatch precedente. Nessun controllo host/marker/ACK disattivato; GFX-003 resta aperto in generale. [Diario](VERIFICATION.md#26-ottobre--riapertura-notepad-e-cloaking-dopo-input-non-client).
 
 - **Verifica locale dopo il ripristino desktop,26 ottobre:** alla segnalazione di cloaking inattivo, ultima diagnostica pixel-hash della finestra :1 ma nessuna app integrata ancora aperta. Un nuovo Notepad dalla libreria (:2) mostra contenuto sul Mac,10frame presentati e DWM_CLOAKED1 verificato indipendentemente. Nessun riavvio o modifica; il guasto precedente non è risolto e la diagnostica storica non descrive tutte le finestre successive. Task Manager non disponibile nel launcher resta non qualificato. [Evidenza circoscritta](VERIFICATION.md#26-ottobre--verifica-del-cloaking-dopo-il-ripristino-desktop-locale).
@@ -205,6 +211,9 @@ Queste voci conservano limiti non risolti, senza richiedere di ripristinare codi
 
 ### WIN-002 — Resize individuale in attesa del frame
 
+- **0.2.7 locale:** errore ripetuto non riavvia il gate e non cancella il recupero; eliminato Mostra comunque, Riprova richiede un frame nuovo. Trasferimenti fra tre Mac a scala2 e massimizzazione3840×2004/ripristino su Notepad completati, input pronto. Salva/Cancel706×209 presentato; candidata finale attiva il dialogo dopo collegamento al proprietario key, Cmd+Q→dialogo key→Don’t Save→chiusura riusciti. Non chiuso il criterio generale. [Evidenze](VERIFICATION.md#26-ottobre--stabilizzazione-del-percorso-app-native).
+
+
 - **Nuovo caso locale,26 ottobre:** dopo richiamo Notepad e apertura desktop, WGC pubblica1464×1238 mentre i bounds DWM/metadati descrivono1463×1238. Il gate rimane con presentedID7/requiredID8 e input sospeso; cloaking attivo e nessun nuovo errore GPU. Primo esito finale rettificato nel diario, nessun bypass Mostra comunque. Il seguito ritaglia soltanto l'eventuale riga/colonna finale di arrotondamento WGC di un pixel; differenze maggiori e gate restano invariati. [Evidenze](VERIFICATION.md#26-ottobre--riapertura-notepad-e-cloaking-dopo-input-non-client).
 - **Esito del caso dispari locale:** guest b79d181a distribuito; prova bordo destro/1463pixel e poi richiamo libreria→desktop→finestra Mac riusciti con frame e bounds1463×1238, presentedID8/requiredID6 e input non sospeso. Stesso documento utente conservato, cloaking attivo e taskbar senza Notepad. Caso corretto, non chiusura generale di WIN-002.
 
@@ -251,6 +260,9 @@ Queste voci conservano limiti non risolti, senza richiedere di ripristinare codi
 - **Evidenze:** [verifica e limiti](VERIFICATION.md#26-ottobre--cloaking-del-pulsante-nella-taskbar-windows).
 
 ### WIN-003 — Monitor N+1 e drag fra scale diverse
+
+- **Seguito0.2.7 locale:** tre DOD reali più3D riservata, mapping3/3 confermato. Nuove DOD PCI10/11 inizialmente col driver3D/problem43; selezione mirata del DOD originale le porta entrambe a0. Stesso Notepad attraversa tutti i tre monitor, massimizza/ripristina sull’interno e sul4K destro; testo preservato. Tutti scala2, quindi scale diverse non qualificate. Nuovo hardware richiede spegnimento/avvio e può ancora richiedere associazione esplicita del driver: nessun hotplug automatico dichiarato. [Evidenze](VERIFICATION.md#26-ottobre--stabilizzazione-del-percorso-app-native).
+
 
 - **Blocco globale riprodotto nella nuova richiesta di stabilità:** riconnessi due monitor fisici, Mac3/guest2 uscite totali e binding di un solo Mac. Il piano richiedeva conteggi identici e cancellava tutti i mapping; nessuna app partiva. Correzione distribuita: pianificare le sole uscite sane con identità confermata e conservare nel layout le uscite guest rimaste dopo unplug, senza mapparle a Mac inesistenti. Verificati quattro contratti mirati e apertura reale Notepad con1/3 mapping, readiness conclusa. Configurazione degli altri monitor e recupero generale ancora in corso. [Diario](VERIFICATION.md#26-ottobre--stabilizzazione-del-percorso-app-native).
 
