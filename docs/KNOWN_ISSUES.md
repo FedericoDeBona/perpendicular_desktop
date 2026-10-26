@@ -147,6 +147,8 @@ Queste voci conservano limiti non risolti, senza richiedere di ripristinare codi
 
 ### GFX-003 — Cattura ferma dopo cambio compositore
 
+- **26 ottobre, secondo Mac:** aggiornamento richiesto sulla VM locale `93be6687`, distinta dalla main dell'altro PC. Notepad principale riceve testo in hardware; nel percorso dialogo/desktop compare `windowGPU.reason=pixel-hash`, seguito da immagini indisponibili e input sospeso. Riaperto soltanto il frontend dopo chiusura della prova generata; nessun reboot o correzione causale. Renderer locale ricostruito dal riferimento Wire2 disponibile con export WGC; non è host-7 dell'altro PC. [Evidenze e limiti](VERIFICATION.md#26-ottobre--pull-rebuild-e-guest-tool-sul-secondo-mac). Voce aperta; nessuna attribuzione automatica del mismatch a GFX-007.
+
 - **Seguito0.2.5:** corretto un guasto concreto della riconnessione: renderer ancora sul vecchio socket WGC e frontend su uno nuovo. Record di avvio autenticato e lock per VM ora conservano il socket effettivo. Stesso documento ripreso nel clone e nella main, senza reboot Windows. Pixel-hash transitorio ricompare nel clone e poi recupera: GFX-003 resta aperto, controlli conservati. [Evidenze](VERIFICATION.md#25-ottobre--integrazione-n1-e-distribuzione-025).
 
 - **Seguito multischermo protetto:** nel trasferimento iniziale Notepad al DOD compare `pixel-hash`; la finestra in seguito mostra nuovamente contenuto e input aggiornati. Nessun controllo disattivato, nessuna causa o affidabilità generale del recupero dimostrata. La diagnostica conserva l’ultimo errore e non descrive da sola l’esito di ogni frame successivo. [Evidenze](VERIFICATION.md#25-ottobre--todo-001-alternative-protette-e-associazione-per-dispositivo).

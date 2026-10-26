@@ -33,7 +33,7 @@ def main():
   command=[x.replace(str(ref),str(q)) for x in shlex.split(record['command'])]
   run('compile-'+filename,command,q/'build');objects.append(record['output'])
  run('archive',['ar','r','src/libvirgl.a',*objects],q/'build')
- ninja=ref.parent/'venv/bin/ninja'
+ ninja=shutil.which('ninja') or str(ref.parent/'venv/bin/ninja')
  for label,target in [('library','src/libvirglrenderer.1.dylib'),('server','server/virgl_render_server')]:
   line=subprocess.check_output([str(ninja),'-C',str(ref/'build'),'-t','commands',target],text=True).splitlines()[-1]
   run('link-'+label,[x.replace(str(ref),str(q)) for x in shlex.split(line)],q/'build')
