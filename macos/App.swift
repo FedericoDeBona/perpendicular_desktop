@@ -22,7 +22,7 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
     private var machineStateRevision=UUID()
     @Published private(set) var catalogueLoading=false
     @Published var launcherNotice:String?
-    private var windowNotice:(id:String,message:String)?
+    private var windowNotice:(id:String,message:String,frame:Bool)?
     @Published private(set) var openingApps:Set<String>=[]
     @Published private(set) var activeApps:Set<String>=[]
     @Published private(set) var applicationIcons:[String:NSImage]=[:]
@@ -47,6 +47,7 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
     private var iconOrder:[String]=[]
     private var openingTasks:[String:Task<Void,Never>]=[:]
     private var openingNoticeApp:String?
+    private var cancelledOpeningApps:Set<String>=[]
     private var windowApps:[String:String]=[:]
     private var focusWarnedWindows:Set<String>=[]
     private var launcher:NSWindow!
@@ -110,7 +111,7 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
                 self.applicationStatusTask?.cancel();self.applicationStatusTask=nil;self.applicationStatusBusy=false
                 self.applicationStates=[:];self.applicationStatusAvailable=false;self.receivedWindows=[];self.failedWindows=[]
                 for task in self.openingTasks.values {task.cancel()}
-                self.openingTasks=[:];self.openingApps=[]
+                self.openingTasks=[:];self.openingApps=[];self.cancelledOpeningApps=[]
                 if !value {
                     self.mixedDisplayConfiguring=false
                     self.desktopResizeTask?.cancel();self.desktopResizeTask=nil
@@ -564,7 +565,7 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
         if machine?.mixedDisplaysEnabled == true,sharedDisplays.isEmpty {
             launcherNotice="Attendi che Windows completi la preparazione degli schermi.";return
         }
-        launcherNotice=nil;beginOpening(app)
+        launcherNotice=nil;cancelledOpeningApps.remove(app.id);beginOpening(app)
         status="Opening \(app.name)…"
         let epoch=launcherEpoch
         bridge.command("launch",["app":app.id]){[weak self] result in
@@ -651,13 +652,9 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
         status=message;launcherNotice=message+" Apri Windows, seleziona l’app e torna a questa finestra."
         guard let controller=windows.values.first(where:{$0.window === NSApp.keyWindow && !$0.role.transient}),
               controller.window.attachedSheet == nil,focusWarnedWindows.insert(controller.id).inserted else{return}
-        let alert=NSAlert()
-        alert.messageText="L’app non è attiva in Windows"
-        alert.informativeText="Questo input non è stato inviato. Apri il desktop Windows e seleziona l’app, poi torna qui."
-        alert.addButton(withTitle:"Apri Windows");alert.addButton(withTitle:"Chiudi")
-        alert.beginSheetModal(for:controller.window){[weak self] response in
-            if response == .alertFirstButtonReturn {self?.showWindows()}
-        }
+        // A modal warning can consume the next typed Return and unexpectedly
+        // open the desktop. Keep the failure visible without stealing input.
+        windowNotice=(controller.id,launcherNotice ?? message,false)
     }
     func applicationBecameVisible(_ app:WindowsApplication){iconVisibility[app.id,default:0]+=1;visibleIcons.insert(app.id);pumpApplicationIcons()}
     func applicationBecameHidden(_ app:WindowsApplication){
@@ -1058,16 +1055,31 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
             for id in Array(windows.keys) where !current.contains(id){windows.removeValue(forKey:id)?.retire();earlyFrames.removeValue(forKey:id);NativeWindowFrames.shared.retire(window:id)}
             for item in items{
                 guard let id=item["id"] as? String,let title=item["title"] as? String else{continue}
+                let isolationNotice="Questa app resta visibile anche in Windows. Puoi continuare a usarla."
                 if item["macOwned"] as? Bool == true,let failure=item["cloakError"] as? String,!failure.isEmpty {
-                    let notice="Questa app resta visibile anche in Windows. Puoi continuare a usarla."
-                    if launcherNotice != notice {launcherNotice=notice}
+                    if launcherNotice != isolationNotice {launcherNotice=isolationNotice}
+                    windowNotice=(id,isolationNotice,false)
+                }else if item["guestIsolated"] as? Bool == true,windowNotice?.id == id,windowNotice?.message == isolationNotice {
+                    if launcherNotice == isolationNotice {launcherNotice=nil}
+                    windowNotice=nil
                 }
                 if windows[id]==nil{
                     let role=WindowRole(rawValue:item["role"] as? String ?? "dialog") ?? .dialog
                     let controller=ApplicationWindow(id:id,title:title,role:role,bridge:bridge)
                     controller.activateOnFirstShow=openingApps.contains(item["app"] as? String ?? "") && machine?.desktopIsKey != true
                     controller.onError={ [weak self] message in
-                        self?.status=message;self?.launcherNotice=message;self?.windowNotice=(id,message)
+                        self?.status=message;self?.launcherNotice=message;self?.windowNotice=(id,message,false)
+                    }
+                    controller.onReady={ [weak self] in
+                        guard let self,let notice=self.windowNotice,notice.id==id,notice.frame else{return}
+                        if self.launcherNotice==notice.message {self.launcherNotice=nil}
+                        self.windowNotice=nil
+                    }
+                    controller.onCloseRequested={ [weak self] in
+                        guard let self,let app=self.windowApps[id] else{return}
+                        self.cancelledOpeningApps.insert(app)
+                        self.finishOpening(app)
+                        if self.openingNoticeApp==app {self.launcherNotice=nil;self.openingNoticeApp=nil}
                     }
                     controller.onClose={ [weak self] in self?.windows.removeValue(forKey:id);NativeWindowFrames.shared.retire(window:id) }
                     controller.onGeometry={ [weak self] in self?.layoutChildren() }
@@ -1098,6 +1110,8 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
             if machine?.desktopIsKey != true,let id=value["window"] as? String {windows[id]?.window.makeKeyAndOrderFront(nil)}
         case "launch_state":
             if value["state"] as? String == "waiting",let id=value["app"] as? String,
+               !cancelledOpeningApps.contains(id),
+               !receivedWindows.contains(where:{windowApps[$0] == id}),
                let app=apps.first(where:{$0.id == id}) {beginOpening(app)}
         case "reply":
             if value["ok"] as? Bool == false,value["operation"] as? String == "input",
@@ -1107,7 +1121,7 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
             // the first frame on the separate frame connection.
             guard let id=value["window"] as? String,windows[id] != nil else{return}
             launcherNotice=value["message"] as? String
-            if let message=launcherNotice {windowNotice=(id,message)}
+            if let message=launcherNotice {windowNotice=(id,message,false)}
         case "window_error","launch_error":
             if let id=value["window"] as? String {failedWindows.insert(id);windows[id]?.failFrameTransition()}
             refreshApplicationStates()
@@ -1116,7 +1130,7 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
             if value["type"] as? String == "window_error",value["role"] as? String == "tooltip" {return}
             status=value["message"] as? String ?? "This application is unavailable. Use Show Windows."
             launcherNotice=value["message"] as? String ?? "Questa app non è disponibile. Puoi continuare dal desktop Windows."
-            if let id=value["window"] as? String,let message=launcherNotice {windowNotice=(id,message)}
+            if let id=value["window"] as? String,let message=launcherNotice {windowNotice=(id,message,value["type"] as? String == "window_error")}
             if let app=value["app"] as? String {finishOpening(app);if value["type"] as? String == "launch_error" {openingNoticeApp=app}}
         default:break
         }

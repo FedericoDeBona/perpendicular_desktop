@@ -100,6 +100,11 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
     private var deferredTextBytes=0
     private var drainingInput=false
     private var discardingInput=false
+    private var presentationText:[String]=[]
+    private var presentationTextBytes=0
+    private var presentationTextBuffered=0
+    private var presentationTextTimeout:Task<Void,Never>?
+    private var closeAfterPresentation=false
     private var canResize=true
     private var nativeResizing=false
     private var resizePreview:NSPanel?
@@ -143,6 +148,8 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
     var onGeometry:(()->Void)?
     var onPointerExit:(()->Void)?
     var onRecovery:(()->Void)?
+    var onReady:(()->Void)?
+    var onCloseRequested:(()->Void)?
     var activateOnFirstShow=true
 
     init(id:String,title:String,role:WindowRole,bridge:GuestBridge){
@@ -282,6 +289,8 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
             self.transitionView.isHidden=true
         }
         trace("frame_transition_finished")
+        flushPresentationText()
+        onReady?()
         onGeometry?()
     }
     /// Only a display snapshot confirmed by the frontend can enable shared
@@ -326,7 +335,7 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
         let current=SharedDisplay.best(sharedDisplays,guest:sourceRect)
         let display=current ?? display
         let area=display.guestWorkArea ?? display.guestFrame
-        guard current == nil || sourceRect.width>area.width || sourceRect.height>area.height else{return}
+        guard current == nil || !area.insetBy(dx:-1,dy:-1).contains(sourceRect) else{return}
         initialAppPlacementRequested=true
         let inset=40/display.pixelScale
         let width=min(sourceRect.width,area.width),height=min(sourceRect.height,area.height)
@@ -519,7 +528,13 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
     func windowShouldClose(_ sender:NSWindow)->Bool{
         if sourceClosed || !bridge.connected{return true}
         guard !closing else{return false};closing=true
-        bridge.command("close",["window":id])
+        onCloseRequested?()
+        bridge.command("close",["window":id]){[weak self] result in
+            if case .failure=result {
+                self?.closing=false
+                self?.onError?("Windows non ha confermato la chiusura. Puoi riprovare.")
+            }
+        }
         Task{@MainActor [weak self] in try? await Task.sleep(for:.seconds(3));self?.closing=false}
         return false
     }
@@ -532,7 +547,28 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
         onClose?()
     }
     private func receive(_ value:WindowInput){
+        if case .input(let packet)=value,packet["event"] as? String=="close" {
+            // Closing addresses the authenticated window, not pixels or a
+            // pointer generation. It must remain available while loading.
+            if !presentationText.isEmpty {
+                closeAfterPresentation=true;onCloseRequested?();return
+            }
+            cancelInput();requestClose();return
+        }
         guard !discardingInput else{return}
+        if transitionActive,case .input(let packet)=value,packet["event"] as? String=="text",let text=packet["text"] as? String {
+            guard window.isKeyWindow,presentationTextBytes+text.utf8.count<=8192 else{return}
+            presentationText.append(text);presentationTextBytes+=text.utf8.count;presentationTextBuffered+=text.utf8.count
+            if presentationTextTimeout==nil {
+                presentationTextTimeout=Task{@MainActor [weak self] in
+                    try? await Task.sleep(for:.seconds(3))
+                    guard !Task.isCancelled,let self,!self.presentationText.isEmpty else{return}
+                    self.clearPresentationText()
+                    self.onError?("La finestra non è pronta: il testo in attesa non è stato inviato.")
+                }
+            }
+            return
+        }
         if inputBlocked || drainingInput {
             if let previous=deferredInput.last,value.replacesPointer(previous) {
                 deferredInput[deferredInput.count-1]=value;return
@@ -567,13 +603,26 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
         let interrupted=inputBlocked || !deferredInput.isEmpty
         // clearModifiers also flushes composed text. Cancellation must discard
         // that tail rather than deliver it to the control preceding the click.
-        discardingInput=interrupted;content.clearModifiers();discardingInput=false
+        discardingInput=true;content.clearModifiers();discardingInput=false
+        if !presentationText.isEmpty {onError?("La finestra ha perso il focus: il testo in attesa non è stato inviato.")}
+        clearPresentationText()
         gesture=nil;inputBlocked=false;deferredInput.removeAll();deferredTextBytes=0
         bridge.command("release")
         if interrupted,let message {onError?(message)}
     }
     private func send(_ value:[String:Any]){
         var packet=value;packet["window"]=id;bridge.command("input",packet)
+    }
+    private func clearPresentationText(){
+        presentationTextTimeout?.cancel();presentationTextTimeout=nil
+        presentationText.removeAll();presentationTextBytes=0;closeAfterPresentation=false
+    }
+    private func flushPresentationText(){
+        guard window.isKeyWindow else{return}
+        let text=presentationText,close=closeAfterPresentation
+        clearPresentationText()
+        for part in text {send(["event":"text","text":part])}
+        if close {requestClose()}
     }
     private func transferClipboard(_ action:String){
         guard window.isKeyWindow,window.firstResponder === content else{return}
@@ -958,6 +1007,7 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
     var presentationState:[String:Any] {
         ["transitionActive":transitionActive,"displayUpdating":displayUpdating,
          "keyWindow":window.isKeyWindow,"contentFocused":window.firstResponder === content,"inputSuspended":content.inputSuspended,
+         "presentationTextBytes":presentationTextBytes,"presentationTextBuffered":presentationTextBuffered,
          "requiredPresentationID":transitionAfterPresentation,"presentedID":lastPresentedID,
          "submittedID":content.presentationID,"hasFrame":hasFrame,
          "receivedSequence":receivedSequence,"acceptedSequence":acceptedSequence,

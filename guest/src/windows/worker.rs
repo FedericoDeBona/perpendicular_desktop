@@ -22,6 +22,7 @@ use windows::Win32::{
     Foundation::{HWND, LPARAM, POINT, WPARAM},
     Graphics::Gdi::ClientToScreen,
     System::{Com::{COINIT_APARTMENTTHREADED, CoCreateGuid, CoInitializeEx},
+        Threading::{GetCurrentThreadId,AttachThreadInput},
         Power::{EXECUTION_STATE,ES_CONTINUOUS,ES_DISPLAY_REQUIRED,SetThreadExecutionState}},
     UI::{
         HiDpi::{DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, SetThreadDpiAwarenessContext},
@@ -39,6 +40,8 @@ struct Window {
     mac_owned: bool,
     cloak: Option<cloak::Window>,
     cloak_error: Option<String>,
+    isolation_attempts:u8,
+    isolation_retry_after:Instant,
     capture_unavailable_since:Option<Instant>,
 }
 struct Launch {
@@ -105,7 +108,19 @@ fn activate_window(hwnd: HWND) -> Result<(), String> {
     unsafe {
         let root = GetAncestor(hwnd, GA_ROOT);
         if GetAncestor(GetForegroundWindow(), GA_ROOT) == root { return Ok(()); }
-        let accepted = SetForegroundWindow(root).as_bool();
+        let mut accepted = SetForegroundWindow(root).as_bool();
+        if GetAncestor(GetForegroundWindow(),GA_ROOT)!=root
+            && window_control::native_app_input_allowed(root) {
+            // Native app displays need no injected UI-thread helper. Share
+            // input only for this explicit activation, then detach before any
+            // wait or input delivery. Foreground identity is still checked.
+            let current=GetCurrentThreadId();
+            let foreground=GetWindowThreadProcessId(GetForegroundWindow(),None);
+            if foreground!=0 && foreground!=current && AttachThreadInput(current,foreground,true).as_bool() {
+                accepted=SetForegroundWindow(root).as_bool();
+                let _=AttachThreadInput(current,foreground,false);
+            }
+        }
         if accepted {
             let _ = SendMessageTimeoutW(root, WM_NULL, WPARAM(0), LPARAM(0),
                 SMTO_ABORTIFHUNG | SMTO_BLOCK, 250, None);
@@ -119,7 +134,10 @@ fn activate_window(hwnd: HWND) -> Result<(), String> {
 }
 
 fn activate_surface(window:&Window)->Result<(),String> {
-    if let Some(scope)=window.cloak.as_ref().filter(|scope|scope.active()) {return scope.activate();}
+    if let Some(scope)=window.cloak.as_ref().filter(|scope|scope.active()) {
+        scope.activate()?;
+        if !scope.native_input(){return Ok(());}
+    }
     activate_window(HWND(window.target.hwnd as _))
 }
 
@@ -499,6 +517,9 @@ impl Worker {
                 let id=value["window"].as_str().ok_or("Missing window identity")?;
                 let window=self.windows.get_mut(id).ok_or("Window retired")?;
                 if !window.target.valid(){return Err("Window retired".into());}
+                if window.cloak.is_none() {
+                    window.cloak_error=None;window.isolation_attempts=0;window.isolation_retry_after=Instant::now();
+                }
                 if window.stop.as_ref().is_none_or(|s|s.load(Ordering::Acquire)) {
                     outbox.retire(id);
                     window.target=Arc::new(window.target.fresh_capture());
@@ -649,9 +670,13 @@ impl Worker {
                         state["captureStopped"] = json!(window.stop.as_ref()
                             .map(|stop| stop.load(Ordering::Acquire)).unwrap_or(true));
                         state["macOwned"] = json!(window.mac_owned);
+                        let popup_isolated=window.mac_owned && catalogue::transient(&window.metadata)
+                            && window_control::native_app_input_allowed(HWND(target.hwnd as _));
                         state["guestCloaked"] = json!(window.cloak.as_ref().is_some_and(|s|s.active() && !s.native_input()));
-                        state["guestIsolated"] = json!(window.cloak.as_ref().is_some_and(cloak::Window::active));
-                        state["guestIsolation"] = json!(if window.cloak.as_ref().is_some_and(cloak::Window::native_input){"app-display"}else{"dwm"});
+                        state["guestIsolated"] = json!(popup_isolated || window.cloak.as_ref().is_some_and(cloak::Window::active));
+                        state["guestIsolation"] = json!(if popup_isolated || window.cloak.as_ref().is_some_and(cloak::Window::native_input){"app-display"}else{"dwm"});
+                        state["isolationAttempts"]=json!(window.isolation_attempts);
+                        state["guestIsolationBackend"]=json!(if popup_isolated{"app-display-inherited"}else if window.cloak.as_ref().is_some_and(cloak::Window::uses_display_api){"app-display-api"}else{"in-process"});
                         state["cloakError"] = json!(window.cloak_error);
                         return Ok(state);
                     }
@@ -660,13 +685,21 @@ impl Worker {
                         window_control::cancel(HWND(target.hwnd as *mut _));
                     }
                     "close" => unsafe {
-                        PostMessageW(
+                        if catalogue::window_class(target.hwnd)=="ConsoleWindowClass" {
+                            // Console windows do not pump a normal client UI
+                            // queue. Use the system close command with a bound.
+                            self.release();
+                            if SendMessageTimeoutW(HWND(target.hwnd as _),WM_SYSCOMMAND,WPARAM(SC_CLOSE as usize),LPARAM(0),
+                                SMTO_ABORTIFHUNG | SMTO_BLOCK,500,None).0==0 {
+                                return Err("Windows did not confirm the console close request".into());
+                            }
+                        }else {PostMessageW(
                             Some(HWND(target.hwnd as *mut _)),
                             WM_CLOSE,
                             WPARAM(0),
                             LPARAM(0),
                         )
-                        .map_err(error)?;
+                        .map_err(error)?;}
                     },
                     _ => {}
                 }
@@ -975,11 +1008,18 @@ impl Worker {
         if refresh_minimum { self.next_minimum_scan = Instant::now() + Duration::from_secs(2); }
         for (id, mut details) in updated {
             if let Some(window) = self.windows.get_mut(&id) {
-                if window.mac_owned && window.cloak.is_none() && window.cloak_error.is_none()
+                let app_display=window_control::native_app_input_allowed(HWND(window.target.hwnd as _));
+                let transient=catalogue::transient(&details);
+                if window.mac_owned && !transient && window.cloak.is_none()
+                    && window.isolation_attempts<3 && Instant::now()>=window.isolation_retry_after
+                    && (!window_control::native_app_input_configured()
+                        || app_display)
                     && window.target.capture_frames.load(Ordering::Acquire)>0
                     && window.stop.as_ref().is_some_and(|stop|!stop.load(Ordering::Acquire)) {
+                    window.isolation_attempts+=1;
+                    window.isolation_retry_after=Instant::now()+Duration::from_secs(1);
                     match cloak::Window::new(window.target.clone()).and_then(|mut scope|{scope.hide()?;Ok(scope)}) {
-                        Ok(scope)=>{window.cloak=Some(scope);changed=true;}
+                        Ok(scope)=>{window.cloak=Some(scope);window.cloak_error=None;changed=true;}
                         Err(message)=>{
                             log(format!("Window isolation unavailable hwnd={}: {message}",window.target.hwnd));
                             window.cloak_error=Some(message);changed=true;
@@ -998,15 +1038,23 @@ impl Worker {
                     let native=window_control::native_app_input_allowed(HWND(window.target.hwnd as _));
                     if let Err(message)=scope.set_native_input(native) {
                         window.cloak_error=Some(message);scope.show();cloaked=false;
+                    }else {cloaked=scope.active();}
+                    if let Err(message)=scope.touch() {
+                        window.cloak_error=Some(message);scope.show();cloaked=false;
                     }
-                    scope.touch();
                 }
                 if window.cloak.is_some() && !cloaked {
                     window.cloak.take();window.cloak_error=Some("Window isolation expired; restored in Windows".into());
+                    window.isolation_retry_after=Instant::now()+Duration::from_secs(1);
                 }
+                // Popup menus have no taskbar button and remain on their
+                // authenticated app's reserved display. Never inject/cloak
+                // their system menu-loop windows independently of the owner.
+                let popup_isolated=window.mac_owned && transient && app_display;
                 details["guestCloaked"]=json!(cloaked && !window.cloak.as_ref().is_some_and(cloak::Window::native_input));
-                details["guestIsolated"]=json!(cloaked);
-                details["guestIsolation"]=json!(if window.cloak.as_ref().is_some_and(cloak::Window::native_input){"app-display"}else{"dwm"});
+                details["guestIsolated"]=json!(cloaked || popup_isolated);
+                details["guestIsolation"]=json!(if popup_isolated || window.cloak.as_ref().is_some_and(cloak::Window::native_input){"app-display"}else{"dwm"});
+                details["guestIsolationBackend"]=json!(if popup_isolated{"app-display-inherited"}else if window.cloak.as_ref().is_some_and(cloak::Window::uses_display_api){"app-display-api"}else{"in-process"});
                 details["macOwned"]=json!(window.mac_owned);
                 details["cloakError"]=json!(window.cloak_error);
                 // DWM visibility and presentation of a Mac-owned window are
@@ -1144,6 +1192,7 @@ impl Worker {
                 mac_owned:true,
                 cloak:None,
                 cloak_error:None,
+                isolation_attempts:0,isolation_retry_after:Instant::now(),
                     capture_unavailable_since:None,
             },
         );
@@ -1169,7 +1218,9 @@ impl Worker {
                 "parent":w.parent,"role":w.metadata["role"],"x":w.metadata["x"],"y":w.metadata["y"],
                 "z":w.metadata["z"],"visible":w.metadata["visible"],"minimized":w.metadata["minimized"],
                 "class":w.metadata["class"],"style":w.metadata["style"],"exStyle":w.metadata["exStyle"],
-                "macOwned":w.mac_owned,"guestCloaked":w.metadata["guestCloaked"],"cloakError":w.cloak_error,
+                "macOwned":w.mac_owned,"guestCloaked":w.metadata["guestCloaked"],
+                "guestIsolated":w.metadata["guestIsolated"],"guestIsolation":w.metadata["guestIsolation"],
+                "guestIsolationBackend":w.metadata["guestIsolationBackend"],"cloakError":w.cloak_error,
                 "maxWidth":w.metadata["maxWidth"],"maxHeight":w.metadata["maxHeight"],
                 "minWidth":w.metadata["minWidth"],"minHeight":w.metadata["minHeight"],"resizable":w.metadata["resizable"]})
         }).collect();
@@ -1286,6 +1337,7 @@ impl Worker {
                     mac_owned:value["macOwned"]==true,
                     cloak:None,
                     cloak_error:None,
+                    isolation_attempts:0,isolation_retry_after:Instant::now(),
                     capture_unavailable_since:None,
                 },
             );

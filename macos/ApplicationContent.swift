@@ -218,15 +218,24 @@ final class ApplicationContent:NSView {
         keyDown(with:event);return true
     }
     override func keyDown(with event:NSEvent){
-        guard !inputSuspended else{return}
         let flags=event.modifierFlags
+        if event.keyCode==12,flags.contains(.command),!flags.contains(.control),!flags.contains(.option) {
+            if !event.isARepeat {emit(["event":"close"])}
+            return
+        }
+        if inputSuspended {
+            if !flags.contains(.command),!flags.contains(.control),let text=event.characters,!text.isEmpty,
+               text.unicodeScalars.allSatisfy({$0.properties.generalCategory != .control && !($0.value>=0xF700 && $0.value<=0xF8FF)}) {
+                queueText(text)
+            }
+            return
+        }
         let shift=flags.contains(.shift) ? [0x10]:[]
         if flags.contains(.command),!flags.contains(.control),!flags.contains(.option){
             switch event.keyCode {
             case 8:if !event.isARepeat {copy(nil)};return
             case 7:if !event.isARepeat {cut(nil)};return
             case 9:if !event.isARepeat {paste(nil)};return
-            case 12:emit(["event":"close"]);return
             case 6 where flags.contains(.shift):chord([0x11,0x59]);return
             case 123:chord(shift+[0x24]);return
             case 124:chord(shift+[0x23]);return

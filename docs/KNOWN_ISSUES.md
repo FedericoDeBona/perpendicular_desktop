@@ -230,6 +230,10 @@ Queste voci conservano limiti non risolti, senza richiedere di ripristinare codi
 
 ### WIN-004 — Finestra Mac visibile ma app Windows non attiva
 
+- **0.2.9 locale:** input console dopo attivazione nativa, drag/resize e testo iniziale34byte verificati; Cmd+Q chiude anche durante la preparazione. La prima candidata perde W del comando e un’altra riaccende l’avviso dopo chiusura: fallimenti conservati. Coda testo breve e cancellazione delle attese tardive verificate nella build finale, nessun banner dopo44s. Notepad File→Save As→Cancel riuscito, ma popup compare soltanto dopo richiamo della finestra nel caso registrato: ordinamento/comparsa ancora aperti. [Diario](VERIFICATION.md#26-ottobre--seguito-stabilità-console-posizionamento-e-focus).
+
+- **Seguito0.2.9 locale:** Command Prompt conserva hook87 e finisce fuori schermo perché la sola intersezione con una DOD saltava il posizionamento. Correzione richiede contenimento; ConsoleWindowClass usa taskbar dal worker/input normale senza hook. Primo tentativo isola ma rifiuta il focus; successiva attivazione temporanea della coda input, solo per console verificata sull’uscita app, riceve/esegue Write-Output dopo drag integrato→esterno e resize. Il foglio focus che poteva consumare Invio→Apri Windows è sostituito da avviso non modale. Prompt utente conservato. Qualifica generale aperta. [Evidenze](VERIFICATION.md#26-ottobre--seguito-stabilità-console-posizionamento-e-focus).
+
 - **Seguito input Windows normale nella candidata0.2.8:** precedenza generica al figlio ritirata perché non migliora il clic. Isolamento nell’uscita DOD confermata e taskbar esclusa, con input Windows normale solo quando l’intera finestra è fuori dalla primaria riservata; fallback DWM-cloak altrimenti, verifica anche al confine input. Hit sul figlio reale dello stesso root evita il drag Mac sintetico. Task Manager: click ricerca/Cmd+A/explorer funziona e filtra Windows Explorer; Notepad riceve testo al ritorno da un vero clic nel desktop completo, drag fra esterni e dialogo/Don’t Save riusciti. Questo cambia il meccanismo: guestIsolated=true/isolation=app-display e guestCloaked=false sono distinti, senza dichiarare cloaking DWM. Compatibilità generale, altre classi di controlli e guasti GPU restano aperti. [Diario](VERIFICATION.md#26-ottobre--riapertura-stabilizzazione-input-resize-e-schermi-fisici).
 
 
@@ -256,6 +260,8 @@ Queste voci conservano limiti non risolti, senza richiedere di ripristinare codi
 ## Monitor e compatibilità
 
 ### WIN-005 — App cloaked ancora nella barra delle applicazioni Windows
+
+- **0.2.9 locale:** il recupero limitato a3tentativi non basta: helper Notepad scade ripetutamente durante i dialoghi. Percorso sulle uscite app confermate sostituito da API taskbar del worker, senza heartbeat UI, per le finestre interamente contenute; popup ereditano isolamento dal contenimento. Desktop primario/taskbar verificati senza Notepad e Command Prompt, testo dopo ritorno dal desktop riuscito. È app-display-api/guestIsolated=true, guestCloaked=false. Crash del worker, riavvio Shell, Alt+Tab e compatibilità generale restano aperti. [Diario](VERIFICATION.md#26-ottobre--seguito-stabilità-console-posizionamento-e-focus).
 
 - **0.2.8 locale, meccanismo distinto:** sulle DOD app confermate la finestra interamente contenuta usa input Windows normale ed esclusione taskbar, guestIsolated=true/app-display ma guestCloaked=false. Non chiamare questo stato DWM-cloaking. Apri Windows ora conserva il raster e le mappe N+1; desktop primario e taskbar osservati senza Notepad/Task Manager mentre le due app sono visibili sul Mac. Alt+Tab/Task View, pinning e altre classi di app restano non qualificati. Fuori dall’uscita app confermata torna DWM-cloak. [Diario](VERIFICATION.md#26-ottobre--riapertura-stabilizzazione-input-resize-e-schermi-fisici).
 

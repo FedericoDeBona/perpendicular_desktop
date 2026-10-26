@@ -30,6 +30,7 @@ pub fn native_app_input_allowed(hwnd:HWND)->bool {
             && bounds.top>=frame.top-1 && bounds.right<=frame.right+1 && bounds.bottom<=frame.bottom+1)
     }
 }
+pub fn native_app_input_configured()->bool {NATIVE_APP_INPUT.load(Ordering::Acquire)}
 
 /// Limits of authenticated native app windows, separate from Explorer's
 /// global work areas. Never move the taskbar or reserve space on the desktop.

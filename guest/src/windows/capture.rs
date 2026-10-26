@@ -136,9 +136,10 @@ pub fn spawn(target: Arc<Target>, outbox: Arc<Outbox>) -> Arc<AtomicBool> {
     let flag = stop.clone();
     target.set_phase(Phase::Starting);
     std::thread::spawn(move || {
+        unsafe {SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);}
         let class = catalogue::window_class(target.hwnd);
         let tooltip = class.eq_ignore_ascii_case("tooltips_class32") || class == "MicrosoftWindowsTooltip";
-        let result = if class == "#32768" {
+        let result = if class == "#32768" && !super::window_control::native_app_input_allowed(HWND(target.hwnd as _)) {
             Err("Solo GPU: il menu classico non dispone ancora di una superficie GPU esportabile.".into())
         } else { unsafe { run(&target, &outbox, &flag, D3D_DRIVER_TYPE_HARDWARE, None) } };
         if let Err(message) = result {
