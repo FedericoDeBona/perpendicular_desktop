@@ -235,6 +235,13 @@ Queste voci conservano limiti non risolti, senza richiedere di ripristinare codi
 
 ## Monitor e compatibilità
 
+### WIN-005 — App cloaked ancora nella barra delle applicazioni Windows
+
+- **Causa verificata,26 ottobre sul secondo Mac:** Notepad Mac-owned era su DISPLAY2 e DWM_CLOAKED1, ma il pulsante restava nella taskbar del desktop completo. La verifica precedente del solo attributo DWM non copriva la segnalazione dell'utente.
+- **Correzione distribuita e verificata nel caso locale:** helper ARM64 rimuove la singola HWND con ITaskbarList::DeleteTab; conserva l'idoneità al pulsante per AddTab al rilascio/ripristino, senza cambiare gli stili della finestra. Gestito TaskbarButtonCreated per una nuova registrazione Shell; riavvio Explorer non qualificato.
+- **Criterio circoscritto verificato:** stessa istanza Notepad/PID7352 visibile sul Mac, testo ricevuto e pulsante assente in Windows. Fermando temporaneamente il servizio, pulsante ripristinato; alla riconnessione di nuovo assente. Pacchetto canonico e build allineati al guest0bb7fa1315de. Nessun reboot Windows. GFX-003 ricomparso durante l'input resta aperto; altre app, pinning, Alt+Tab/Task View e recupero generale non qualificati. TODO-002 resta IN CORSO.
+- **Evidenze:** [verifica e limiti](VERIFICATION.md#26-ottobre--cloaking-del-pulsante-nella-taskbar-windows).
+
 ### WIN-003 — Monitor N+1 e drag fra scale diverse
 
 - **Secondo Mac,26 ottobre:** motore misto e driver originali installati sulla VM93be6687. Due uscite Windows3D+DOD, mapping del solo Mac attualmente collegato e DPI app192 verificati; la topologia persiste dopo il successivo avvio. Non è una prova di trasferimento fra monitor: i due esterni presenti al primo aggiornamento non sono più rilevati durante questa installazione. [Evidenze e limiti](VERIFICATION.md#26-ottobre--allineamento-completo-del-motore-sul-secondo-mac).

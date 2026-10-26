@@ -22,6 +22,8 @@ API int __stdcall SetPropW(HWND,const WCHAR*,HANDLE);
 API HANDLE __stdcall RemovePropW(HWND,const WCHAR*);
 API IPTR __stdcall CallNextHookEx(HANDLE,int,UPTR,IPTR);
 API long __stdcall DwmSetWindowAttribute(HWND,DWORD,const void*,DWORD);
+API IPTR __stdcall GetWindowLongPtrW(HWND,int);
+API HWND __stdcall GetWindow(HWND,UINT);
 API int __stdcall IsWindow(HWND);
 API int __stdcall IsWindowEnabled(HWND);
 API int __stdcall GetClientRect(HWND,RECT*);
@@ -62,6 +64,54 @@ static const WCHAR last_click[]=L"Perpendicular.Window.LastClick";
 static const WCHAR last_point[]=L"Perpendicular.Window.LastPoint";
 static const WCHAR last_child[]=L"Perpendicular.Window.LastChild";
 static const WCHAR last_button[]=L"Perpendicular.Window.LastButton";
+static const WCHAR taskbar_state[]=L"Perpendicular.Window.Taskbar";
+
+/* DWM cloaking leaves the Shell's running-app button behind. Use the taskbar
+ * interface instead of WS_EX_TOOLWINDOW, which changes the app's caption.
+ * Keep the normal button eligibility so release/recovery does not add dialogs.
+ */
+typedef struct { DWORD a; unsigned short b,c; unsigned char d[8]; } GUID;
+typedef struct TASKBAR TASKBAR;
+typedef struct {
+ long (__stdcall *QueryInterface)(TASKBAR*,const GUID*,void**);
+ DWORD (__stdcall *AddRef)(TASKBAR*);
+ DWORD (__stdcall *Release)(TASKBAR*);
+ long (__stdcall *HrInit)(TASKBAR*);
+ long (__stdcall *AddTab)(TASKBAR*,HWND);
+ long (__stdcall *DeleteTab)(TASKBAR*,HWND);
+} TASKBAR_VTABLE;
+struct TASKBAR { const TASKBAR_VTABLE *v; };
+API long __stdcall CoInitializeEx(void*,DWORD);
+API void __stdcall CoUninitialize(void);
+API long __stdcall CoCreateInstance(const GUID*,void*,DWORD,const GUID*,void**);
+static long taskbar(HWND h,int add) {
+ static const GUID cls={0x56fdf344,0xfd6d,0x11d0,{0x95,0x8a,0x00,0x60,0x97,0xc9,0xa0,0x90}};
+ static const GUID iid={0x56fdf342,0xfd6d,0x11d0,{0x95,0x8a,0x00,0x60,0x97,0xc9,0xa0,0x90}};
+ long init=CoInitializeEx(0,2);
+ if(init<0 && (DWORD)init!=0x80010106)return init; /* existing apartment */
+ TASKBAR *list=0;
+ long hr=CoCreateInstance(&cls,0,1,&iid,(void**)&list);
+ if(hr>=0) {
+  hr=list->v->HrInit(list);
+  if(hr>=0)hr=add?list->v->AddTab(list,h):list->v->DeleteTab(list,h);
+  list->v->Release(list);
+ }
+ if(init>=0)CoUninitialize();
+ return hr;
+}
+static long hide_taskbar(HWND h) {
+ if(GetPropW(h,taskbar_state))return 0;
+ IPTR style=GetWindowLongPtrW(h,-20);
+ int button=!(style&0x80) && ((style&0x40000) || !GetWindow(h,4));
+ if(!SetPropW(h,taskbar_state,(HANDLE)(UPTR)(button?2:1)))return (long)0x80004005;
+ long hr=taskbar(h,0);
+ if(hr<0)RemovePropW(h,taskbar_state);
+ return hr;
+}
+static void restore_window(HWND h) {
+ int no=0;DwmSetWindowAttribute(h,13,&no,4);
+ if((UPTR)RemovePropW(h,taskbar_state)==2)taskbar(h,1);
+}
 
 typedef struct { HWND root; DWORD controller; HANDLE process,module; } WATCH;
 static DWORD __stdcall recover(void *arg) {
@@ -71,7 +121,7 @@ static DWORD __stdcall recover(void *arg) {
  HeapFree(GetProcessHeap(),0,watch);
  while(process && IsWindow(h) && (DWORD)(UPTR)GetPropW(h,owner)==controller) {
   if(WaitForSingleObject(process,250)==0 || GetTickCount64()-(UPTR)GetPropW(h,L"Perpendicular.Window.Beat")>3000) {
-   int no=0;DwmSetWindowAttribute(h,13,&no,4);
+   restore_window(h);
    PostMessageW(h,0x001f,0,0); /* WM_CANCELMODE */
    RemovePropW(h,owner);break;
   }
@@ -90,17 +140,21 @@ static DWORD dispatch(HWND root,UINT op,long sx,long sy) {
   if(cloak && !GetPropW(root,owner))return 1;
   long hr=DwmSetWindowAttribute(root,13,&cloak,4);
   if(hr<0)return (DWORD)hr;
+  if(cloak) {
+   hr=hide_taskbar(root);
+   if(hr<0){restore_window(root);return (DWORD)hr;}
+  }else {restore_window(root);}
   DWORD controller=(DWORD)(UPTR)GetPropW(root,owner);
   if(cloak && (DWORD)(UPTR)GetPropW(root,L"Perpendicular.Window.Watch")!=controller) {
    WATCH *watch=(WATCH*)HeapAlloc(GetProcessHeap(),8,sizeof(WATCH));
-   if(!watch){cloak=0;DwmSetWindowAttribute(root,13,&cloak,4);return 2;}
+   if(!watch){restore_window(root);return 2;}
    watch->root=root;watch->controller=controller;
    watch->process=OpenProcess(0x00100000,0,controller);
    GetModuleHandleExW(4,(const WCHAR*)&recover,&watch->module);
    HANDLE thread=(watch->process && watch->module)?CreateThread(0,0,recover,watch,0,0):0;
    if(!thread){
     if(watch->process)CloseHandle(watch->process);if(watch->module)FreeLibrary(watch->module);
-    HeapFree(GetProcessHeap(),0,watch);cloak=0;DwmSetWindowAttribute(root,13,&cloak,4);return 2;
+    HeapFree(GetProcessHeap(),0,watch);restore_window(root);return 2;
    }
    CloseHandle(thread);SetPropW(root,L"Perpendicular.Window.Watch",(HANDLE)(UPTR)controller);
   }
@@ -202,6 +256,8 @@ __declspec(dllexport) IPTR __stdcall PerpendicularMessageHook(int code,UPTR w,IP
 __declspec(dllexport) IPTR __stdcall PerpendicularWindowHook(int code,UPTR w,IPTR l) {
  if(code>=0 && l) {
   const CWPSTRUCT *m=(const CWPSTRUCT*)l;DWORD pid=0;
+  if(GetPropW(m->hwnd,owner) && GetPropW(m->hwnd,taskbar_state) &&
+     m->message==RegisterWindowMessageW(L"TaskbarButtonCreated"))taskbar(m->hwnd,0);
   if(m->message==RegisterWindowMessageW(L"Perpendicular.Window.83cf5732-02d7-48a2-b121-ef5973d04b95") &&
      m->wParam && GetPropW(m->hwnd,request)==(HANDLE)m->wParam &&
      GetWindowThreadProcessId(m->hwnd,&pid) && pid==GetCurrentProcessId()) {

@@ -8,4 +8,4 @@ clang -target aarch64-pc-windows-msvc -O2 -fno-stack-protector -c guest/native/w
 toolchain="$(rustc --print sysroot)"
 linker="$toolchain/lib/rustlib/aarch64-apple-darwin/bin/rust-lld"
 DYLD_LIBRARY_PATH="$toolchain/lib${DYLD_LIBRARY_PATH:+:$DYLD_LIBRARY_PATH}" "$linker" -flavor link /dll /noentry /machine:arm64 /timestamp:0 "/out:$output/perpendicular-window-hook.dll" "$output/window-hook.obj" \
-  "$sdk/User32.Lib" "$sdk/kernel32.Lib" "$sdk/dwmapi.lib"
+  "$sdk/User32.Lib" "$sdk/kernel32.Lib" "$sdk/dwmapi.lib" "$sdk/Ole32.Lib"
