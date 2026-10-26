@@ -29,6 +29,10 @@ private final class ResizePreviewView:NSView {
 }
 
 private enum MouseMode {case pending,move,resize(ResizeEdges),remote,zoom,discard}
+private struct ActivationStatus:Sendable {
+    let focused:Bool
+    let foreground:UInt64?
+}
 private enum WindowInput {
     case input([String:Any])
     case leftMouse(WindowMouseSample,[String:Any])
@@ -98,6 +102,9 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
     private var placedDialog=false
     private var gesture:MouseGesture?
     private var inputBlocked=false
+    private var focusPending=false
+    private var focusRequest:UUID?
+    private var focusTask:Task<Void,Never>?
     private var inputRequests=0
     private var inputRejected=0
     private var lastInputEvent=""
@@ -159,6 +166,7 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
     var onReady:(()->Void)?
     var onCloseRequested:(()->Void)?
     var onDeviceClose:((Double) async throws->Void)?
+    var onDeviceFocus:((Double) async throws->Void)?
     var activateOnFirstShow=true
 
     init(id:String,title:String,role:WindowRole,bridge:GuestBridge){
@@ -226,6 +234,7 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
         activateOnFirstShow=true
         guard initialPlacementReady,!displayUpdating else{return}
         window.makeKeyAndOrderFront(nil);window.makeFirstResponder(content)
+        requestActivation()
     }
     func setDisplayUpdating(_ updating:Bool){
         if updating,!displayUpdating {displayPriorRaster=sharedDisplay?.guestFrame.size}
@@ -347,7 +356,7 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
             nativeResizing=false;expectedSize=nil
             content.suspendedPointer=false;bridge.command("release")
         }
-        if inputBlocked || !deferredInput.isEmpty {cancelInput("The display changed before the pending input could be sent.")}
+        if inputBlocked || focusPending || !deferredInput.isEmpty {cancelInput("The display changed before the pending input could be sent.")}
         else {gesture=nil}
         zoomRestore=nil;adjustedInitialPlacement=false;sharedDisplay=display
         if display == nil {initialAppPlacementRequested=false}
@@ -642,7 +651,7 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
             }
             return
         }
-        if inputBlocked || drainingInput {
+        if inputBlocked || focusPending || drainingInput {
             if let previous=deferredInput.last,value.replacesPointer(previous) {
                 deferredInput[deferredInput.count-1]=value;return
             }
@@ -666,12 +675,13 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
         guard !drainingInput else{return}
         drainingInput=true
         defer{drainingInput=false}
-        while !inputBlocked,!deferredInput.isEmpty {
+        while !inputBlocked,!focusPending,!deferredInput.isEmpty {
             let value=deferredInput.removeFirst();deferredTextBytes-=value.textBytes
             deliver(value)
         }
     }
     private func cancelInput(_ message:String?=nil){
+        focusRequest=nil;focusTask?.cancel();focusTask=nil;focusPending=false
         clipboardRequest=nil
         let interrupted=inputBlocked || !deferredInput.isEmpty
         // clearModifiers also flushes composed text. Cancellation must discard
@@ -704,8 +714,11 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
         guard window.isKeyWindow else{return}
         let text=presentationText,close=closeAfterPresentation
         clearPresentationText()
-        for part in text {send(["event":"text","text":part])}
-        if close {requestClose()}
+        for part in text {receive(.input(["event":"text","text":part]))}
+        if close {
+            if focusPending || inputBlocked {deferredInput.append(.input(["event":"close"]))}
+            else {requestClose()}
+        }
     }
     private func transferClipboard(_ action:String){
         guard window.isKeyWindow,window.firstResponder === content else{return}
@@ -1094,6 +1107,7 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
     var presentationState:[String:Any] {
         ["transitionActive":transitionActive,"displayUpdating":displayUpdating,
          "inputBlocked":inputBlocked,"deferredInputCount":deferredInput.count,
+         "focusPending":focusPending,
          "inputRequests":inputRequests,"inputRejected":inputRejected,
          "lastInputEvent":lastInputEvent,"lastInputError":lastInputError,
          "lastCloseError":lastCloseError,
@@ -1143,8 +1157,72 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
     func windowDidBecomeKey(_ notification:Notification){
         if !role.transient {
             window.makeFirstResponder(content)
-            bridge.command("activate",["window":id])
+            requestActivation()
         }
+    }
+    private func activationCommand(_ operation:String) async throws->ActivationStatus {
+        try await withCheckedThrowingContinuation {continuation in
+            bridge.command(operation,["window":id],timeout:.milliseconds(400)){result in
+                switch result {
+                case .failure(let error):continuation.resume(throwing:error)
+                case .success(let reply):
+                    let value=reply["value"] as? [String:Any] ?? [:]
+                    continuation.resume(returning:ActivationStatus(focused:operation=="activate" || value["focused"] as? Bool == true,
+                        foreground:(value["foreground"] as? NSNumber)?.uint64Value))
+                }
+            }
+        }
+    }
+    private func requestActivation(){
+        guard !role.transient,!sourceClosed,window.isKeyWindow else{return}
+        guard readyForInput,bridge.deviceFocusAvailable else{
+            bridge.command("activate",["window":id]);return
+        }
+        guard !focusPending else{return}
+        let request=UUID();focusRequest=request;focusPending=true
+        focusTask=Task{@MainActor [weak self] in
+            guard let self else{return}
+            defer{if self.focusRequest==request {self.cancelInput()}}
+            do {
+                // The ordinary API is enough when Windows grants focus.
+                // Otherwise use real device window switching, with readback
+                // after each step, instead of joining another UI queue.
+                do {
+                    _=try await self.activationCommand("activate")
+                    try Task.checkCancellation()
+                    guard self.focusRequest==request,self.window.isKeyWindow else{return}
+                    self.finishActivation(request);return
+                }catch {try Task.checkCancellation()}
+                var visited=Set<UInt64>()
+                let limit=ProcessInfo.processInfo.systemUptime+3
+                for step in 0...8 {
+                    try Task.checkCancellation()
+                    guard self.focusRequest==request,self.window.isKeyWindow,self.readyForInput else{return}
+                    let checkedAt=ProcessInfo.processInfo.systemUptime
+                    let state=try await self.activationCommand("device_focus_state")
+                    try Task.checkCancellation()
+                    guard self.focusRequest==request,self.window.isKeyWindow else{return}
+                    if state.focused {self.finishActivation(request);return}
+                    guard step<8,ProcessInfo.processInfo.systemUptime<limit,
+                          let foreground=state.foreground,visited.insert(foreground).inserted,
+                          let cycle=self.onDeviceFocus else {
+                        throw NSError(domain:"Guest",code:1,userInfo:[NSLocalizedDescriptionKey:"Windows non ha attivato questa finestra. L’input in attesa non è stato inviato."])
+                    }
+                    try await cycle(checkedAt+0.5)
+                    try await Task.sleep(for:.milliseconds(120))
+                }
+            }catch {
+                guard self.focusRequest==request else{return}
+                let report = !Task.isCancelled
+                self.cancelInput()
+                if report {self.onError?(error.localizedDescription)}
+            }
+        }
+    }
+    private func finishActivation(_ request:UUID){
+        guard focusRequest==request else{return}
+        focusRequest=nil;focusTask=nil;focusPending=false
+        drainInput()
     }
     func windowDidResignKey(_ notification:Notification){
         if !role.transient {
@@ -1157,7 +1235,7 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
             }
         }
     }
-    func windowDidDeminiaturize(_ notification:Notification){bridge.command("activate",["window":id])}
+    func windowDidDeminiaturize(_ notification:Notification){requestActivation()}
     func windowWillMove(_ notification:Notification){
         guard !role.transient,sharedDisplay != nil,!applyingSourceGeometry,geometryInteraction == nil,
               NSEvent.pressedMouseButtons & 1 != 0,NSApp.currentEvent?.window === window else{return}

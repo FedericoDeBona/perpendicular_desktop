@@ -1113,6 +1113,13 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
                         }
                         try await machine.closeForegroundApplication(notAfter:deadline)
                     }
+                    controller.onDeviceFocus={ [weak self,weak controller] deadline in
+                        guard let self,let controller,self.displayEpoch==closeEpoch,
+                              self.connected,controller.window.isKeyWindow,let machine=self.machine else {
+                            throw CocoaError(.executableRuntimeMismatch)
+                        }
+                        try await machine.cycleApplicationFocus(notAfter:deadline)
+                    }
                     controller.activateOnFirstShow=openingApps.contains(item["app"] as? String ?? "") && machine?.desktopIsKey != true
                     controller.onError={ [weak self] message in
                         self?.status=message;self?.launcherNotice=message;self?.windowNotice=(id,message,false)

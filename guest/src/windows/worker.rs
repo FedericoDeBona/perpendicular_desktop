@@ -22,7 +22,6 @@ use windows::Win32::{
     Foundation::{HWND, LPARAM, POINT, WPARAM, GetLastError, ERROR_ACCESS_DENIED},
     Graphics::Gdi::ClientToScreen,
     System::{Com::{COINIT_APARTMENTTHREADED, CoCreateGuid, CoInitializeEx},
-        Threading::{GetCurrentThreadId,AttachThreadInput},
         Power::{EXECUTION_STATE,ES_CONTINUOUS,ES_DISPLAY_REQUIRED,SetThreadExecutionState}},
     UI::{
         HiDpi::{DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, SetThreadDpiAwarenessContext},
@@ -108,19 +107,9 @@ fn activate_window(hwnd: HWND) -> Result<(), String> {
     unsafe {
         let root = GetAncestor(hwnd, GA_ROOT);
         if GetAncestor(GetForegroundWindow(), GA_ROOT) == root { return Ok(()); }
-        let mut accepted = SetForegroundWindow(root).as_bool();
-        if GetAncestor(GetForegroundWindow(),GA_ROOT)!=root
-            && window_control::native_app_input_allowed(root) {
-            // Native app displays need no injected UI-thread helper. Share
-            // input only for this explicit activation, then detach before any
-            // wait or input delivery. Foreground identity is still checked.
-            let current=GetCurrentThreadId();
-            let foreground=GetWindowThreadProcessId(GetForegroundWindow(),None);
-            if foreground!=0 && foreground!=current && AttachThreadInput(current,foreground,true).as_bool() {
-                accepted=SetForegroundWindow(root).as_bool();
-                let _=AttachThreadInput(current,foreground,false);
-            }
-        }
+        // Never join another application's input queue: an unresponsive
+        // foreground thread can then block this worker inside activation.
+        let accepted = SetForegroundWindow(root).as_bool();
         if accepted {
             let _ = SendMessageTimeoutW(root, WM_NULL, WPARAM(0), LPARAM(0),
                 SMTO_ABORTIFHUNG | SMTO_BLOCK, 250, None);
@@ -246,7 +235,7 @@ impl Worker {
         outbox.control(
             json!({"type":"hello","protocol":1,"token":config.token,"epoch":self.epoch,
             "sid":self.sid,"session":self.session,"version":env!("CARGO_PKG_VERSION"),
-            "capabilities":{"capture":"wgc-hardware-readback-with-software-recovery","windows":4,"transients":12,"windowRoles":true,"input":true,"catalogue":true,"appIcon":true,"frameChannel":true,"windowRefresh":true,"nativeAppInput":true,"modeFocus":true,"gpuFramesOnly":true,"frameEncodings":[],"displayInfo":true,"displayTopology":true,"driverInfo":true,"graphicsInfo":true,"displayConfigure":true,"sharedGeometry":true,"processControl":true,"clipboard":true,"clipboardTextBytes":262144,"applicationStatus":true,"memoryStatus":true,"execute":true,"executeTimeoutSeconds":60,"executeOutputBytes":65536,"displayEvents":self.display_observer.is_some()}}),
+            "capabilities":{"capture":"wgc-hardware-readback-with-software-recovery","windows":4,"transients":12,"windowRoles":true,"input":true,"catalogue":true,"appIcon":true,"frameChannel":true,"windowRefresh":true,"nativeAppInput":true,"modeFocus":true,"deviceFocus":true,"gpuFramesOnly":true,"frameEncodings":[],"displayInfo":true,"displayTopology":true,"driverInfo":true,"graphicsInfo":true,"displayConfigure":true,"sharedGeometry":true,"processControl":true,"clipboard":true,"clipboardTextBytes":262144,"applicationStatus":true,"memoryStatus":true,"execute":true,"executeTimeoutSeconds":60,"executeOutputBytes":65536,"displayEvents":self.display_observer.is_some()}}),
         );
         let (sender, receiver) = mpsc::sync_channel(128);
         let state = outbox.clone();
@@ -636,7 +625,7 @@ impl Worker {
                 Ok(json!({}))
             }
             "input" | "clipboard" | "activate" | "resize" | "close" | "hit_test" | "geometry" | "set_geometry"
-            | "cancel_interaction" => {
+            | "cancel_interaction" | "device_focus_state" => {
                 let id = value["window"].as_str().ok_or("Missing window identity")?;
                 let window = self.windows.get(id).ok_or("Window retired")?;
                 if !window.target.valid() {
@@ -644,6 +633,25 @@ impl Worker {
                 }
                 let target = window.target.clone();
                 match value["operation"].as_str().unwrap() {
+                    "device_focus_state" => unsafe {
+                        let hwnd=HWND(target.hwnd as _);
+                        if !window.mac_owned || catalogue::transient(&window.metadata)
+                            || !window_control::native_app_input_allowed(hwnd)
+                            || !IsWindowVisible(hwnd).as_bool() || !IsWindowEnabled(hwnd).as_bool()
+                            || IsIconic(hwnd).as_bool() {
+                            return Err("This window is not available for device focus".into());
+                        }
+                        let foreground=GetAncestor(GetForegroundWindow(),GA_ROOT);
+                        let mut gui=GUITHREADINFO{cbSize:size_of::<GUITHREADINFO>() as u32,..Default::default()};
+                        GetGUIThreadInfo(0,&mut gui).map_err(error)?;
+                        // Menus, a held pointer and move/resize loops belong
+                        // to the user's current interaction, never cycle them.
+                        if foreground.is_invalid() || !gui.hwndCapture.is_invalid()
+                            || gui.flags.0 & 0x1e != 0 {
+                            return Err("Finish the current Windows interaction before switching apps".into());
+                        }
+                        return Ok(json!({"focused":foreground==hwnd,"foreground":foreground.0 as usize}));
+                    },
                     "input" | "clipboard" => {
                         let root = self.input_root(window);
                         let root_hwnd = root.target.hwnd;

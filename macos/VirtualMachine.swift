@@ -194,13 +194,19 @@ final class VirtualMachineController {
     func finishDesktopResolution(){displayRequest=nil;desktopResolutionPending=false;displayControl?.stop();displayControl=nil}
     func closeDesktop(){finishDesktopResolution();desktop?.stop();desktop?.window.close();desktop=nil}
     func closeForegroundApplication(notAfter:Double) async throws {
+        try await sendApplicationChord(["alt","f4"],notAfter:notAfter)
+    }
+    func cycleApplicationFocus(notAfter:Double) async throws {
+        try await sendApplicationChord(["alt","esc"],notAfter:notAfter)
+    }
+    private func sendApplicationChord(_ keys:[String],notAfter:Double) async throws {
         guard let launch=desktopLaunch() else{throw CocoaError(.executableRuntimeMismatch)}
         let socket=controlSocket,id=configuration.id,pid=launch.pid
         try await Task.detached {
             // QEMU releases both device keys after the bounded hold, even if
             // the frontend disappears. No process termination or token change.
             _=try MachineControl.execute(socket:socket,operation:"send-key",
-                arguments:["keys":[["type":"qcode","data":"alt"],["type":"qcode","data":"f4"]],"hold-time":100],
+                arguments:["keys":keys.map{["type":"qcode","data":$0]},"hold-time":100],
                 expectedUUID:id,expectedPID:pid,notAfter:notAfter)
         }.value
     }
