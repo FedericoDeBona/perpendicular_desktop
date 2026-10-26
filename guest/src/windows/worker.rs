@@ -515,7 +515,8 @@ impl Worker {
             }
             "desktop_focus_target" => {
                 let foreground=catalogue::foreground();
-                let window=self.windows.values().find(|w|w.mac_owned && w.target.hwnd==foreground && w.target.valid());
+                let window=self.windows.values().find(|w|w.mac_owned && self.catalogue.singleton(&w.app)
+                    && w.target.hwnd==foreground && w.target.valid());
                 Ok(json!({"window":window.map(|w|w.target.id.as_str())}))
             }
             "window_refresh" => {

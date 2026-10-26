@@ -236,8 +236,19 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
             // Re-present its valid image only when the raster is unchanged.
             content.redrawCurrentFrame()
         }
-        if !updating {finishPresentedTransition();if transitionActive {requestFreshFrame()}}
+        if !updating {
+            presentInitialPlacementPacketIfReady()
+            finishPresentedTransition();if transitionActive {requestFreshFrame()}
+        }
         trace(updating ? "frame_display_wait":"frame_display_ready")
+    }
+    private func presentInitialPlacementPacketIfReady(){
+        guard !hasFrame,!displayUpdating,initialPlacementReady,let packet=initialPlacementPacket,
+              packet.header["width"] as? Int == Int(sourceRect.width),
+              packet.header["height"] as? Int == Int(sourceRect.height) else{return}
+        // An unchanged WGC window may deliver only one image. Reconcile both
+        // arrival orders: metadata and display confirmation can follow it.
+        initialPlacementPacket=nil;present(packet)
     }
     private func beginFrameTransition(_ message:String){
         guard !role.transient,!transitionActive else{return}
@@ -424,11 +435,7 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
         if !hasFrame,role == .main,!displayUpdating,let first=sharedDisplays.first {
             placeOnAppDisplayIfNeeded(first)
         }
-        if initialPlacementReady,let packet=initialPlacementPacket,
-           packet.header["width"] as? Int == Int(sourceRect.width),
-           packet.header["height"] as? Int == Int(sourceRect.height) {
-            initialPlacementPacket=nil;present(packet)
-        }
+        presentInitialPlacementPacketIfReady()
         if sharedDisplay != nil,!geometryActive,!geometryFinishing,!minimized {applySourceFrame()}
         if initialPlacementReady && !displayUpdating && !role.transient && visible && !minimized && !window.isVisible {
             if activateOnFirstShow {window.makeKeyAndOrderFront(nil)}
@@ -1071,6 +1078,8 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
          "presentationTextBytes":presentationTextBytes,"presentationTextBuffered":presentationTextBuffered,
          "requiredPresentationID":transitionAfterPresentation,"presentedID":lastPresentedID,
          "initialPlacementReady":initialPlacementReady,"initialPlacementFailed":initialPlacementFailed,
+         "heldInitialFramePixels":[initialPlacementPacket?.header["width"] as? Int ?? 0,
+                                   initialPlacementPacket?.header["height"] as? Int ?? 0],
          "hasBeenReady":hasBeenReady,"activateOnFirstShow":activateOnFirstShow,
          "submittedID":content.presentationID,"hasFrame":hasFrame,
          "receivedSequence":receivedSequence,"acceptedSequence":acceptedSequence,

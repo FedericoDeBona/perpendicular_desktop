@@ -276,16 +276,19 @@ pub fn hit_test(target: &Target, value: &Value) -> Result<Value, String> {
         if !ClientToScreen(hwnd, &mut point).as_bool() {
             return Err("Pointer transform unavailable".into());
         }
+        let mut receiver = hwnd;
         if native_app_input_allowed(hwnd) {
             let hit=WindowFromPoint(point);
             if !hit.is_invalid() && hit != hwnd && GetAncestor(hit,GA_ROOT)==hwnd {
-                // Windows owns hit testing of the real child/control. Do not
-                // convert its custom caption band into a synthetic Mac drag.
-                return Ok(json!({"hit":1,"nativeChild":true}));
+                // Explorer exposes its draggable caption as a real child
+                // (TITLE_BAR_SCAFFOLDING_WINDOW_CLASS). The child reports
+                // HTCAPTION while the root reports HTCLIENT. Ask the actual
+                // hit window: assuming HTCLIENT lets Windows start a second
+                // move loop while the Mac follows the resulting geometry.
+                receiver=hit;
             }
         }
-        let mut receiver = hwnd;
-        if let Some(content) = &target.hosted {
+        if receiver == hwnd && let Some(content) = &target.hosted {
             let child = HWND(content.hwnd as *mut _);
             let mut client = RECT::default();
             GetClientRect(child, &mut client).map_err(error)?;
@@ -321,7 +324,10 @@ pub fn hit_test(target: &Target, value: &Value) -> Result<Value, String> {
             return Err("Window did not respond".into());
         }
         if !target.valid() { return Err("Window retired".into()); }
-        Ok(json!({"hit":hit as i32}))
+        if receiver != hwnd && GetAncestor(receiver,GA_ROOT)!=hwnd {
+            return Err("Window geometry is updating".into());
+        }
+        Ok(json!({"hit":hit as i32,"nativeChild":receiver!=hwnd}))
     }
 }
 
