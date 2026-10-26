@@ -1,0 +1,14 @@
+--- a/meson.build
++++ b/meson.build
+@@ -2595,6 +2595,11 @@
+                                         args: '-DVIRGL_RENDERER_UNSTABLE_APIS',
+                                         prefix: '#include <virglrenderer.h>',
+                                         dependencies: virgl))
++  # This profile includes Perpendicular's native Darwin desktop backend.
++  # A failed linker probe must not silently compile out its scanout path.
++  if host_os == 'darwin' and not config_host_data.get('HAVE_VIRGL_RENDERER_NATIVE_SCANOUT')
++    error('Native Darwin desktop requires virgl_renderer_create_handle_for_scanout; check the library path and clear cached feature probes')
++  endif
+   config_host_data.set('VIRGL_VERSION_MAJOR', virgl.version().split('.')[0])
+   config_host_data.set('HAVE_VIRGL_RENDERER_NEPTUNE',
+                         cc.has_header_symbol('virglrenderer.h',

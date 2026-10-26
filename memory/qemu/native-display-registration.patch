@@ -1,0 +1,17 @@
+--- a/ui/meson.build
++++ b/ui/meson.build
+@@ -77,8 +77,13 @@
+   if host_os != 'darwin'
+     egl_headless_deps += [gbm]
+   endif
+-  egl_headless_ss.add(when: egl_headless_deps,
+-                      if_true: files('egl-headless.c'))
++  # The native Darwin backend registers DISPLAY_TYPE_EGL_HEADLESS itself.
++  # qemu_display_register replaces the previous registration, so linking
++  # the stock implementation as well silently disables the native publisher.
++  if host_os != 'darwin'
++    egl_headless_ss.add(when: egl_headless_deps,
++                        if_true: files('egl-headless.c'))
++  endif
+   ui_modules += {'egl-headless' : egl_headless_ss}
+ endif

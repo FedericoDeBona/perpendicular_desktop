@@ -35,6 +35,15 @@ Il ciclo RAM protetto 4→2→4 GiB con dati conservati resta la qualifica prece
 
 ## Problemi pertinenti al desktop
 
+### GFX-009 — Desktop nero per backend duplicato e scanout escluso dalla build locale
+
+- **Stato:** corretto e verificato sul secondo Mac/VM93be6687; nessuna nuova qualifica generale del driver. Windows e le due uscite erano attivi, ma Apri Windows mostrava la console RFB inattiva800×600.
+- **Cause verificate:** il backend EGL stock sostituiva la registrazione del backend nativo; inoltre un controllo di link fallito e memorizzato aveva lasciato HAVE_VIRGL_RENDERER_NATIVE_SCANOUT disabilitato pur con le funzioni presenti nella libreria. La prima consegna non aveva verificato il desktop dopo l'allineamento.
+- **Correzione:** esclusa la registrazione stock dal profilo Darwin nativo, ripristinata la singola unità scanout dopo probe positivo sulle librerie effettive; guardia di configurazione per impedire il ripiego silenzioso. QEMU4ab6275c4d11 distribuito e firmato.
+- **Criterio verificato:** desktop reale1920×1280 visibile, nativeActive=true, menu Start aperto dal mouse,86 frame pubblicati/ACK nel campione. WinUI parziale resta GFX-001 e il dialogo WIN-002 non è stato riprovato.
+- **Limite distinto:** primo arresto ordinario non completato entro60s; QMP poi chiuso con processo ancora vivo. Uscita forzata solo dopo consenso esplicito, successivi due arresti ordinari riusciti. Non dichiarata risolta l'affidabilità di arresto SYS-001/TODO-009.
+- **Evidenze:** [diario](VERIFICATION.md#26-ottobre--ripristino-del-desktop-nativo-sul-secondo-mac).
+
 ### PERF-001 — Explorer nel desktop compare prima del contenuto completo
 
 - **Seguito pipeline25 ottobre:** frontend temporaneo sulla VM principale: tratto desktop ingresso→presentazione mediano41,498 ms, GPU copy+draw0,476 ms nel campione1920×1280. Non sono tempi di apertura/produzione Explorer e non spiegano da soli i secondi del rapporto precedente. Nessuna causa o correzione chiusa. [Report pipeline](reports/2026-10-25-graphics-pipeline.md), [verifica](VERIFICATION.md#25-ottobre--pipeline-grafica-con-timestamp-gpu-e-presentazione).

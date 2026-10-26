@@ -100,3 +100,14 @@ Il fetch istruzione consulta RamDiscardManager per i soli4 byte popolati;
 non legge RAM hotremoved. Applicare queste patch dopo gli overlay scanout,
 protocollo e input della base nativa corrispondente, non su QEMU upstream puro.
 Nessuna patch consumer-demand o modifica WGC fa parte del percorso RAM.
+
+Quando il sorgente include anche il backend Darwin di Perpendicular che registra
+DISPLAY_TYPE_EGL_HEADLESS, applicare dopo la patch EGL
+`native-display-registration.patch`: la versione stock non deve essere collegata
+insieme a quella nativa. QEMU conserva l'ultima registrazione senza segnalare il
+doppione; la sola build riuscita non conferma quindi il desktop. Verificare
+perp-headless-stats.initialized, frame nativi consegnati/ACK e il desktop visibile.
+Il medesimo profilo richiede `native-scanout-required.patch`: un errore di link
+nel controllo di virgl_renderer_create_handle_for_scanout deve fermare la
+configurazione. Correggere i percorsi delle librerie e azzerare la cache Meson,
+senza interpretare un risultato negativo memorizzato come assenza della funzione.
