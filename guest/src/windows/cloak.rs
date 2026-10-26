@@ -34,7 +34,7 @@ pub fn install(directory:&Path)->Result<(),String> {
 
 pub struct Window {
     target:Arc<Target>, module:*mut c_void, call_hook:*mut c_void, message_hook:*mut c_void,
-    active:bool, last:(i32,i32), buttons:u32,
+    active:bool, native_input:bool,last:(i32,i32), buttons:u32,
 }
 impl Window {
     pub fn new(target:Arc<Target>)->Result<Self,String> {
@@ -48,7 +48,7 @@ impl Window {
             if pid!=target.pid || thread==0 {return Err("Window identity changed".into());}
             let module=LoadLibraryW(wide.as_ptr());
             if module.is_null(){return Err(format!("Load window helper: {}",std::io::Error::last_os_error()));}
-            let mut value=Self{target,module,call_hook:std::ptr::null_mut(),message_hook:std::ptr::null_mut(),active:false,last:(0,0),buttons:0};
+            let mut value=Self{target,module,call_hook:std::ptr::null_mut(),message_hook:std::ptr::null_mut(),active:false,native_input:false,last:(0,0),buttons:0};
             let call=GetProcAddress(module,c"PerpendicularWindowHook".as_ptr().cast());
             let message=GetProcAddress(module,c"PerpendicularMessageHook".as_ptr().cast());
             if call.is_null()||message.is_null(){return Err("Missing window helper entry point".into());}
@@ -59,6 +59,12 @@ impl Window {
         }
     }
     pub fn active(&self)->bool {self.active && unsafe {GetPropW(self.target.hwnd as _,w!("Perpendicular.Window.Controller").as_ptr()) as usize==GetCurrentProcessId() as usize}}
+    pub fn native_input(&self)->bool {self.active() && self.native_input}
+    pub fn set_native_input(&mut self,enabled:bool)->Result<(),String> {
+        if self.native_input==enabled{return Ok(());}
+        self.command(if enabled{11}else{1},0,0,0)?;
+        self.native_input=enabled;Ok(())
+    }
     pub fn touch(&self) {
         if self.active() {unsafe {SetPropW(self.target.hwnd as _,w!("Perpendicular.Window.Beat").as_ptr(),GetTickCount64() as usize as _);}}
     }

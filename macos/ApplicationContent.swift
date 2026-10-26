@@ -226,7 +226,7 @@ final class ApplicationContent:NSView {
             case 8:if !event.isARepeat {copy(nil)};return
             case 7:if !event.isARepeat {cut(nil)};return
             case 9:if !event.isARepeat {paste(nil)};return
-            case 12:chord([0x12,0x73]);return // Command-Q → Alt-F4.
+            case 12:emit(["event":"close"]);return
             case 6 where flags.contains(.shift):chord([0x11,0x59]);return
             case 123:chord(shift+[0x24]);return
             case 124:chord(shift+[0x23]);return

@@ -136,6 +136,11 @@ static DWORD __stdcall recover(void *arg) {
 
 /* Result codes are positive protocol errors, not HRESULT success aliases. */
 static DWORD dispatch(HWND root,UINT op,long sx,long sy) {
+ if(op==11) {
+  int cloak=0;long hr=DwmSetWindowAttribute(root,13,&cloak,4);
+  if(hr<0)return (DWORD)hr;
+  hr=hide_taskbar(root);return hr<0?(DWORD)hr:0;
+ }
  if(op==10) {
   SetForegroundWindow(root);
   /* ShowWindow(SW_RESTORE) on a subsequent Mac launch can add the button

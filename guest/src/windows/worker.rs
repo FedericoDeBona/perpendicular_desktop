@@ -228,7 +228,7 @@ impl Worker {
         outbox.control(
             json!({"type":"hello","protocol":1,"token":config.token,"epoch":self.epoch,
             "sid":self.sid,"session":self.session,"version":env!("CARGO_PKG_VERSION"),
-            "capabilities":{"capture":"wgc-hardware-readback-with-software-recovery","windows":4,"transients":12,"windowRoles":true,"input":true,"catalogue":true,"appIcon":true,"frameChannel":true,"windowRefresh":true,"gpuFramesOnly":true,"frameEncodings":[],"displayInfo":true,"displayTopology":true,"driverInfo":true,"graphicsInfo":true,"displayConfigure":true,"sharedGeometry":true,"processControl":true,"clipboard":true,"clipboardTextBytes":262144,"applicationStatus":true,"memoryStatus":true,"execute":true,"executeTimeoutSeconds":60,"executeOutputBytes":65536,"displayEvents":self.display_observer.is_some()}}),
+            "capabilities":{"capture":"wgc-hardware-readback-with-software-recovery","windows":4,"transients":12,"windowRoles":true,"input":true,"catalogue":true,"appIcon":true,"frameChannel":true,"windowRefresh":true,"nativeAppInput":true,"gpuFramesOnly":true,"frameEncodings":[],"displayInfo":true,"displayTopology":true,"driverInfo":true,"graphicsInfo":true,"displayConfigure":true,"sharedGeometry":true,"processControl":true,"clipboard":true,"clipboardTextBytes":262144,"applicationStatus":true,"memoryStatus":true,"execute":true,"executeTimeoutSeconds":60,"executeOutputBytes":65536,"displayEvents":self.display_observer.is_some()}}),
         );
         let (sender, receiver) = mpsc::sync_channel(128);
         let state = outbox.clone();
@@ -490,6 +490,11 @@ impl Worker {
         }
         match value["operation"].as_str().ok_or("Missing operation")? {
             "catalogue" => Ok(self.catalogue.refresh()?),
+            "app_input_mode" => {
+                let enabled=value["enabled"].as_bool().ok_or("Missing input mode")?;
+                window_control::set_native_app_input(enabled)?;
+                Ok(json!({"accepted":true}))
+            }
             "window_refresh" => {
                 let id=value["window"].as_str().ok_or("Missing window identity")?;
                 let window=self.windows.get_mut(id).ok_or("Window retired")?;
@@ -644,7 +649,9 @@ impl Worker {
                         state["captureStopped"] = json!(window.stop.as_ref()
                             .map(|stop| stop.load(Ordering::Acquire)).unwrap_or(true));
                         state["macOwned"] = json!(window.mac_owned);
-                        state["guestCloaked"] = json!(window.cloak.as_ref().is_some_and(cloak::Window::active));
+                        state["guestCloaked"] = json!(window.cloak.as_ref().is_some_and(|s|s.active() && !s.native_input()));
+                        state["guestIsolated"] = json!(window.cloak.as_ref().is_some_and(cloak::Window::active));
+                        state["guestIsolation"] = json!(if window.cloak.as_ref().is_some_and(cloak::Window::native_input){"app-display"}else{"dwm"});
                         state["cloakError"] = json!(window.cloak_error);
                         return Ok(state);
                     }
@@ -987,11 +994,19 @@ impl Worker {
                         window.cloak.take();window.cloak_error=Some("Capture stopped; restored in Windows".into());cloaked=false;
                     }
                 }else {window.capture_unavailable_since=None;}
-                if let Some(scope)=&window.cloak {scope.touch();}
+                if let Some(scope)=&mut window.cloak {
+                    let native=window_control::native_app_input_allowed(HWND(window.target.hwnd as _));
+                    if let Err(message)=scope.set_native_input(native) {
+                        window.cloak_error=Some(message);scope.show();cloaked=false;
+                    }
+                    scope.touch();
+                }
                 if window.cloak.is_some() && !cloaked {
                     window.cloak.take();window.cloak_error=Some("Window isolation expired; restored in Windows".into());
                 }
-                details["guestCloaked"]=json!(cloaked);
+                details["guestCloaked"]=json!(cloaked && !window.cloak.as_ref().is_some_and(cloak::Window::native_input));
+                details["guestIsolated"]=json!(cloaked);
+                details["guestIsolation"]=json!(if window.cloak.as_ref().is_some_and(cloak::Window::native_input){"app-display"}else{"dwm"});
                 details["macOwned"]=json!(window.mac_owned);
                 details["cloakError"]=json!(window.cloak_error);
                 // DWM visibility and presentation of a Mac-owned window are
@@ -1293,7 +1308,13 @@ impl Worker {
         value: &Value,
     ) -> Result<(), String> {
         let kind=value["event"].as_str().ok_or("Missing input type")?;
-        if self.windows.get(&target.id).is_some_and(|w|w.cloak.as_ref().is_some_and(cloak::Window::active)) {
+        if let Some(scope)=self.windows.get_mut(&target.id).and_then(|w|w.cloak.as_mut()) {
+            if scope.native_input() && !window_control::native_app_input_allowed(HWND(target.hwnd as _)) {
+                scope.set_native_input(false)?;
+                return Err("The app is leaving its reserved display".into());
+            }
+        }
+        if self.windows.get(&target.id).is_some_and(|w|w.cloak.as_ref().is_some_and(|s|s.active() && !s.native_input())) {
             if kind=="leave" {return Ok(());}
             // DefWindowProc's Alt-F4/title-button tracking requires a visible
             // desktop hit target. Request the same authenticated system close.

@@ -22,6 +22,7 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
     private var machineStateRevision=UUID()
     @Published private(set) var catalogueLoading=false
     @Published var launcherNotice:String?
+    private var windowNotice:(id:String,message:String)?
     @Published private(set) var openingApps:Set<String>=[]
     @Published private(set) var activeApps:Set<String>=[]
     @Published private(set) var applicationIcons:[String:NSImage]=[:]
@@ -746,7 +747,7 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
         displaySetupID=UUID()
         invalidateDisplay("Checking Windows display…")
         guard connected else{return}
-        if !desktopOnly {machine.synchronizePrimaryDisplay()}
+        if !desktopOnly,machine.mixedDisplaysEnabled != true {machine.synchronizePrimaryDisplay()}
         readDisplay()
         prepareDisplay()
     }
@@ -772,6 +773,9 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
         }
     }
     private func acceptDisplay(_ snapshot:[String:Any]){
+        // A primary-console snapshot cannot replace the independently verified
+        // mappings of the N+1 app displays.
+        if machine?.mixedDisplaysEnabled == true {readMixedDisplay();return}
         launcherDisplays=snapshot["displays"] as? [[String:Any]] ?? []
         displayUpdating=false
         if desktopOnly,let displays=snapshot["displays"] as? [[String:Any]],displays.count == 1,
@@ -798,6 +802,11 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
     private func acceptMixedDisplay(_ plan:MixedDisplayPlan,_ snapshot:[String:Any])throws {
         let mappings=try plan.mappings(snapshot:snapshot)
         mixedDisplayConfiguring=false
+        if guestCapabilities["nativeAppInput"] == true {
+            bridge.command("app_input_mode",["enabled":true]){[weak self] result in
+                if case .failure(let error)=result {self?.launcherNotice=error.localizedDescription}
+            }
+        }
         lastHostDisplays=HostDisplay.current()
         sharedDisplay=nil;sharedDisplays=mappings;displayUpdating=false
         launcherDisplays=((snapshot["monitors"] as? [String:Any])?["displays"] as? [[String:Any]] ?? []).map{monitor in
@@ -878,7 +887,7 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
         }
     }
     private func scheduleDesktopResize(){
-        guard desktopOnly,connected,displayConfigurable,desktopResizeRequest == nil,desktopReadRequest == nil,
+        guard desktopOnly,machine?.mixedDisplaysEnabled != true,connected,displayConfigurable,desktopResizeRequest == nil,desktopReadRequest == nil,
               desktopSize.width>0,desktopSize.height>0,
               machine?.desktopState["visible"] as? Bool == true else{return}
         desktopResizeTask?.cancel()
@@ -981,7 +990,7 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
             displayEpoch=value["epoch"] as? String
             invalidateDisplay("Checking Windows display…")
             let capabilities=value["capabilities"] as? [String:Any] ?? [:]
-            guestCapabilities=Dictionary(uniqueKeysWithValues:["memoryStatus","execute","displayInfo","displayTopology","driverInfo","graphicsInfo","sharedGeometry","appIcon","applicationStatus","processControl","clipboard"].map{($0,capabilities[$0] as? Bool == true)})
+            guestCapabilities=Dictionary(uniqueKeysWithValues:["nativeAppInput","memoryStatus","execute","displayInfo","displayTopology","driverInfo","graphicsInfo","sharedGeometry","appIcon","applicationStatus","processControl","clipboard"].map{($0,capabilities[$0] as? Bool == true)})
             memoryController?.guestReady=guestCapabilities["memoryStatus"] == true
             startApplicationStatusUpdates()
             pumpApplicationIcons()
@@ -1032,6 +1041,10 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
         case "windows":
             guard let items=value["windows"] as? [[String:Any]],items.count<=16 else{return}
             let current=Set(items.compactMap{$0["id"] as? String})
+            if let notice=windowNotice,!current.contains(notice.id) {
+                if launcherNotice==notice.message {launcherNotice=nil}
+                windowNotice=nil
+            }
             focusWarnedWindows.formIntersection(current)
             windowApps=items.reduce(into:[:]){result,item in
                 if let id=item["id"] as? String,let app=item["app"] as? String {result[id]=app}
@@ -1053,7 +1066,9 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
                     let role=WindowRole(rawValue:item["role"] as? String ?? "dialog") ?? .dialog
                     let controller=ApplicationWindow(id:id,title:title,role:role,bridge:bridge)
                     controller.activateOnFirstShow=openingApps.contains(item["app"] as? String ?? "") && machine?.desktopIsKey != true
-                    controller.onError={ [weak self] message in self?.status=message;self?.launcherNotice=message }
+                    controller.onError={ [weak self] message in
+                        self?.status=message;self?.launcherNotice=message;self?.windowNotice=(id,message)
+                    }
                     controller.onClose={ [weak self] in self?.windows.removeValue(forKey:id);NativeWindowFrames.shared.retire(window:id) }
                     controller.onGeometry={ [weak self] in self?.layoutChildren() }
                     controller.onPointerExit={ [weak self] in self?.pointerExited(id) }
@@ -1092,6 +1107,7 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
             // the first frame on the separate frame connection.
             guard let id=value["window"] as? String,windows[id] != nil else{return}
             launcherNotice=value["message"] as? String
+            if let message=launcherNotice {windowNotice=(id,message)}
         case "window_error","launch_error":
             if let id=value["window"] as? String {failedWindows.insert(id);windows[id]?.failFrameTransition()}
             refreshApplicationStates()
@@ -1100,6 +1116,7 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
             if value["type"] as? String == "window_error",value["role"] as? String == "tooltip" {return}
             status=value["message"] as? String ?? "This application is unavailable. Use Show Windows."
             launcherNotice=value["message"] as? String ?? "Questa app non è disponibile. Puoi continuare dal desktop Windows."
+            if let id=value["window"] as? String,let message=launcherNotice {windowNotice=(id,message)}
             if let app=value["app"] as? String {finishOpening(app);if value["type"] as? String == "launch_error" {openingNoticeApp=app}}
         default:break
         }

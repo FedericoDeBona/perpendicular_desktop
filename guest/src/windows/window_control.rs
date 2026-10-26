@@ -1,6 +1,7 @@
 use super::{capture::Target, catalogue, error};
 use serde_json::{Value, json};
 use std::sync::{Mutex, OnceLock};
+use std::sync::atomic::{AtomicBool,Ordering};
 use windows::Win32::{
     Foundation::{HWND, LPARAM, POINT, RECT, WPARAM},
     Graphics::Gdi::{ClientToScreen, GetMonitorInfoW, MonitorFromWindow, MonitorFromRect,
@@ -9,6 +10,26 @@ use windows::Win32::{
 };
 
 static APP_AREAS: OnceLock<Mutex<Vec<(RECT,RECT)>>> = OnceLock::new();
+static NATIVE_APP_INPUT:AtomicBool=AtomicBool::new(false);
+
+pub fn set_native_app_input(enabled:bool)->Result<(),String> {
+    if enabled && APP_AREAS.get().and_then(|a|a.lock().ok()).is_none_or(|a|a.is_empty()) {
+        return Err("App displays are not configured".into());
+    }
+    NATIVE_APP_INPUT.store(enabled,Ordering::Release);Ok(())
+}
+pub fn native_app_input_allowed(hwnd:HWND)->bool {
+    if !NATIVE_APP_INPUT.load(Ordering::Acquire){return false;}
+    let Some(bounds)=catalogue::frame_bounds(hwnd) else{return false;};
+    let Some(areas)=APP_AREAS.get().and_then(|a|a.lock().ok()) else{return false;};
+    unsafe {
+        let monitor=MonitorFromWindow(hwnd,MONITOR_DEFAULTTONEAREST);
+        let mut info=MONITORINFO{cbSize:size_of::<MONITORINFO>() as u32,..Default::default()};
+        if !GetMonitorInfoW(monitor,&mut info).as_bool() || info.dwFlags & 1 != 0 {return false;}
+        areas.iter().any(|(frame,_)|*frame==info.rcMonitor && bounds.left>=frame.left-1
+            && bounds.top>=frame.top-1 && bounds.right<=frame.right+1 && bounds.bottom<=frame.bottom+1)
+    }
+}
 
 /// Limits of authenticated native app windows, separate from Explorer's
 /// global work areas. Never move the taskbar or reserve space on the desktop.
@@ -253,6 +274,14 @@ pub fn hit_test(target: &Target, value: &Value) -> Result<Value, String> {
         };
         if !ClientToScreen(hwnd, &mut point).as_bool() {
             return Err("Pointer transform unavailable".into());
+        }
+        if native_app_input_allowed(hwnd) {
+            let hit=WindowFromPoint(point);
+            if !hit.is_invalid() && hit != hwnd && GetAncestor(hit,GA_ROOT)==hwnd {
+                // Windows owns hit testing of the real child/control. Do not
+                // convert its custom caption band into a synthetic Mac drag.
+                return Ok(json!({"hit":1,"nativeChild":true}));
+            }
         }
         let mut receiver = hwnd;
         if let Some(content) = &target.hosted {

@@ -547,7 +547,8 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
         guard !transitionActive else{return}
         switch value {
         case .input(let packet):
-            if packet["event"] as? String == "clipboard",let action=packet["action"] as? String {transferClipboard(action)}
+            if packet["event"] as? String == "close" {requestClose()}
+            else if packet["event"] as? String == "clipboard",let action=packet["action"] as? String {transferClipboard(action)}
             else {send(packet)}
         case .leftMouse(let event,let packet):leftMouse(event,packet)
         }
