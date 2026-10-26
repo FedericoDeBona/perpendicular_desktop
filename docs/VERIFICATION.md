@@ -2,6 +2,14 @@
 
 Registro cronologico delle prove dal 21 ottobre 2026. Per stato attuale e istruzioni operative leggere [KNOWN_ISSUES.md](KNOWN_ISSUES.md), [RESTART_PLAN.md](RESTART_PLAN.md) e [IMPLEMENTATION.md](IMPLEMENTATION.md). I vecchi comandi, percorsi, protezioni e handoff qui sotto descrivono la singola prova alla sua data: possono riferirsi a esperimenti ritirati o dischi eliminati e non sono istruzioni da eseguire sulla base corrente. Esiti negativi e limiti sono conservati; i [resoconti ritirati](RETIRED_EXPERIMENTS.md) sono recuperabili da Git.
 
+## 26 ottobre — segnalazione singleton invisibile e stop richiesto
+
+**Segnalazione utente sulla0.2.14:** «Task Manager a volte si apre da Desktop: lo vedo nella barra delle app Windows ma non lo vedo, penso sia su un altro schermo; se ora apro Task Manager dal launcher Seamless non fa niente». È un esito negativo del percorso di prodotto, conservato senza dedurne che l’app non esista o che il lancio generi un duplicato. La posizione su uno schermo riservato è un’ipotesi da confermare sull’istanza attuale; il caso precedente fuori primaria resta documentato nella0.2.13.
+
+**Solo controllo iniziale prima dello stop:** repository pulito dopo6e9e6a1, app/bridge collegati; Desktop visibile/nativo1920×1280, setup schermi completo e due monitor Mac mappati. geometry_snapshot restituisce windows[], status windowCount0: nessuna finestra attualmente gestita come Mac. Non interrogati processo/HWND/rettangolo Windows-only e non verificato il gesto di richiamo; nessuna causa nuova attribuita. La precedente Notepad non è più nell’elenco, senza deduzioni sul suo documento o sulla chiusura da parte dell’utente.
+
+**Istruzione successiva:** «fermati, segna i problemi e pusha». Interrotti interventi e verifiche interattive; aggiornati soltanto registro, TODO e piano. TODO-022/WIN-004 restano aperti; nessuna nuova implementazione, build, distribuzione o qualifica nel clone/main. Obiettivo sospeso su richiesta, da riprendere soltanto quando autorizzato. Prossimo risultato: stessa istanza Task Manager visibile e utilizzabile nell’ambiente che la ospita, con richiamo dal launcher opposto e stato conservato.
+
 ## 26 ottobre — focus della finestra e dispositivo VM 0.2.14
 
 **Ripresa:** turno precedente classificato progresso:0.2.13 effettivamente installata, Cmd+Q elevato verificato nel caso con foreground esatta e commit5390eac pubblicato. Obiettivo completo ancora attivo. Baseline leggibile, stessa IoT/QEMU97186, Notepad394236/documento conservati; nessuna qualifica clone.
