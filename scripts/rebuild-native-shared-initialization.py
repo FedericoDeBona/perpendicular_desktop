@@ -22,6 +22,16 @@ PINS = {
     'prefix/lib/libdxmt-native.dylib': 'ee4249f15cfb6ce61a8f54e4a1e73452aa4e8eb02cfbc12a00a8045c27fb5766',
 }
 BASE_BACKEND = 'e041d265e64b395bfeeefe9ec7df0f9a8d75258f9b7dd7ec797a5d385315d947'
+LOCAL_PINS = {**PINS,
+    'build/compile_commands.json': '0b0d6153b64ae6198a46ef95462a14a7e382cd1a6e1a9d18517e6f2ede392ce2',
+    'build/src/d3d11/libd3d11.a': '6584ac13c3f67a786833adf1314473e581402b4395b2e5e7f9231a1d92bc3660',
+    'build/src/dxmt/libdxmt.a': '1bf458accb25181fc158b432fcb253bd53eed6e59092641097e5c8d12c7942e1',
+    'build/src/nativemetal/libwinemetal.a': '60ab87e81b8cfc4bb915903a8f3ddd88eaea8bdd6aefb292c65fc5c214933d35',
+    'build/build.ninja': 'a5f81c362a215a9de7653d86b2ddb3f8eb252bc5261d28b3ddce0548bf22e419',
+    'prefix/lib/libdxmt-native.dylib': 'f9c5f278b7f704489a90b1e9b5505f0a8e4246d86ee9c49a196432ce08178933',
+}
+LOCAL_BACKEND = '1a704afafdb17439ea1fbf90371498e34b94a8d932914778850a8ea19cf32e01'
+LOCAL_ARCHIVE = '487a8ee93de2c4ec7f7fe305defd0cf98371b898a3edc8e93ac5b8a4a8a2868b'
 
 
 def digest(path):
@@ -42,12 +52,18 @@ def main():
     parser.add_argument('--reference', type=Path, required=True)
     parser.add_argument('--runtime', type=Path, required=True)
     parser.add_argument('--output', type=Path, required=True)
+    parser.add_argument('--local-named-errors-archive', type=Path,
+                        help='Use the pinned October 23 build and retain its named-error objects')
     args = parser.parse_args()
     reference, runtime = args.reference.resolve(strict=True), args.runtime.resolve(strict=True)
     output = args.output.resolve()
     require(not output.exists(), 'Fresh private output required')
     require(not output.is_relative_to(REPO) or output.is_relative_to(REPO / '.build'), 'Private output required')
-    for name, expected in PINS.items():
+    pins = LOCAL_PINS if args.local_named_errors_archive else PINS
+    base_backend = LOCAL_BACKEND if args.local_named_errors_archive else BASE_BACKEND
+    if args.local_named_errors_archive:
+        require(digest(args.local_named_errors_archive) == LOCAL_ARCHIVE, 'Different named-error archive')
+    for name, expected in pins.items():
         require(digest(reference / name) == expected, 'Different backend input: ' + name)
     inventory = json.loads((reference / 'source-files.json').read_text())
     for group, root in [('repository', reference / 'src/dxmt'),
@@ -58,7 +74,7 @@ def main():
     require(manifest.get('guest_wire_version') == 2 and manifest.get('host_transport_version') == 3
             and manifest.get('native_descriptor_version') == 2
             and manifest.get('protocol_source_pin') == 'f510a6e41ea89a6d626de4da9d9b02978a770e37', 'Different runtime protocol')
-    require(manifest['files'].get('lib/libdxmt-native.dylib') == BASE_BACKEND, 'Different baseline backend')
+    require(manifest['files'].get('lib/libdxmt-native.dylib') == base_backend, 'Different baseline backend')
     for name, expected in manifest['files'].items():
         relative = Path(name)
         require(not relative.is_absolute() and '..' not in relative.parts, 'Unsafe runtime path')
@@ -82,7 +98,7 @@ def main():
         command[command.index(flag) + 1] = str(value)
     run(command, reference / 'build')
     archive = output / 'libd3d11.a'
-    shutil.copy2(reference / 'build/src/d3d11/libd3d11.a', archive)
+    shutil.copy2(args.local_named_errors_archive or reference / 'build/src/d3d11/libd3d11.a', archive)
     run(['ar', '-r', archive, obj])
     ninja = reference.parent / 'build-venv/bin/ninja'
     recipe = subprocess.check_output([str(ninja), '-C', str(reference / 'build'), '-t', 'commands',
@@ -111,7 +127,9 @@ def main():
     (result / 'runtime.json').write_text(json.dumps(manifest, indent=2) + '\n')
     for name, expected in manifest['files'].items():
         require(digest(result / name) == expected, 'Packaged runtime mismatch: ' + name)
-    receipt = {'reference': str(reference), 'base_backend': BASE_BACKEND,
+    receipt = {'reference': str(reference), 'base_backend': base_backend,
+               'reference_pins': pins,
+               'named_errors_archive_sha256': LOCAL_ARCHIVE if args.local_named_errors_archive else None,
                'patch_sha256': digest(patch), 'source_sha256': digest(source),
                'raw_backend_sha256': digest(library), 'backend_sha256': digest(target),
                'compiled_units': ['d3d11_texture_device.cpp'], 'runtime_verified': False}

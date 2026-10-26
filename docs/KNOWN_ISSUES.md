@@ -86,6 +86,8 @@ Il ciclo RAM protetto 4→2→4 GiB con dati conservati resta la qualifica prece
 
 ### SYS-003 — RAM della VM non restituita al Mac a runtime
 
+- **Secondo Mac,26 ottobre:** motore ricostruito e installato sulla VM93be6687, con i driver originali e protezioni attive. Massimo8 GiB preservato, base2 GiB e6 GiB hotplug. Memoria Windows passa da circa2 a8 GiB; poi unplug/balloon effettivi osservati e ritorno completo8 GiB/pendingfalse durante l'uso dell'app. Nessuna nuova prova estesa di integrità o promessa di footprint minimo. [Evidenze locali](VERIFICATION.md#26-ottobre--allineamento-completo-del-motore-sul-secondo-mac).
+
 - **Stato:** corretto e qualificato nella nuova IoT pulita, ora promossa a VM principale dell’app installata0.2.0 con lo stesso runtime Native3D. La prima valutazione negativa non costituiva raggiungimento dell'obiettivo e resta nel diario.
 - **Requisito:** VM sempre accesa, restituzione/riassegnazione reale a runtime; Secure Boot attivo, Code Integrity attiva e TESTSIGNING disattivato.
 - **Verificato:** installazione nuova dalla ISO IoT ARM64 LTSC 2024 dell'utente, senza Tools Parallels. Balloon ARM64 271 e VioMem ARM64 304 Microsoft-signed Running con protezioni attive. Hotplug +512 MiB osservato esattamente nella memoria Windows; rimozione reale parziale e successiva aggiunta senza reboot. Balloon 4→3 GiB con circa 713 MiB di footprint Mac recuperato, ritorno e nuova allocazione verificata. Controllo continuo su 128 MiB senza variazioni di hash.
@@ -147,6 +149,8 @@ Queste voci conservano limiti non risolti, senza richiedere di ripristinare codi
 
 ### GFX-003 — Cattura ferma dopo cambio compositore
 
+- **Allineamento successivo sul secondo Mac:** incluso anche il backend con inizializzazione prima dell'export, assente nella prima consegna. Nella breve prova finale Notepad hardware,44frame e windowGPU vuoto, testo e cloaking utilizzabili. Questo non dimostra risolti tutti i mismatch: il dialogo distinto resta in attesa di presentazione (WIN-002). [Verifica locale](VERIFICATION.md#26-ottobre--allineamento-completo-del-motore-sul-secondo-mac).
+
 - **26 ottobre, secondo Mac:** aggiornamento richiesto sulla VM locale `93be6687`, distinta dalla main dell'altro PC. Notepad principale riceve testo in hardware; nel percorso dialogo/desktop compare `windowGPU.reason=pixel-hash`, seguito da immagini indisponibili e input sospeso. Riaperto soltanto il frontend dopo chiusura della prova generata; nessun reboot o correzione causale. Renderer locale ricostruito dal riferimento Wire2 disponibile con export WGC; non è host-7 dell'altro PC. [Evidenze e limiti](VERIFICATION.md#26-ottobre--pull-rebuild-e-guest-tool-sul-secondo-mac). Voce aperta; nessuna attribuzione automatica del mismatch a GFX-007.
 
 - **Seguito0.2.5:** corretto un guasto concreto della riconnessione: renderer ancora sul vecchio socket WGC e frontend su uno nuovo. Record di avvio autenticato e lock per VM ora conservano il socket effettivo. Stesso documento ripreso nel clone e nella main, senza reboot Windows. Pixel-hash transitorio ricompare nel clone e poi recupera: GFX-003 resta aperto, controlli conservati. [Evidenze](VERIFICATION.md#25-ottobre--integrazione-n1-e-distribuzione-025).
@@ -188,6 +192,8 @@ Queste voci conservano limiti non risolti, senza richiedere di ripristinare codi
 
 ### WIN-002 — Resize individuale in attesa del frame
 
+- **Secondo Mac,26 ottobre:** dopo l'allineamento del motore, dialogo Notepad hardware/cloaked con frame706×209 accettato, submittedID2 ma presentedID0/transitionActive. Il menu Window lo seleziona, ma resta «La finestra sta impiegando più tempo». Annullamento tramite il controllo Mac di chiusura riuscito; main torna utilizzabile. Nessun bypass Mostra comunque, dialogo non qualificato. [Evidenze](VERIFICATION.md#26-ottobre--allineamento-completo-del-motore-sul-secondo-mac).
+
 - **Qualifica main0.2.5 circoscritta:** resize Notepad2044×1078→1844×978pixel, Mac1022×539→922×489punti, primo frame pertinente presentato/transitionfalse e input riabilitato. Dialogo706×209pixel→353×105punti realmente visibile e Cancel riuscito. Input tentato troppo presto viene rifiutato; l’avviso «non ancora pronta» e l’attesa percepita restano da migliorare, senza indebolire il gate. [Evidenze](VERIFICATION.md#25-ottobre--integrazione-n1-e-distribuzione-025).
 
 - **Rilievo diagnostico25 ottobre:** osservati callback Metal con `presentedTime=0`; il callback funzionale di readiness in WindowRenderer non verifica questo valore prima di chiamare onPresented. È un limite del criterio «già presentato», distinto dalle durate GPU e da un errore del command buffer. Non dimostrata la causa dei precedenti guasti, nessuna correzione del gate applicata. Richiedere una presentazione positiva nella futura qualifica. [Report](reports/2026-10-25-graphics-pipeline.md), [verifica](VERIFICATION.md#25-ottobre--pipeline-grafica-con-timestamp-gpu-e-presentazione).
@@ -219,6 +225,8 @@ Queste voci conservano limiti non risolti, senza richiedere di ripristinare codi
 ## Monitor e compatibilità
 
 ### WIN-003 — Monitor N+1 e drag fra scale diverse
+
+- **Secondo Mac,26 ottobre:** motore misto e driver originali installati sulla VM93be6687. Due uscite Windows3D+DOD, mapping del solo Mac attualmente collegato e DPI app192 verificati; la topologia persiste dopo il successivo avvio. Non è una prova di trasferimento fra monitor: i due esterni presenti al primo aggiornamento non sono più rilevati durante questa installazione. [Evidenze e limiti](VERIFICATION.md#26-ottobre--allineamento-completo-del-motore-sul-secondo-mac).
 
 - **Stato corrente0.2.5 nella main:** un Mac1440×900@2→DOD2880×1800/DPI192,3D riservato2048×1152/DPI144; `mappedDisplays=1`/setup completo. Testo, drag, resize e dialogo/Cancel reali verificati. Mapping per monitor e limiti guest implementati; riserva privata app distinta dalla work area OS. Restano passaggio fra monitor/scale diverse (secondo Mac non collegato in questa fase), cambio monitor che può richiedere setup DOD esplicito/reboot, Snap/massimizzazioni e margine inferiore48punti della taskbar. Nessuna affidabilità completa dichiarata. Questo aggiornamento supera le descrizioni «nessuna main» dei passaggi storici sotto. [Evidenze](VERIFICATION.md#25-ottobre--integrazione-n1-e-distribuzione-025).
 

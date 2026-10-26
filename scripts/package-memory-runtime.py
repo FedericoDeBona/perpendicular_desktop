@@ -37,6 +37,15 @@ def main():
     libraries.mkdir(parents=True, exist_ok=True)
     search = [p.resolve(strict=True) for p in args.library_dir]
     copied, targets, receipt = {}, {}, []
+    native_root = app / "Contents/Resources/Native3D"
+    native_manifest = (json.loads((native_root / "runtime.json").read_text())
+                       if args.native else {})
+
+    def compatibility(binary):
+        lines = output("otool", "-L", str(binary)).splitlines()
+        if len(lines) < 2 or "compatibility version " not in lines[1]:
+            raise ValueError("Missing library compatibility version: " + str(binary))
+        return lines[1].split("compatibility version ", 1)[1].split(",", 1)[0]
 
     def resolve(dependency, owner):
         if dependency.startswith("@loader_path/"):
@@ -50,12 +59,36 @@ def main():
             raise ValueError("Unresolved dependency: " + dependency)
         if not dependency.startswith("/"):
             raise ValueError("Unsupported dependency: " + dependency)
-        return Path(dependency).resolve(strict=True)
+        absolute = Path(dependency)
+        if absolute.exists():
+            return absolute.resolve(strict=True)
+        # A relocated build may retain its original absolute install names.
+        # Only use explicitly supplied library directories, and reject
+        # different binaries sharing that name instead of guessing a version.
+        candidates = [p / absolute.name for p in search if (p / absolute.name).is_file()]
+        if not candidates:
+            raise ValueError("Unresolved dependency: " + dependency)
+        hashes = {hashlib.sha256(p.read_bytes()).hexdigest() for p in candidates}
+        if len(hashes) != 1:
+            raise ValueError("Ambiguous relocated dependency: " + dependency)
+        return candidates[0].resolve(strict=True)
 
     def copy(binary, target):
         binary = binary.resolve(strict=True)
         if binary in copied:
             return copied[binary]
+        existing = native_root / "lib" / binary.name
+        member = "lib/" + binary.name
+        if args.native and member in native_manifest.get("files", {}) and existing.is_file():
+            if hashlib.sha256(existing.read_bytes()).hexdigest() != native_manifest["files"][member]:
+                raise ValueError("Packaged native library changed: " + member)
+            if compatibility(binary) != compatibility(existing):
+                raise ValueError("Incompatible native library: " + member)
+            copied[binary] = existing
+            receipt.append({"source": str(binary), "sourceSHA256": hashlib.sha256(binary.read_bytes()).hexdigest(),
+                            "file": str(existing.relative_to(app)), "sha256": native_manifest["files"][member],
+                            "reusedNativeLibrary": True})
+            return existing
         if target in targets and targets[target] != binary:
             raise ValueError("Library name collision: " + str(target))
         copied[binary], targets[target] = target, binary
