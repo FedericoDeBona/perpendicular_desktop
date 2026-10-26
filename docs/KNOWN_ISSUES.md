@@ -130,6 +130,8 @@ Il ciclo RAM protetto 4→2→4 GiB con dati conservati resta la qualifica prece
 
 ### APP-002 — Esplora file assente e finestre riusate non riconosciute
 
+- **Nuova segnalazione26 ottobre, da isolare:** a volte un clic nel launcher non porta all'app; non ancora distinto mancato processo, riuso di un'istanza, associazione o attesa del frame. TODO-011 ora prioritario, senza assumere che la correzione storica namespace/PID risolva il caso. [Richiesta e limiti](VERIFICATION.md#26-ottobre--requisiti-integrazione-app-e-full-experience).
+
 - **Stato:** filtro del catalogo e associazione corretti nel clone del launcher. Esplora file ed Edge presenti fra le app principali e aperti in finestre Mac; distribuzione ordinaria non qualificata.
 - **Causa/correzione:** il target namespace `::{…}` di Esplora file veniva scambiato per un drive mancante perché il secondo carattere è `:`. Il controllo ora richiede una lettera di unità. Per i due programmi che riusano processi esistenti, associazione per percorso eseguibile completo e classe della finestra; il solo PID restituito dalla Shell non basta. Desktop/taskbar dello stesso Explorer sono esclusi, anche al ripristino.
 - **Chiusura:** catalogo e avvio delle due app verificati nel pacchetto destinato all’utente, senza inglobare il desktop o duplicare le app. I pixel mancanti di Esplora file restano GFX-001.
@@ -215,6 +217,8 @@ Queste voci conservano limiti non risolti, senza richiedere di ripristinare codi
 
 ### WIN-002 — Resize individuale in attesa del frame
 
+- **Nuova segnalazione26 ottobre:** dimensione iniziale errata che si adatta dopo; all'inizio di alcuni drag appare brevemente il caricamento, poi i drag diventano normalmente utilizzabili. Segnalati anche drag/resize instabili in Explorer e altre app (WIN-001/003). Non ancora riprodotti qui né attribuiti a una causa unica; non equivale automaticamente a un'app Windows bloccata. Prossimo passo un percorso minimo con geometria/frame/input correlati, test ora autorizzati. [Richiesta](VERIFICATION.md#26-ottobre--requisiti-integrazione-app-e-full-experience).
+
 - **0.2.7 locale:** errore ripetuto non riavvia il gate e non cancella il recupero; eliminato Mostra comunque, Riprova richiede un frame nuovo. Trasferimenti fra tre Mac a scala2 e massimizzazione3840×2004/ripristino su Notepad completati, input pronto. Salva/Cancel706×209 presentato; candidata finale attiva il dialogo dopo collegamento al proprietario key, Cmd+Q→dialogo key→Don’t Save→chiusura riusciti. Non chiuso il criterio generale. [Evidenze](VERIFICATION.md#26-ottobre--stabilizzazione-del-percorso-app-native).
 
 
@@ -233,6 +237,8 @@ Queste voci conservano limiti non risolti, senza richiedere di ripristinare codi
 - **Evidenze:** [frame valido al resize](VERIFICATION.md#24-ottobre--gate-pronto-prima-delluso-e-frame-valido-al-resize).
 
 ### WIN-004 — Finestra Mac visibile ma app Windows non attiva
+
+- **Priorità utente26 ottobre:** input spesso assente, finestre non rispondenti e richieste di chiusura senza esito, oltre a mancati avvii e transizioni iniziali errate (APP-002/WIN-002). Segnalazioni da isolare nel percorso pertinente, senza dichiararne la causa o chiuderle con il solo aggiornamento guest. TODO-002/011 prioritari; focus delle singleton specificato separatamente in TODO-022. [Requisiti e nuova autorizzazione ai test](VERIFICATION.md#26-ottobre--requisiti-integrazione-app-e-full-experience).
 
 - **Allineamento IoT26 ottobre, sola configurazione/distribuzione:** frontend0.2.10 era collegato al vecchio servizio0.2.6, nativeAppInput=false; Task Manager aperta nella primaria con cloakError="Cannot publish window input" e senza mapping condiviso. Aggiornati servizio/helper, nativeAppInput=true e mapping2/2 letti dopo riconnessione; nessun test input/drag/resize. Task Manager resta nella primaria, guestIsolated=false/hasSharedDisplay=false; anche dopo riapertura del solo frontend canonico compare «Windows non ha spostato l'app sullo schermo Mac». Voce aperta; prossimo passo isolare il rifiuto di posizionamento e verificare input reale solo quando richiesto. Nessuna causa attribuita automaticamente a privilegi, GPU o driver. [Evidenze](VERIFICATION.md#26-ottobre--allineamento-effettivo-della-iot-dopo-il-rebuild).
 

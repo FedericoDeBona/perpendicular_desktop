@@ -2,6 +2,14 @@
 
 Registro cronologico delle prove dal 21 ottobre 2026. Per stato attuale e istruzioni operative leggere [KNOWN_ISSUES.md](KNOWN_ISSUES.md), [RESTART_PLAN.md](RESTART_PLAN.md) e [IMPLEMENTATION.md](IMPLEMENTATION.md). I vecchi comandi, percorsi, protezioni e handoff qui sotto descrivono la singola prova alla sua data: possono riferirsi a esperimenti ritirati o dischi eliminati e non sono istruzioni da eseguire sulla base corrente. Esiti negativi e limiti sono conservati; i [resoconti ritirati](RETIRED_EXPERIMENTS.md) sono recuperabili da Git.
 
+## 26 ottobre — requisiti integrazione app e Full Experience
+
+L'utente autorizza ora test e altri interventi e chiede di continuare sull'integrazione delle app Mac. Segnala frequenti finestre non rispondenti, input assente, drag/resize instabili in Explorer e altre app, richieste di chiusura senza esito. Chiarimento successivo: il requisito copre anche clic nel launcher senza app apparentemente avviata, dimensione iniziale sbagliata che si adatta dopo e breve caricamento all'inizio di alcuni drag, seguito da utilizzo normale. Registrate segnalazioni, non nuove riproduzioni o cause accertate. Riprendere APP-002/WIN-001/002/003/004 e TODO-002/011 senza creare un problema duplicato per ogni sintomo.
+
+Nuovo requisito singleton, esempio Task Manager: richiamo da Full Experience di un'istanza già ospitata come finestra Mac attiva quella finestra Mac; richiamo dal launcher Mac di un'istanza già presente in Full Experience porta a quella Windows. Conservare stato/documento e una sola istanza; verificare direzione del focus senza assumere automaticamente un trasferimento di ownership. Registrato TODO-022 DA FARE. Nome della modalità corretto esplicitamente dall'utente: soltanto **Full Experience**, senza prefisso Windows; TODO-023 DA FARE.
+
+Il precedente «NON testare» è superato dalla nuova autorizzazione, conservando i limiti sulle operazioni distruttive e le protezioni Windows. Questo passaggio aggiorna soltanto requisiti/priorità, registro/piano/TODO: nessuna modifica sorgente o UI, build, nuova verifica nel clone o nell'app principale; nessun difetto chiuso. Prossimo passo pratico un breve percorso lancio→geometria iniziale/frame→input→inizio drag→resize→chiusura, poi correzione circoscritta del primo guasto identificato.
+
 ## 26 ottobre — allineamento effettivo della IoT dopo il rebuild
 
 **Segnalazione:** l'utente riferisce una differenza rispetto all'altro PC, dove le app del launcher permettevano passaggio fra monitor, drag e resize. Il precedente rebuild aveva aggiornato solo il pacchetto, non il servizio nella VM. Resta il vincolo di non eseguire test: svolta lettura dello stato e distribuzione, senza prove interattive di app/drag/resize o benchmark.
