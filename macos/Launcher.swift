@@ -6,7 +6,7 @@ extension Notification.Name {
 }
 
 private enum LibrarySection:String,CaseIterable,Identifiable {
-    case apps="App",displays="Schermi",settings="Impostazioni"
+    case apps="Seamless",displays="Schermi",settings="Impostazioni"
     var id:Self {self}
     var symbol:String {switch self {case .apps:"square.grid.2x2";case .displays:"display.2";case .settings:"gearshape"}}
 }
@@ -28,7 +28,7 @@ struct Launcher:View {
             Divider().opacity(0.45)
             VStack(alignment:.leading,spacing:0){
                 HStack(spacing:24){
-                    Text(search.isEmpty ? section.rawValue:"Risultati").font(.system(size:27,weight:.semibold,design:.rounded)).tracking(-0.6)
+                    Text(search.isEmpty ? (section == .apps ? "Seamless Apps":section.rawValue):"Risultati").font(.system(size:27,weight:.semibold,design:.rounded)).tracking(-0.6)
                     Spacer(minLength:8)
                     if section == .apps {searchField.frame(width:240)}
                 }.padding(.horizontal,32).padding(.top,28).padding(.bottom,26)
@@ -103,7 +103,7 @@ struct Launcher:View {
             }.padding(.horizontal,12)
             Spacer(minLength:24)
             Button(action:model.showWindows){
-                HStack(spacing:10){Image(systemName:"macwindow").font(.system(size:15));Text("Apri Windows").font(.system(size:12,weight:.medium)).lineLimit(1).fixedSize();Spacer();Image(systemName:"arrow.up.right").font(.system(size:10,weight:.semibold))}
+                HStack(spacing:10){Image(systemName:"macwindow").font(.system(size:15));Text("Desktop").font(.system(size:12,weight:.medium)).lineLimit(1).fixedSize();Spacer();Image(systemName:"arrow.up.right").font(.system(size:10,weight:.semibold))}
                     .foregroundStyle(.primary).padding(13)
                     .background(Color.primary.opacity(0.045),in:RoundedRectangle(cornerRadius:12))
             }.buttonStyle(.plain).disabled(!model.desktopAvailable || model.machineOperation != nil).padding(.horizontal,12).padding(.bottom,17)

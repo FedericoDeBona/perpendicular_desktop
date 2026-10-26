@@ -34,6 +34,27 @@ pub fn install(directory:&Path)->Result<(),String> {
     Ok(())
 }
 
+// A service replacement can end the previous worker before its Drop restores
+// taskbar membership. WGC rejects such an otherwise visible main window.
+// Restore only an authenticated, ordinary top-level app; normal isolation
+// removes its tab again after the new capture has actually produced a frame.
+pub fn restore_capture_eligibility(target:&Target)->Result<bool,String> {
+    if !target.valid() || !target.full_frame {return Ok(false);}
+    unsafe {
+        let hwnd=HWND(target.hwnd as _);
+        let style=GetWindowLongPtrW(hwnd,GWL_STYLE) as u32;
+        let extended=GetWindowLongPtrW(hwnd,GWL_EXSTYLE) as u32;
+        if !IsWindowVisible(hwnd).as_bool() || GetAncestor(hwnd,GA_ROOT)!=hwnd
+            || style & WS_CHILD.0 != 0 || style & WS_CAPTION.0 != WS_CAPTION.0
+            || extended & (WS_EX_TOOLWINDOW.0|WS_EX_NOACTIVATE.0) != 0
+            || (extended & WS_EX_APPWINDOW.0==0 && GetWindow(hwnd,GW_OWNER).is_ok_and(|owner|!owner.is_invalid())) {
+            return Ok(false);
+        }
+        Window::taskbar(hwnd,true)?;
+        Ok(true)
+    }
+}
+
 pub struct Window {
     target:Arc<Target>, module:*mut c_void, call_hook:*mut c_void, message_hook:*mut c_void,
     active:bool, native_input:bool,display_only:bool,restore_taskbar:bool,taskbar_refreshed:Cell<Instant>,last:(i32,i32), buttons:u32,

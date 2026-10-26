@@ -246,7 +246,7 @@ impl Worker {
         outbox.control(
             json!({"type":"hello","protocol":1,"token":config.token,"epoch":self.epoch,
             "sid":self.sid,"session":self.session,"version":env!("CARGO_PKG_VERSION"),
-            "capabilities":{"capture":"wgc-hardware-readback-with-software-recovery","windows":4,"transients":12,"windowRoles":true,"input":true,"catalogue":true,"appIcon":true,"frameChannel":true,"windowRefresh":true,"nativeAppInput":true,"gpuFramesOnly":true,"frameEncodings":[],"displayInfo":true,"displayTopology":true,"driverInfo":true,"graphicsInfo":true,"displayConfigure":true,"sharedGeometry":true,"processControl":true,"clipboard":true,"clipboardTextBytes":262144,"applicationStatus":true,"memoryStatus":true,"execute":true,"executeTimeoutSeconds":60,"executeOutputBytes":65536,"displayEvents":self.display_observer.is_some()}}),
+            "capabilities":{"capture":"wgc-hardware-readback-with-software-recovery","windows":4,"transients":12,"windowRoles":true,"input":true,"catalogue":true,"appIcon":true,"frameChannel":true,"windowRefresh":true,"nativeAppInput":true,"modeFocus":true,"gpuFramesOnly":true,"frameEncodings":[],"displayInfo":true,"displayTopology":true,"driverInfo":true,"graphicsInfo":true,"displayConfigure":true,"sharedGeometry":true,"processControl":true,"clipboard":true,"clipboardTextBytes":262144,"applicationStatus":true,"memoryStatus":true,"execute":true,"executeTimeoutSeconds":60,"executeOutputBytes":65536,"displayEvents":self.display_observer.is_some()}}),
         );
         let (sender, receiver) = mpsc::sync_channel(128);
         let state = outbox.clone();
@@ -513,6 +513,11 @@ impl Worker {
                 window_control::set_native_app_input(enabled)?;
                 Ok(json!({"accepted":true}))
             }
+            "desktop_focus_target" => {
+                let foreground=catalogue::foreground();
+                let window=self.windows.values().find(|w|w.mac_owned && w.target.hwnd==foreground && w.target.valid());
+                Ok(json!({"window":window.map(|w|w.target.id.as_str())}))
+            }
             "window_refresh" => {
                 let id=value["window"].as_str().ok_or("Missing window identity")?;
                 let window=self.windows.get_mut(id).ok_or("Window retired")?;
@@ -537,12 +542,34 @@ impl Worker {
                     w.app == app && !catalogue::transient(&w.metadata) && w.target.valid()
                 }) {
                     let window = self.activation_window(window)?;
+                    // Host focus must not depend on foreground permission in
+                    // Windows (for example when an elevated app is in front).
+                    outbox.control(json!({"type":"activate","window":window.target.id}));
                     unsafe {
                         let _ = ShowWindow(HWND(window.target.hwnd as *mut _), SW_RESTORE);
                         activate_surface(window)?;
                     }
-                    outbox.control(json!({"type":"activate","window":window.target.id}));
                     return Ok(json!({"accepted":true,"existing":true}));
+                }
+                if self.catalogue.singleton(app) {
+                    let existing=catalogue::windows().into_iter().find_map(|raw| {
+                        if !self.catalogue.matches(app,raw){return None;}
+                        identity::owner(HWND(raw as _),&self.sid,self.session).map(|owner|(raw,owner))
+                    });
+                    if let Some((raw,owner))=existing {
+                        let activation=self.catalogue.prepare_launch(app)?;
+                        let sender=outbox.clone();let app=app.to_owned();let sid=self.sid.clone();let session=self.session;
+                        std::thread::Builder::new().name("singleton-activation".into()).spawn(move || {
+                            let result=if identity::owner(HWND(raw as _),&sid,session)==Some(owner) {
+                                activation.run().map(|_|())
+                            }else{Err("The existing application window changed".into())};
+                            sender.control(match result {
+                                Ok(())=>json!({"type":"desktop_focus","app":app}),
+                                Err(message)=>json!({"type":"launch_error","app":app,"message":message}),
+                            });
+                        }).map_err(error)?;
+                        return Ok(json!({"accepted":true,"existing":true,"ready":false,"destination":"desktop"}));
+                    }
                 }
                 if self.pending.iter().any(|p| p.app == app) {
                     return Ok(json!({"accepted":true,"pending":true}));

@@ -4,6 +4,7 @@ import AppKit
 private final class DesktopSurface:NSView {
     let renderer:WindowRenderer
     var onResize:(()->Void)?
+    var onUserInput:(()->Void)?
     var connection:DesktopConnection?
     var inputScreen=DesktopScreen(id:0,x:0,y:0,width:800,height:600)
     var source=NSSize(width:800,height:600)
@@ -41,9 +42,9 @@ private final class DesktopSurface:NSView {
     override func mouseMoved(with event:NSEvent){mouse(event)}
     override func mouseDragged(with event:NSEvent){mouse(event)}
     override func rightMouseDragged(with event:NSEvent){mouse(event)}
-    override func mouseDown(with event:NSEvent){buttons |= 1;mouse(event)}
+    override func mouseDown(with event:NSEvent){buttons |= 1;mouse(event);onUserInput?()}
     override func mouseUp(with event:NSEvent){buttons &= ~1;mouse(event)}
-    override func rightMouseDown(with event:NSEvent){buttons |= 4;mouse(event)}
+    override func rightMouseDown(with event:NSEvent){buttons |= 4;mouse(event);onUserInput?()}
     override func rightMouseUp(with event:NSEvent){buttons &= ~4;mouse(event)}
     override func scrollWheel(with event:NSEvent){
         mouse(event);guard event.scrollingDeltaY != 0 else{return}
@@ -59,7 +60,7 @@ private final class DesktopSurface:NSView {
         if (0xf704...0xf70f).contains(value){return 0xffbe+(value-0xf704)}
         return 0x01000000|value
     }
-    override func keyDown(with event:NSEvent){if let value=symbol(event){keys[event.keyCode]=value;connection?.key(value,down:true)}}
+    override func keyDown(with event:NSEvent){if let value=symbol(event){keys[event.keyCode]=value;connection?.key(value,down:true);onUserInput?()}}
     override func keyUp(with event:NSEvent){if let value=keys.removeValue(forKey:event.keyCode) ?? symbol(event){connection?.key(value,down:false)}}
     override func flagsChanged(with event:NSEvent){
         var next=Set<UInt32>()
@@ -95,11 +96,12 @@ final class DesktopWindow:NSObject,NSWindowDelegate {
     private var visible=false
 
     var state:[String:Any] {["visible":visible,"fullScreen":window.styleMask.contains(.fullScreen),"viewWidth":Int(surface.bounds.width),"viewHeight":Int(surface.bounds.height),"backingScale":window.backingScaleFactor,"nativeActive":nativeActive,"width":Int(surface.source.width),"height":Int(surface.source.height)]}
-    init(socket:String,endpoint:@escaping ()->NativeDisplayEndpoint?,resized:@escaping (NSSize)->Void = {_ in})throws{
+    init(socket:String,endpoint:@escaping ()->NativeDisplayEndpoint?,resized:@escaping (NSSize)->Void = {_ in},input:@escaping ()->Void = {})throws{
         self.socket=socket;self.endpoint=endpoint;surface=DesktopSurface(renderer:try WindowRenderer(opaque:true))
         window=NSWindow(contentRect:NSRect(x:140,y:120,width:960,height:640),styleMask:[.titled,.closable,.miniaturizable,.resizable],backing:.buffered,defer:false)
         super.init()
-        window.title="Windows Desktop";window.isReleasedWhenClosed=false;window.contentView=surface;window.delegate=self
+        surface.onUserInput=input
+        window.title="Desktop Mode";window.isReleasedWhenClosed=false;window.contentView=surface;window.delegate=self
         surface.onResize={ [weak self] in
             guard let self,self.visible else{return}
             resized(self.surface.convertToBacking(self.surface.bounds).size)
@@ -125,13 +127,13 @@ final class DesktopWindow:NSObject,NSWindowDelegate {
             let client=DesktopConnection(path:socket,receive:{[weak self] pixels,width,height in
                 guard let self,self.visible,self.connectionID == id,!self.nativeActive else{return}
                 self.surface.source=NSSize(width:width,height:height)
-                self.surface.renderer.present(pixels,width:width,height:height);self.window.title="Windows Desktop"
+                self.surface.renderer.present(pixels,width:width,height:height);self.window.title="Desktop Mode"
             },layout:{[weak self] screen in
                 guard let self,self.connectionID == id,!self.nativeActive else{return};self.surface.inputScreen=screen
             },failed:{[weak self] message in
                 guard let self,self.connectionID == id else{return}
                 self.desktop=nil;self.surface.connection=nil
-                if !self.nativeActive {self.window.title="Windows Desktop — \(message)"}
+                if !self.nativeActive {self.window.title="Desktop Mode — \(message)"}
             })
             desktop=client;surface.connection=client;client.start()
         }
@@ -142,13 +144,13 @@ final class DesktopWindow:NSObject,NSWindowDelegate {
                 self.nativeActive=true;self.desktop?.requestPixels(false)
                 self.surface.source=NSSize(width:frame.texture.width,height:frame.texture.height)
                 self.surface.inputScreen=DesktopScreen(id:0,x:0,y:0,width:frame.texture.width,height:frame.texture.height)
-                self.surface.renderer.present(frame);self.window.title="Windows Desktop"
+                self.surface.renderer.present(frame);self.window.title="Desktop Mode"
             },failed:{[weak self] message in
                 guard let self,self.readerID == id else{return}
                 let wasNative=self.nativeActive
                 self.readerID=nil;self.native?.stop();self.native=nil;self.nativeActive=false
                 if wasNative {self.surface.renderer.clear();self.desktop?.requestPixels(true)}
-                self.window.title="Windows Desktop — \(message)"
+                self.window.title="Desktop Mode — \(message)"
             })
             native=reader;reader.start()
         }

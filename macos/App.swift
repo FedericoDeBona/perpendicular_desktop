@@ -60,6 +60,8 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
     private var earlyFrames:[String:GuestPacket]=[:]
     private var layoutInProgress=false
     private var pointerExitTask:Task<Void,Never>?
+    private var desktopFocusTask:Task<Void,Never>?
+    private var desktopFocusRequest=UUID()
     private var displaySetupTask:Task<Void,Never>?
     private var displaySetupID=UUID()
     private var displayEpoch:String?
@@ -161,9 +163,9 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
         NSApp.activate(ignoringOtherApps:true)
         let main=NSMenu();let appItem=NSMenuItem();main.addItem(appItem)
         let menu=NSMenu();appItem.submenu=menu
-        let applications=NSMenuItem(title:"Libreria",action:#selector(showApplications),keyEquivalent:"l");applications.target=self;menu.addItem(applications)
+        let applications=NSMenuItem(title:"Seamless Apps",action:#selector(showApplications),keyEquivalent:"l");applications.target=self;menu.addItem(applications)
         let settings=NSMenuItem(title:"Impostazioni…",action:#selector(showSettings),keyEquivalent:",");settings.target=self;menu.addItem(settings)
-        let show=NSMenuItem(title:"Apri Windows",action:#selector(showWindows),keyEquivalent:"");show.target=self;menu.addItem(show)
+        let show=NSMenuItem(title:"Desktop Mode",action:#selector(showWindows),keyEquivalent:"");show.target=self;menu.addItem(show)
         let displayItem=NSMenuItem(title:"Display",action:nil,keyEquivalent:"")
         let displayMenu=NSMenu();displayItem.submenu=displayMenu;menu.addItem(displayItem)
         for (profile,title) in [("standard","Standard"),("native3D","Experimental 3D")] {
@@ -255,6 +257,7 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
     private func configureMachineControllers(){
         memoryController?.stop();memoryController=nil;vmMemoryState=[:]
         machine.onDesktopSize={ [weak self] size in self?.desktopSize=size;self?.scheduleDesktopResize() }
+        machine.onDesktopInput={ [weak self] in self?.followDesktopFocus() }
         if let configuration=machine.configuration.dynamicMemory,let bridge {
             memoryController=RuntimeMemoryController(machine:machine,bridge:bridge,configuration:configuration){[weak self] in
                 guard let self,NSApp.isActive,!NSApp.isHidden else{return false}
@@ -326,6 +329,30 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
             self.acceptMachineState(actual)
             if actual != .stopped {
                 self.launcherNotice="L’arresto di Windows non è confermato. "+(commandError?.localizedDescription ?? "Il processo è ancora attivo.")
+            }
+        }
+    }
+    private func followDesktopFocus(){
+        guard connected,guestCapabilities["modeFocus"] == true else{return}
+        desktopFocusTask?.cancel();let request=UUID();desktopFocusRequest=request
+        let epoch=displayEpoch
+        desktopFocusTask=Task{@MainActor [weak self] in
+            // Only follow a real Desktop input, never merely opening Desktop.
+            // The bounded grace period covers Shell/singleton activation.
+            for _ in 0..<6 {
+                do {try await Task.sleep(for:.milliseconds(250))}catch{return}
+                guard let self,!Task.isCancelled,self.desktopFocusRequest == request,
+                      self.displayEpoch == epoch,self.machine?.desktopIsKey == true else{return}
+                let handled:Bool=await withCheckedContinuation { continuation in
+                    self.bridge.command("desktop_focus_target",timeout:.seconds(1)){[weak self] result in
+                        guard let self,self.desktopFocusRequest == request,self.displayEpoch == epoch,
+                              self.machine?.desktopIsKey == true,case .success(let reply)=result,
+                              let value=reply["value"] as? [String:Any],let id=value["window"] as? String,
+                              let window=self.windows[id] else{continuation.resume(returning:false);return}
+                        window.activate();continuation.resume(returning:true)
+                    }
+                }
+                if handled{return}
             }
         }
     }
@@ -515,7 +542,7 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
                 let deadline=Date().addingTimeInterval(60)
                 while await previous.observedState() != .stopped,Date()<deadline {try await Task.sleep(for:.milliseconds(500))}
                 guard await previous.observedState() == .stopped else {
-                    self.status="Windows has not shut down. Save your work or use Show Windows.";return
+                    self.status="Windows has not shut down. Save your work or open Desktop Mode.";return
                 }
                 previous.closeDesktop()
                 self.machine=try previous.withDisplay(graphics:graphics,recovery:recovery)
@@ -577,7 +604,10 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
                 self.launcherNotice="Non riesco ad aprire \(app.name). "+error.localizedDescription;self.openingNoticeApp=app.id
             case .success(let reply):
                 self.launcherPreferences.record(app.id);try? self.launcherLibrary?.save(self.launcherPreferences)
-                if let value=reply["value"] as? [String:Any],value["existing"] as? Bool == true,value["ready"] as? Bool != false {self.finishOpening(app.id,appeared:true)}
+                if let value=reply["value"] as? [String:Any],value["existing"] as? Bool == true,value["ready"] as? Bool != false,
+                   self.windows.contains(where:{self.windowApps[$0.key] == app.id && $0.value.readyForInput}) {
+                    self.finishOpening(app.id,appeared:true)
+                }
             }
         }
     }
@@ -588,7 +618,7 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
             try? await Task.sleep(for:.seconds(32))
             guard !Task.isCancelled,let self,self.launcherEpoch == epoch,self.openingApps.contains(app.id) else{return}
             self.finishOpening(app.id)
-            self.launcherNotice="La finestra di \(app.name) non è ancora disponibile. Apri Windows per continuare.";self.openingNoticeApp=app.id
+            self.launcherNotice="La finestra di \(app.name) non è ancora disponibile. Apri Desktop per continuare.";self.openingNoticeApp=app.id
         }
     }
     private func finishOpening(_ id:String,appeared:Bool=false){
@@ -649,7 +679,7 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
     }
     private func inputFocusFailed(){
         let message="Windows non ha attivato l’app. Il clic o il testo non è stato inviato."
-        status=message;launcherNotice=message+" Apri Windows, seleziona l’app e torna a questa finestra."
+        status=message;launcherNotice=message+" Apri Desktop, seleziona l’app e torna a questa finestra."
         guard let controller=windows.values.first(where:{$0.window === NSApp.keyWindow && !$0.role.transient}),
               controller.window.attachedSheet == nil,focusWarnedWindows.insert(controller.id).inserted else{return}
         // A modal warning can consume the next typed Return and unexpectedly
@@ -810,7 +840,7 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
             var monitor=monitor
             if let index=plan.devices.firstIndex(of:monitor["device"] as? String ?? "") {
                 monitor["label"]="Schermo Mac \(index+1)";monitor["appScreen"]=true
-            }else{monitor["label"]="Desktop Windows";monitor["appScreen"]=false}
+            }else{monitor["label"]="Desktop Mode";monitor["appScreen"]=false}
             return monitor
         }
         let previousStatus=displayStatus
@@ -996,7 +1026,7 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
             displayEpoch=value["epoch"] as? String
             invalidateDisplay("Checking Windows display…")
             let capabilities=value["capabilities"] as? [String:Any] ?? [:]
-            guestCapabilities=Dictionary(uniqueKeysWithValues:["nativeAppInput","memoryStatus","execute","displayInfo","displayTopology","driverInfo","graphicsInfo","sharedGeometry","appIcon","applicationStatus","processControl","clipboard"].map{($0,capabilities[$0] as? Bool == true)})
+            guestCapabilities=Dictionary(uniqueKeysWithValues:["nativeAppInput","modeFocus","memoryStatus","execute","displayInfo","displayTopology","driverInfo","graphicsInfo","sharedGeometry","appIcon","applicationStatus","processControl","clipboard"].map{($0,capabilities[$0] as? Bool == true)})
             memoryController?.guestReady=guestCapabilities["memoryStatus"] == true
             startApplicationStatusUpdates()
             pumpApplicationIcons()
@@ -1080,7 +1110,9 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
                         self?.status=message;self?.launcherNotice=message;self?.windowNotice=(id,message,false)
                     }
                     controller.onReady={ [weak self] in
-                        guard let self,let notice=self.windowNotice,notice.id==id,notice.frame else{return}
+                        guard let self else{return}
+                        if let app=self.windowApps[id] {self.finishOpening(app,appeared:true)}
+                        guard let notice=self.windowNotice,notice.id==id,notice.frame else{return}
                         if self.launcherNotice==notice.message {self.launcherNotice=nil}
                         self.windowNotice=nil
                     }
@@ -1106,7 +1138,7 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
                 if machine?.mixedDisplaysEnabled == true,machine.desktopIsKey != true,let first=sharedDisplays.first {
                     windows[id]?.placeOnAppDisplayIfNeeded(first)
                 }
-                if let frame=earlyFrames.removeValue(forKey:id){windows[id]?.present(frame);if let app=windowApps[id]{finishOpening(app,appeared:true)}}
+                if let frame=earlyFrames.removeValue(forKey:id){windows[id]?.present(frame)}
             }
             layoutChildren()
             pumpApplicationIcons()
@@ -1114,9 +1146,12 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
         case "frame":
             guard let id=value["window"] as? String else{return}
             receivedWindows.insert(id);failedWindows.remove(id)
-            if let window=windows[id]{window.present(packet);if let app=windowApps[id]{finishOpening(app,appeared:true)}}else if earlyFrames.count<16{earlyFrames[id]=packet}
+            if let window=windows[id]{window.present(packet)}else if earlyFrames.count<16{earlyFrames[id]=packet}
         case "activate":
-            if machine?.desktopIsKey != true,let id=value["window"] as? String {windows[id]?.window.makeKeyAndOrderFront(nil)}
+            if machine?.desktopIsKey != true,let id=value["window"] as? String {windows[id]?.activate()}
+        case "desktop_focus":
+            guard let app=value["app"] as? String,openingApps.contains(app),!cancelledOpeningApps.contains(app) else{return}
+            finishOpening(app,appeared:true);showWindows()
         case "launch_state":
             if value["state"] as? String == "waiting",let id=value["app"] as? String,
                !cancelledOpeningApps.contains(id),
@@ -1137,7 +1172,7 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
             // A rejected suggestion is diagnosed per surface in the guest.
             // It does not make its still-running document unavailable.
             if value["type"] as? String == "window_error",value["role"] as? String == "tooltip" {return}
-            status=value["message"] as? String ?? "This application is unavailable. Use Show Windows."
+            status=value["message"] as? String ?? "This application is unavailable. Open Desktop Mode."
             launcherNotice=value["message"] as? String ?? "Questa app non è disponibile. Puoi continuare dal desktop Windows."
             if let id=value["window"] as? String,let message=launcherNotice {windowNotice=(id,message,value["type"] as? String == "window_error")}
             if let app=value["app"] as? String {finishOpening(app);if value["type"] as? String == "launch_error" {openingNoticeApp=app}}

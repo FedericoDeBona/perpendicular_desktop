@@ -7,7 +7,7 @@ final class WindowTransitionView:NSVisualEffectView {
     private let ring=WaitingRing(frame:.zero)
     private let title=NSTextField(labelWithString:"App Windows")
     private let detail=NSTextField(labelWithString:"Preparazione della finestra…")
-    private let recoveryButton=NSButton(title:"Apri Windows",target:nil,action:nil)
+    private let recoveryButton=NSButton(title:"Desktop",target:nil,action:nil)
     private let revealButton=NSButton(title:"Riprova",target:nil,action:nil)
     private let actions=NSStackView()
     var recovery:(()->Void)?

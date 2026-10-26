@@ -141,7 +141,15 @@ pub fn spawn(target: Arc<Target>, outbox: Arc<Outbox>) -> Arc<AtomicBool> {
         let tooltip = class.eq_ignore_ascii_case("tooltips_class32") || class == "MicrosoftWindowsTooltip";
         let result = if class == "#32768" && !super::window_control::native_app_input_allowed(HWND(target.hwnd as _)) {
             Err("Solo GPU: il menu classico non dispone ancora di una superficie GPU esportabile.".into())
-        } else { unsafe { run(&target, &outbox, &flag, D3D_DRIVER_TYPE_HARDWARE, None) } };
+        } else {
+            loop {
+                match unsafe {run(&target,&outbox,&flag,D3D_DRIVER_TYPE_HARDWARE,None)} {
+                    Ok(true) if !flag.load(Ordering::Acquire) && outbox.connected.load(Ordering::Acquire) && target.valid() => continue,
+                    Ok(_) => break Ok(()),
+                    Err(message) => break Err(message),
+                }
+            }
+        };
         if let Err(message) = result {
             let mut description = target.capture_device.lock().unwrap();
             let description = description.get_or_insert_with(|| json!({}));
@@ -227,6 +235,15 @@ unsafe fn create_item(target:&Target,interop:&IGraphicsCaptureItemInterop)->Resu
             "initialFailureMilliseconds":started.elapsed().as_secs_f64()*1000.0,
             "expectedPid":target.pid,"expectedCreation":target.creation.to_string(),"session":target.session,
             "admissionAttempted":false}));
+        if initial.code()==windows::core::HRESULT(0x80070057u32 as i32) && target.full_frame {
+            let restored=super::cloak::restore_capture_eligibility(target)?;
+            if let Some(report)=report.as_mut() {report["taskbarRestoredForCapture"]=json!(restored);}
+            if restored {
+                if !target.valid(){return Err("Window retired during capture admission".into());}
+                return interop.CreateForWindow::<GraphicsCaptureItem>(hwnd)
+                    .map_err(|e|format!("CreateForWindow after taskbar restoration: {e}"));
+            }
+        }
         // This is a single, cause-specific admission for authenticated classic
         // dialogs. Do not alter tooltips, children or capture-excluded windows.
         if initial.code()!=windows::core::HRESULT(0x80070057u32 as i32)
@@ -288,11 +305,11 @@ unsafe fn create_item(target:&Target,interop:&IGraphicsCaptureItemInterop)->Resu
     result
 }
 
-unsafe fn run(target: &Target, outbox: &Outbox, stop: &AtomicBool, driver:D3D_DRIVER_TYPE, hardware_failure:Option<&str>) -> Result<(), String> {
+unsafe fn run(target: &Target, outbox: &Outbox, stop: &AtomicBool, driver:D3D_DRIVER_TYPE, hardware_failure:Option<&str>) -> Result<bool, String> {
     unsafe {
         let deadline=Instant::now();
         while outbox.row_alignment()!=256 || !outbox.gpu_enabled.load(Ordering::Acquire) {
-            if stop.load(Ordering::Acquire) || !outbox.connected.load(Ordering::Acquire) {return Ok(());}
+            if stop.load(Ordering::Acquire) || !outbox.connected.load(Ordering::Acquire) {return Ok(false);}
             if deadline.elapsed()>Duration::from_secs(5) {return Err("Solo GPU: canale immagini non disponibile. Nessun fallback TCP.".into());}
             std::thread::sleep(Duration::from_millis(5));
         }
@@ -315,7 +332,7 @@ unsafe fn run(target: &Target, outbox: &Outbox, stop: &AtomicBool, driver:D3D_DR
                 || !outbox.connected.load(Ordering::Acquire)
                 || !target.valid()
             {
-                return Ok(());
+                return Ok(false);
             }
             std::thread::sleep(Duration::from_millis(75));
         }
@@ -327,7 +344,7 @@ unsafe fn run(target: &Target, outbox: &Outbox, stop: &AtomicBool, driver:D3D_DR
         let hwnd=HWND(target.hwnd as *mut _);
         while target.full_frame && !IsWindowEnabled(hwnd).as_bool() {
             if stop.load(Ordering::Acquire) || !outbox.connected.load(Ordering::Acquire) || !target.valid() {
-                return Ok(());
+                return Ok(false);
             }
             let popup=GetLastActivePopup(hwnd);
             if popup==hwnd || popup.0.is_null() || !IsWindowVisible(popup).as_bool()
@@ -343,7 +360,7 @@ unsafe fn run(target: &Target, outbox: &Outbox, stop: &AtomicBool, driver:D3D_DR
         target.set_phase(Phase::Starting);
         let item = create_item(target, &interop)?;
         if stop.load(Ordering::Acquire) || !outbox.connected.load(Ordering::Acquire) || !target.valid() {
-            return Ok(());
+            return Ok(false);
         }
         let mut device = None;
         let mut context = None;
@@ -429,6 +446,7 @@ unsafe fn run(target: &Target, outbox: &Outbox, stop: &AtomicBool, driver:D3D_DR
         target.progress.enabled_at_start.store(IsWindowEnabled(HWND(target.hwnd as *mut _)).as_bool(),Ordering::Relaxed);
         session.StartCapture().map_err(|e| gpu_error(&device, "StartCapture", e))?;
         target.progress.starts.fetch_add(1,Ordering::Relaxed);
+        let mut restart_session=false;
         let result = (|| -> Result<(), String> {
             let mut native_gpu:Option<super::gpu::Gpu>=None;
             let mut sequence = target.capture_frames.load(Ordering::Acquire);
@@ -446,6 +464,13 @@ unsafe fn run(target: &Target, outbox: &Outbox, stop: &AtomicBool, driver:D3D_DR
                     continue;
                 }
                 if target.refresh_requested.swap(false,Ordering::AcqRel) {
+                    // A session that has never delivered a frame can remain
+                    // stuck after Recreate. Close it on its owning thread and
+                    // start a fresh session for the same authenticated HWND.
+                    // This is request-driven; no retry loop on a timer.
+                    if target.progress.acquired.load(Ordering::Relaxed)==0 {
+                        restart_session=true;break;
+                    }
                     // Recreate on this capture thread, after any prior packet's
                     // ACK, rather than racing a second producer for the HWND.
                     pool.Recreate(&runtime,DirectXPixelFormat::B8G8R8A8UIntNormalized,2,size).map_err(error)?;
@@ -563,7 +588,7 @@ unsafe fn run(target: &Target, outbox: &Outbox, stop: &AtomicBool, driver:D3D_DR
         let _ = session.Close();
         let _ = pool.RemoveFrameArrived(registration);
         let _ = pool.Close();
-        result
+        result.map(|()|restart_session)
     }
 }
 

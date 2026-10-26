@@ -81,12 +81,15 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
     private var nativeMoveLastAt=0.0
     private var nativeGeometryObservation:Task<Void,Never>?
     private var placementCaptureSize:NSSize?
+    private var initialPlacementPacket:GuestPacket?
+    private var initialPlacementFailed=false
     private var displayPriorRaster:NSSize?
     private var rejectedTransitionPacket:GuestPacket?
     private let bridge:GuestBridge
     private var sourceClosed=false
     private var closing=false
     private var hasFrame=false
+    private var hasBeenReady=false
     private var rejectedDiagnosticFrames=0
     private var frameSize=NSSize.zero
     private var sourceRect=NSRect.zero
@@ -95,6 +98,12 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
     private var placedDialog=false
     private var gesture:MouseGesture?
     private var inputBlocked=false
+    private var observedInputPending=0
+    private var inputRequests=0
+    private var inputAccepted=0
+    private var inputRejected=0
+    private var lastInputEvent=""
+    private var lastInputError=""
     private var clipboardRequest:UUID?
     private var deferredInput:[WindowInput]=[]
     private var deferredTextBytes=0
@@ -207,6 +216,17 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
         beginFrameTransition("Preparazione della finestra…")
     }
     func identifyApplication(name:String,icon:NSImage?){transitionView.identify(name:name,icon:icon)}
+    var readyForInput:Bool {hasFrame && !transitionActive && !displayUpdating && initialPlacementReady}
+    private var initialPlacementReady:Bool {
+        guard role == .main,!sharedDisplays.isEmpty,!initialPlacementFailed else{return true}
+        guard let display=SharedDisplay.best(sharedDisplays,guest:sourceRect) else{return false}
+        return (display.guestWorkArea ?? display.guestFrame).insetBy(dx:-1,dy:-1).contains(sourceRect)
+    }
+    func activate(){
+        activateOnFirstShow=true
+        guard initialPlacementReady,!displayUpdating else{return}
+        window.makeKeyAndOrderFront(nil);window.makeFirstResponder(content)
+    }
     func setDisplayUpdating(_ updating:Bool){
         if updating,!displayUpdating {displayPriorRaster=sharedDisplay?.guestFrame.size}
         displayUpdating=updating
@@ -243,7 +263,7 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
             self.finishPresentedTransition()
             guard self.transitionActive else{return}
             self.transitionTimeout=nil
-            self.transitionView.stalled("La finestra non risponde. Puoi riprovare senza chiudere il documento.",canRetry:self.bridge.windowRefreshAvailable)
+            self.transitionView.stalled("L’immagine della finestra non è ancora pronta. Puoi riprovare senza chiudere il documento.",canRetry:self.bridge.windowRefreshAvailable)
             self.trace("frame_transition_delayed")
         }
         trace("frame_transition_started")
@@ -282,6 +302,10 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
         content.clearModifiers();content.inputSuspended=false
         transitionActive=false;transitionTimeout?.cancel();transitionTimeout=nil;rejectedTransitionPacket=nil
         content.resizeEnabled=role == .main && canResize
+        if !hasBeenReady {
+            hasBeenReady=true
+            if activateOnFirstShow,NSApp.isActive {activate()}
+        }
         if window.isKeyWindow {window.makeFirstResponder(content)}
         let identity=transitionID
         transitionView.finish{[weak self] in
@@ -343,7 +367,14 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
         if !hasFrame {placementCaptureSize=NSSize(width:width,height:height)}
         bridge.command("set_geometry",["window":id,"gesture":UUID().uuidString,"serial":1,
             "x":Int(x.rounded()),"y":Int(y.rounded()),"width":Int(width.rounded()),"height":Int(height.rounded())],timeout:.seconds(3)){[weak self] result in
-                if case .failure=result {self?.onError?("Windows non ha spostato l’app sullo schermo Mac.")}
+                guard let self else{return}
+                if case .failure(let error)=result {
+                    self.initialPlacementFailed=true
+                    NativeWindowTrace.record("initial-placement-failed",["window":self.id,"message":error.localizedDescription])
+                    if let packet=self.initialPlacementPacket {self.initialPlacementPacket=nil;self.present(packet)}
+                    if self.activateOnFirstShow {self.activate()}
+                    self.onError?("Windows non ha spostato l’app sullo schermo Mac.")
+                }
         }
     }
     private func applySizeLimits(){
@@ -392,8 +423,16 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
             if canResize {window.styleMask.insert(.resizable)}else{window.styleMask.remove(.resizable)}
         }
         minimized=nextMinimized
+        if !hasFrame,role == .main,!displayUpdating,let first=sharedDisplays.first {
+            placeOnAppDisplayIfNeeded(first)
+        }
+        if initialPlacementReady,let packet=initialPlacementPacket,
+           packet.header["width"] as? Int == Int(sourceRect.width),
+           packet.header["height"] as? Int == Int(sourceRect.height) {
+            initialPlacementPacket=nil;present(packet)
+        }
         if sharedDisplay != nil,!geometryActive,!geometryFinishing,!minimized {applySourceFrame()}
-        if !hasFrame && !role.transient && visible && !minimized && !window.isVisible {
+        if initialPlacementReady && !displayUpdating && !role.transient && visible && !minimized && !window.isVisible {
             if activateOnFirstShow {window.makeKeyAndOrderFront(nil)}
             else {window.orderBack(nil)}
             window.makeFirstResponder(content)
@@ -402,7 +441,7 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
             if minimized && !window.isMiniaturized {window.miniaturize(nil)}
             if !minimized && window.isMiniaturized {window.deminiaturize(nil)}
         }
-        if !visible {window.orderOut(nil)}else if hasFrame && !minimized && !role.transient && !window.isVisible {window.orderFront(nil)}
+        if !visible {window.orderOut(nil)}
         // Metadata and the completed Metal presentation arrive independently.
         // Reconcile either order; an unchanged WGC window need not repaint.
         finishPresentedTransition()
@@ -446,6 +485,13 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
         guard let width=packet.header["width"] as? Int,let height=packet.header["height"] as? Int else{return}
         receivedSequence=(packet.header["sequence"] as? NSNumber)?.uint64Value ?? 0
         let nextSize=NSSize(width:width,height:height)
+        if first,role == .main,!sharedDisplays.isEmpty,
+           !initialPlacementReady || displayUpdating || nextSize != sourceRect.size {
+            // A launch can export the old desktop rectangle before its app
+            // display placement completes. Keep only the latest local frame;
+            // metadata must confirm the initial geometry before showing it.
+            initialPlacementPacket=packet;return
+        }
         if resizePreviewFrame != nil {
             // Keep the original window and image intact until the mouse-up
             // request is confirmed and a frame of that resulting size arrives.
@@ -611,7 +657,22 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
         if interrupted,let message {onError?(message)}
     }
     private func send(_ value:[String:Any]){
-        var packet=value;packet["window"]=id;bridge.command("input",packet)
+        var packet=value;packet["window"]=id
+        let event=value["event"] as? String ?? ""
+        // Observe discrete actions without recording text or adding a pending
+        // reply for every pointer movement.
+        guard ["button","key","text","chord"].contains(event),observedInputPending<8 else {
+            bridge.command("input",packet);return
+        }
+        observedInputPending+=1;inputRequests+=1;lastInputEvent=event
+        bridge.command("input",packet){[weak self] result in
+            guard let self else{return}
+            self.observedInputPending-=1
+            switch result {
+            case .success:self.inputAccepted+=1;self.lastInputError=""
+            case .failure(let error):self.inputRejected+=1;self.lastInputError=error.localizedDescription
+            }
+        }
     }
     private func clearPresentationText(){
         presentationTextTimeout?.cancel();presentationTextTimeout=nil
@@ -669,7 +730,8 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
         }
     }
     private func applySourceFrame(){
-        guard let sharedDisplay,!sourceRect.isEmpty,!geometryActive,!geometryFinishing else{return}
+        guard let sharedDisplay,!sourceRect.isEmpty,!geometryActive,!geometryFinishing,
+              hasFrame || initialPlacementReady else{return}
         let mapped=sharedDisplay.macFrame(forGuest:sourceRect)
         let frame=window.frameRect(forContentRect:mapped)
         guard window.frame != frame else{return}
@@ -901,7 +963,10 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
         pumpSharedGeometry()
     }
     private func pumpSharedGeometry(){
-        guard let interaction=geometryInteraction,!geometryInFlight,let target=geometryPending else{return}
+        // Move the Mac surface locally while tracking the pointer. Committing
+        // Windows only on drop avoids clamping/recloaking an intermediate
+        // rectangle as it crosses the boundary between two app displays.
+        guard geometryFinishing,let interaction=geometryInteraction,!geometryInFlight,let target=geometryPending else{return}
         let delay=geometryFinishing ? 0:max(0,geometryNextSend-ProcessInfo.processInfo.systemUptime)
         if delay>0 {
             guard geometryTimer == nil else{return}
@@ -1006,9 +1071,14 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
     }
     var presentationState:[String:Any] {
         ["transitionActive":transitionActive,"displayUpdating":displayUpdating,
+         "inputBlocked":inputBlocked,"deferredInputCount":deferredInput.count,
+         "inputRequests":inputRequests,"inputAccepted":inputAccepted,"inputRejected":inputRejected,
+         "lastInputEvent":lastInputEvent,"lastInputError":lastInputError,
          "keyWindow":window.isKeyWindow,"contentFocused":window.firstResponder === content,"inputSuspended":content.inputSuspended,
          "presentationTextBytes":presentationTextBytes,"presentationTextBuffered":presentationTextBuffered,
          "requiredPresentationID":transitionAfterPresentation,"presentedID":lastPresentedID,
+         "initialPlacementReady":initialPlacementReady,"initialPlacementFailed":initialPlacementFailed,
+         "hasBeenReady":hasBeenReady,"activateOnFirstShow":activateOnFirstShow,
          "submittedID":content.presentationID,"hasFrame":hasFrame,
          "receivedSequence":receivedSequence,"acceptedSequence":acceptedSequence,
          "framePixels":[frameSize.width,frameSize.height],

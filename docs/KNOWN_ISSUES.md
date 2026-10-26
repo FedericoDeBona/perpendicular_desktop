@@ -1,5 +1,7 @@
 # Registro dei problemi
 
+**Seguito corrente0.2.11 — obiettivo IN CORSO:** conservato il riscontro utente negativo (input assente, soltanto resize). Richiesta UAC nascosta annullata; recupero WGC dopo sostituzione worker corretto e verificato sulle stesse Notepad/Explorer (AddTab mirato dopo0x80070057, poi nuovo isolamento app-display). Guest6c9a9d194289 e frontend433dd770c952 realmente installati, stessa VM e documenti conservati. Notepad riceve nuovo testo dopo riconnessione; Explorer aveva completato navigazione in C:\Windows, ma rendering incompleto resta aperto. modeFocus distribuito, bidirezionalità non qualificata; drag/resize e Task Manager elevata restano da completare. Nessuna qualifica nel clone o chiusura generale. [Evidenze e fallimenti](VERIFICATION.md#26-ottobre--seamless-e-desktop-primo-incremento-0211).
+
 Aggiornato il 26 ottobre 2026. Leggere questo file prima di iniziare o riprendere, poi [RESTART_PLAN.md](RESTART_PLAN.md). Qui sono descritti stato corrente, prossimi passi e criteri di chiusura. La cronologia delle prove e dei fallimenti resta in [VERIFICATION.md](VERIFICATION.md); gli esperimenti ritirati sono indicizzati separatamente in [RETIRED_EXPERIMENTS.md](RETIRED_EXPERIMENTS.md).
 
 Le attività richieste, incluse condivisione degli stessi file Mac e analisi delle prestazioni, sono raccolte nella [TODO obbligatoria](TODO.md), da leggere dopo il piano. La ricognizione documentale del 25 ottobre non cambia gli esiti delle verifiche: nessun nuovo test o difetto chiuso. La TODO rimanda agli ID di questo registro per i problemi già noti.
@@ -209,6 +211,8 @@ Queste voci conservano limiti non risolti, senza richiedere di ripristinare codi
 
 ### WIN-001 — Spostamenti casuali nel drag delle finestre individuali
 
+- **0.2.11, implementazione da qualificare sul gesto:** anteprima del movimento locale e set_geometry Windows solo al rilascio; elimina gli invii delle posizioni intermedie soggette a clamp/isolamento. Nessuna riuscita di drag dichiarata: il primo campione massimo torna al bordo, poi CUA fallisce noWindowsAvailable. Prossimo passo una prova concreta, senza ampliare il test. [Diario](VERIFICATION.md#26-ottobre--seamless-e-desktop-primo-incremento-0211).
+
 - **Qualifica main0.2.5 circoscritta:** drag Notepad da(41,291) a(91,260)punti Mac, guest da(2130,140) a(2230,202)pixel: stesso spostamento a scala0,5, frame successivo accettato/presentato e transizione conclusa. Un monitor fisico soltanto; non prova stabilità generale o trasferimenti fra scale diverse. [Evidenze](VERIFICATION.md#25-ottobre--integrazione-n1-e-distribuzione-025).
 
 - **Stato:** causa corretta e verificata nel clone, commit 21d206b; distribuzione ordinaria e altre configurazioni non qualificate. Posizione/metadati mouse sono acquisiti prima dell’accodamento, evitando coordinate ricostruite dopo lo spostamento della finestra Mac.
@@ -216,6 +220,8 @@ Queste voci conservano limiti non risolti, senza richiedere di ripristinare codi
 - **Evidenze:** [diario delle verifiche](VERIFICATION.md), correzione del drag del 24 ottobre.
 
 ### WIN-002 — Resize individuale in attesa del frame
+
+- **0.2.11:** prima immagine/visibilità della main attende collocazione iniziale confermata, spinner del launcher termina al frame pronto; timeout descritto come attesa immagine invece di dichiarare un blocco dell’app. Notepad/Explorer con frame e geometria concordi nel campione; gesti non qualificati per CUA noWindowsAvailable e cambio monitor2→1. Voce generale aperta, prossimo passo gesto reale col riscontro disponibile. [Evidenze](VERIFICATION.md#26-ottobre--seamless-e-desktop-primo-incremento-0211).
 
 - **Nuova segnalazione26 ottobre:** dimensione iniziale errata che si adatta dopo; all'inizio di alcuni drag appare brevemente il caricamento, poi i drag diventano normalmente utilizzabili. Segnalati anche drag/resize instabili in Explorer e altre app (WIN-001/003). Non ancora riprodotti qui né attribuiti a una causa unica; non equivale automaticamente a un'app Windows bloccata. Prossimo passo un percorso minimo con geometria/frame/input correlati, test ora autorizzati. [Richiesta](VERIFICATION.md#26-ottobre--requisiti-integrazione-app-e-full-experience).
 
@@ -237,6 +243,10 @@ Queste voci conservano limiti non risolti, senza richiedere di ripristinare codi
 - **Evidenze:** [frame valido al resize](VERIFICATION.md#24-ottobre--gate-pronto-prima-delluso-e-frame-valido-al-resize).
 
 ### WIN-004 — Finestra Mac visibile ma app Windows non attiva
+
+- **0.2.11, riscontro negativo e recupero circoscritto:** utente riferisce input assente/app appena apribili, solo resize; niente chiusura generale. Dopo annullamento UAC Notepad/testo ed Explorer/navigazione funzionano nel caso osservato. Sostituzione del worker lascia vecchie main non ammesse da WGC0x80070057: AddTab mirato recupera le stesse HWND e i primi frame senza rilancio, poi isolamento app-display riapplicato. Testo successivo alla riconnessione osservato. Rendering Explorer, mouse/gesti, elevazione Task Manager e singleton ancora aperti. [Evidenze](VERIFICATION.md#26-ottobre--seamless-e-desktop-primo-incremento-0211).
+
+- **Primo incremento Seamless0.2.11:** integrità Task Manager0x3000, worker/Explorer0x2000; posizionamento/chiusura Mac ancora rifiutati, nessuna modifica delle protezioni. Explorer riceve frame e dopo richiamo ha focus Mac, ma navigazione non confermata e foreground guest separato Edge: non risolto input generale. Attivazione al primo frame pronto implementata; singleton modeFocus ancora da distribuire/verificare. [Diario](VERIFICATION.md#26-ottobre--seamless-e-desktop-primo-incremento-0211).
 
 - **Priorità utente26 ottobre:** input spesso assente, finestre non rispondenti e richieste di chiusura senza esito, oltre a mancati avvii e transizioni iniziali errate (APP-002/WIN-002). Segnalazioni da isolare nel percorso pertinente, senza dichiararne la causa o chiuderle con il solo aggiornamento guest. TODO-002/011 prioritari; focus delle singleton specificato separatamente in TODO-022. [Requisiti e nuova autorizzazione ai test](VERIFICATION.md#26-ottobre--requisiti-integrazione-app-e-full-experience).
 

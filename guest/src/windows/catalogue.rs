@@ -288,7 +288,7 @@ impl Catalogue {
                 let revision = std::fs::metadata(&image_path).ok().and_then(|m| m.modified().ok())
                     .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|t| t.as_secs().to_string()).unwrap_or_default();
                 apps.push(json!({"id":id,"name":name,"key":key,"essential":!key.is_empty(),"iconRevision":revision}));
-                if key == "explorer" || key == "edge" {
+                if key == "explorer" || key == "edge" || Self::task_manager_image(&image_path) {
                     if key == "explorer" {image_path = std::env::var("WINDIR").unwrap_or_else(|_| "C:\\Windows".into()) + "\\explorer.exe";}
                     if !image_path.is_empty() && std::path::Path::new(&image_path).is_file() {images.insert(id.clone(), image_path);}
                 }
@@ -312,13 +312,14 @@ impl Catalogue {
         };
         if process_app_id(hwnd).is_some_and(|actual| actual.eq_ignore_ascii_case(
             expected.strip_prefix("shell:AppsFolder\\").unwrap_or(expected))) {return true;}
-        // Explorer and Edge can reuse an existing process without returning a
-        // launch handle. Match only these catalogue entries by their installed
+        // Explorer, Edge and Task Manager can reuse an existing process without
+        // returning a launch handle. Match these catalogue entries by their installed
         // full image path and real application window class, never by title.
         let Some(expected_image) = self.images.get(id) else {return false;};
         let class = window_class(hwnd);
         if (primary_app(expected) == "explorer" && class != "CabinetWClass" && class != "ExploreWClass")
-            || (primary_app(expected) == "edge" && class != "Chrome_WidgetWin_1") {return false;}
+            || (primary_app(expected) == "edge" && class != "Chrome_WidgetWin_1")
+            || (Self::task_manager_image(expected_image) && class != "TaskManagerWindow") {return false;}
         unsafe {
             let Ok(handle) = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, process_id(hwnd)) else {return false;};
             let handle = identity::Handle(handle);
@@ -326,6 +327,14 @@ impl Catalogue {
             QueryFullProcessImageNameW(handle.0, PROCESS_NAME_WIN32, PWSTR(buffer.as_mut_ptr()), &mut length).is_ok()
                 && String::from_utf16_lossy(&buffer[..length as usize]).eq_ignore_ascii_case(expected_image)
         }
+    }
+
+    fn task_manager_image(image:&str)->bool {
+        let Some(windows)=std::env::var_os("WINDIR") else{return false};
+        image.eq_ignore_ascii_case(&std::path::PathBuf::from(windows).join("System32").join("Taskmgr.exe").to_string_lossy())
+    }
+    pub fn singleton(&self,id:&str)->bool {
+        self.images.get(id).is_some_and(|image|Self::task_manager_image(image))
     }
 
     pub fn hosted_content(&self, app: &str, frame: usize, sid: &str, session: u32) -> Option<HostedContent> {
