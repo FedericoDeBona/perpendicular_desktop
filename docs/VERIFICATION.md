@@ -2,6 +2,18 @@
 
 Registro cronologico delle prove dal 21 ottobre 2026. Per stato attuale e istruzioni operative leggere [KNOWN_ISSUES.md](KNOWN_ISSUES.md), [RESTART_PLAN.md](RESTART_PLAN.md) e [IMPLEMENTATION.md](IMPLEMENTATION.md). I vecchi comandi, percorsi, protezioni e handoff qui sotto descrivono la singola prova alla sua data: possono riferirsi a esperimenti ritirati o dischi eliminati e non sono istruzioni da eseguire sulla base corrente. Esiti negativi e limiti sono conservati; i [resoconti ritirati](RETIRED_EXPERIMENTS.md) sono recuperabili da Git.
 
+## 26 ottobre — pull e rebuild 0.2.10 sul Mac IoT senza test
+
+**Richiesta:** scaricare le modifiche e ricompilare con tutte le feature, senza test. Checkout inizialmente pulito su main4090ab8; `git pull --ff-only` completato a0cf4edd. Questo computer conserva `/Applications/Perpendicular.app`0.2.6 senza override della directory VM: è il Mac della IoT, distinto dal secondo Mac93be6687 descritto nelle altre voci.
+
+**Esito di build:** `zsh scripts/build-guest.sh` e poi `zsh scripts/build-macos.sh` terminati entrambi con codice0. Ricompilati helper C ARM64, guest Rust release ARM64 e frontend Swift/trasporto C; icona nativa e fallback confezionati, bundle firmato ad hoc. Guest:9warning, inclusi PDB Microsoft assenti/LNK4099, senza errori bloccanti. Nessun flag di esclusione runtime utilizzato e nessuna feature opzionale del pacchetto Rust da abilitare separatamente.
+
+Pacchetto `.build/Perpendicular.app`0.2.10, frontend SHA256 `1babe4a80ecb260bdca8cee147de45bb884ee3bd799d9707044304752e1be152`, guest `46d4a2f0c3bb9349d483c28a76b6ebc571ddb8cc7bd916bd200763d64d924459`. Motore completo riutilizzato dall'app locale tramite il confezionatore ordinario: QEMU `7a86ee3d16e548b84bbafc8c464ad86b249ee679c0b7f52afa3aad2832a34fc6`; manifest con hvf_dynamic_memory_version1, mixed_display_identity_version1, experimental_wgc_gpu_export1 e shared_texture_initialization_before_export1. Renderer/server/backend del riferimento locale conservati; le patch per il diverso QEMU del secondo Mac non sono una ricompilazione necessaria di questo runtime già completo.
+
+**Perimetro:** nessun test automatico/manuale, benchmark, boot, avvio del frontend o comando nel guest. I controlli di confezionamento interni allo script sono parte della build, non una qualifica funzionale. App installata0.2.6, servizio Windows, VM, configurazione e dati non modificati. Nessuna verifica nel clone o nell'app principale e nessun difetto chiuso. Il pacchetto contiene le funzionalità già implementate nei sorgenti aggiornati; le feature ancora DA FARE non diventano implementate con questa build. La distribuzione resta distinta e non eseguita.
+
+Log locali ignorati da Git: `.build/pull-rebuild-20261026-guest.log` e `.build/pull-rebuild-20261026-macos.log`.
+
 ## 26 ottobre — regressione della risoluzione dinamica Desktop Windows
 
 L’utente segnala che Desktop Windows non segue più la dimensione della finestra. Requisito già presente nel piano: raster Windows effettivo per vista/fullscreen, non semplice scaling. Confermata la regressione causale: nella0.2.8 scheduleDesktopResize esclude esplicitamente mixedDisplaysEnabled; la0.2.9 conserva il blocco per evitare rehoming/app mapping singolo. Non era una soluzione completa.
