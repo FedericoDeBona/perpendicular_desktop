@@ -77,6 +77,10 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
     private var dialogActivationPending=true
     private var transitionStartedAt=0.0
     private var displayUpdating=false
+    private var nativeMoveNotifications=0
+    private var nativeMoveLastAt=0.0
+    private var nativeGeometryObservation:Task<Void,Never>?
+    private var placementCaptureSize:NSSize?
     private var displayPriorRaster:NSSize?
     private var rejectedTransitionPacket:GuestPacket?
     private let bridge:GuestBridge
@@ -318,13 +322,16 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
     /// Move only an admitted native app still on the reserved Windows desktop.
     /// Geometry metadata, not this request's ACK, determines its final placement.
     func placeOnAppDisplayIfNeeded(_ display:SharedDisplay){
-        guard role == .main,!initialAppPlacementRequested,!sourceRect.isEmpty,
-              SharedDisplay.best(sharedDisplays,guest:sourceRect)==nil else{return}
-        initialAppPlacementRequested=true
+        guard role == .main,!initialAppPlacementRequested,!sourceRect.isEmpty else{return}
+        let current=SharedDisplay.best(sharedDisplays,guest:sourceRect)
+        let display=current ?? display
         let area=display.guestWorkArea ?? display.guestFrame
+        guard current == nil || sourceRect.width>area.width || sourceRect.height>area.height else{return}
+        initialAppPlacementRequested=true
         let inset=40/display.pixelScale
         let width=min(sourceRect.width,area.width),height=min(sourceRect.height,area.height)
         let x=area.minX+min(inset,max(0,area.width-width)),y=area.minY+min(inset,max(0,area.height-height))
+        if !hasFrame {placementCaptureSize=NSSize(width:width,height:height)}
         bridge.command("set_geometry",["window":id,"gesture":UUID().uuidString,"serial":1,
             "x":Int(x.rounded()),"y":Int(y.rounded()),"width":Int(width.rounded()),"height":Int(height.rounded())],timeout:.seconds(3)){[weak self] result in
                 if case .failure=result {self?.onError?("Windows non ha spostato l’app sullo schermo Mac.")}
@@ -354,6 +361,14 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
             sourceRect=next
         }
         refreshSharedDisplay()
+        if let fitted=placementCaptureSize,sourceRect.width<=fitted.width+1,sourceRect.height<=fitted.height+1 {
+            placementCaptureSize=nil
+            if !hasFrame,bridge.windowRefreshAvailable {
+                // The first WGC run may already have stopped on the old,
+                // oversized rectangle. Retry only after metadata confirms fit.
+                bridge.command("window_refresh",["window":id])
+            }
+        }
         canResize=item["resizable"] as? Bool ?? true
         content.resizeEnabled=role == .main && canResize && !transitionActive
         if let width=item["minWidth"] as? Double,let height=item["minHeight"] as? Double,
@@ -509,6 +524,7 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
         return false
     }
     func windowWillClose(_ notification:Notification){
+        nativeGeometryObservation?.cancel();nativeGeometryObservation=nil
         transitionTimeout?.cancel();transitionTimeout=nil
         if !role.transient {cancelInput()}
         cancelSharedGeometry()
@@ -828,7 +844,7 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
         geometryTimer?.invalidate();geometryTimer=nil
         let interaction=geometryInteraction
         geometryDeadline=Task{@MainActor [weak self] in
-            try? await Task.sleep(for:.seconds(3))
+            try? await Task.sleep(for:.seconds(6))
             guard !Task.isCancelled,let self,self.geometryInteraction == interaction else{return}
             self.finishSharedGeometry(error:"Windows did not finish updating the window geometry.")
         }
@@ -946,7 +962,13 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
          "receivedSequence":receivedSequence,"acceptedSequence":acceptedSequence,
          "framePixels":[frameSize.width,frameSize.height],
          "geometryFinishing":geometryFinishing,"nativeResizing":nativeResizing,
-         "expectedSize":expectedSize != nil]
+         "expectedSize":expectedSize != nil,"nativeMoveNotifications":nativeMoveNotifications,
+         "geometryRequests":geometrySerial,"hasSharedDisplay":sharedDisplay != nil,
+         "mappingDevice":sharedDisplay?.device ?? "",
+         "sourceRect":[sourceRect.minX,sourceRect.minY,sourceRect.width,sourceRect.height],
+         "sharedDisplayCount":sharedDisplays.count,"geometryActive":geometryActive,
+         "geometryInteraction":geometryInteraction != nil,"applyingSourceGeometry":applyingSourceGeometry,
+         "sourceClosed":sourceClosed,"pressedMouseButtons":NSEvent.pressedMouseButtons]
     }
     private func trace(_ event:String){
         guard ProcessInfo.processInfo.environment["PERPENDICULAR_STATE_TRACE"] == "1" else{return}
@@ -991,22 +1013,62 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
     }
     func windowDidDeminiaturize(_ notification:Notification){bridge.command("activate",["window":id])}
     func windowWillMove(_ notification:Notification){
-        guard role == .dialog,sharedDisplay != nil,!applyingSourceGeometry,
+        guard !role.transient,sharedDisplay != nil,!applyingSourceGeometry,geometryInteraction == nil,
               NSEvent.pressedMouseButtons & 1 != 0,NSApp.currentEvent?.window === window else{return}
         beginSharedGeometry()
+        trackNativeMove(waitForMouseUp:true)
+    }
+    private func trackNativeMove(waitForMouseUp:Bool){
+        nativeMoveTimer?.invalidate()
+        nativeMoveLastAt=ProcessInfo.processInfo.systemUptime
         let timer=Timer(timeInterval:0.05,repeats:true){[weak self] _ in
             MainActor.assumeIsolated {
                 guard let self,self.geometryActive else{return}
-                if NSEvent.pressedMouseButtons & 1 == 0 {self.commitSharedGeometry()}
+                let settled=ProcessInfo.processInfo.systemUptime-self.nativeMoveLastAt>=0.15
+                if waitForMouseUp ? NSEvent.pressedMouseButtons & 1 == 0:settled {self.commitSharedGeometry()}
             }
         }
         nativeMoveTimer=timer;RunLoop.main.add(timer,forMode:.common)
     }
+    private func followNativeGeometry(){
+        guard !role.transient,hasFrame,!sourceClosed,!applyingSourceGeometry,!displayUpdating,
+              !nativeResizing,geometryInteraction == nil,let sharedDisplay else{return}
+        let actual=window.contentRect(forFrameRect:window.frame)
+        let expected=sharedDisplay.macFrame(forGuest:sourceRect)
+        guard abs(actual.minX-expected.minX)>0.5 || abs(actual.minY-expected.minY)>0.5 ||
+              abs(actual.width-expected.width)>0.5 || abs(actual.height-expected.height)>0.5 else{return}
+        // macOS Window-menu moves/tiles and native drags do not pass through
+        // our Windows-caption gesture. Own their geometry until guest ACK and
+        // metadata agree, so an old snapshot cannot snap the window back.
+        beginSharedGeometry();trackNativeMove(waitForMouseUp:false)
+    }
+    private func observeNativeGeometryAfterNotification(){
+        nativeGeometryObservation?.cancel()
+        nativeGeometryObservation=Task{@MainActor [weak self] in
+            // AppKit's animated Move to Display can notify while frame still
+            // exposes the preceding animation step. Inspect the settled frame
+            // outside that callback rather than accepting its stale rectangle.
+            try? await Task.sleep(for:.milliseconds(60))
+            guard !Task.isCancelled,let self else{return}
+            self.nativeGeometryObservation=nil;self.followNativeGeometry()
+            if self.geometryActive,!self.nativeResizing {self.updateSharedGeometry()}
+        }
+    }
     func windowDidMove(_ notification:Notification){
+        nativeMoveNotifications+=1
+        nativeMoveLastAt=ProcessInfo.processInfo.systemUptime
+        observeNativeGeometryAfterNotification()
+        followNativeGeometry()
         if !applyingSourceGeometry,geometryActive,!nativeResizing {updateSharedGeometry()}
         onGeometry?()
     }
-    func windowDidResize(_ notification:Notification){onGeometry?()}
+    func windowDidResize(_ notification:Notification){
+        nativeMoveLastAt=ProcessInfo.processInfo.systemUptime
+        observeNativeGeometryAfterNotification()
+        followNativeGeometry()
+        if !applyingSourceGeometry,geometryActive,!nativeResizing {updateSharedGeometry()}
+        onGeometry?()
+    }
     func windowWillStartLiveResize(_ notification:Notification){
         guard !role.transient else{return}
         beginResize()

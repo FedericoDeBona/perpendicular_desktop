@@ -411,9 +411,11 @@ impl Worker {
                             } else {
                                 diagnostics()
                             };
+                            // A reply authorizes the host's next operation.
+                            // Release the completed operation before queuing it.
+                            busy.store(false, Ordering::Release);
                             sender.control(match result{Ok(value)=>json!({"type":"reply","request":request,"ok":true,"result":value}),
                                 Err(message)=>json!({"type":"reply","request":request,"ok":false,"message":message})});
-                            busy.store(false, Ordering::Release);
                         });
                     }
                     continue;

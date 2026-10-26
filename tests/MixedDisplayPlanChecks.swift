@@ -25,6 +25,26 @@ import AppKit
             _=try MixedDisplayPlan(hosts:[first],bindings:AppDisplayBindings(machineID:"test",pid:1,displays:[binding,binding]),topology:topology)
             preconditionFailure("Duplicate device identities must be rejected")
         } catch {}
-        print("Mixed displays: add, remove, missing and duplicate identity checks passed")
+        let applied=connected.layout.map { fields -> [String:Any] in
+            var actual=fields
+            let area=fields["workArea"] ?? ["x":fields["x"]!,"y":fields["y"]!,"width":fields["width"]!,"height":fields["height"]!]
+            actual["workArea"]=area;actual["appWorkArea"]=area
+            return actual
+        }
+        let reused=try connected.mappings(snapshot:["monitors":["displays":applied]])
+        precondition(reused.count==1,
+                     "A fully confirmed unchanged layout must be reusable")
+        var changed=applied
+        changed[0]["x"]=1
+        do {
+            _=try connected.mappings(snapshot:["monitors":["displays":changed]])
+            preconditionFailure("A changed reserved desktop must not pass the unchanged-layout gate")
+        }catch{}
+        changed=applied;changed[1]["appWorkArea"]=["x":0,"y":0,"width":10,"height":10]
+        do {
+            _=try connected.mappings(snapshot:["monitors":["displays":changed]])
+            preconditionFailure("A stale private app work area must require configuration")
+        }catch{}
+        print("Mixed displays: binding checks and unchanged-layout verification passed")
     }
 }

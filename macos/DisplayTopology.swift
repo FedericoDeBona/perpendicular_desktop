@@ -3,7 +3,7 @@ import ColorSync
 
 /// Host points and backing pixels are separate inputs to the guest topology.
 /// IDs describe this display connection; never assume Windows uses the same IDs.
-struct HostDisplay {
+struct HostDisplay:Equatable {
     let id:UInt32
     let frame:NSRect
     let workArea:NSRect
@@ -156,13 +156,29 @@ struct MixedDisplayPlan {
 
     func mappings(snapshot:[String:Any])throws->[SharedDisplay] {
         guard let monitors=(snapshot["monitors"] as? [String:Any])?["displays"] as? [[String:Any]] else {throw Self.failure("Impossibile verificare gli schermi Windows.")}
+        // Verify every real output, including the reserved desktop, before
+        // treating a settings broadcast as an unchanged configuration.
+        guard monitors.count==layout.count,layout.allSatisfy({ requested in
+            guard let actual=monitors.first(where:{$0["device"] as? String==requested["device"] as? String}) else{return false}
+            return ["x","y","width","height"].allSatisfy{actual[$0] as? Int==requested[$0] as? Int}
+                && actual["primary"] as? Bool==requested["primary"] as? Bool
+        }) else{throw Self.failure("Windows non ha confermato la disposizione completa degli schermi.")}
         return try zip(hosts,devices).map { host,device in
             guard let actual=monitors.first(where:{$0["device"] as? String==device}),
                   let requested=layout.first(where:{$0["device"] as? String==device}),
-                  let mapping=SharedDisplay.mapped(host:host,monitor:actual,requested:requested,scale:scale) else {
+                  let mapping=SharedDisplay.mapped(host:host,monitor:actual,requested:requested,scale:scale),
+                  let requestedArea=requested["workArea"] as? [String:Int],
+                  let osArea=actual["workArea"] as? [String:Int],
+                  let expectedArea=Self.area(requestedArea),let systemArea=Self.area(osArea),
+                  mapping.guestWorkArea==expectedArea.intersection(systemArea) else {
                 throw Self.failure("Windows non ha confermato posizione, dimensioni e scala degli schermi.")
             }
             return mapping
         }
     }
+    private static func area(_ fields:[String:Int])->NSRect? {
+        guard let x=fields["x"],let y=fields["y"],let w=fields["width"],let h=fields["height"],w>0,h>0 else{return nil}
+        return NSRect(x:x,y:y,width:w,height:h)
+    }
+
 }

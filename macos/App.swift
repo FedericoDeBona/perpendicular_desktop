@@ -70,6 +70,10 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
     private var sharedDisplay:SharedDisplay?
     private var sharedDisplays:[SharedDisplay]=[]
     private var mixedDisplayConfiguring=false
+    private var lastHostDisplays:[HostDisplay]=[]
+    private var mixedDisplayChecks=0
+    private var mixedDisplayApplies=0
+    private var displayInvalidations=0
     private var recoveryItem:NSMenuItem!
     private var displayItems:[NSMenuItem]=[]
     private var desktopSize=NSSize.zero
@@ -215,6 +219,8 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
             for window in Array(windows.values) {window.retire()}
             windows=[:];earlyFrames=[:];windowApps=[:]
             machine?.closeDesktop();status="Windows spento"
+            if launcherNotice==displayStatus {launcherNotice=nil}
+            launcherDisplays=[];displayStatus="Windows spento"
         }else if case .running=state,!connected {
             status="Windows acceso · collegamento in attesa"
         }
@@ -369,6 +375,7 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
             localResponse(["ok":true,"result":["connected":connected,"machineRunning":running,
                 "machineState":machineStateLabel,"machineOperation":machineOperation as Any? ?? NSNull(),
                 "status":status,"displayStatus":displayStatus,"primaryMatchesHost":sharedDisplay != nil,
+                "displayChecks":mixedDisplayChecks,"displayApplies":mixedDisplayApplies,"displayInvalidations":displayInvalidations,
                 "mappedDisplays":sharedDisplays.count,"displaySetupComplete":machine?.mixedDisplaysEnabled == true ? sharedDisplays.count==HostDisplay.current().count:sharedDisplay != nil,
                 "appLaunchReady":machine?.mixedDisplaysEnabled != true || !sharedDisplays.isEmpty,
                 "memory":memoryController?.state ?? ["enabled":false],
@@ -727,10 +734,13 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
         }
     }
     private func invalidateDisplay(_ message:String){
-        displayRevision+=1;displayUpdating=true;sharedDisplay=nil;sharedDisplays=[];displayStatus=message
+        displayRevision+=1;displayInvalidations+=1;displayUpdating=true;sharedDisplay=nil;sharedDisplays=[];displayStatus=message
         for window in windows.values {window.setDisplayUpdating(true);window.setSharedDisplay(nil)}
     }
     @objc private func hostDisplaysChanged(){
+        let hosts=HostDisplay.current()
+        guard hosts != lastHostDisplays else{return}
+        lastHostDisplays=hosts
         mixedDisplayConfiguring=false
         displaySetupTask?.cancel();displaySetupTask=nil
         displaySetupID=UUID()
@@ -785,48 +795,69 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
             try? FileHandle.standardError.write(contentsOf:data+Data([10]))
         }
     }
-    private func readMixedDisplay(){
+    private func acceptMixedDisplay(_ plan:MixedDisplayPlan,_ snapshot:[String:Any])throws {
+        let mappings=try plan.mappings(snapshot:snapshot)
+        mixedDisplayConfiguring=false
+        lastHostDisplays=HostDisplay.current()
+        sharedDisplay=nil;sharedDisplays=mappings;displayUpdating=false
+        launcherDisplays=((snapshot["monitors"] as? [String:Any])?["displays"] as? [[String:Any]] ?? []).map{monitor in
+            var monitor=monitor
+            if let index=plan.devices.firstIndex(of:monitor["device"] as? String ?? "") {
+                monitor["label"]="Schermo Mac \(index+1)";monitor["appScreen"]=true
+            }else{monitor["label"]="Desktop Windows";monitor["appScreen"]=false}
+            return monitor
+        }
+        let previousStatus=displayStatus
+        displayStatus=plan.unavailableHosts==0 ? "\(mappings.count) schermi Mac collegati, desktop Windows separato.":
+            "\(mappings.count) di \(mappings.count+plan.unavailableHosts) schermi pronti. Puoi aprire le app sugli schermi disponibili; spegni e avvia Windows da Perpendicular per aggiungere gli altri."
+        if plan.unavailableHosts>0 {launcherNotice=displayStatus}
+        else if launcherNotice==previousStatus {launcherNotice=nil}
+        for window in windows.values {
+            window.setSharedDisplays(mappings);window.setDisplayUpdating(false)
+            if machine.desktopIsKey != true,let first=mappings.first {window.placeOnAppDisplayIfNeeded(first)}
+        }
+        layoutChildren()
+    }
+    private func readMixedDisplay(attempt:Int=0){
         guard connected,let epoch=displayEpoch,!mixedDisplayConfiguring else{return}
         guard guestCapabilities["displayTopology"] == true,let bindings=machine.appDisplayBindings else {
             failMixedDisplay("La configurazione multischermo richiede gli strumenti Windows aggiornati e un nuovo avvio.");return
         }
-        mixedDisplayConfiguring=true
+        mixedDisplayConfiguring=true;mixedDisplayChecks+=1
         let request=UUID();displaySetupID=request
-        bridge.command("display_topology",timeout:.seconds(5)){[weak self] result in
+        bridge.command("display_topology",timeout:.seconds(8)){[weak self] result in
             guard let self,self.connected,self.displayEpoch==epoch,self.displaySetupID==request else{return}
             do {
-                guard case .success(let reply)=result,let topology=reply["value"] as? [String:Any] else {throw NSError(domain:"Displays",code:1,userInfo:[NSLocalizedDescriptionKey:"Impossibile leggere gli schermi Windows."])}
+                let reply=try result.get()
+                guard let topology=reply["value"] as? [String:Any] else{throw CocoaError(.coderReadCorrupt)}
                 let plan=try MixedDisplayPlan(hosts:HostDisplay.current(),bindings:bindings,topology:topology)
+                // Settings notifications do not prove that topology changed.
+                // A verified unchanged layout must preserve an in-flight drag,
+                // resize and keyboard focus, without another display command.
+                if (try? plan.mappings(snapshot:topology)) != nil {
+                    try self.acceptMixedDisplay(plan,topology);return
+                }
+                self.invalidateDisplay("Aggiornamento degli schermi…")
+                self.mixedDisplayApplies+=1
                 self.bridge.command("display_layout",["layout":plan.layout],timeout:.seconds(12)){[weak self] result in
                     guard let self,self.connected,self.displayEpoch==epoch,self.displaySetupID==request else{return}
-                    self.mixedDisplayConfiguring=false
                     do {
-                        guard case .success(let reply)=result,let snapshot=reply["value"] as? [String:Any] else {
-                            if case .failure(let error)=result {throw error}
-                            throw CocoaError(.coderReadCorrupt)
-                        }
-                        let mappings=try plan.mappings(snapshot:snapshot)
-                        self.sharedDisplay=nil;self.sharedDisplays=mappings;self.displayUpdating=false
-                        self.launcherDisplays=((snapshot["monitors"] as? [String:Any])?["displays"] as? [[String:Any]] ?? []).map{monitor in
-                            var monitor=monitor
-                            if let index=plan.devices.firstIndex(of:monitor["device"] as? String ?? "") {
-                                monitor["label"]="Schermo Mac \(index+1)";monitor["appScreen"]=true
-                            }else{monitor["label"]="Desktop Windows";monitor["appScreen"]=false}
-                            return monitor
-                        }
-                        let previousStatus=self.displayStatus
-                        self.displayStatus=plan.unavailableHosts==0 ? "\(mappings.count) schermi Mac collegati, desktop Windows separato.":
-                            "\(mappings.count) di \(mappings.count+plan.unavailableHosts) schermi pronti. Puoi aprire le app sugli schermi disponibili; spegni e avvia Windows da Perpendicular per aggiungere gli altri."
-                        if plan.unavailableHosts>0 {self.launcherNotice=self.displayStatus}
-                        else if self.launcherNotice==previousStatus {self.launcherNotice=nil}
-                        for window in self.windows.values {
-                            window.setSharedDisplays(mappings);window.setDisplayUpdating(false)
-                            if self.machine.desktopIsKey != true,let first=mappings.first {window.placeOnAppDisplayIfNeeded(first)}
-                        }
-                        self.layoutChildren()
+                        let reply=try result.get()
+                        guard let snapshot=reply["value"] as? [String:Any] else{throw CocoaError(.coderReadCorrupt)}
+                        try self.acceptMixedDisplay(plan,snapshot)
                     }catch{self.failMixedDisplay(error.localizedDescription)}
                 }
-            }catch{self.mixedDisplayConfiguring=false;self.failMixedDisplay(error.localizedDescription)}
+            }catch{
+                self.mixedDisplayConfiguring=false
+                if attempt<2 {
+                    self.displayReadTask?.cancel()
+                    self.displayReadTask=Task{@MainActor [weak self] in
+                        try? await Task.sleep(for:.milliseconds(300))
+                        guard !Task.isCancelled,let self,self.connected,self.displayEpoch==epoch,self.displaySetupID==request else{return}
+                        self.displayReadTask=nil;self.readMixedDisplay(attempt:attempt+1)
+                    }
+                }else{self.failMixedDisplay(error.localizedDescription)}
+            }
         }
     }
     private func failMixedDisplay(_ message:String){
@@ -991,7 +1022,7 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
         case "display_changed":
             guard value["epoch"] as? String == displayEpoch else{return}
             if machine?.mixedDisplaysEnabled == true,mixedDisplayConfiguring {return}
-            invalidateDisplay("Checking Windows display…")
+            if machine?.mixedDisplaysEnabled != true {invalidateDisplay("Checking Windows display…")}
             displayReadTask?.cancel()
             displayReadTask=Task{@MainActor [weak self] in
                 try? await Task.sleep(for:.milliseconds(250))
