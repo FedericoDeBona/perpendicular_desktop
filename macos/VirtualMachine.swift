@@ -193,6 +193,17 @@ final class VirtualMachineController {
     }
     func finishDesktopResolution(){displayRequest=nil;desktopResolutionPending=false;displayControl?.stop();displayControl=nil}
     func closeDesktop(){finishDesktopResolution();desktop?.stop();desktop?.window.close();desktop=nil}
+    func closeForegroundApplication(notAfter:Double) async throws {
+        guard let launch=desktopLaunch() else{throw CocoaError(.executableRuntimeMismatch)}
+        let socket=controlSocket,id=configuration.id,pid=launch.pid
+        try await Task.detached {
+            // QEMU releases both device keys after the bounded hold, even if
+            // the frontend disappears. No process termination or token change.
+            _=try MachineControl.execute(socket:socket,operation:"send-key",
+                arguments:["keys":[["type":"qcode","data":"alt"],["type":"qcode","data":"f4"]],"hold-time":100],
+                expectedUUID:id,expectedPID:pid,notAfter:notAfter)
+        }.value
+    }
     func synchronizePrimaryDisplay(){
         // The v0.4 native driver keeps the modes advertised at boot. Sending
         // a new RFB preferred size while connected can select a smaller default

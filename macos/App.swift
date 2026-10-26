@@ -1105,6 +1105,14 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
                 if windows[id]==nil{
                     let role=WindowRole(rawValue:item["role"] as? String ?? "dialog") ?? .dialog
                     let controller=ApplicationWindow(id:id,title:title,role:role,bridge:bridge)
+                    let closeEpoch=displayEpoch
+                    controller.onDeviceClose={ [weak self,weak controller] deadline in
+                        guard let self,let controller,self.displayEpoch==closeEpoch,
+                              self.connected,controller.window.isKeyWindow,let machine=self.machine else {
+                            throw CocoaError(.executableRuntimeMismatch)
+                        }
+                        try await machine.closeForegroundApplication(notAfter:deadline)
+                    }
                     controller.activateOnFirstShow=openingApps.contains(item["app"] as? String ?? "") && machine?.desktopIsKey != true
                     controller.onError={ [weak self] message in
                         self?.status=message;self?.launcherNotice=message;self?.windowNotice=(id,message,false)

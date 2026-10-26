@@ -102,6 +102,7 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
     private var inputRejected=0
     private var lastInputEvent=""
     private var lastInputError=""
+    private var lastCloseError=""
     private var clipboardRequest:UUID?
     private var deferredInput:[WindowInput]=[]
     private var deferredTextBytes=0
@@ -157,6 +158,7 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
     var onRecovery:(()->Void)?
     var onReady:(()->Void)?
     var onCloseRequested:(()->Void)?
+    var onDeviceClose:((Double) async throws->Void)?
     var activateOnFirstShow=true
 
     init(id:String,title:String,role:WindowRole,bridge:GuestBridge){
@@ -580,14 +582,34 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
         if sourceClosed || !bridge.connected{return true}
         guard !closing else{return false};closing=true
         onCloseRequested?()
+        lastCloseError=""
+        let requestedAt=ProcessInfo.processInfo.systemUptime
         bridge.command("close",["window":id]){[weak self] result in
-            if case .failure=result {
-                self?.closing=false
-                self?.onError?("Windows non ha confermato la chiusura. Puoi riprovare.")
+            guard let self else{return}
+            switch result {
+            case .failure(let error):self.closeFailed(error)
+            case .success(let reply):
+                guard let value=reply["value"] as? [String:Any],value["method"] as? String == "device-keyboard" else{return}
+                // The guest authenticated this exact foreground HWND. Reject
+                // a delayed answer or a Mac focus change rather than sending
+                // a global shortcut to the user's newly selected window.
+                guard !self.sourceClosed,self.bridge.connected,self.window.isKeyWindow,
+                      ProcessInfo.processInfo.systemUptime-requestedAt<0.5,
+                      let close=self.onDeviceClose else {
+                    self.closeFailed(NSError(domain:"Guest",code:1,userInfo:[NSLocalizedDescriptionKey:"Il focus è cambiato prima della chiusura. Ripeti sulla finestra attiva."]))
+                    return
+                }
+                Task{@MainActor [weak self] in
+                    do {try await close(requestedAt+0.5)}catch{self?.closeFailed(error)}
+                }
             }
         }
         Task{@MainActor [weak self] in try? await Task.sleep(for:.seconds(3));self?.closing=false}
         return false
+    }
+    private func closeFailed(_ error:Error){
+        lastCloseError=error.localizedDescription;closing=false
+        onError?("Windows non ha confermato la chiusura. Puoi riprovare.")
     }
     func windowWillClose(_ notification:Notification){
         nativeGeometryObservation?.cancel();nativeGeometryObservation=nil
@@ -1074,6 +1096,7 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
          "inputBlocked":inputBlocked,"deferredInputCount":deferredInput.count,
          "inputRequests":inputRequests,"inputRejected":inputRejected,
          "lastInputEvent":lastInputEvent,"lastInputError":lastInputError,
+         "lastCloseError":lastCloseError,
          "keyWindow":window.isKeyWindow,"contentFocused":window.firstResponder === content,"inputSuspended":content.inputSuspended,
          "presentationTextBytes":presentationTextBytes,"presentationTextBuffered":presentationTextBuffered,
          "requiredPresentationID":transitionAfterPresentation,"presentedID":lastPresentedID,

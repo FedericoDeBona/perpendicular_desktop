@@ -3,12 +3,12 @@ import Darwin
 
 enum MachineControl {
     static func execute(socket path:String, operation:String, arguments:[String:Any]=[:],
-                        expectedUUID:String?=nil,expectedPID:Int32?=nil) throws -> [String:Any] {
+                        expectedUUID:String?=nil,expectedPID:Int32?=nil,notAfter:Double?=nil) throws -> [String:Any] {
         try value(socket:path,operation:operation,arguments:arguments,
-                  expectedUUID:expectedUUID,expectedPID:expectedPID) as? [String:Any] ?? [:]
+                  expectedUUID:expectedUUID,expectedPID:expectedPID,notAfter:notAfter) as? [String:Any] ?? [:]
     }
     static func value(socket path:String, operation:String, arguments:[String:Any]=[:],
-                      expectedUUID:String?=nil,expectedPID:Int32?=nil) throws -> Any {
+                      expectedUUID:String?=nil,expectedPID:Int32?=nil,notAfter:Double?=nil) throws -> Any {
         let fd=socket(AF_UNIX,SOCK_STREAM,0)
         guard fd>=0 else { throw failure("Cannot open machine control.") }
         defer { close(fd) }
@@ -28,7 +28,7 @@ enum MachineControl {
         }
         var noSignal:Int32=1
         _=setsockopt(fd,SOL_SOCKET,SO_NOSIGPIPE,&noSignal,socklen_t(MemoryLayout<Int32>.size))
-        let deadline=ProcessInfo.processInfo.systemUptime+3
+        let deadline=min(ProcessInfo.processInfo.systemUptime+3,notAfter ?? .infinity)
         var buffer=Data()
         func receive() throws -> [String:Any] {
             while true {
@@ -70,6 +70,7 @@ enum MachineControl {
                 throw failure("Machine control belongs to a different virtual machine.")
             }
         }
+        guard ProcessInfo.processInfo.systemUptime<deadline else{throw failure("La richiesta è scaduta. Ripeti sulla finestra attiva.")}
         return try exchange(["execute":operation,"arguments":arguments])
     }
     private static func failure(_ message:String)->NSError {NSError(domain:"Machine",code:1,userInfo:[NSLocalizedDescriptionKey:message])}

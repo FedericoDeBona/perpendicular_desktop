@@ -19,7 +19,7 @@ use std::{
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 use windows::Win32::{
-    Foundation::{HWND, LPARAM, POINT, WPARAM},
+    Foundation::{HWND, LPARAM, POINT, WPARAM, GetLastError, ERROR_ACCESS_DENIED},
     Graphics::Gdi::ClientToScreen,
     System::{Com::{COINIT_APARTMENTTHREADED, CoCreateGuid, CoInitializeEx},
         Threading::{GetCurrentThreadId,AttachThreadInput},
@@ -721,13 +721,25 @@ impl Worker {
                                 SMTO_ABORTIFHUNG | SMTO_BLOCK,500,None).0==0 {
                                 return Err("Windows did not confirm the console close request".into());
                             }
-                        }else {PostMessageW(
+                        }else if let Err(cause)=PostMessageW(
                             Some(HWND(target.hwnd as *mut _)),
                             WM_CLOSE,
                             WPARAM(0),
                             LPARAM(0),
-                        )
-                        .map_err(error)?;}
+                        ) {
+                            // A medium-integrity SendInput can return success
+                            // without controlling an elevated foreground app.
+                            // Ask the host for one ordinary device Alt+F4;
+                            // never activate a different window or force exit.
+                            if cause.code().0 as u32 != 0x80070005
+                                || !window_control::native_app_input_allowed(HWND(target.hwnd as _))
+                                || !IsWindowEnabled(HWND(target.hwnd as _)).as_bool()
+                                || GetAncestor(GetForegroundWindow(),GA_ROOT).0 as usize != target.hwnd {
+                                return Err(error(cause));
+                            }
+                            log(format!("Close message denied; requesting foreground device shortcut hwnd={}",target.hwnd));
+                            return Ok(json!({"accepted":false,"method":"device-keyboard"}));
+                        }
                     },
                     _ => {}
                 }
@@ -1593,15 +1605,9 @@ impl Worker {
                         .filter(|s| s.len() <= 1024)
                         .ok_or("Invalid input text")?;
                     if text.chars().any(|c|c=='\u{7f}' || (c.is_control() && !matches!(c,'\r'|'\n'|'\t'))) {return Err("Control characters must be sent as keys".into());}
-                    let mut focus = GUITHREADINFO::default();
-                    focus.cbSize = size_of::<GUITHREADINFO>() as u32;
-                    GetGUIThreadInfo(0, &mut focus).map_err(error)?;
-                    if focus.hwndFocus.is_invalid()
-                        || !related.contains(&(GetAncestor(focus.hwndFocus, GA_ROOT).0 as usize))
-                    {
-                        return Err("This window has no focused text control".into());
-                    }
-                    if target.hosted.is_some() {
+                    let native_queue=self.windows.get(&target.id).and_then(|w|w.cloak.as_ref())
+                        .is_some_and(cloak::Window::native_input);
+                    if target.hosted.is_some() || native_queue {
                         if !target.valid() { return Err("Window retired".into()); }
                         if let Some(unit) = self.pending_unicode {
                             send(unicode_key(unit, true))?;
@@ -1612,8 +1618,9 @@ impl Worker {
                             [unicode_key(*unit, false), unicode_key(*unit, true)]
                         }).collect();
                         if inputs.is_empty() { return Ok(()); }
-                        // Hosted WinUI needs VK_PACKET in its normal input
-                        // queue. Keep this separate from the Win32 WM_CHAR path.
+                        // Keep committed text behind shortcuts in the same
+                        // Windows input queue. A synchronous WM_CHAR can
+                        // overtake the key which is about to focus an editor.
                         let sent = SendInput(&inputs, size_of::<INPUT>() as i32) as usize;
                         if sent != inputs.len() {
                             // SendInput inserts in order. Only an odd accepted
@@ -1627,6 +1634,14 @@ impl Worker {
                             return Err("Windows did not accept all of the text. The text was not retried.".into());
                         }
                         return Ok(());
+                    }
+                    let mut focus = GUITHREADINFO::default();
+                    focus.cbSize = size_of::<GUITHREADINFO>() as u32;
+                    GetGUIThreadInfo(0, &mut focus).map_err(error)?;
+                    if focus.hwndFocus.is_invalid()
+                        || !related.contains(&(GetAncestor(focus.hwndFocus, GA_ROOT).0 as usize))
+                    {
+                        return Err("This window has no focused text control".into());
                     }
                     // Text is already committed by macOS. Deliver UTF-16 character messages to
                     // the focused control; virtual-key injection remains reserved for shortcuts.
@@ -1642,6 +1657,9 @@ impl Worker {
                         )
                         .0 == 0
                         {
+                            if GetLastError()==ERROR_ACCESS_DENIED {
+                                return Err("Windows denied access to this app's text control".into());
+                            }
                             return Err("The application did not accept text in time".into());
                         }
                     }
