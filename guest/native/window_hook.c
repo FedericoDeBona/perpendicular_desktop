@@ -100,12 +100,14 @@ static long taskbar(HWND h,int add) {
  return hr;
 }
 static long hide_taskbar(HWND h) {
- if(GetPropW(h,taskbar_state))return 0;
- IPTR style=GetWindowLongPtrW(h,-20);
- int button=!(style&0x80) && ((style&0x40000) || !GetWindow(h,4));
- if(!SetPropW(h,taskbar_state,(HANDLE)(UPTR)(button?2:1)))return (long)0x80004005;
+ int saved=GetPropW(h,taskbar_state)!=0;
+ if(!saved) {
+  IPTR style=GetWindowLongPtrW(h,-20);
+  int button=!(style&0x80) && ((style&0x40000) || !GetWindow(h,4));
+  if(!SetPropW(h,taskbar_state,(HANDLE)(UPTR)(button?2:1)))return (long)0x80004005;
+ }
  long hr=taskbar(h,0);
- if(hr<0)RemovePropW(h,taskbar_state);
+ if(hr<0 && !saved)RemovePropW(h,taskbar_state);
  return hr;
 }
 static void restore_window(HWND h) {
@@ -134,7 +136,12 @@ static DWORD __stdcall recover(void *arg) {
 
 /* Result codes are positive protocol errors, not HRESULT success aliases. */
 static DWORD dispatch(HWND root,UINT op,long sx,long sy) {
- if(op==10) {SetForegroundWindow(root);return 0;}
+ if(op==10) {
+  SetForegroundWindow(root);
+  /* ShowWindow(SW_RESTORE) on a subsequent Mac launch can add the button
+   * again. The saved restore state is not proof that it is still excluded. */
+  return GetPropW(root,taskbar_state)?(DWORD)hide_taskbar(root):0;
+ }
  if(op==1 || op==2) {
   int cloak=op==1;
   if(cloak && !GetPropW(root,owner))return 1;
@@ -195,7 +202,18 @@ static DWORD dispatch(HWND root,UINT op,long sx,long sy) {
   for(int depth=0;depth<32;depth++) {
    POINT local=p;RECT rect;
    if(!ScreenToClient(target,&local)||!GetClientRect(target,&rect))return 5;
-   if(local.x<0||local.y<0||local.x>=rect.right||local.y>=rect.bottom)return 6;
+   if(local.x<0||local.y<0||local.x>=rect.right||local.y>=rect.bottom) {
+    /* ChildWindowFromPointEx includes child borders/scrollbars. Those are
+     * non-client input, not failure of the isolation helper. A stale point
+     * outside both regions is ignored without restoring the guest window. */
+    if(op==8)break;
+    UINT hit=(UINT)SendMessageW(target,0x0084,0,(unsigned short)sx|((UPTR)(unsigned short)sy<<16));
+    if(hit>1 && hit<=21) {
+     UINT nc=op==3?0x00a0:op==4?0x00a1:op==5?0x00a2:op==6?0x00a4:0x00a5;
+     return PostMessageW(target,nc,hit,(unsigned short)sx|((UPTR)(unsigned short)sy<<16))?0:13;
+    }
+    return 0;
+   }
    HWND child=ChildWindowFromPointEx(target,local,7);
    if(!child || child==target)break;
    DWORD child_pid=0;

@@ -35,7 +35,9 @@ impl Gpu{
    if ready!=0{break;}if wait.elapsed()>Duration::from_millis(800){return Err("GPU query timeout".into());}std::thread::sleep(Duration::from_millis(1));
   }
   let gpu_wait=wait.elapsed().as_secs_f64()*1000.0;
-  // Only the first three frames read back a reference for the qualification.
+  // Compare transport with the owned export allocation, which stays immutable
+  // until this packet's ACK. A second read of the WGC source is a different
+  // observation; keep it as diagnostics, not as the export's pixel identity.
   let reference=self.checks_left>0;
   let hash=if reference{
    self.checks_left-=1;
@@ -45,7 +47,17 @@ impl Gpu{
    context.CopySubresourceRegion(&staging,0,0,0,0,source,0,Some(&region));context.Flush();let mut mapped=D3D11_MAPPED_SUBRESOURCE::default();
    context.Map(&staging,0,D3D11_MAP_READ,0,Some(&mut mapped)).map_err(error)?;
    let mut digest=Sha256::new();for row in 0..h as usize{digest.update(std::slice::from_raw_parts((mapped.pData as *const u8).add(row*mapped.RowPitch as usize),w as usize*4));}
-   context.Unmap(&staging,0);Some(format!("{:x}",digest.finalize()))
+   context.Unmap(&staging,0);let source_hash=format!("{:x}",digest.finalize());
+   let exported_region=D3D11_BOX{left:0,top:0,front:0,right:w,bottom:h,back:1};
+   context.CopySubresourceRegion(&staging,0,0,0,0,&self.texture,0,Some(&exported_region));context.Flush();
+   context.Map(&staging,0,D3D11_MAP_READ,0,Some(&mut mapped)).map_err(error)?;
+   let mut digest=Sha256::new();for row in 0..h as usize{digest.update(std::slice::from_raw_parts((mapped.pData as *const u8).add(row*mapped.RowPitch as usize),w as usize*4));}
+   context.Unmap(&staging,0);let exported_hash=format!("{:x}",digest.finalize());
+   if let Some(description)=target.capture_device.lock().unwrap().as_mut() {
+    description["transportReference"]=json!({"image":"owned-export-allocation","sourceSHA256":source_hash,
+     "exportedSHA256":exported_hash,"sourceMatchesExport":source_hash==exported_hash});
+   }
+   Some(exported_hash)
   }else{None};
   let hwnd=HWND(target.hwnd as *mut _);let bounds=catalogue::frame_bounds(hwnd).ok_or("No bounds")?;let mut origin=POINT::default();
   if !ClientToScreen(hwnd,&mut origin).as_bool(){return Err("No origin".into());}
