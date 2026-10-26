@@ -516,7 +516,15 @@ unsafe fn run(target: &Target, outbox: &Outbox, stop: &AtomicBool, driver:D3D_DR
                 }
                 let hwnd = HWND(target.hwnd as *mut _);
                 let (x, y, width, height) = if target.full_frame {
-                    (0, 0, size.Width, size.Height)
+                    // WGC can round an odd DWM extent up by one pixel. That
+                    // trailing row/column is not part of the window described
+                    // to the host; exporting it leaves the geometry gate stuck.
+                    let bounds=catalogue::frame_bounds(hwnd).ok_or("Window bounds unavailable")?;
+                    let frame_width=bounds.right-bounds.left;
+                    let frame_height=bounds.bottom-bounds.top;
+                    let width=if frame_width>0 && (0..=1).contains(&(size.Width-frame_width)){frame_width}else{size.Width};
+                    let height=if frame_height>0 && (0..=1).contains(&(size.Height-frame_height)){frame_height}else{size.Height};
+                    (0, 0, width, height)
                 } else {
                     client(hwnd, size.Width, size.Height)?
                 };
