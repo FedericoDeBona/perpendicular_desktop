@@ -63,6 +63,9 @@ if arguments.graphics_driver_dir:
         if path.name != name or hashlib.sha256(path.read_bytes()).hexdigest()!=expected:
             raise RuntimeError('Graphics driver does not match the pinned release: '+name)
         drivers.append(path)
+shared=repo/'.build/Perpendicular.app/Contents/Resources/Guest/SharedFiles'
+if not shared.is_dir():
+    raise RuntimeError('Build the complete Mac app first: the Windows shared-folder payload is missing.')
 digest=hashlib.sha256()
 for source in sources:
     digest.update(source.read_bytes())
@@ -73,6 +76,9 @@ for source in network_drivers:
 digest.update(configuration['token'].encode())
 for source,name in memory_drivers:
     digest.update(name.encode());digest.update(source.read_bytes())
+for source in sorted(shared.rglob('*')):
+    if source.is_file():
+        digest.update(str(source.relative_to(shared)).encode());digest.update(source.read_bytes())
 if arguments.dry_run:
     print('Setup inputs verified. No CD created or attached.')
     raise SystemExit(0)
@@ -92,6 +98,7 @@ for source,name in memory_drivers:
     destination=setup/'Memory'/name
     destination.parent.mkdir(parents=True,exist_ok=True,mode=0o700)
     shutil.copy2(source,destination)
+shutil.copytree(shared,setup/'SharedFiles',dirs_exist_ok=True)
 (setup/'connection.json').write_text(json.dumps({'port':configuration['guestPort'],'token':configuration['token']}))
 (setup/'connection.json').chmod(0o600)
 iso=setup.with_suffix('.iso')

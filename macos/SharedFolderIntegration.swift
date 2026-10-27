@@ -24,28 +24,30 @@ final class SharedFolderIntegration {
             do {
                 update("Preparazione delle cartelle…",false,true)
                 try await self.installScript(bridge:bridge)
-                var failed:[String]=[]
-                for kind in SharedFolderKind.allCases {
+                let selected=exports.map{$0.kind.rawValue}
+                let requestID=UUID().uuidString.lowercased()
+                let payload=try JSONSerialization.data(withJSONObject:["id":requestID,"enabled":selected]).base64EncodedString()
+                let submit=#"""
+                $ErrorActionPreference='Stop';$sid=[Security.Principal.WindowsIdentity]::GetCurrent().User.Value;$root=Join-Path $env:ProgramData ('Perpendicular\FolderRequests\'+$sid);[IO.File]::WriteAllBytes((Join-Path $root 'request.json'),[Convert]::FromBase64String('\#(payload)'));& (Join-Path $env:SystemRoot 'System32\schtasks.exe') /Run /TN ('PerpendicularFolders-'+$sid)|Out-Null;if($LASTEXITCODE -ne 0){throw 'Folder configuration task is not installed'}
+                """#
+                _ = try await self.powershell(submit,bridge:bridge)
+                let deadline=Date().addingTimeInterval(180)
+                while true {
                     try Task.checkCancellation()
-                    let enabled=exports.contains{$0.kind == kind}
-                    update("Preparazione di \(kind.title)…",false,true)
-                    do {
-                        var args=["-NoProfile","-NonInteractive","-ExecutionPolicy","Bypass","-File",self.scriptPath,
-                                  "-Folder",kind.rawValue,"-Owner","\(getuid()):\(getgid())"]
-                        if !enabled {args.append("-Disable")}
-                        let output=try await self.execute(args,bridge:bridge,seconds:50)
-                        guard output.contains("PERP_FOLDER_READY:"+kind.rawValue+":"+(enabled ? "shared":"local")) else {
-                            throw Self.failure("Folder setup did not confirm its final state.")
-                        }
-                        log("\(kind.rawValue): \(enabled ? "shared":"local")")
-                    }catch is CancellationError {throw CancellationError()}
-                    catch {failed.append(kind.title);log("\(kind.rawValue): \(error.localizedDescription)")}
+                    let poll=#"""
+                    $ErrorActionPreference='Stop';$sid=[Security.Principal.WindowsIdentity]::GetCurrent().User.Value;$path=Join-Path $env:ProgramData ('Perpendicular\FolderRequests\'+$sid+'\response.json');[IO.File]::ReadAllText($path)
+                    """#
+                    let output=try await self.powershell(poll,bridge:bridge)
+                    if let data=output.data(using:.utf8),let result=try? JSONSerialization.jsonObject(with:data) as? [String:Any],result["id"] as? String == requestID {
+                        guard result["ok"] as? Bool == true else {throw Self.failure(result["error"] as? String ?? "Folder configuration failed.")}
+                        log("Folder selection confirmed: "+selected.joined(separator:","))
+                        let count=exports.count
+                        update(count == 0 ? "Windows usa le sue cartelle locali.":count == 1 ? "1 cartella Mac collegata.":"\(count) cartelle Mac collegate.",false,false)
+                        break
+                    }
+                    guard Date()<deadline else {throw Self.failure("Folder configuration did not finish in time.")}
+                    try await Task.sleep(for:.seconds(2))
                 }
-                try Task.checkCancellation()
-                if failed.isEmpty {
-                    let count=exports.count
-                    update(count == 0 ? "Windows usa le sue cartelle locali.":count == 1 ? "1 cartella Mac collegata.":"\(count) cartelle Mac collegate.",false,false)
-                }else {update("Non riesco a preparare: "+failed.joined(separator:", ")+". Riprova il collegamento.",true,false)}
             }catch is CancellationError {}
             catch {if !Task.isCancelled {log(error.localizedDescription);update("Non riesco a preparare le cartelle. Verifica che i componenti Windows siano installati e riprova il collegamento.",true,false)}}
         }
@@ -60,20 +62,11 @@ final class SharedFolderIntegration {
         $ErrorActionPreference='Stop';$ProgressPreference='SilentlyContinue';$path='\(scriptPath)';if(![IO.File]::Exists('C:\\Program Files\\Perpendicular Shared Files\\virtiofs.exe')){throw 'Signed folder components are not installed'};if([IO.File]::Exists($path)){$sha=[Security.Cryptography.SHA256]::Create();$value=[BitConverter]::ToString($sha.ComputeHash([IO.File]::ReadAllBytes($path))).Replace('-','').ToLowerInvariant();$sha.Dispose();if($value -eq '\(sha)'){[Console]::WriteLine('MATCH')}}
         """
         if try await powershell(probe,bridge:bridge).contains("MATCH") {return}
-        for offset in stride(from:0,to:data.count,by:1900) {
-            try Task.checkCancellation()
-            let bytes=data.subdata(in:offset..<min(data.count,offset+1900)).base64EncodedString()
-            let mode=offset == 0 ? "Create":"Append"
-            let write="""
-            $ErrorActionPreference='Stop';$bytes=[Convert]::FromBase64String('\(bytes)');$file=[IO.FileStream]::new('\(scriptPath)',[IO.FileMode]::\(mode),[IO.FileAccess]::Write,[IO.FileShare]::None);try{$file.Write($bytes,0,$bytes.Length)}finally{$file.Dispose()}
-            """
-            _ = try await powershell(write,bridge:bridge)
-        }
-        guard try await powershell(probe,bridge:bridge).contains("MATCH") else {throw Self.failure("Folder helper delivery differs.")}
+        throw Self.failure("Aggiorna i componenti Windows per collegare le cartelle.")
     }
     private func powershell(_ source:String,bridge:GuestBridge)async throws->String {
         let encoded=source.data(using:.utf16LittleEndian)!.base64EncodedString()
-        return try await execute(["-NoProfile","-NonInteractive","-EncodedCommand",encoded],bridge:bridge,seconds:15)
+        return try await execute(["-NoProfile","-NonInteractive","-EncodedCommand",encoded],bridge:bridge,seconds:60)
     }
     private func execute(_ args:[String],bridge:GuestBridge,seconds:Int)async throws->String {
         try Task.checkCancellation()
@@ -82,7 +75,8 @@ final class SharedFolderIntegration {
                 do {
                     let value=try result.get()["value"] as? [String:Any] ?? [:]
                     guard value["exitCode"] as? Int == 0,value["timedOut"] as? Bool != true else {
-                        throw Self.failure(value["stderr"] as? String ?? "Windows folder setup failed.")
+                        let detail=value["stderr"] as? String ?? ""
+                        throw Self.failure(value["timedOut"] as? Bool == true ? "Windows non ha completato il comando cartelle entro \(seconds) secondi.":detail.isEmpty ? "Comando cartelle terminato con codice \(value["exitCode"] ?? "sconosciuto").":detail)
                     }
                     continuation.resume(returning:value["stdout"] as? String ?? "")
                 }catch {continuation.resume(throwing:error)}

@@ -43,6 +43,9 @@ def main():
     help_text = subprocess.check_output([str(native / 'bin/qemu-system-aarch64'), '-device', 'help'], text=True)
     if 'vhost-user-fs-pci' not in help_text:
         raise ValueError('QEMU does not expose vhost-user-fs-pci')
+    displays = subprocess.check_output([str(native / 'bin/qemu-system-aarch64'), '-display', 'help'], text=True)
+    if 'egl-headless' not in displays.split():
+        raise ValueError('QEMU does not register the required egl-headless display')
     output.parent.mkdir(parents=True, exist_ok=True)
     subprocess.run(['cp', '-cR', str(app), str(output)], check=True)
     target = output / 'Contents/Resources/Native3D'

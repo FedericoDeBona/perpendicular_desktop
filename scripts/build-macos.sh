@@ -34,7 +34,7 @@ xcrun swiftc -swift-version 6 -O -parse-as-library -target arm64-apple-macosx14.
     macos/WindowGeometry.swift macos/WindowRenderer.swift macos/WindowTransitionView.swift macos/ApplicationContent.swift macos/ApplicationWindow.swift macos/LauncherLibrary.swift macos/Launcher.swift macos/GuestApplicationState.swift macos/App.swift \
     -o "$app/Contents/MacOS/Perpendicular"
 cp "$guest" guest/install.ps1 guest/install.cmd "$app/Contents/Resources/Guest/"
-cp guest/configure-shared-folders.ps1 guest/install-shared-downloads.ps1 guest/redirect-shared-downloads.ps1 guest/virtiofs-drivers.json "$app/Contents/Resources/Guest/"
+cp guest/apply-shared-folders.ps1 guest/configure-shared-folders.ps1 guest/install-shared-downloads.ps1 guest/redirect-shared-downloads.ps1 guest/virtiofs-drivers.json "$app/Contents/Resources/Guest/"
 zsh scripts/package-app-icon.sh "$app"
 if [[ "${SKIP_RUNTIME:-0}" != 1 ]]; then
     python3 scripts/copy-main-runtime.py --from-app "$runtime_app" --to-app "$app"
@@ -45,6 +45,7 @@ if [[ "${SKIP_RUNTIME:-0}" == 1 && -d .build/Native3D ]]; then
     rm -rf "$app/Contents/Resources/Native3D"
     cp -R .build/Native3D "$app/Contents/Resources/Native3D"
 fi
+python3 scripts/prepare-build-dependencies.py --app "$app"
 rm -rf "$app/Contents/Resources/Display2D"
 codesign --force --sign - "$app"
 "$app/Contents/Resources/QEMU/bin/qemu-system-aarch64" --version | head -1
