@@ -1,5 +1,9 @@
 # Registro dei problemi
 
+**27 ottobre — nuova base del launcher:** l’utente chiarisce che il problema è l’organizzazione degli elementi, non lo stile. Ripartire semplice con brainstorming online; **Schermi scompare completamente dall’interfaccia del launcher**, senza una voce spostata in Avanzate. Restano stato Windows testuale e attendibile, preferiti funzionanti/visibili, impostazioni separate e nessuna sidebar predefinita. Entrambi i giri precedenti sono respinti come direzione; nessuna scelta approvata. Tre ipotesi di organizzazione: preferiti come home, ricerca come home, finestre aperte come home. Raccomandazione iniziale: preferiti come home con ricerca e accesso a tutte le app. Ricerca/confronto documentati, implementazione nativa e verifiche clone/main DA FARE; APP-003 aperto. [Evidenze e prossimo passo](VERIFICATION.md#27-ottobre--launcher-organizzazione-semplice-e-ricerca-online).
+
+**Storico superato dalle indicazioni sopra:** i paragrafi seguenti sui prototipi conservano i tentativi precedenti; le richieste di pagine Schermi e le direzioni stilistiche non sono requisiti correnti.
+
 **27 ottobre — launcher, direzione creativa corretta:** Essenziale/Compatto/Libreria rifiutati dall’utente; ora richieste tre idee radicalmente diverse. Nuovi prototipi Mission Control/Orbita/Officina, solo simulazioni locali. APP-003 ancora aperto, nessuna scelta approvata o modifica dell’app ordinaria. TODO-019 conserva stato, requisiti e prossimo passo. [Evidenze](VERIFICATION.md#27-ottobre--tre-direzioni-radicali-per-il-launcher).
 
 **27 ottobre — nuova priorità UI/launcher:** richiesti prototipi in chat con stato Windows evidente, preferiti funzionanti e pagine Schermi/Impostazioni distinte, senza la sidebar corrente come vista predefinita. Tre disegni locali verificati (Essenziale, Compatto, Libreria), nessuna modifica all’app installata o alla VM. APP-003 registra il difetto dei preferiti; TODO-019 contiene requisiti, prossimo passo e criterio della futura implementazione. I prototipi hanno stati/azioni simulati e non qualificano la main. [Evidenze](VERIFICATION.md#27-ottobre--prototipi-del-nuovo-launcher).
@@ -177,7 +181,7 @@ Il ciclo RAM protetto 4→2→4 GiB con dati conservati resta la qualifica prece
 
 - **Stato:** APERTO, segnalato dall’utente il27 ottobre come «i preferiti non funzionano». Nessuna nuova prova interattiva della persistenza nella main in questo passaggio.
 - **Evidenza sorgente circoscritta:** Launcher.swift costruisce soltanto recenti e catalogo; il menu contestuale chiama togglePin, ma i pinned non hanno un elenco dedicato né riconoscimento sulle tessere. LauncherPreferences conserva pinned e la funzione suggested non alimenta quella vista. Questo dimostra il difetto di esposizione, non esclude un ulteriore problema di salvataggio/identità da verificare.
-- **Prossimo passo:** nel ridisegno TODO-019, sezione preferiti e stella esplicita per aggiunta/rimozione; conservare lo store per VM e verificare salvataggio/rilettura sulla stessa app installata. Il mockup simulato non chiude il difetto.
+- **Prossimo passo:** nel ridisegno TODO-019, preferiti realmente visibili dalla schermata iniziale e azione esplicita per aggiunta/rimozione; conservare lo store per VM e verificare salvataggio/rilettura sulla stessa app installata. La nuova ricerca sull’organizzazione non chiude il difetto e non approva un disegno. [Requisiti correnti](VERIFICATION.md#27-ottobre--launcher-organizzazione-semplice-e-ricerca-online).
 - **Chiusura:** aggiunta/rimozione osservabili e mantenute dopo riapertura del frontend nella main, senza perdere preferenze preesistenti. [Evidenze](VERIFICATION.md#27-ottobre--prototipi-del-nuovo-launcher).
 
 ## Limite delle acquisizioni automatiche

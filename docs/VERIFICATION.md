@@ -1,5 +1,22 @@
 # Diario delle verifiche
 
+## 27 ottobre — launcher: organizzazione semplice e ricerca online
+
+**Richiesta e correzione:** l’utente chiarisce che è sbagliata la base dell’interfaccia, non soltanto lo stile. Ripartire semplice, riorganizzare gli elementi, eliminare Schermi e cercare online per brainstorming. Il secondo giro Mission Control/Orbita/Officina non soddisfa la direzione richiesta; conservati i tentativi e i limiti precedenti. Nessuna approvazione desunta dalle selezioni del widget. La rimozione riguarda la UI del launcher, non una richiesta di cancellare il funzionamento multimonitor.
+
+**Fonti ufficiali consultate27 ottobre:**
+
+- [Raycast — Search Bar](https://manual.raycast.com/search-bar): ricerca come ingresso, preferiti visibili a campo vuoto, azioni dell’elemento separate dal risultato principale.
+- [Alfred — Default Results](https://www.alfredapp.com/help/features/default-results/): app ricercabili direttamente e ambito dei risultati configurabile. Suggerisce contenere il rumore; non prova che una palette sia adatta a ogni utente.
+- [Microsoft — Device and app actions in Windows App](https://learn.microsoft.com/en-us/windows-app/device-actions): aggiunta/rimozione dei preferiti produce una destinazione esplicita Favorites; il menu che modifica la preferenza non sostituisce il luogo dove ritrovarla.
+- [Parallels — Coherence](https://kb.parallels.com/en/4670): avvio app Windows da Dock/cartella app e richiamo delle app aperte dal Dock, con gestione VM secondaria. Questo documenta la separazione dell’uso delle app dalla configurazione, non l’affidabilità di Perpendicular.
+
+**Sintesi progettuale proposta, non risultato misurato:** tre alternative strutturali da confrontare con identica sobrietà grafica: (A) preferiti come contenuto principale della home, ricerca e accesso a tutte le app; (B) piccola palette con ricerca principale e preferiti quando il campo è vuoto; (C) finestre attualmente aperte con titolo e azione Riprendi come contenuto principale, preferiti e Nuova app secondari. C cambia il punto d’ingresso rispetto ad A/B, ma può essere più rumorosa con tante finestre e richiede identità/stato delle finestre attendibili. Nessuna miniatura, nuova indicizzazione o funzione di sessione persistente assunta come già disponibile. Raccomandazione iniziale A: rende visibile la scelta dell’utente senza imporre digitazione o spostare continuamente gli elementi.
+
+**Base comune proposta:** una sola riga superiore con stato Windows leggibile e comando coerente, accessi secondari Desktop Windows e Impostazioni; nessuna sidebar o voce Schermi. Il catalogo resta consultabile anche a Windows spento, come proposta, senza far credere che sia aggiornato in tempo reale; l’avvio dell’app richiede un percorso di accensione/attesa esplicito. Favoriti stabili, non tre copie della stessa app in Recenti/Preferiti/Tutte. Stati richiesti invariati: spento, avvio, acceso/pronto, arresto, acceso ma scollegato, problema immagine, sconosciuto. Spegnimento distinto dal chiudere il launcher, anomalie testuali senza dipendere soltanto dal colore.
+
+**Esito e limiti:** ricerca/confronto documentali, nessun nuovo prototipo approvato o realizzato in questo passaggio, nessuna misura di usabilità e nessuna dichiarazione che le fonti dimostrino la bontà della proposta. Documenti riallineati al requisito Schermi eliminato, APP-003 ancora aperto. Nessuna modifica al codice, build, runtime, disco o stato VM; implementazione, verifica clone e verifica main DA FARE. Prossimo risultato osservabile: wireframe semplice della direzione condivisa che chiarisca schermata iniziale, apertura/richiamo app e stato Windows, prima dell’incremento nativo. Nessun test automatico o benchmark pertinente per questo solo brainstorming.
+
 ## 27 ottobre — tre direzioni radicali per il launcher
 
 **Esito negativo conservato:** l’utente respinge Essenziale/Compatto/Libreria come insufficientemente diversi e richiede tre idee pazze, completamente distinte. La selezione Essenziale ricevuta dal carosello non è una scelta approvata, superata dal rifiuto esplicito. Nuovi concetti progettati da zero nelle forme/interazioni: Mission Control (console verde/monospazio, stato gigante e comandi/tasti funzione), Orbita (Windows come centro e app favorite su orbite, riposizionabili), Officina (oggetto hardware beige, display LCD, rocker arancione, cartucce favorite, manopole Schermi/Risorse).
