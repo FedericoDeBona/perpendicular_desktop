@@ -58,7 +58,9 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
     private var failedIcons:Set<String>=[]
     private var iconOrder:[String]=[]
     private var openingTasks:[String:Task<Void,Never>]=[:]
+    private var openingRequests:[String:UUID]=[:]
     private var openingNoticeApp:String?
+    private var openingNoticeTimedOut=false
     private var cancelledOpeningApps:Set<String>=[]
     private var windowApps:[String:String]=[:]
     private var focusWarnedWindows:Set<String>=[]
@@ -127,7 +129,7 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
                 self.applicationStatusTask?.cancel();self.applicationStatusTask=nil;self.applicationStatusBusy=false
                 self.applicationStates=[:];self.applicationStatusAvailable=false;self.receivedWindows=[];self.failedWindows=[]
                 for task in self.openingTasks.values {task.cancel()}
-                self.openingTasks=[:];self.openingApps=[];self.cancelledOpeningApps=[]
+                self.openingTasks=[:];self.openingRequests=[:];self.openingApps=[];self.cancelledOpeningApps=[]
                 if !value {
                     self.mixedDisplayConfiguring=false
                     self.desktopResizeTask?.cancel();self.desktopResizeTask=nil
@@ -546,7 +548,7 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
                 "frameChannel":bridge?.separateFrames ?? false,
                 "windowGPU":NativeWindowFrames.shared.diagnostics,
                 "windowGPUCache":NativeWindowFrames.shared.cacheDiagnostics,
-                "launcher":["apps":apps.map{["id":$0.id,"name":$0.name,"key":$0.key,"essential":$0.essential]},"iconCacheHits":iconCacheHits,"iconFetches":iconFetches,"cachedIcons":applicationIcons.count,"recent":launcherPreferences.recent(apps).map(\.id)],
+                "launcher":["apps":apps.map{["id":$0.id,"name":$0.name,"key":$0.key,"essential":$0.essential]},"opening":Array(openingApps).sorted(),"notice":launcherNotice as Any? ?? NSNull(),"iconCacheHits":iconCacheHits,"iconFetches":iconFetches,"cachedIcons":applicationIcons.count,"recent":launcherPreferences.recent(apps).map(\.id)],
                 "desktop":machine?.desktopState ?? [:],
                 "lastCommandRTTMilliseconds":bridge?.lastRoundTripMilliseconds ?? 0,
                 "frameReceiveMilliseconds":bridge?.frameReceiveMilliseconds ?? 0,
@@ -725,18 +727,22 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
         if machine?.mixedDisplaysEnabled == true,sharedDisplays.isEmpty {
             launcherNotice="Attendi che Windows completi la preparazione degli schermi.";return
         }
-        launcherNotice=nil;cancelledOpeningApps.remove(app.id);beginOpening(app)
+        launcherNotice=nil;openingNoticeApp=nil;openingNoticeTimedOut=false
+        cancelledOpeningApps.remove(app.id);beginOpening(app)
         status="Opening \(app.name)…"
-        let epoch=launcherEpoch
+        let epoch=launcherEpoch,request=openingRequests[app.id]
         bridge.command("launch",["app":app.id]){[weak self] result in
             guard let self,self.launcherEpoch == epoch else{return}
+            if case .success=result {
+                self.launcherPreferences.record(app.id);try? self.launcherLibrary?.save(self.launcherPreferences)
+            }
+            guard self.openingRequests[app.id] == request else{return}
             self.refreshApplicationStates()
             switch result {
             case .failure(let error):
                 self.finishOpening(app.id);self.status=error.localizedDescription
                 self.launcherNotice="Non riesco ad aprire \(app.name). "+error.localizedDescription;self.openingNoticeApp=app.id
             case .success(let reply):
-                self.launcherPreferences.record(app.id);try? self.launcherLibrary?.save(self.launcherPreferences)
                 if let value=reply["value"] as? [String:Any],value["existing"] as? Bool == true,value["ready"] as? Bool != false,
                    self.windows.contains(where:{self.windowApps[$0.key] == app.id && $0.value.readyForInput}) {
                     self.finishOpening(app.id,appeared:true)
@@ -745,21 +751,29 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
         }
     }
     private func beginOpening(_ app:WindowsApplication){
+        // Only an explicit launcher request starts this clock. A guest window
+        // gap after a Desktop transfer is not a new launch.
+        guard !openingApps.contains(app.id) else{return}
+        let request=UUID();openingRequests[app.id]=request
         openingApps.insert(app.id);openingTasks.removeValue(forKey:app.id)?.cancel()
         let epoch=launcherEpoch
         openingTasks[app.id]=Task{@MainActor [weak self] in
             try? await Task.sleep(for:.seconds(32))
-            guard !Task.isCancelled,let self,self.launcherEpoch == epoch,self.openingApps.contains(app.id) else{return}
+            guard !Task.isCancelled,let self,self.launcherEpoch == epoch,self.openingRequests[app.id] == request else{return}
+            if self.windows.contains(where:{self.windowApps[$0.key] == app.id && $0.value.readyForInput}) {
+                self.finishOpening(app.id,appeared:true);return
+            }
             self.finishOpening(app.id)
-            self.launcherNotice="La finestra di \(app.name) non è ancora disponibile. Apri Desktop per continuare.";self.openingNoticeApp=app.id
+            self.launcherNotice="La finestra di \(app.name) non è ancora disponibile. Apri Desktop per continuare.";self.openingNoticeApp=app.id;self.openingNoticeTimedOut=true
         }
     }
     private func finishOpening(_ id:String,appeared:Bool=false){
         seamlessTransferApps.remove(id)
         guard openingApps.contains(id) || openingTasks[id] != nil || (appeared && openingNoticeApp == id) else{return}
         openingTasks.removeValue(forKey:id)?.cancel()
+        openingRequests.removeValue(forKey:id)
         if openingApps.contains(id) {openingApps.remove(id)}
-        if appeared,openingNoticeApp == id {launcherNotice=nil;openingNoticeApp=nil}
+        if appeared,openingNoticeApp == id {launcherNotice=nil;openingNoticeApp=nil;openingNoticeTimedOut=false}
     }
     private func startApplicationStatusUpdates(){
         guard guestCapabilities["applicationStatus"] == true else{return}
@@ -789,6 +803,16 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
             if !self.applicationStatusAvailable {self.applicationStatusAvailable=true}
             let active=Set(states.values.filter{$0.running || !$0.windows.isEmpty}.map(\.id))
             if self.activeApps != active {self.activeApps=active}
+            // Presentation and status travel independently. Reconcile ready
+            // windows even if their ready callback preceded the launch reply.
+            for id in Array(self.openingApps) where self.windows.contains(where:{self.windowApps[$0.key] == id && $0.value.readyForInput}) {
+                self.finishOpening(id,appeared:true)
+            }
+            if self.openingNoticeTimedOut,let id=self.openingNoticeApp,
+               !self.openingApps.contains(id),
+               states[id].map({!$0.activationPending && !$0.running && $0.windows.isEmpty}) ?? true {
+                self.finishOpening(id,appeared:true)
+            }
             PipelineTrace.record("ui-state-poll","applications",["published":changed])
         }
     }
@@ -1210,6 +1234,16 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
             }
         case "windows":
             guard let items=value["windows"] as? [[String:Any]],items.count<=16 else{return}
+            let previousMainApps=Set(windows.compactMap{!$0.value.role.transient ? windowApps[$0.key]:nil})
+            let currentMainApps=Set(items.compactMap{item->String? in
+                guard let role=WindowRole(rawValue:item["role"] as? String ?? "dialog"),!role.transient else{return nil}
+                return item["app"] as? String
+            })
+            for app in previousMainApps.subtracting(currentMainApps) {
+                // Retiring the last mirror includes a Desktop transfer and a
+                // close in Windows. Neither may leave its launch spinner alive.
+                cancelledOpeningApps.insert(app);finishOpening(app,appeared:true)
+            }
             let current=Set(items.compactMap{$0["id"] as? String})
             if let notice=windowNotice,!current.contains(notice.id) {
                 if launcherNotice==notice.message {launcherNotice=nil}
@@ -1309,10 +1343,13 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
             if let target=value["target"] as? [String:Any] {recoverDesktopSingleton(app:app,target:target)}
             else {finishOpening(app,appeared:true);showWindows()}
         case "launch_state":
-            if value["state"] as? String == "waiting",let id=value["app"] as? String,
-               !cancelledOpeningApps.contains(id),
-               !receivedWindows.contains(where:{windowApps[$0] == id}),
-               let app=apps.first(where:{$0.id == id}) {beginOpening(app)}
+            guard let id=value["app"] as? String else{return}
+            if value["state"] as? String == "desktop" {
+                cancelledOpeningApps.insert(id);finishOpening(id,appeared:true)
+            }
+            // Waiting/window_available describe the guest's current work;
+            // only launch() can create a new host opening request. Readiness
+            // still requires the matching window's presented frame.
         case "reply":
             if value["ok"] as? Bool == false,value["operation"] as? String == "input",
                let id=value["window"] as? String,let message=value["message"] as? String {
@@ -1327,6 +1364,8 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
             launcherNotice=value["message"] as? String
             if let message=launcherNotice {windowNotice=(id,message,false)}
         case "window_error","launch_error":
+            if value["type"] as? String == "launch_error",let app=value["app"] as? String,
+               cancelledOpeningApps.contains(app) {return}
             if let id=value["window"] as? String {failedWindows.insert(id);windows[id]?.failFrameTransition()}
             refreshApplicationStates()
             // A rejected suggestion is diagnosed per surface in the guest.

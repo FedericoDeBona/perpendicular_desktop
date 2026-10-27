@@ -588,7 +588,9 @@ impl Worker {
                     ids.push(id.clone());
                     for id in ids {self.retire_window(&id,outbox);}
                     self.pending.retain(|p|p.app!=*app);
+                    if let Some(session)=self.applications.get_mut(app) {session.startup_until=Instant::now();}
                     self.save();self.snapshot(outbox);
+                    outbox.control(json!({"type":"launch_state","app":app,"state":"desktop"}));
                     let target=self.desktop_application(app,foreground).ok_or("Application changed during transfer")?;
                     log(format!("Application transferred to Desktop app={app} hwnd={foreground}"));
                     return Ok(json!({"desktopSingleton":target,"transferred":true}));
@@ -1062,7 +1064,7 @@ impl Worker {
         let (app, _) = candidates.next()?;
         candidates.next().is_none().then(|| app.clone())
     }
-    fn refresh_applications(&mut self, outbox: &Outbox) -> bool {
+    fn refresh_applications(&mut self) -> bool {
         let now = Instant::now();
         let visible_apps: HashSet<String> = self.windows.values().filter(|w| !catalogue::transient(&w.metadata))
             .map(|w| w.app.clone()).collect();
@@ -1076,9 +1078,8 @@ impl Worker {
             } else if session.gap_until.is_none() || (before != 0 && session.processes.is_empty()) {
                 session.gap_until = Some(now + Duration::from_secs(30)); changed = true;
                 log(format!("Application window gap app={app} processes={}", session.processes.len()));
-                if session.startup_until > now {
-                    outbox.control(json!({"type":"launch_state","app":app,"state":"waiting"}));
-                }
+                // A missing Mac mirror can be a deliberate Desktop transfer
+                // or a closed document. It must not create another launch.
             }
         }
         let before = self.applications.len();
@@ -1120,7 +1121,7 @@ impl Worker {
         for id in retired {
             changed |= self.retire_window(&id, outbox);
         }
-        changed |= self.refresh_applications(outbox);
+        changed |= self.refresh_applications();
         let known: HashSet<usize> = self.windows.values().map(|w| w.target.hwnd).collect();
         // Owners precede their transient children even though EnumWindows is front-to-back.
         for raw in visible.iter().rev().copied() {
@@ -1313,7 +1314,9 @@ impl Worker {
         }
         else { self.remember_process(&app, pid, creation); }
         if !transient {
-            if let Some(session) = self.applications.get_mut(&app) { session.gap_until = None; }
+            if let Some(session) = self.applications.get_mut(&app) {
+                session.gap_until = None;session.startup_until=Instant::now();
+            }
         }
         self.serial += 1;
         let id = format!("{}:{}", self.epoch, self.serial);
