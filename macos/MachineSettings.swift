@@ -78,8 +78,8 @@ enum MachineSettingsStore {
         guard var value=try JSONSerialization.jsonObject(with:data) as? [String:Any],value["id"] as? String == machineID else {
             throw MachineSettings.failure("L’identità della VM è cambiata. Riapri le impostazioni.")
         }
-        value["cpus"]=settings.cpus;value["memoryMiB"]=settings.initialMemoryMiB
-        if let memory=settings.dynamicMemory {
+        value["cpus"]=settings.cpus;value["memoryMiB"]=value["sharedDownloads"] != nil ? settings.maximumMemoryMiB:settings.initialMemoryMiB
+        if let memory=settings.dynamicMemory,value["sharedDownloads"] == nil {
             value["dynamicMemory"]=try JSONSerialization.jsonObject(with:JSONEncoder().encode(memory))
         }else{value.removeValue(forKey:"dynamicMemory")}
         return try JSONSerialization.data(withJSONObject:value,options:[.prettyPrinted,.sortedKeys])

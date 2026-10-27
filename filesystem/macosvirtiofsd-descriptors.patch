@@ -1,0 +1,72 @@
+diff --git a/src/descriptor_utils.rs b/src/descriptor_utils.rs
+index b793a5b..b5b0dbe 100644
+--- a/src/descriptor_utils.rs
++++ b/src/descriptor_utils.rs
+@@ -97,7 +97,11 @@ impl<'a> DescriptorChainConsumer<'a> {
+                 break;
+             }
+ 
+-            bufs.push(vs);
++            // Bound the final slice too: vectored file I/O consumes the
++            // supplied slices, not the separate requested byte count.
++            let remaining = count - buflen;
++            bufs.push(vs.subslice(0, cmp::min(remaining, vs.len()))
++                .map_err(io::Error::other)?);
+ 
+             let rem = count - buflen;
+             if rem < vs.len() {
+@@ -160,7 +164,7 @@ impl<'a> DescriptorChainConsumer<'a> {
+                 // its `size` value in the call to `position` above.
+                 let front = other.pop_front().expect("empty VecDeque after split");
+                 self.buffers
+-                    .push_back(front.offset(rem).map_err(Error::VolatileMemoryError)?);
++                    .push_back(front.subslice(0, rem).map_err(Error::VolatileMemoryError)?);
+                 other.push_front(front.offset(rem).map_err(Error::VolatileMemoryError)?);
+             }
+ 
+@@ -488,3 +492,45 @@ impl io::Write for Writer<'_> {
+         Ok(())
+     }
+ }
++
++
++#[cfg(test)]
++mod perpendicular_descriptor_checks {
++    use super::*;
++    use vm_memory::Bytes;
++
++    #[test]
++    fn split_reply_preserves_header_and_payload() {
++        for buffers in [vec![(GuestAddress(0x1000), 80)],
++                        vec![(GuestAddress(0x1000), 8), (GuestAddress(0x2000), 72)]] {
++            let memory = GuestMemoryMmap::from_ranges(&[(GuestAddress(0x1000), 0x2000)]).unwrap();
++            let mut header = Writer::from_buffers(&memory, &buffers).unwrap();
++            let mut payload = header.split_at(16).unwrap();
++            // FUSE READ/READDIR emit the payload before the reply header.
++            payload.write_all(b"directory-data").unwrap();
++            header.write_all(&[0xa5; 16]).unwrap();
++            assert_eq!(header.available_bytes(), 0);
++            let mut actual = Vec::new();
++            for (address, length) in buffers {
++                let mut part = vec![0; length as usize];
++                memory.read_slice(&mut part, address).unwrap();
++                actual.extend(part);
++            }
++            assert_eq!(&actual[..16], &[0xa5; 16]);
++            assert_eq!(&actual[16..30], b"directory-data");
++        }
++    }
++
++    #[test]
++    fn requested_io_size_limits_vectored_slices() {
++        let memory = GuestMemoryMmap::from_ranges(&[(GuestAddress(0x1000), 4096)]).unwrap();
++        let mut writer = Writer::from_buffers(&memory, &[(GuestAddress(0x1000), 4096)]).unwrap();
++        let consumed = writer.buffer.consume(5, |slices| {
++            let exposed: usize = slices.iter().map(|slice| slice.len()).sum();
++            assert_eq!(exposed, 5, "A five-byte I/O must not expose the rest of guest memory");
++            Ok(exposed)
++        }).unwrap();
++        assert_eq!(consumed, 5);
++        assert_eq!(writer.bytes_written(), 5);
++    }
++}

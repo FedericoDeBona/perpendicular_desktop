@@ -25,6 +25,7 @@ struct MachineConfiguration: Codable {
     let keyboardLayout:String?
     let tpmStateFile:String?
     let dynamicMemory:DynamicMemoryConfiguration?
+    let sharedDownloads:SharedDownloadsConfiguration?
     /// Experimental protected layout: one accelerated desktop plus one DOD
     /// adapter per Mac display. Enabled only after installing the signed pair.
     let mixedDisplays:Bool?
@@ -58,6 +59,10 @@ final class VirtualMachineController {
         configuration = try JSONDecoder().decode(MachineConfiguration.self,
             from: Data(contentsOf: directory.appendingPathComponent("machine.json")))
         try configuration.dynamicMemory?.validate(baseMiB:configuration.memoryMiB)
+        try configuration.sharedDownloads?.validate()
+        if configuration.sharedDownloads != nil,configuration.dynamicMemory != nil {
+            throw CocoaError(.coderReadCorrupt,userInfo:[NSLocalizedDescriptionKey:"I Download condivisi richiedono RAM fissa in questa versione."])
+        }
         guard configuration.graphics == nil || ["standard","virtio2D","native3D"].contains(configuration.graphics!) else{
             throw CocoaError(.coderReadCorrupt,userInfo:[NSLocalizedDescriptionKey:"Unknown Windows graphics configuration."])
         }
@@ -318,6 +323,9 @@ final class VirtualMachineController {
         }
         let resources=runtime.deletingLastPathComponent().deletingLastPathComponent()
         let native=nativeGraphicsEnabled ? try NativeGraphics(root:resources.appendingPathComponent("Native3D")):nil
+        if configuration.sharedDownloads != nil,native?.supportsVirtioFS != true {
+            throw CocoaError(.executableRuntimeMismatch,userInfo:[NSLocalizedDescriptionKey:"Il motore Windows non include il supporto ai Download condivisi."])
+        }
         let hostDisplays=HostDisplay.current()
         if let native,configuration.dynamicMemory != nil,!native.supportsDynamicMemory {
             throw CocoaError(.executableRuntimeMismatch,userInfo:[NSLocalizedDescriptionKey:"This graphics runtime has not been qualified for dynamic RAM. Use the qualified Windows IoT memory runtime."])
@@ -357,7 +365,7 @@ final class VirtualMachineController {
         // The default 512 GiB PCI window can exceed the HVF guest PA range.
         // A 1 GiB aligned window fits this single GPU's 512 MiB BAR and keeps
         // PCI enumeration available alongside the bounded hotplug region.
-        let pciWindow=native != nil && c.dynamicMemory != nil ? ",highmem-mmio-size=1G":""
+        let pciWindow=native != nil && (c.dynamicMemory != nil || c.sharedDownloads != nil) ? ",highmem-mmio-size=1G":""
         var arguments = [
             "-name", "Perpendicular Windows", "-uuid", c.id,
             "-L",runtime.deletingLastPathComponent().appendingPathComponent("share/qemu").path,
@@ -414,15 +422,38 @@ final class VirtualMachineController {
                 "-object","memory-backend-ram,id=vmemram,size=\(memory.hotplugMiB)M",
                 "-device","virtio-mem-pci,id=vmem0,memdev=vmemram,requested-size=0,block-size=2M,dynamic-memslots=off"]
         }
+        var sharedFiles:Process?
+        var keepSharedFiles=false
+        defer {if !keepSharedFiles,sharedFiles?.isRunning == true {sharedFiles?.terminate()}}
+        if let share=c.sharedDownloads,let native {
+            try share.validate()
+            let socket=displayDirectory.appendingPathComponent("virtiofs.sock").path
+            sharedFiles=try launch("macosvirtiofsd",["--socket-path",socket,"--shared-dir",share.hostPath,
+                "--tag",share.tag,"--cache","never","--trusted-guest-uidgid-map","501:20"],log:"virtiofs.log",
+                executable:native.root.appendingPathComponent("bin/macosvirtiofsd"))
+            let deadline=Date().addingTimeInterval(5)
+            while sharedFiles?.isRunning == true,!FileManager.default.fileExists(atPath:socket),Date()<deadline {
+                try await Task.sleep(for:.milliseconds(20))
+            }
+            guard sharedFiles?.isRunning == true,FileManager.default.fileExists(atPath:socket) else {
+                throw CocoaError(.executableRuntimeMismatch,userInfo:[NSLocalizedDescriptionKey:"Impossibile collegare Download del Mac. Consulta virtiofs.log."])
+            }
+            arguments += ["-object","memory-backend-shm,id=sharedram,size=\(c.memoryMiB)M,share=on",
+                "-chardev","socket,id=downloads,path=\(socket)",
+                "-device","vhost-user-fs-pci,id=downloads,queue-size=128,num-request-queues=1,chardev=downloads,tag=\(share.tag)"]
+            let index=arguments.firstIndex(of:"-machine")!+1
+            arguments[index] += ",memory-backend=sharedram"
+        }
         var launchEnvironment=native?.environment(directory:displayDirectory,session:session,primary:HostDisplay.current().first(where:\.primary))
         // Never inherit an experiment flag into an ordinary VM. The runtime
         // changes the primary PCI identity only for this explicit configuration.
         if native != nil {launchEnvironment?["PERP_VIRTIO_MIXED_DISPLAYS"]=mixedDisplaysEnabled ? "1":"0"}
-        if c.dynamicMemory != nil {
+        if c.dynamicMemory != nil || c.sharedDownloads != nil {
             launchEnvironment=(launchEnvironment ?? [:]).merging(["PERP_HVF_BALLOON_RECLAIM":"1","PERP_HVF_VIRTIO_MEM":"1"]){_,new in new}
         }
         machine = try launch("qemu-system-aarch64",arguments,log:"qemu.log",executable:native?.executable,
             environment:launchEnvironment)
+        keepSharedFiles=true
         if mixedDisplaysEnabled {
             let value=AppDisplayBindings(machineID:c.id,pid:machine!.processIdentifier,
                 displays:hostDisplays.enumerated().map{AppDisplayBinding(hostID:$0.element.stableID!,slot:9+$0.offset)})
@@ -437,8 +468,11 @@ final class VirtualMachineController {
         let launchFile=directory.appendingPathComponent("desktop-launch.json")
         try JSONEncoder().encode(state).write(to:launchFile,options:.atomic)
         try FileManager.default.setAttributes([.posixPermissions:0o600],ofItemAtPath:launchFile.path)
-        let companion=tpm
-        machine?.terminationHandler={_ in if companion?.isRunning==true{companion?.terminate()}}
+        let companion=tpm,files=sharedFiles
+        machine?.terminationHandler={_ in
+            if companion?.isRunning==true{companion?.terminate()}
+            if files?.isRunning==true{files?.terminate()}
+        }
         let readyDeadline=Date().addingTimeInterval(4)
         while Date()<readyDeadline {
             if machine?.isRunning != true {

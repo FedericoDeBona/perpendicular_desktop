@@ -1,6 +1,8 @@
 # Registro dei problemi
 
-**27 ottobre — prossima priorità: stessi file Mac/Windows (TODO-003).** Confronto virtio-fs/SMB e cartelle standard, comprese Desktop/Download. Rettificato il vincolo documentale impropriamente attribuito all'utente: preservare la RAM dinamica non è una condizione obbligatoria di questa attività. La compatibilità RAM è un compromesso tecnico da spiegare. Nessun nuovo difetto o verifica runtime; implementazione e prove clone/main DA FARE. [Ricognizione e rettifica](VERIFICATION.md#27-ottobre--filesystem-condiviso-confronto-e-rettifica-del-vincolo-ram).
+**27 ottobre — virtiofs0.2.21 distribuito, filesystem Download verificato sulla main93be6687:** Download Windows→X: espone /Users/federico/Downloads, senza copie;4GiB fissi condivisi e protezioni attive. Lettura/contenuto, creazione, rinomina nei due sistemi, rescan dopo modifica Mac e ReplaceFile con backup PASS sui soli file sacrificabili reali. Corretti FS-001/002 nel backend Mac; precedente directory Windows preservata. Incremento Download locale FATTO: implementazione e verifiche API/Explorer PASS; nuova prova clone NON ESEGUITA, Explorer e shell:Downloads verificati, cartelle ulteriori e semantiche generali TODO-003 ancora IN CORSO. Arresto/riconnessione grafica mantengono limiti separati, con arresti forzati soltanto dopo consenso esplicito. [Evidenze, fallimenti e limiti](VERIFICATION.md#27-ottobre--virtiofs-e-download-mac-nella-cartella-download-windows).
+
+**Ricognizione precedente, superata dall’incremento sopra — stessi file Mac/Windows (TODO-003).** Confronto virtio-fs/SMB e cartelle standard, comprese Desktop/Download. Rettificato il vincolo documentale impropriamente attribuito all'utente: preservare la RAM dinamica non è una condizione obbligatoria di questa attività. La compatibilità RAM è un compromesso tecnico da spiegare. Nessun nuovo difetto o verifica runtime; implementazione e prove clone/main DA FARE. [Ricognizione e rettifica](VERIFICATION.md#27-ottobre--filesystem-condiviso-confronto-e-rettifica-del-vincolo-ram).
 
 **27 ottobre — launcher glass0.2.20 distribuito:** ricerca→preferiti→recenti→resto, nessuna sidebar/Schermi, materiale vetro nativo e temi Sistema/Chiaro/Scuro persistenti. Stato Windows soltanto come icona in basso con dettaglio su clic. UI, temi e preferiti0→2→riapertura→2→0→riapertura→0 verificati nella main locale; APP-003 chiuso. **Limite:** il tentativo Command Prompt→Invio è seguito da perdita del collegamento e uscita QEMU, causa non isolata; apertura/input della console non qualificati. Nuovo avvio ordinario dopo il controllo delle preferenze, nessun arresto forzato o modifica runtime/guest/configurazione. Implementazione UI e verifica main circoscritta completate, nessuna nuova prova clone; affidabilità generale TODO-009/011 ancora IN CORSO. [Prove, fallimenti e limiti](VERIFICATION.md#27-ottobre--launcher-glass-nativo-e-temi-0220).
 
@@ -79,6 +81,22 @@ Il ciclo RAM protetto 4→2→4 GiB con dati conservati resta la qualifica prece
 
 ## Problemi pertinenti al desktop
 
+### FS-001 — Risposta virtiofs malformata con buffer Windows unico
+
+- **Stato:** CORRETTO e verificato nel perimetro filesystem della main93be6687; nessuna nuova prova clone o qualifica generale delle app.
+- **Riproduzione conservata:** lookup/open riusciti, creazione Unicode e ASCII con errore I/O. Client READDIR/opcode28 con header len539634218 o0/unique errata contro1488/56byte effettivi; lookup del nome mancante fallisce prima di CREATE.
+- **Causa/correzione:** DescriptorChainConsumer::split_at sovrapponeva prefisso e suffisso su un solo descrittore; prefisso ora subslice(0,rem). Ultima slice di consume limitata al count richiesto. Patch filesystem/macosvirtiofsd-descriptors.patch, pin/hash nel packager.
+- **Criterio circoscritto verificato:** due controlli locali pertinenti PASS; daemon corretto realmente caricato, creazione Unicode/ASCII, letture con confronto byte host, rinomina Windows, modifica/rinomina Mac, elenco e salvataggio con sostituzione riusciti sulla main. Mount/Downloads persistono al nuovo boot. La correzione distinta FS-002 è necessaria per l'elenco completo; non basta il solo mount.
+- **Prossimo passo:** preservare questo risultato; ulteriori cartelle e semantiche restano TODO-003. [Diario](VERIFICATION.md#27-ottobre--virtiofs-e-download-mac-nella-cartella-download-windows).
+
+### FS-002 — Elenco virtiofs vuoto o non aggiornato in Windows
+
+- **Stato:** CORRETTO e verificato nel perimetro API filesystem della main93be6687; riscontro Explorer reale positivo; nessuna qualifica generale delle app.
+- **Riproduzione:** file esistenti leggibili per nome esatto ma Directory.GetFiles restituisce zero/cmd dir File Not Found. Prima patch di solo refresh non risolve Windows: client usa READDIRPLUS/opcode44, risposta len16/error0.
+- **Cause/correzione:** snapshot DirStream mai rinnovato e offset condiviso da dup: rewinddir a ogni riempimento e ricostruzione a offset0, cookie nonzero stabili. Inoltre readdirplus trattava nomi cached di d_namlen byte come CStr già terminati da NUL; lookup troncata e errore assorbito producevano lista vuota. Ora CString::new conserva il nome completo. Patch filesystem/macosvirtiofsd-directory-refresh.patch, hash finale nel packager.
+- **Verifica:** regression locale prima FAIL sia per snapshot stale sia per lista READDIRPLUS vuota; dopo3controlli pertinenti PASS, incluso Unicode. Runtime finale f037b029724afe6c7b52e9fd3fc91627ace102bf414a42bd66b3c8b49b028308 caricato nella main35991: Explorer mostra poi i quattro nomi corretti e shell:Downloads seleziona X:\; elenco iniziale3nomi esatti; rename/append sul Mac, nuovo elenco4nomi esatti dopo ReplaceFile con backup, vecchio nome/temp assenti e byte corrispondenti. Nessun clone.
+- **Criterio circoscritto soddisfatto:** enumerazione e rescan riflettono i file reali con contenuto integro. Notifiche automatiche Explorer, concorrenza, locking, iCloud e altre semantiche non sono qualificati da un rescan esplicito. Prossimo passo pertinente in TODO-003, senza chiusura generale. [Diario](VERIFICATION.md#27-ottobre--virtiofs-e-download-mac-nella-cartella-download-windows).
+
 ### GFX-009 — Desktop nero per backend duplicato e scanout escluso dalla build locale
 
 - **Stato:** corretto e verificato sul secondo Mac/VM93be6687; nessuna nuova qualifica generale del driver. Windows e le due uscite erano attivi, ma Apri Windows mostrava la console RFB inattiva800×600.
@@ -122,6 +140,8 @@ Il ciclo RAM protetto 4→2→4 GiB con dati conservati resta la qualifica prece
 - **Evidenze:** [installazione e recupero](VERIFICATION.md#24-ottobre--gate-pronto-prima-delluso-e-frame-valido-al-resize), [avvio protetto della base corrente](VERIFICATION.md#25-ottobre--resize-con-driver-ufficiale-e-protezioni-ripristinate).
 
 ### SYS-001 — Arresto HVF durante riavvio o arresto
+
+- **27 ottobre, virtiofs0.2.21, caso distinto:** ACPI e shutdown.exe ordinario non completano l'arresto; richiesta indipendente SYSTEM avviata, poi /s /f /t0 restituisce1115/arresto già in corso. Il collegamento guest infine si chiude ma QMP resta running. Nessuna nuova assertion HVF identificata né causa comune dimostrata. Spegnimento forzato QMP soltanto dopo consenso esplicito distinto, PID/UUID autenticati; controllo qcow2 offline exit0/check-errors0, nessuna riparazione. Ultimo shutdown34544 con /s /f /t0 completato senza QMP quit, ma voce generale ancora aperta; il montaggio virtiofs non qualifica l’arresto. [Evidenze](VERIFICATION.md#27-ottobre--virtiofs-e-download-mac-nella-cartella-download-windows).
 
 - **27 ottobre, osservazione distinta da attribuire:** durante la prova launcher0.2.20 QEMU86332 esce dopo richiesta Command Prompt; nessuna assertion HVF identificata nella coda letta, nessuna causa attribuita a questa voce. Nessun arresto forzato usato; il successivo avvio normale non risolve l’affidabilità generale. [Esito negativo e contesto](VERIFICATION.md#27-ottobre--launcher-glass-nativo-e-temi-0220).
 

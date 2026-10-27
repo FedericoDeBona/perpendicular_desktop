@@ -563,13 +563,17 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
         if command == "status" {
             let running:Any
             switch machineState {case .running:running=true;case .stopped:running=false;case .unreachable:running=NSNull()}
+            let memoryState:[String:Any]=memoryController?.state ?? ["enabled":false,"fixedForSharedDownloads":machine?.configuration.sharedDownloads != nil]
+            let sharedDownloads:[String:String]
+            if let share=machine?.configuration.sharedDownloads {sharedDownloads=["hostPath":share.hostPath,"tag":share.tag]}
+            else {sharedDownloads=[:]}
             localResponse(["ok":true,"result":["connected":connected,"machineRunning":running,
                 "machineState":machineStateLabel,"machineOperation":machineOperation as Any? ?? NSNull(),
                 "status":status,"displayStatus":displayStatus,"primaryMatchesHost":sharedDisplay != nil,
                 "displayChecks":mixedDisplayChecks,"displayApplies":mixedDisplayApplies,"displayInvalidations":displayInvalidations,
                 "mappedDisplays":sharedDisplays.count,"displaySetupComplete":machine?.mixedDisplaysEnabled == true ? sharedDisplays.count==HostDisplay.current().count:sharedDisplay != nil,
                 "appLaunchReady":machine?.mixedDisplaysEnabled != true || !sharedDisplays.isEmpty,
-                "memory":memoryController?.state ?? ["enabled":false],
+                "memory":memoryState,"sharedDownloads":sharedDownloads,
                 "vmSettings":["pending":settingsPending,"initialMemoryMiB":vmSettings?.initialMemoryMiB ?? 0,"maximumMemoryMiB":vmSettings?.maximumMemoryMiB ?? 0,"cpus":vmSettings?.cpus ?? 0],
                 "windowCount":windows.count,"capabilities":guestCapabilities,
                 "frameChannel":bridge?.separateFrames ?? false,

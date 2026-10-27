@@ -6,6 +6,14 @@ La IoT è ora la VM principale di Perpendicular0.2.2, installata in Applicazioni
 Stato prodotto: SYS-003 in
 [KNOWN_ISSUES](../docs/KNOWN_ISSUES.md).
 
+**Configurazione Download virtiofs, 27 ottobre:** la VM locale93be6687 usa ora
+4GiB fissi con `memory-backend-shm,share=on`, necessari al backend vhost-user.
+Nessun device balloon/virtio-mem o controller dinamico è attivo in quel profilo.
+I flag HVF sono mantenuti per la mappatura del runtime locale: non significano
+che sia in corso restituzione di RAM. La qualifica dinamica storica sotto resta
+distinta; il backing condiviso non viene passato al reclaim privato.
+[Evidenze del profilo corrente](../docs/VERIFICATION.md#27-ottobre--virtiofs-e-download-mac-nella-cartella-download-windows).
+
 I due script applicano modifiche circoscritte a un sorgente QEMU 10.0.12 UTM
 privato, esterno al repository. Rifiutano sorgenti con anchor differenti:
 

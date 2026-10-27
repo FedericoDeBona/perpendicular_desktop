@@ -36,6 +36,13 @@ import Foundation
         var fixed=future;fixed.automaticMemory=false
         let fixedJSON=try JSONSerialization.jsonObject(with:MachineSettingsStore.merged(fixed,with:original,machineID:"fixture")) as! [String:Any]
         precondition(fixedJSON["dynamicMemory"] == nil)
+        var shared=try JSONSerialization.jsonObject(with:original) as! [String:Any]
+        shared["sharedDownloads"]=["hostPath":"/Users/example/Downloads","tag":"mac-downloads"]
+        let sharedData=try JSONSerialization.data(withJSONObject:shared)
+        let sharedJSON=try JSONSerialization.jsonObject(with:MachineSettingsStore.merged(future,with:sharedData,machineID:"fixture")) as! [String:Any]
+        precondition(sharedJSON["memoryMiB"] as? Int == future.maximumMemoryMiB && sharedJSON["dynamicMemory"] == nil,
+                     "Saving CPU/RAM settings must retain the fixed shared backing required by virtiofs")
+        precondition((sharedJSON["sharedDownloads"] as? [String:String])?["tag"] == "mac-downloads")
         try MachineSettingsStore.save(current,in:root,machineID:"fixture",current:current)
         let cancelled=try MachineSettingsStore.pending(in:root,machineID:"fixture")
         precondition(cancelled == nil)
