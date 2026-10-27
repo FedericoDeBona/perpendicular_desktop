@@ -1,5 +1,7 @@
 # Registro dei problemi
 
+**27 ottobre — cartelle Mac selezionabili0.2.23 consegnate:** Scrivania, Documenti, Download, Immagini, Musica e Video, tutte attive di default; selezione individuale nelle impostazioni, applicata al successivo avvio Windows. Sei percorsi personali normali, nessuna unità aggiuntiva e nessuna copia dei file Mac. Lettura/modifica e confronto byte nelle sei radici reali PASS; UI→Immagini off→arresto normale→boot con cinque export/ripristino locale→on→arresto normale→boot con sei export PASS. File locali precedenti preservati, sette soli file sacrificabili rimossi dopo verifica. FS-004 (link volume morto) e FS-005 (attesa consenso macOS) corretti nel perimetro osservato. Implementazione/distribuzione e verifica main circoscritta FATTE; clone NON ESEGUITO, TODO-003 generale IN CORSO per semantiche ulteriori. Stessa VM/disco/runtime/4GiB fissi; due arresti ordinari completati, separata uscita runtime iniziale da loginwindow non attribuita (SYS-001). [Prove, fallimenti e limiti](VERIFICATION.md#27-ottobre--cartelle-mac-selezionabili-nelle-impostazioni).
+
 **27 ottobre — Download trasparente0.2.22, FS-003 corretto:** normale C:\Users\federico\Downloads sui file Mac, nome/icona Downloads in Explorer e Salva con nome, nessuna unità X: assegnata. Rimosse soltanto le vecchie voci di cronologia del volume tecnico, conservati gli altri percorsi. API lettura/modifica/rinomina e file creato dal dialogo verificati, riavvio servizio positivo;9voci Windows precedenti conservate tramite rinomina integrale in backup interno. Puliti soltanto i due file di prova. Nuovo boot/clone non eseguiti, limiti grafici/focus precedenti e TODO-003 generale restano aperti. [Evidenze e fallimenti](VERIFICATION.md#27-ottobre--download-ordinaria-senza-unita-aggiuntiva).
 
 **Storico0.2.21, trasporto verificato ma presentazione X: poi rifiutata — filesystem Download sulla main93be6687:** Download Windows→X: espone /Users/federico/Downloads, senza copie;4GiB fissi condivisi e protezioni attive. Lettura/contenuto, creazione, rinomina nei due sistemi, rescan dopo modifica Mac e ReplaceFile con backup PASS sui soli file sacrificabili reali. Corretti FS-001/002 nel backend Mac; precedente directory Windows preservata. Incremento Download locale FATTO: implementazione e verifiche API/Explorer PASS; nuova prova clone NON ESEGUITA, Explorer e shell:Downloads verificati, cartelle ulteriori e semantiche generali TODO-003 ancora IN CORSO. Arresto/riconnessione grafica mantengono limiti separati, con arresti forzati soltanto dopo consenso esplicito. [Evidenze, fallimenti e limiti](VERIFICATION.md#27-ottobre--virtiofs-e-download-mac-nella-cartella-download-windows).
@@ -83,6 +85,20 @@ Il ciclo RAM protetto 4→2→4 GiB con dati conservati resta la qualifica prece
 
 ## Problemi pertinenti al desktop
 
+### FS-004 — Collegamento directory a un volume non più presente
+
+- **Stato:** CORRETTO nel caso reale e nel ciclo di selezione/boot della main0.2.23; nessun clone.
+- **Riproduzione:** dopo uscita QEMU, Downloads conserva un reparse point NTFS verso un vecchio volume GUID. Il primo helper rifiuta il link ma non ripubblica la cartella; le altre cinque sono operative.
+- **Correzione:** dopo stop del solo servizio posseduto, verificare errore dispositivo assente, tag MOUNT_POINT e destinazione volume GUID esatta tramite OPEN_REPARSE_POINT. Rimuovere solo il collegamento morto, senza attraversarne la destinazione. Rifiuto dei link estranei, backup tramite rinomina e record atomico; rollback non dichiara valido un collegamento pendente.
+- **Evidenza/criterio:** helper corretto → Download normale → lettura/modifica esatta in tutte sei PASS. Ciclo disattiva→boot→ripristino locale→riattiva→boot PASS per Immagini; sei file reali riletti identici dopo il boot finale, nessuna unità extra. Ulteriori forme di guasto non qualificate. [Diario](VERIFICATION.md#27-ottobre--cartelle-mac-selezionabili-nelle-impostazioni).
+
+### FS-005 — Scadenza backend durante il consenso macOS alle cartelle
+
+- **Stato:** corretto e verificato nell'avvio reale0.2.23 della main, nessun clone.
+- **Riproduzione:** due avvii non arrivano a QEMU: daemon Scrivania senza socket dopo5s; log TCC conferma AUTHREQ_PROMPTING DesktopFolder per Perpendicular. Attesa terminata prima della risposta al consenso.
+- **Correzione:** apertura directory dall'app su task separato prima della scadenza socket; macOS attende il consenso senza bloccare la UI, accesso negato produce errore specifico.
+- **Criterio soddisfatto:** richieste TCC Desktop/Documents/Downloads nel log, app responsiva, cinque daemon e QEMU43391 avviati con selezione salvata; nessuna riduzione/aggiramento di TCC. Accesso negato e firma distribuita non qualificati. [Diario](VERIFICATION.md#27-ottobre--cartelle-mac-selezionabili-nelle-impostazioni).
+
 ### FS-001 — Risposta virtiofs malformata con buffer Windows unico
 
 - **Stato:** CORRETTO e verificato nel perimetro filesystem della main93be6687; nessuna nuova prova clone o qualifica generale delle app.
@@ -150,6 +166,8 @@ Il ciclo RAM protetto 4→2→4 GiB con dati conservati resta la qualifica prece
 - **Evidenze:** [installazione e recupero](VERIFICATION.md#24-ottobre--gate-pronto-prima-delluso-e-frame-valido-al-resize), [avvio protetto della base corrente](VERIFICATION.md#25-ottobre--resize-con-driver-ufficiale-e-protezioni-ripristinate).
 
 ### SYS-001 — Arresto HVF durante riavvio o arresto
+
+- **27 ottobre0.2.23, osservazione distinta:** QEMU35991 termina su segnale15 da pid609/loginwindow durante aggiornamento frontend, senza richiesta di arresto VM da questa attività; causa non isolata. Non classificato come assertion HVF o arresto ordinario. Due successivi shutdown Windows senza /f completano realmente QEMU42927 e43391 e permettono il ciclo delle cartelle; non chiudono l’affidabilità generale. [Evidenze](VERIFICATION.md#27-ottobre--cartelle-mac-selezionabili-nelle-impostazioni).
 
 - **27 ottobre, virtiofs0.2.21, caso distinto:** ACPI e shutdown.exe ordinario non completano l'arresto; richiesta indipendente SYSTEM avviata, poi /s /f /t0 restituisce1115/arresto già in corso. Il collegamento guest infine si chiude ma QMP resta running. Nessuna nuova assertion HVF identificata né causa comune dimostrata. Spegnimento forzato QMP soltanto dopo consenso esplicito distinto, PID/UUID autenticati; controllo qcow2 offline exit0/check-errors0, nessuna riparazione. Ultimo shutdown34544 con /s /f /t0 completato senza QMP quit, ma voce generale ancora aperta; il montaggio virtiofs non qualifica l’arresto. [Evidenze](VERIFICATION.md#27-ottobre--virtiofs-e-download-mac-nella-cartella-download-windows).
 

@@ -5,7 +5,14 @@ import Foundation
         let root=FileManager.default.temporaryDirectory.appendingPathComponent("perpendicular-settings-"+UUID().uuidString)
         try FileManager.default.createDirectory(at:root,withIntermediateDirectories:true)
         defer{try? FileManager.default.removeItem(at:root)}
-        let current=MachineSettings(cpus:1,initialMemoryMiB:2048,automaticMemory:true,maximumMemoryMiB:4096,backgroundMemoryMiB:1536,reserveMemoryMiB:512)
+        let localOnly=Dictionary(uniqueKeysWithValues:SharedFolderKind.allCases.map{($0.rawValue,false)})
+        let current=MachineSettings(cpus:1,initialMemoryMiB:2048,automaticMemory:true,maximumMemoryMiB:4096,backgroundMemoryMiB:1536,reserveMemoryMiB:512,sharedFolderSelection:localOnly)
+        var defaults=current;defaults.sharedFolderSelection=nil
+        precondition(defaults.enabledSharedFolders.count == 6,"All six standard folders must be selected by default")
+        let older=Data(#"{"cpus":1,"initialMemoryMiB":2048,"automaticMemory":false,"maximumMemoryMiB":4096,"backgroundMemoryMiB":1536,"reserveMemoryMiB":512}"#.utf8)
+        let decodedOlder=try JSONDecoder().decode(MachineSettings.self,from:older)
+        precondition(decodedOlder.enabledSharedFolders.count == 6)
+
         var future=current;future.initialMemoryMiB=1024
         future.useAutomaticMemoryPolicy()
         precondition(future.automaticMemory && future.backgroundMemoryMiB==1024 && future.reserveMemoryMiB==512 && future.initialMemoryMiB==1024 && future.maximumMemoryMiB==4096)
@@ -39,10 +46,21 @@ import Foundation
         var shared=try JSONSerialization.jsonObject(with:original) as! [String:Any]
         shared["sharedDownloads"]=["hostPath":"/Users/example/Downloads","tag":"mac-downloads"]
         let sharedData=try JSONSerialization.data(withJSONObject:shared)
-        let sharedJSON=try JSONSerialization.jsonObject(with:MachineSettingsStore.merged(future,with:sharedData,machineID:"fixture")) as! [String:Any]
+        var shareSettings=future;shareSettings.setShared(.downloads,enabled:true)
+        let sharedJSON=try JSONSerialization.jsonObject(with:MachineSettingsStore.merged(shareSettings,with:sharedData,machineID:"fixture")) as! [String:Any]
         precondition(sharedJSON["memoryMiB"] as? Int == future.maximumMemoryMiB && sharedJSON["dynamicMemory"] == nil,
                      "Saving CPU/RAM settings must retain the fixed shared backing required by virtiofs")
-        precondition((sharedJSON["sharedDownloads"] as? [String:String])?["tag"] == "mac-downloads")
+        let exports=try JSONDecoder().decode(SharedFoldersConfiguration.self,from:JSONSerialization.data(withJSONObject:sharedJSON["sharedFolders"]!))
+        precondition(exports.folders == [SharedFolderExport(kind:.downloads,hostPath:"/Users/example/Downloads")],"Migration must preserve the selected host directory")
+        precondition(sharedJSON["sharedDownloads"] == nil)
+        shareSettings.useAutomaticMemoryPolicy()
+        precondition(!shareSettings.automaticMemory && shareSettings.initialMemoryMiB == shareSettings.maximumMemoryMiB)
+        let disabled=try JSONSerialization.jsonObject(with:MachineSettingsStore.merged(current,with:sharedData,machineID:"fixture")) as! [String:Any]
+        let noExports=try JSONDecoder().decode(SharedFoldersConfiguration.self,from:JSONSerialization.data(withJSONObject:disabled["sharedFolders"]!))
+        precondition(noExports.folders.isEmpty,"Explicitly disabling every folder must remove all host exports")
+        try MachineSettingsStore.save(current,in:root,machineID:"fixture",current:current,forcePending:true)
+        let explicitOff=try MachineSettingsStore.pending(in:root,machineID:"fixture")
+        precondition(explicitOff == current,"An initial all-off selection must not revert to defaults")
         try MachineSettingsStore.save(current,in:root,machineID:"fixture",current:current)
         let cancelled=try MachineSettingsStore.pending(in:root,machineID:"fixture")
         precondition(cancelled == nil)

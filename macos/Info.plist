@@ -6,11 +6,13 @@
 <key>CFBundleExecutable</key><string>Perpendicular</string>
 <key>CFBundleIdentifier</key><string>com.perpendicular.restart</string>
 <key>CFBundlePackageType</key><string>APPL</string>
-<key>CFBundleShortVersionString</key><string>0.2.22</string>
+<key>CFBundleShortVersionString</key><string>0.2.23</string>
 <key>CFBundleIconFile</key><string>Perpendicular</string>
 <key>CFBundleIconName</key><string>Perpendicular</string>
 <key>LSMinimumSystemVersion</key><string>14.0</string>
 <key>PerpendicularDesktopOnly</key><true/>
 <key>NSHighResolutionCapable</key><true/>
 <key>NSDownloadsFolderUsageDescription</key><string>Consente a Windows di aprire e salvare direttamente nella cartella Download del Mac.</string>
+<key>NSDesktopFolderUsageDescription</key><string>Consente a Windows di usare la stessa Scrivania del Mac.</string>
+<key>NSDocumentsFolderUsageDescription</key><string>Consente a Windows di aprire e salvare direttamente nei Documenti del Mac.</string>
 </dict></plist>

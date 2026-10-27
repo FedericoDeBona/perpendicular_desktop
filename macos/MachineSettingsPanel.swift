@@ -12,6 +12,9 @@ struct MachineSettingsPanel:View {
     private func number(_ key:WritableKeyPath<MachineSettings,Int>)->Binding<Int>{
         Binding(get:{draft[keyPath:key]},set:{draft[keyPath:key]=$0;model.settingsNotice=nil})
     }
+    private func folder(_ kind:SharedFolderKind)->Binding<Bool>{
+        Binding(get:{draft.shares(kind)},set:{draft.setShared(kind,enabled:$0);model.settingsNotice=nil})
+    }
     private func memory(_ value:Int)->String {
         value%1024 == 0 ? "\(value/1024) GB":"\(value) MB"
     }
@@ -29,6 +32,27 @@ struct MachineSettingsPanel:View {
                             .font(.system(size:13,weight:.medium)).foregroundStyle(.indigo)
                     }
                     GroupBox {
+                        VStack(alignment:.leading,spacing:14){
+                            Text("Usa in Windows le stesse cartelle del Mac, senza copie.").font(.system(size:13)).foregroundStyle(.secondary)
+                            ForEach(SharedFolderKind.allCases){kind in
+                                Toggle(isOn:folder(kind)){Label(kind.title,systemImage:kind.icon)}
+                                    .toggleStyle(.switch).accessibilityIdentifier("shared-folder-"+kind.rawValue)
+                            }
+                            Text("Tutte attive per impostazione predefinita. Se disattivi una cartella, Windows torna ai suoi file locali; i file del Mac rimangono sul Mac.")
+                                .font(.caption).foregroundStyle(.secondary)
+                            Text(model.folderIntegrationStatus).font(.caption)
+                                .foregroundStyle(model.folderIntegrationFailed ? Color.orange:Color.secondary)
+                            if model.folderIntegrationFailed {
+                                Button("Riprova collegamento"){model.prepareSharedFolders()}
+                                    .disabled(!model.connected || model.folderIntegrationBusy)
+                            }
+                            Button("Attiva tutte le cartelle"){
+                                for kind in SharedFolderKind.allCases {draft.setShared(kind,enabled:true)}
+                                model.settingsNotice=nil
+                            }.disabled(draft.enabledSharedFolders.count == SharedFolderKind.allCases.count)
+                        }.padding(12)
+                    }label:{Label("Cartelle Mac",systemImage:"folder")}
+                    GroupBox {
                         VStack(alignment:.leading,spacing:16){
                             Picker("Processori",selection:number(\.cpus)){
                                 ForEach(1...MachineSettings.cpuLimit,id:\.self){Text("\($0)").tag($0)}
@@ -40,13 +64,14 @@ struct MachineSettingsPanel:View {
                             Picker("RAM massima",selection:number(\.maximumMemoryMiB)){
                                 ForEach(choices(from:draft.initialMemoryMiB,through:min(MachineSettings.memoryLimitMiB,draft.initialMemoryMiB+8192),current:draft.maximumMemoryMiB),id:\.self){Text(memory($0)).tag($0)}
                             }
-                            Text(draft.maximumMemoryMiB == draft.initialMemoryMiB ? "Windows usa una quantità fissa di RAM." : "È il limite totale della RAM di Windows, inclusa quella iniziale. Perpendicular aggiunge e restituisce memoria automaticamente.")
+                            Text(!draft.enabledSharedFolders.isEmpty || draft.maximumMemoryMiB == draft.initialMemoryMiB ? "Windows usa una quantità fissa di RAM." : "È il limite totale della RAM di Windows, inclusa quella iniziale. Perpendicular aggiunge e restituisce memoria automaticamente.")
                                 .font(.caption).foregroundStyle(.secondary)
                             Text("La VM usa anche memoria per grafica e servizi: il consumo complessivo sul Mac può essere superiore a questo limite.")
                                 .font(.caption).foregroundStyle(.secondary)
                             if draft.maximumMemoryMiB == draft.initialMemoryMiB {
                                 Text("Con il massimo uguale alla RAM iniziale, la memoria rimane fissa.").font(.caption).foregroundStyle(.secondary)
                             }
+                            if draft.enabledSharedFolders.isEmpty {
                             DisclosureGroup("Avanzate",isExpanded:$advanced){
                                 VStack(alignment:.leading,spacing:10){
                                     Picker("RAM all’avvio",selection:number(\.initialMemoryMiB)){
@@ -55,6 +80,7 @@ struct MachineSettingsPanel:View {
                                     Text("Quantità con cui Windows si avvia prima che la gestione automatica sia disponibile.").font(.caption).foregroundStyle(.secondary)
                                 }
                                 .padding(.top,10)
+                            }
                             }
                         }.padding(12)
                     }label:{Label("Memoria",systemImage:"memorychip")}

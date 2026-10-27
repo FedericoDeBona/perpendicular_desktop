@@ -34,7 +34,7 @@ try {
     Copy-Item (Join-Path $MediaRoot 'viofs\virtiofs.exe') $target -Force
     & pnputil.exe /add-driver (Join-Path $MediaRoot 'viofs\viofs.inf') /install
     if ($LASTEXITCODE -notin @(0,3010)) {throw "Virtiofs driver installation failed: $LASTEXITCODE"}
-    Copy-Item (Join-Path $MediaRoot 'redirect-shared-downloads.ps1') $target -Force
+    Copy-Item (Join-Path $MediaRoot 'configure-shared-folders.ps1') $target -Force
     if ($InstallOnly) {
         # SYSTEM installs components only. The interactive user's normal
         # Downloads path is configured separately; never allocate a drive letter.
@@ -42,5 +42,5 @@ try {
         @{componentsInstalled=$true;userFolderConfigurationRequired=$true} | ConvertTo-Json | Set-Content (Join-Path $state 'components.json') -Encoding UTF8
         return
     }
-    & (Join-Path $MediaRoot 'redirect-shared-downloads.ps1')
+    & (Join-Path $MediaRoot 'configure-shared-folders.ps1') -Folder downloads
 } finally {Stop-Transcript}

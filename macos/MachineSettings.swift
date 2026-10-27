@@ -20,17 +20,32 @@ struct MachineSettings:Codable,Equatable,Sendable {
     var maximumMemoryMiB:Int
     var backgroundMemoryMiB:Int
     var reserveMemoryMiB:Int
+    /// Missing in older saved drafts: all standard folders are selected by default.
+    var sharedFolderSelection:[String:Bool]? = nil
+    var enabledSharedFolders:[SharedFolderKind] {
+        SharedFolderKind.allCases.filter{sharedFolderSelection?[$0.rawValue] ?? true}
+    }
+    func shares(_ kind:SharedFolderKind)->Bool {enabledSharedFolders.contains(kind)}
+    mutating func setShared(_ kind:SharedFolderKind,enabled:Bool){
+        if sharedFolderSelection == nil {sharedFolderSelection=Dictionary(uniqueKeysWithValues:SharedFolderKind.allCases.map{($0.rawValue,true)})}
+        sharedFolderSelection?[kind.rawValue]=enabled
+    }
     static var cpuLimit:Int {max(1,ProcessInfo.processInfo.processorCount)}
     static var memoryLimitMiB:Int {min(16384,Int(ProcessInfo.processInfo.physicalMemory/1_048_576))}
     var dynamicMemory:DynamicMemoryConfiguration? {
         automaticMemory ? .init(hotplugMiB:maximumMemoryMiB-initialMemoryMiB,backgroundMiB:backgroundMemoryMiB,reserveMiB:reserveMemoryMiB):nil
     }
     mutating func useAutomaticMemoryPolicy(){
-        automaticMemory=maximumMemoryMiB>initialMemoryMiB
+        if !enabledSharedFolders.isEmpty {initialMemoryMiB=maximumMemoryMiB}
+        automaticMemory=enabledSharedFolders.isEmpty && maximumMemoryMiB>initialMemoryMiB
         backgroundMemoryMiB=1024
         reserveMemoryMiB=512
     }
     func validate()throws {
+        if let selection=sharedFolderSelection,
+           !Set(selection.keys).isSubset(of:Set(SharedFolderKind.allCases.map(\.rawValue))) {
+            throw Self.failure("La selezione delle cartelle Mac non è valida.")
+        }
         guard (1...Self.cpuLimit).contains(cpus) else{throw Self.failure("Scegli da 1 a \(Self.cpuLimit) processori.")}
         guard (1024...Self.memoryLimitMiB).contains(initialMemoryMiB),initialMemoryMiB%128==0 else {
             throw Self.failure("La RAM iniziale deve essere almeno 1 GB e in multipli di 128 MB.")
@@ -62,9 +77,9 @@ enum MachineSettingsStore {
         guard value.machineID == machineID else{throw MachineSettings.failure("Le impostazioni appartengono a un’altra VM.")}
         try value.settings.validate();return value.settings
     }
-    static func save(_ settings:MachineSettings,in directory:URL,machineID:String,current:MachineSettings)throws {
+    static func save(_ settings:MachineSettings,in directory:URL,machineID:String,current:MachineSettings,forcePending:Bool=false)throws {
         try settings.validate()
-        if settings == current {try clear(in:directory);return}
+        if !forcePending,settings == current {try clear(in:directory);return}
         let bytes=try JSONEncoder().encode(Pending(machineID:machineID,settings:settings))
         try bytes.write(to:file(in:directory),options:.atomic)
         try FileManager.default.setAttributes([.posixPermissions:0o600],ofItemAtPath:file(in:directory).path)
@@ -78,8 +93,17 @@ enum MachineSettingsStore {
         guard var value=try JSONSerialization.jsonObject(with:data) as? [String:Any],value["id"] as? String == machineID else {
             throw MachineSettings.failure("L’identità della VM è cambiata. Riapri le impostazioni.")
         }
-        value["cpus"]=settings.cpus;value["memoryMiB"]=value["sharedDownloads"] != nil ? settings.maximumMemoryMiB:settings.initialMemoryMiB
-        if let memory=settings.dynamicMemory,value["sharedDownloads"] == nil {
+        let enabled=settings.enabledSharedFolders
+        var sources:[SharedFolderKind:String]=[:]
+        if let prior=value["sharedFolders"] {
+            let existing=try JSONDecoder().decode(SharedFoldersConfiguration.self,from:JSONSerialization.data(withJSONObject:prior))
+            for folder in existing.folders {sources[folder.kind]=folder.hostPath}
+        }else if let legacy=value["sharedDownloads"] as? [String:String],let path=legacy["hostPath"] {sources[.downloads]=path}
+        let folders=SharedFoldersConfiguration(folders:enabled.map{SharedFolderExport(kind:$0,hostPath:sources[$0] ?? $0.hostDirectory.path)})
+        value["sharedFolders"]=try JSONSerialization.jsonObject(with:JSONEncoder().encode(folders))
+        value.removeValue(forKey:"sharedDownloads")
+        value["cpus"]=settings.cpus;value["memoryMiB"]=enabled.isEmpty ? settings.initialMemoryMiB:settings.maximumMemoryMiB
+        if let memory=settings.dynamicMemory,enabled.isEmpty {
             value["dynamicMemory"]=try JSONSerialization.jsonObject(with:JSONEncoder().encode(memory))
         }else{value.removeValue(forKey:"dynamicMemory")}
         return try JSONSerialization.data(withJSONObject:value,options:[.prettyPrinted,.sortedKeys])

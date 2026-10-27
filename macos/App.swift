@@ -70,6 +70,10 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
     private var machine:VirtualMachineController!
     private var bridge:GuestBridge!
     private var memoryController:RuntimeMemoryController?
+    private let folderIntegration=SharedFolderIntegration()
+    @Published private(set) var folderIntegrationStatus="Le cartelle saranno preparate quando Windows sarà collegato."
+    @Published private(set) var folderIntegrationBusy=false
+    @Published private(set) var folderIntegrationFailed=false
     private var localControl:MacLocalControl?
     private var guestCapabilities:[String:Bool]=[:]
     private var windows:[String:ApplicationWindow]=[:]
@@ -133,6 +137,9 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
                 for task in self.openingTasks.values {task.cancel()}
                 self.openingTasks=[:];self.openingRequests=[:];self.openingApps=[];self.cancelledOpeningApps=[]
                 if !value {
+                    self.folderIntegration.cancel()
+                    self.folderIntegrationStatus="Le cartelle saranno preparate quando Windows sarà collegato."
+                    self.folderIntegrationFailed=false;self.folderIntegrationBusy=false
                     self.mixedDisplayConfiguring=false
                     self.desktopResizeTask?.cancel();self.desktopResizeTask=nil
                     self.desktopReadRequest=nil;self.desktopReadAgain=false
@@ -313,11 +320,23 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
             memoryController?.start()
         }
     }
+    func prepareSharedFolders(){
+        guard connected,guestCapabilities["execute"] == true,let machine else{return}
+        folderIntegration.apply(exports:machine.configuration.folderExports,bridge:bridge,directory:machine.directory){[weak self] text,failed,busy in
+            self?.folderIntegrationStatus=text;self?.folderIntegrationFailed=failed;self?.folderIntegrationBusy=busy
+        }
+    }
     private func loadVMSettings(){
         guard let machine else{return}
         currentVMSettings=machine.configuration.settings
         do {
-            let pending=try MachineSettingsStore.pending(in:machine.directory,machineID:machine.configuration.id)
+            var pending=try MachineSettingsStore.pending(in:machine.directory,machineID:machine.configuration.id)
+            if pending == nil,machine.configuration.sharedFolders == nil,var defaults=currentVMSettings {
+                defaults.sharedFolderSelection=Dictionary(uniqueKeysWithValues:SharedFolderKind.allCases.map{($0.rawValue,true)})
+                defaults.useAutomaticMemoryPolicy()
+                try MachineSettingsStore.save(defaults,in:machine.directory,machineID:machine.configuration.id,current:machine.configuration.settings,forcePending:true)
+                pending=defaults
+            }
             vmSettings=pending ?? currentVMSettings;settingsPending=pending != nil
         }catch {
             vmSettings=currentVMSettings;settingsPending=false
@@ -328,7 +347,7 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
         guard let machine,machineOperation == nil,!restarting else{return}
         do {
             var settings=requested;settings.useAutomaticMemoryPolicy()
-            try MachineSettingsStore.save(settings,in:machine.directory,machineID:machine.configuration.id,current:machine.configuration.settings)
+            try MachineSettingsStore.save(settings,in:machine.directory,machineID:machine.configuration.id,current:machine.configuration.settings,forcePending:machine.configuration.sharedFolders == nil)
             loadVMSettings();settingsFailed=false
             settingsNotice=settingsPending ? "Impostazioni salvate. Saranno applicate al prossimo avvio di Windows.":"Modifiche in attesa annullate. Restano i valori attuali."
         }catch{settingsFailed=true;settingsNotice=error.localizedDescription}
@@ -339,6 +358,7 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
         if next !== previous {
             previous.closeDesktop();machine=next
             configureMachineControllers();loadVMSettings()
+            settingsNotice=nil;settingsFailed=false
         }
         return next
     }
@@ -563,17 +583,20 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
         if command == "status" {
             let running:Any
             switch machineState {case .running:running=true;case .stopped:running=false;case .unreachable:running=NSNull()}
-            let memoryState:[String:Any]=memoryController?.state ?? ["enabled":false,"fixedForSharedDownloads":machine?.configuration.sharedDownloads != nil]
+            let memoryState:[String:Any]=memoryController?.state ?? ["enabled":false,"fixedForSharedFolders":!(machine?.configuration.folderExports.isEmpty ?? true)]
             let sharedDownloads:[String:String]
-            if let share=machine?.configuration.sharedDownloads {sharedDownloads=["hostPath":share.hostPath,"tag":share.tag]}
+            if let share=machine?.configuration.folderExports.first(where:{$0.kind == .downloads}) {sharedDownloads=["hostPath":share.hostPath,"tag":share.tag]}
             else {sharedDownloads=[:]}
+            let folderState:[String:Any]=["status":folderIntegrationStatus,"failed":folderIntegrationFailed,
+                "active":machine?.configuration.folderExports.map{["id":$0.kind.rawValue,"hostPath":$0.hostPath]} ?? [],
+                "selected":vmSettings?.enabledSharedFolders.map(\.rawValue) ?? []]
             localResponse(["ok":true,"result":["connected":connected,"machineRunning":running,
                 "machineState":machineStateLabel,"machineOperation":machineOperation as Any? ?? NSNull(),
                 "status":status,"displayStatus":displayStatus,"primaryMatchesHost":sharedDisplay != nil,
                 "displayChecks":mixedDisplayChecks,"displayApplies":mixedDisplayApplies,"displayInvalidations":displayInvalidations,
                 "mappedDisplays":sharedDisplays.count,"displaySetupComplete":machine?.mixedDisplaysEnabled == true ? sharedDisplays.count==HostDisplay.current().count:sharedDisplay != nil,
                 "appLaunchReady":machine?.mixedDisplaysEnabled != true || !sharedDisplays.isEmpty,
-                "memory":memoryState,"sharedDownloads":sharedDownloads,
+                "memory":memoryState,"sharedDownloads":sharedDownloads,"sharedFolders":folderState,
                 "vmSettings":["pending":settingsPending,"initialMemoryMiB":vmSettings?.initialMemoryMiB ?? 0,"maximumMemoryMiB":vmSettings?.maximumMemoryMiB ?? 0,"cpus":vmSettings?.cpus ?? 0],
                 "windowCount":windows.count,"capabilities":guestCapabilities,
                 "frameChannel":bridge?.separateFrames ?? false,
@@ -1239,6 +1262,7 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
             let capabilities=value["capabilities"] as? [String:Any] ?? [:]
             guestCapabilities=Dictionary(uniqueKeysWithValues:["nativeAppInput","modeFocus","memoryStatus","execute","displayInfo","displayTopology","driverInfo","graphicsInfo","sharedGeometry","appIcon","applicationStatus","processControl","clipboard"].map{($0,capabilities[$0] as? Bool == true)})
             memoryController?.guestReady=guestCapabilities["memoryStatus"] == true
+            prepareSharedFolders()
             startApplicationStatusUpdates()
             pumpApplicationIcons()
             displayReadable=capabilities["displayInfo"] as? Bool == true
