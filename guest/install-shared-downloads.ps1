@@ -34,30 +34,12 @@ try {
     Copy-Item (Join-Path $MediaRoot 'viofs\virtiofs.exe') $target -Force
     & pnputil.exe /add-driver (Join-Path $MediaRoot 'viofs\viofs.inf') /install
     if ($LASTEXITCODE -notin @(0,3010)) {throw "Virtiofs driver installation failed: $LASTEXITCODE"}
-    if (Get-PSDrive X -ErrorAction SilentlyContinue) {
-        $disk=Get-CimInstance Win32_LogicalDisk -Filter "DeviceID='X:'"
-        if (!$prior -or $disk.FileSystem -ne 'NTFS') {throw 'Drive X: is already occupied.'}
-    }
-    $key='HKLM:\SOFTWARE\VirtIO-FS'
-    New-Item -Path $key -Force | Out-Null
-    foreach ($entry in @{MountPoint='X:';Owner='501:20';FileSystemName='NTFS'}.GetEnumerator()) {
-        New-ItemProperty $key -Name $entry.Key -Value $entry.Value -PropertyType String -Force | Out-Null
-    }
-    New-ItemProperty $key -Name CaseInsensitive -Value 1 -PropertyType DWord -Force | Out-Null
-    $binary='"'+(Join-Path $target 'virtiofs.exe')+'" -t mac-downloads -m X: -o 501:20 -i -F NTFS'
-    if ($prior) {
-        $change=Invoke-CimMethod -InputObject (Get-CimInstance Win32_Service -Filter "Name='VirtioFsSvc'") -MethodName Change -Arguments @{PathName=$binary;StartMode='Automatic'}
-        if ($change.ReturnValue -ne 0) {throw "Cannot configure the shared Downloads service: $($change.ReturnValue)"}
-    } else {
-        New-Service -Name VirtioFsSvc -DisplayName 'Perpendicular Shared Downloads' -BinaryPathName $binary -StartupType Automatic -DependsOn VirtioFsDrv | Out-Null
-    }
-    & sc.exe failure VirtioFsSvc reset= 60 actions= restart/3000/restart/10000/restart/30000 | Out-Null
-    Start-Service VirtioFsSvc
-    $deadline=(Get-Date).AddSeconds(30)
-    while (!(Test-Path 'X:\') -and (Get-Date) -lt $deadline) {Start-Sleep -Milliseconds 250}
-    if (!(Test-Path 'X:\')) {throw 'The Mac Downloads volume is not mounted; Downloads has not been redirected.'}
+    Copy-Item (Join-Path $MediaRoot 'redirect-shared-downloads.ps1') $target -Force
     if ($InstallOnly) {
-        @{mounted=$true;service=(Get-Service VirtioFsSvc).Status.ToString()} | ConvertTo-Json | Set-Content (Join-Path $state 'mounted.json') -Encoding UTF8
+        # SYSTEM installs components only. The interactive user's normal
+        # Downloads path is configured separately; never allocate a drive letter.
+        if ($prior) {Set-Service VirtioFsSvc -StartupType Manual}
+        @{componentsInstalled=$true;userFolderConfigurationRequired=$true} | ConvertTo-Json | Set-Content (Join-Path $state 'components.json') -Encoding UTF8
         return
     }
     & (Join-Path $MediaRoot 'redirect-shared-downloads.ps1')
