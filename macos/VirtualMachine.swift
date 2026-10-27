@@ -199,6 +199,12 @@ final class VirtualMachineController {
     func cycleApplicationFocus(notAfter:Double) async throws {
         try await sendApplicationChord(["alt","esc"],notAfter:notAfter)
     }
+    func moveApplicationToNextDisplay(notAfter:Double) async throws {
+        try await sendApplicationChord(["meta_l","shift","right"],notAfter:notAfter)
+    }
+    func fitDesktopApplication(notAfter:Double) async throws {
+        try await sendApplicationChord(["meta_l","up"],notAfter:notAfter)
+    }
     private func sendApplicationChord(_ keys:[String],notAfter:Double) async throws {
         guard let launch=desktopLaunch() else{throw CocoaError(.executableRuntimeMismatch)}
         let socket=controlSocket,id=configuration.id,pid=launch.pid

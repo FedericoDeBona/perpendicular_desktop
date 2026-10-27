@@ -3,6 +3,14 @@ import SwiftUI
 import CryptoKit
 import ImageIO
 
+private struct DesktopSingletonState:Sendable {
+    let focused:Bool
+    let visible:Bool
+    let primary:Bool
+    let maxMoves:Int
+    let rect:String
+    let checkedAt:Double
+}
 @MainActor
 final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation,ObservableObject {
     private let desktopOnly=Bundle.main.object(forInfoDictionaryKey:"PerpendicularDesktopOnly") as? Bool == true
@@ -62,6 +70,8 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
     private var pointerExitTask:Task<Void,Never>?
     private var desktopFocusTask:Task<Void,Never>?
     private var desktopFocusRequest=UUID()
+    private var desktopRecoveryTask:Task<Void,Never>?
+    private var desktopRecoveryRequest=UUID()
     private var displaySetupTask:Task<Void,Never>?
     private var displaySetupID=UUID()
     private var displayEpoch:String?
@@ -257,7 +267,10 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
     private func configureMachineControllers(){
         memoryController?.stop();memoryController=nil;vmMemoryState=[:]
         machine.onDesktopSize={ [weak self] size in self?.desktopSize=size;self?.scheduleDesktopResize() }
-        machine.onDesktopInput={ [weak self] in self?.followDesktopFocus() }
+        machine.onDesktopInput={ [weak self] in
+            self?.desktopRecoveryTask?.cancel()
+            self?.followDesktopFocus()
+        }
         if let configuration=machine.configuration.dynamicMemory,let bridge {
             memoryController=RuntimeMemoryController(machine:machine,bridge:bridge,configuration:configuration){[weak self] in
                 guard let self,NSApp.isActive,!NSApp.isHidden else{return false}
@@ -339,7 +352,7 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
         desktopFocusTask=Task{@MainActor [weak self] in
             // Only follow a real Desktop input, never merely opening Desktop.
             // The bounded grace period covers Shell/singleton activation.
-            for _ in 0..<6 {
+            for _ in 0..<16 {
                 do {try await Task.sleep(for:.milliseconds(250))}catch{return}
                 guard let self,!Task.isCancelled,self.desktopFocusRequest == request,
                       self.displayEpoch == epoch,self.machine?.desktopIsKey == true else{return}
@@ -347,12 +360,91 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
                     self.bridge.command("desktop_focus_target",timeout:.seconds(1)){[weak self] result in
                         guard let self,self.desktopFocusRequest == request,self.displayEpoch == epoch,
                               self.machine?.desktopIsKey == true,case .success(let reply)=result,
-                              let value=reply["value"] as? [String:Any],let id=value["window"] as? String,
-                              let window=self.windows[id] else{continuation.resume(returning:false);return}
+                              let value=reply["value"] as? [String:Any] else{continuation.resume(returning:false);return}
+                        if let singleton=value["desktopSingleton"] as? [String:Any],
+                           let app=singleton["app"] as? String,let target=singleton["target"] as? [String:Any] {
+                            self.recoverDesktopSingleton(app:app,target:target)
+                            continuation.resume(returning:true);return
+                        }
+                        guard let id=value["window"] as? String,let window=self.windows[id] else{continuation.resume(returning:false);return}
                         window.activate();continuation.resume(returning:true)
                     }
                 }
                 if handled{return}
+            }
+        }
+    }
+    private func desktopSingletonState(app:String,target:[String:Any],place:Bool=false) async throws->DesktopSingletonState {
+        let checkedAt=ProcessInfo.processInfo.systemUptime
+        return try await withCheckedThrowingContinuation {continuation in
+            bridge.command("desktop_singleton_state",["app":app,"target":target,"place":place],timeout:.seconds(1)){result in
+                switch result {
+                case .failure(let error):continuation.resume(throwing:error)
+                case .success(let reply):
+                    let value=reply["value"] as? [String:Any] ?? [:]
+                    continuation.resume(returning:DesktopSingletonState(focused:value["focused"] as? Bool == true,
+                        visible:value["onDesktop"] as? Bool == true,primary:value["onPrimary"] as? Bool == true,
+                        maxMoves:min(8,max(1,value["maxMoves"] as? Int ?? 1)),rect:String(describing:value["rect"] ?? ""),checkedAt:checkedAt))
+                }
+            }
+        }
+    }
+    private func recoverDesktopSingleton(app:String,target:[String:Any]){
+        desktopRecoveryTask?.cancel();let request=UUID();desktopRecoveryRequest=request
+        let epoch=displayEpoch
+        desktopRecoveryTask=Task{@MainActor [weak self] in
+            guard let self,let machine=self.machine else{return}
+            defer{if self.desktopRecoveryRequest==request {
+                self.desktopRecoveryTask=nil
+                if Task.isCancelled {self.finishOpening(app)}
+            }}
+            do {
+                try await machine.showDesktop()
+                @MainActor func current() throws {
+                    try Task.checkCancellation()
+                    guard self.desktopRecoveryRequest==request,self.displayEpoch==epoch,self.connected,machine.desktopIsKey else{
+                        throw CocoaError(.userCancelled)
+                    }
+                }
+                try current()
+                _=try await self.desktopSingletonState(app:app,target:target,place:true)
+                try await Task.sleep(for:.milliseconds(180));try current()
+                var state=try await self.desktopSingletonState(app:app,target:target)
+                for _ in 0..<8 where !state.focused {
+                    try current()
+                    try await machine.cycleApplicationFocus(notAfter:state.checkedAt+0.5)
+                    try await Task.sleep(for:.milliseconds(160));try current()
+                    state=try await self.desktopSingletonState(app:app,target:target)
+                }
+                var seen=Set<String>()
+                var fitted=false
+                for _ in 0...state.maxMoves {
+                    try current()
+                    if state.focused && state.visible {
+                        self.finishOpening(app,appeared:true);self.launcherNotice=nil;return
+                    }
+                    guard state.focused,seen.insert(state.rect).inserted else{break}
+                    if state.primary {
+                        guard !fitted else{break};fitted=true
+                        try await machine.fitDesktopApplication(notAfter:state.checkedAt+0.5)
+                    }
+                    else {try await machine.moveApplicationToNextDisplay(notAfter:state.checkedAt+0.5)}
+                    let previous=state.rect
+                    // Display/DPI changes arrive after the device ACK. Wait
+                    // for Windows' geometry, never replay the move merely
+                    // because its first readback still has the old rectangle.
+                    for _ in 0..<10 {
+                        try await Task.sleep(for:.milliseconds(150));try current()
+                        state=try await self.desktopSingletonState(app:app,target:target)
+                        if state.visible || state.rect != previous {break}
+                    }
+                }
+                throw NSError(domain:"Guest",code:1,userInfo:[NSLocalizedDescriptionKey:"Windows non ha riportato l’app nel Desktop visibile. L’istanza è stata conservata."])
+            }catch {
+                guard self.desktopRecoveryRequest==request else{return}
+                self.finishOpening(app)
+                guard !Task.isCancelled,machine.desktopIsKey,self.displayEpoch==epoch else{return}
+                self.launcherNotice=error.localizedDescription
             }
         }
     }
@@ -1166,7 +1258,8 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
             if machine?.desktopIsKey != true,let id=value["window"] as? String {windows[id]?.activate()}
         case "desktop_focus":
             guard let app=value["app"] as? String,openingApps.contains(app),!cancelledOpeningApps.contains(app) else{return}
-            finishOpening(app,appeared:true);showWindows()
+            if let target=value["target"] as? [String:Any] {recoverDesktopSingleton(app:app,target:target)}
+            else {finishOpening(app,appeared:true);showWindows()}
         case "launch_state":
             if value["state"] as? String == "waiting",let id=value["app"] as? String,
                !cancelledOpeningApps.contains(id),

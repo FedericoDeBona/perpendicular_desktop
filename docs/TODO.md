@@ -1,6 +1,6 @@
 # TODO — feature e correzioni
 
-**Lavoro sospeso su richiesta dell’utente:** Task Manager aperta dal Desktop compare nella barra delle applicazioni Windows ma non è visibile; l’utente sospetta che sia su un altro schermo. Richiamandola dal launcher Seamless non osserva alcun effetto. Segnalazione non risolta, da trattare come priorità alla ripresa di TODO-022/WIN-004. Il controllo iniziale legge Desktop attivo, due mapping Mac pronti e0 finestre gestite dal frontend: non identifica ancora HWND, posizione o causa dell’istanza Windows-only. Nessuna ulteriore prova o correzione dopo lo stop. **Prossimo passo, soltanto alla ripresa autorizzata:** individuare l’istanza esistente e renderla visibile nel contesto corretto preservandone processo/stato; verificare il richiamo da entrambi gli ambienti con input utilizzabile. [Segnalazione e limite](VERIFICATION.md#26-ottobre--segnalazione-singleton-invisibile-e-stop-richiesto).
+**Stato corrente0.2.15 — recupero Task Manager nel Desktop verificato:** guestafeb107bb7d3 e frontend e39ea84a12be installati nella main. Stessa Task Manager Windows-only4804/328028 prima fuori primaria ora visibile e con input nel Desktop dopo richiamo Seamless, senza duplicazione/adozione Mac. Finale verificata anche sul recupero automatico dopo Move→Invio: attende la fine del gesto e la geometria effettiva; nessun falso errore residuo nel launcher. TODO-022 rimane IN CORSO per altre singleton/input elevato Seamless; gli altri limiti dell’integrazione non sono chiusi. Prossimo passo pertinente: input/controllo elevato nelle finestre Mac, preservando questo recupero Windows-only. [Prove e limiti](VERIFICATION.md#27-ottobre--recupero-della-singleton-nel-desktop).
 
 **Stato corrente0.2.14:** guest253889116c48 e frontendcbe0bec0b409 realmente installati, stessa VM e Notepad/documento conservati. Eliminato AttachThreadInput dal focus, input accodato fino all’attivazione; fallback dispositivo implementato con readback della HWND. Main: richiamo Notepad→dialogo/testo/Cancel, richiamo Task Manager dalla finestra Mac e nuovo avvio→foreground esatta→Cmd+Q riusciti; ritorno dal Desktop→dialogo Notepad riuscito. Nel campione finale API ordinaria positiva: fallback automatico completo e cancellazione restano non qualificati, senza dichiarare affidabilità generale. Prossimo passo input elevato e ritorno singleton nel Desktop visibile; grafica Explorer rinviata. [Evidenze e limiti](VERIFICATION.md#26-ottobre--focus-della-finestra-e-dispositivo-vm-0214).
 
@@ -73,7 +73,7 @@ Priorità 1–4 corrispondenti alla richiesta iniziale dell'utente; TODO-017/018
 | --- | --- | --- | --- |
 | TODO-001 | Schermi Windows N+1 | IN CORSO:0.2.5 main, due uscite e integrazione verificate con un Mac | WIN-003; passaggio tra scale diverse e nuovi monitor da qualificare. |
 | TODO-002 | Geometria, input e finestre Mac/Windows 1:1 | IN CORSO: input cloaked e dialoghi distribuiti0.2.6, qualifica circoscritta | WIN-001/002/003/004; WIN-005/taskbar corretto su Notepad locale; più monitor/scale e massimizzazioni restano aperti. |
-| TODO-022 | Focus bidirezionale delle app singleton tra Seamless e Desktop | IN CORSO: focus Task Manager nelle due direzioni osservato, ritorno Desktop fuori schermo | Richiamo dell'istanza esistente nell'ambiente che la ospita; nessun duplicato o finestra irraggiungibile. |
+| TODO-022 | Focus bidirezionale delle app singleton tra Seamless e Desktop | IN CORSO: recupero Windows-only Task Manager verificato0.2.15; altre singleton/input Seamless aperti | Richiamo dell'istanza esistente nell'ambiente che la ospita; nessun duplicato o finestra irraggiungibile. |
 | TODO-023 | Nomi Seamless / Desktop e Seamless Apps / Desktop Mode | FATTO nella0.2.11 per UI/comandi osservati | Nomi approvati dall’utente, sostituiscono Full Experience. |
 | TODO-003 | Stessi file utente su Mac e Windows, senza copie | DA FARE; virtio-fs candidato, combinazione non qualificata | Backend macOS, client ARM64 firmato, compatibilità RAM. |
 | TODO-019 | Catalogo unico, recenti in alto e impostazioni VM al posto dei processi | IN CORSO: semplificato/installato0.2.3, qualifica UI parziale | Massimo RAM principale e avvio in Avanzate; store verificato; CUA crasha nel suo servizio sul pannello. |
@@ -358,6 +358,8 @@ Aggiunte TODO-017/018 per comandi Mac e appunti testo/file bidirezionali, distin
 
 
 ## TODO-022 — Focus bidirezionale delle app singleton
+
+**Incremento0.2.15 verificato nella main:** Task Manager Windows-only fuori primaria recuperata senza cambiare PID/HWND/stato, con input Desktop e ritorno dal launcher Mac; recupero automatico dopo fine Move e assenza di errore residuo confermati. Nessuna qualifica clone; stato globale IN CORSO per altre singleton e input elevato nella finestra Mac. [Evidenze](VERIFICATION.md#27-ottobre--recupero-della-singleton-nel-desktop).
 
 **Seguito0.2.14:** richiamo e nuovo lancio Task Manager dal Mac ottengono foreground Windows esatta e Cmd+Q riuscito. Input elevato completo e reverse con finestra visibile nella primaria restano da completare; nessuna chiusura globale. [Verifiche](VERIFICATION.md#26-ottobre--focus-della-finestra-e-dispositivo-vm-0214).
 

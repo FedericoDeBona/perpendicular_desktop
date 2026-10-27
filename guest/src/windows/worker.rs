@@ -19,8 +19,8 @@ use std::{
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 use windows::Win32::{
-    Foundation::{HWND, LPARAM, POINT, WPARAM, GetLastError, ERROR_ACCESS_DENIED},
-    Graphics::Gdi::ClientToScreen,
+    Foundation::{HWND, LPARAM, POINT, RECT, WPARAM, GetLastError, ERROR_ACCESS_DENIED},
+    Graphics::Gdi::{ClientToScreen, GetMonitorInfoW, MonitorFromPoint, MonitorFromWindow, MONITORINFO, MONITOR_DEFAULTTOPRIMARY, MONITOR_DEFAULTTONEAREST},
     System::{Com::{COINIT_APARTMENTTHREADED, CoCreateGuid, CoInitializeEx},
         Power::{EXECUTION_STATE,ES_CONTINUOUS,ES_DISPLAY_REQUIRED,SetThreadExecutionState}},
     UI::{
@@ -473,6 +473,51 @@ impl Worker {
         Err("Host disconnected; retaining application identities".into())
     }
 
+    fn desktop_singleton(&self,app:&str,raw:usize)->Option<Value> {
+        if raw==0 || !self.catalogue.singleton(app) || !self.catalogue.matches(app,raw)
+            || self.windows.values().any(|w|w.mac_owned && w.target.hwnd==raw) {return None;}
+        let owner=identity::owner(HWND(raw as _),&self.sid,self.session)?;
+        Some(json!({"app":app,"target":{"hwnd":raw,"pid":owner.0,"creation":owner.1.to_string()}}))
+    }
+    fn desktop_singleton_state(&self,value:&Value)->Result<Value,String> {
+        let app=value["app"].as_str().ok_or("Missing app identity")?;
+        let raw=value["target"]["hwnd"].as_u64().ok_or("Missing window identity")? as usize;
+        let actual=self.desktop_singleton(app,raw).ok_or("The Windows application changed")?;
+        if actual["target"]!=value["target"] {return Err("The Windows application changed".into());}
+        unsafe {
+            let hwnd=HWND(raw as _);
+            if !IsWindowVisible(hwnd).as_bool() || !IsWindowEnabled(hwnd).as_bool() || IsIconic(hwnd).as_bool() {
+                return Err("Restore this application or finish its dialog in Windows".into());
+            }
+            let primary=MonitorFromPoint(POINT{x:0,y:0},MONITOR_DEFAULTTOPRIMARY);
+            let mut info=MONITORINFO{cbSize:size_of::<MONITORINFO>() as u32,..Default::default()};
+            if !GetMonitorInfoW(primary,&mut info).as_bool() || info.dwFlags&1==0 {return Err("Windows desktop display unavailable".into());}
+            let work=info.rcWork;
+            let mut bounds=catalogue::frame_bounds(hwnd).ok_or("Window geometry unavailable")?;
+            let focused=GetAncestor(GetForegroundWindow(),GA_ROOT)==hwnd;
+            let mut gui=GUITHREADINFO{cbSize:size_of::<GUITHREADINFO>() as u32,..Default::default()};
+            GetGUIThreadInfo(0,&mut gui).map_err(error)?;
+            // Check before any geometry mutation, including the direct API.
+            // A real user drag, menu or held pointer must never be fought.
+            if !gui.hwndCapture.is_invalid() || gui.flags.0&0x1e!=0 {return Err("Finish the current Windows interaction before switching apps".into());}
+            let contained=|r:RECT|r.left>=work.left-1 && r.top>=work.top-1 && r.right<=work.right+1 && r.bottom<=work.bottom+1;
+            let mut direct_error=None;
+            if value["place"]==true && !contained(bounds) {
+                let mut outer=RECT::default();GetWindowRect(hwnd,&mut outer).map_err(error)?;
+                let width=(bounds.right-bounds.left).min(work.right-work.left).max(160);
+                let height=(bounds.bottom-bounds.top).min(work.bottom-work.top).max(100);
+                if let Err(cause)=SetWindowPos(hwnd,None,work.left-(bounds.left-outer.left),work.top-(bounds.top-outer.top),
+                    width+(outer.right-outer.left)-(bounds.right-bounds.left),
+                    height+(outer.bottom-outer.top)-(bounds.bottom-bounds.top),
+                    SWP_NOZORDER|SWP_NOACTIVATE|SWP_ASYNCWINDOWPOS) {direct_error=Some(error(cause));}
+                bounds=catalogue::frame_bounds(hwnd).ok_or("Window geometry unavailable")?;
+            }
+            let on_desktop=MonitorFromWindow(hwnd,MONITOR_DEFAULTTONEAREST)==primary && contained(bounds);
+            log(format!("Desktop singleton hwnd={raw} focused={focused} visible={on_desktop} rect={},{},{},{} directError={direct_error:?}",bounds.left,bounds.top,bounds.right,bounds.bottom));
+            Ok(json!({"focused":focused,"onDesktop":on_desktop,"onPrimary":MonitorFromWindow(hwnd,MONITOR_DEFAULTTONEAREST)==primary,"rect":[bounds.left,bounds.top,bounds.right,bounds.bottom],
+                "maxMoves":GetSystemMetrics(SM_CMONITORS).clamp(1,8)}))
+        }
+    }
     fn command(&mut self, value: &Value, outbox: &Arc<Outbox>) -> Result<Value, String> {
         // Releases never depend on a window, pointer coordinates or capture generation.
         // A resize or a retired popup must not leave an injected button/key held.
@@ -506,8 +551,18 @@ impl Worker {
                 let foreground=catalogue::foreground();
                 let window=self.windows.values().find(|w|w.mac_owned && self.catalogue.singleton(&w.app)
                     && w.target.hwnd==foreground && w.target.valid());
-                Ok(json!({"window":window.map(|w|w.target.id.as_str())}))
+                let off_primary=unsafe {MonitorFromWindow(HWND(foreground as _),MONITOR_DEFAULTTONEAREST)
+                    !=MonitorFromPoint(POINT{x:0,y:0},MONITOR_DEFAULTTOPRIMARY)};
+                let idle=unsafe {
+                    let mut gui=GUITHREADINFO{cbSize:size_of::<GUITHREADINFO>() as u32,..Default::default()};
+                    GetGUIThreadInfo(0,&mut gui).is_ok() && gui.hwndCapture.is_invalid() && gui.flags.0&0x1e==0
+                };
+                let singleton=if window.is_none() && off_primary && idle {
+                    self.catalogue.items.keys().find_map(|app|self.desktop_singleton(app,foreground))
+                }else{None};
+                Ok(json!({"window":window.map(|w|w.target.id.as_str()),"desktopSingleton":singleton}))
             }
+            "desktop_singleton_state" => self.desktop_singleton_state(value),
             "window_refresh" => {
                 let id=value["window"].as_str().ok_or("Missing window identity")?;
                 let window=self.windows.get_mut(id).ok_or("Window retired")?;
@@ -554,7 +609,7 @@ impl Worker {
                                 activation.run().map(|_|())
                             }else{Err("The existing application window changed".into())};
                             sender.control(match result {
-                                Ok(())=>json!({"type":"desktop_focus","app":app}),
+                                Ok(())=>json!({"type":"desktop_focus","app":app,"target":{"hwnd":raw,"pid":owner.0,"creation":owner.1.to_string()}}),
                                 Err(message)=>json!({"type":"launch_error","app":app,"message":message}),
                             });
                         }).map_err(error)?;
