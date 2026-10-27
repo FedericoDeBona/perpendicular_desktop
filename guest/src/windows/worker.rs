@@ -272,7 +272,12 @@ impl Worker {
         let icon_busy = Arc::new(AtomicBool::new(false));
         let mut frame_channel_started = false;
         while outbox.connected.load(Ordering::Acquire) {
-            if let Ok(command) = receiver.recv_timeout(Duration::from_millis(10)) {
+            // Commands wake this wait immediately. Only window discovery needs
+            // a deadline; do not wake 100 times/s to check a 75 ms observation.
+            let interval = if self.windows.is_empty() && self.pending.is_empty() {
+                Duration::from_millis(500)
+            } else { Duration::from_millis(75) };
+            if let Ok(command) = receiver.recv_timeout(interval.saturating_sub(poll.elapsed())) {
                 let request = command["request"].clone();
                 if command["operation"] == "trial_clock" {outbox.control(json!({"type":"reply","request":request,"ok":true,"result":super::gpu::clock()}));continue;}
                 if command["operation"] == "frame_channel" {
@@ -458,8 +463,10 @@ impl Worker {
             {
                 outbox.control(json!({"type":"display_changed","epoch":self.epoch}));
             }
-            if frame_channel_started && poll.elapsed() >= Duration::from_millis(75) {
+            if poll.elapsed() >= interval {
+                if frame_channel_started {
                 self.observe(&outbox);
+                }
                 poll = Instant::now();
             }
         }
@@ -1086,7 +1093,7 @@ impl Worker {
         self.applications.retain(|_, session| session.activation.is_some() || !session.processes.is_empty()
             || session.gap_until.is_none_or(|until| until > now));
         changed |= before != self.applications.len();
-        if now < self.next_process_scan { return changed; }
+        if self.applications.is_empty() || now < self.next_process_scan { return changed; }
         self.next_process_scan = now + Duration::from_millis(250);
         let table = app_process::snapshot();
         for (app, session) in &mut self.applications {
@@ -1103,6 +1110,13 @@ impl Worker {
     }
     fn observe(&mut self, outbox: &Arc<Outbox>) {
         self.finish_activations(outbox);
+        // Desktop-only windows cannot become Mac-owned without a launcher
+        // request. Retain process lifecycle bookkeeping, but do not inspect
+        // every unrelated window (and open its process) in the background.
+        if self.windows.is_empty() && self.pending.is_empty() {
+            if self.refresh_applications() {self.snapshot(outbox);self.save();}
+            return;
+        }
         let visible = catalogue::windows();
         let mut changed = false;
         let retired: Vec<String> = self

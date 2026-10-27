@@ -38,6 +38,7 @@ final class NativeDisplayReader:@unchecked Sendable {
         var frame:ndt_frame
         var delivered=false
         var retired=false
+        var readySource:DispatchSourceRead?
         let deadline=ProcessInfo.processInfo.systemUptime+3
         init(_ frame:ndt_frame){self.frame=frame}
     }
@@ -51,6 +52,8 @@ final class NativeDisplayReader:@unchecked Sendable {
     private var started=false
     private var deadline=0.0
     private var timer:DispatchSourceTimer?
+    private var socketRead:DispatchSourceRead?
+    private var socketWrite:DispatchSourceWrite?
     private var frames:[UInt64:Entry]=[:]
 
     init(endpoint:NativeDisplayEndpoint,device:any MTLDevice,
@@ -67,12 +70,48 @@ final class NativeDisplayReader:@unchecked Sendable {
             ndt_client_start(&connection,$0,endpoint.expectedUID,endpoint.serverPID,endpoint.sessionHi,endpoint.sessionLo,endpoint.epoch)
         }
         guard result == NDT_OK || result == NDT_AGAIN else{close("Cannot connect to the Windows graphics display (\(result)).");return}
-        let timer=DispatchSource.makeTimerSource(queue:queue)
-        timer.schedule(deadline:.now(),repeating:.milliseconds(5),leeway:.milliseconds(1))
-        timer.setEventHandler{[weak self] in self?.step()};self.timer=timer;timer.resume()
+        socketRead=readSource(ndt_socket_fd(&connection)){[weak self] in self?.step()}
+        guard socketRead != nil else{close("Cannot observe the graphics display.");return}
+        step()
+    }
+    // Watch duplicated descriptors, closing each only in its cancellation
+    // handler. ndt_close/frame_close can then release their own descriptors
+    // without racing Dispatch's asynchronous removal from kqueue.
+    private func readSource(_ descriptor:Int32,_ event:@escaping @Sendable ()->Void)->DispatchSourceRead? {
+        let fd=fcntl(descriptor,F_DUPFD_CLOEXEC,0)
+        guard fd>=0 else{return nil}
+        let source=DispatchSource.makeReadSource(fileDescriptor:fd,queue:queue)
+        source.setEventHandler(handler:event)
+        source.setCancelHandler{Darwin.close(fd)}
+        source.resume();return source
+    }
+    private func refreshSources(){
+        guard active else{return}
+        let wantsWrite=ndt_poll_events(&connection)&Int16(POLLOUT) != 0
+        if wantsWrite,socketWrite == nil {
+            let fd=fcntl(ndt_socket_fd(&connection),F_DUPFD_CLOEXEC,0)
+            guard fd>=0 else{close("Cannot observe graphics acknowledgements.");return}
+            let source=DispatchSource.makeWriteSource(fileDescriptor:fd,queue:queue)
+            source.setEventHandler{[weak self] in self?.step()}
+            source.setCancelHandler{Darwin.close(fd)}
+            socketWrite=source;source.resume()
+        }else if !wantsWrite {
+            socketWrite?.cancel();socketWrite=nil
+        }
+        // The timer checks deadlines only while connecting or waiting for GPU
+        // readiness. Static/delivered frames require no periodic polling.
+        let waiting=ndt_status(&connection) != NDT_OK || frames.values.contains{!$0.delivered && !$0.retired}
+        if waiting,timer == nil {
+            let source=DispatchSource.makeTimerSource(queue:queue)
+            source.schedule(deadline:.now() + .milliseconds(250),repeating:.milliseconds(250),leeway:.milliseconds(25))
+            source.setEventHandler{[weak self] in self?.step()}
+            timer=source;source.resume()
+        }else if !waiting {timer?.cancel();timer=nil}
     }
     private func step(){
         guard active else{return}
+        defer{refreshSources()}
+        PipelineTrace.record("desktop-reader-wake","desktop:\(endpoint.epoch)")
         var descriptor=pollfd(fd:ndt_socket_fd(&connection),events:ndt_poll_events(&connection),revents:0)
         let available=Darwin.poll(&descriptor,1,0)
         if available<0 && errno != EINTR {close("The graphics display disconnected.");return}
@@ -98,12 +137,17 @@ final class NativeDisplayReader:@unchecked Sendable {
             if entry.delivered {continue}
             let ready=ndt_ready(entry.frame.ready_fd)
             if ready == NDT_AGAIN {
+                if entry.readySource == nil {
+                    entry.readySource=readSource(entry.frame.ready_fd){[weak self] in self?.step()}
+                    guard entry.readySource != nil else{close("Cannot observe graphics readiness.");return}
+                }
                 if ProcessInfo.processInfo.systemUptime>entry.deadline {close("Windows did not finish a graphics frame.")}
                 break
             }
             guard ready == NDT_OK else{close("Unsupported graphics frame.");return}
             PipelineTrace.record("desktop-ready","desktop:\(endpoint.epoch):\(number)")
             guard let frame=importFrame(entry.frame,number:number) else{close("Unsupported graphics frame.");return}
+            entry.readySource?.cancel();entry.readySource=nil
             PipelineTrace.record("desktop-imported",frame.traceID)
             entry.delivered=true
             PipelineTrace.record("desktop-main-enqueued",frame.traceID)
@@ -132,6 +176,7 @@ final class NativeDisplayReader:@unchecked Sendable {
     private func retire(_ number:UInt64){
         guard let entry=frames[number],!entry.retired else{return}
         entry.retired=true;acknowledge(number)
+        step()
     }
     private func acknowledge(_ number:UInt64){
         guard let entry=frames[number],entry.retired else{return}
@@ -146,6 +191,9 @@ final class NativeDisplayReader:@unchecked Sendable {
     private func close(_ reason:String?){
         guard active else{return};active=false
         timer?.setEventHandler{};timer?.cancel();timer=nil
+        socketRead?.cancel();socketRead=nil
+        socketWrite?.cancel();socketWrite=nil
+        for entry in frames.values {entry.readySource?.cancel();entry.readySource=nil}
         ndt_close(&connection)
         for number in Array(frames.keys) {
             guard let entry=frames[number] else{continue}
