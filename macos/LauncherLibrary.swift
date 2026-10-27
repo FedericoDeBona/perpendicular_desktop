@@ -30,6 +30,12 @@ struct LauncherPreferences:Codable {
             return left == right ? $0.name.localizedStandardCompare($1.name) == .orderedAscending:left>right
         }
     }
+    func sections(_ apps:[WindowsApplication],recentLimit:Int=6)->(favorites:[WindowsApplication],recent:[WindowsApplication],remaining:[WindowsApplication]) {
+        let favorites=apps.filter{pinned.contains($0.id)}.sorted{$0.name.localizedStandardCompare($1.name) == .orderedAscending}
+        let recent=Array(recent(apps).filter{!pinned.contains($0.id)}.prefix(max(0,recentLimit)))
+        let shown=Set(favorites.map(\.id)+recent.map(\.id))
+        return (favorites,recent,apps.filter{!shown.contains($0.id)}.sorted{$0.name.localizedStandardCompare($1.name) == .orderedAscending})
+    }
     func suggested(_ apps:[WindowsApplication],limit:Int=12,now:Date=Date())->[WindowsApplication] {
         let order=["explorer","edge","notepad","calculator","settings","terminal","paint","photos","snipping","store"]
         func score(_ app:WindowsApplication)->Double {

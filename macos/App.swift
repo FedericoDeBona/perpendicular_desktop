@@ -19,6 +19,7 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
     private let desktopOnly=Bundle.main.object(forInfoDictionaryKey:"PerpendicularDesktopOnly") as? Bool == true
     @Published var apps:[WindowsApplication]=[]
     @Published var launcherPreferences=LauncherPreferences()
+    @Published private(set) var launcherAppearance=LauncherAppearance(rawValue:UserDefaults.standard.string(forKey:"LauncherAppearance") ?? "system") ?? .system
     @Published private(set) var launcherDisplays:[[String:Any]]=[]
     private var launcherLibrary:LauncherLibrary?
     private var iconDiskChecked:Set<String>=[]
@@ -169,11 +170,13 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
                 try? FileHandle.standardError.write(contentsOf:Data(("Local control unavailable: "+error.localizedDescription+"\n").utf8))
             }
         }catch{status=error.localizedDescription;launcherNotice="Windows non può essere avviato. "+error.localizedDescription}
-        launcher=NSWindow(contentRect:NSRect(x:200,y:160,width:960,height:680),styleMask:[.titled,.closable,.resizable,.miniaturizable],backing:.buffered,defer:false)
+        launcher=NSWindow(contentRect:NSRect(x:200,y:160,width:760,height:760),styleMask:[.titled,.closable,.resizable,.miniaturizable,.fullSizeContentView],backing:.buffered,defer:false)
         launcher.title="Perpendicular";launcher.isReleasedWhenClosed=false
+        launcher.titleVisibility = .hidden
         launcher.titlebarAppearsTransparent=true;launcher.toolbarStyle = .unified
-        launcher.backgroundColor = .windowBackgroundColor
-        launcher.minSize=NSSize(width:800,height:540)
+        launcher.isOpaque=false;launcher.backgroundColor = .clear
+        launcher.appearance=launcherAppearance.native
+        launcher.minSize=NSSize(width:540,height:480)
         launcher.setFrameAutosaveName("PerpendicularLauncher")
         launcher.contentView=NSHostingView(rootView:Launcher(model:self))
         launcher.center();launcher.makeKeyAndOrderFront(nil)
@@ -224,6 +227,29 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
     var desktopAvailable:Bool {machine != nil}
     var canStartWindows:Bool {machine != nil && machineState == .stopped && machineOperation == nil && !restarting}
     var canStopWindows:Bool {machine != nil && machineState.pid != nil && machineOperation == nil && !restarting}
+    func setLauncherAppearance(_ value:LauncherAppearance){
+        launcherAppearance=value
+        UserDefaults.standard.set(value.rawValue,forKey:"LauncherAppearance")
+        launcher?.appearance=value.native
+    }
+    var launcherWindowsStatus:LauncherWindowsStatus {
+        if let machineOperation {return .init(kind:.busy,title:machineOperation,detail:"Attendi il completamento dell’operazione.")}
+        if restarting {return .init(kind:.busy,title:"Windows in riavvio",detail:"Attendi il nuovo collegamento.")}
+        switch machineState {
+        case .stopped:return .init(kind:.off,title:"Windows spento",detail:"Accendi Windows per aprire le app.")
+        case .unreachable:return .init(kind:.unknown,title:"Stato Windows non verificabile",detail:"Non è possibile confermare se Windows è acceso o spento.")
+        case .running:
+            guard connected else{return .init(kind:.disconnected,title:"Windows acceso · scollegato",detail:"Windows è acceso, ma il collegamento alle app non è disponibile.")}
+            if !failedWindows.isEmpty || windowNotice?.frame == true {
+                return .init(kind:.graphics,title:"Windows acceso · problema immagine",detail:"Una finestra non ha un’immagine disponibile. Windows non risulta spento.")
+            }
+            if launcherNotice != nil {return .init(kind:.attention,title:"Windows acceso · avviso",detail:"Apri il dettaglio dell’avviso prima di riprovare l’operazione.")}
+            if machine?.mixedDisplaysEnabled == true,sharedDisplays.isEmpty {
+                return .init(kind:.busy,title:"Windows acceso · preparazione app",detail:"Il collegamento è attivo; le finestre delle app non sono ancora pronte.")
+            }
+            return .init(kind:.connected,title:"Windows acceso · collegato",detail:"Il collegamento alle app è disponibile. Lo stato delle singole finestre può variare.")
+        }
+    }
     var machineStateLabel:String {
         if let machineOperation {return machineOperation}
         switch machineState {
@@ -549,7 +575,7 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
                 "frameChannel":bridge?.separateFrames ?? false,
                 "windowGPU":NativeWindowFrames.shared.diagnostics,
                 "windowGPUCache":NativeWindowFrames.shared.cacheDiagnostics,
-                "launcher":["apps":apps.map{["id":$0.id,"name":$0.name,"key":$0.key,"essential":$0.essential]},"opening":Array(openingApps).sorted(),"notice":launcherNotice as Any? ?? NSNull(),"iconCacheHits":iconCacheHits,"iconFetches":iconFetches,"cachedIcons":applicationIcons.count,"recent":launcherPreferences.recent(apps).map(\.id)],
+                "launcher":["apps":apps.map{["id":$0.id,"name":$0.name,"key":$0.key,"essential":$0.essential]},"opening":Array(openingApps).sorted(),"notice":launcherNotice as Any? ?? NSNull(),"iconCacheHits":iconCacheHits,"iconFetches":iconFetches,"cachedIcons":applicationIcons.count,"recent":launcherPreferences.recent(apps).map(\.id),"favorites":launcherPreferences.sections(apps).favorites.map(\.id),"appearance":launcherAppearance.rawValue,"indicator":launcherWindowsStatus.title],
                 "desktop":machine?.desktopState ?? [:],
                 "lastCommandRTTMilliseconds":bridge?.lastRoundTripMilliseconds ?? 0,
                 "frameReceiveMilliseconds":bridge?.frameReceiveMilliseconds ?? 0,
@@ -892,8 +918,13 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
         }
     }
     func togglePin(_ app:WindowsApplication){
-        if !launcherPreferences.pinned.insert(app.id).inserted {launcherPreferences.pinned.remove(app.id)}
-        try? launcherLibrary?.save(launcherPreferences)
+        var next=launcherPreferences
+        if !next.pinned.insert(app.id).inserted {next.pinned.remove(app.id)}
+        do {
+            guard let launcherLibrary else{throw CocoaError(.fileNoSuchFile)}
+            try launcherLibrary.save(next)
+            launcherPreferences=next
+        }catch {launcherNotice="Non riesco a salvare i preferiti. "+error.localizedDescription}
     }
     private static func decodeIcon(_ data:Data)->NSImage? {
         guard data.starts(with:[137,80,78,71,13,10,26,10]),

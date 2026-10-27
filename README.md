@@ -1,5 +1,7 @@
 # Perpendicular Desktop
 
+La0.2.20 introduce il launcher glass nativo: ricerca grande, Preferiti, Recenti e resto del catalogo, senza sidebar o pagina Schermi. L’icona nella barra inferiore apre stato e azioni Windows; Impostazioni→Aspetto permette Sistema, Chiaro e Scuro. Preferiti e tema persistono dopo la chiusura del frontend, verificati nell’app ordinaria. La prova di apertura della console è stata interrotta dall’uscita del runtime: affidabilità generale ancora aperta. [Verifiche e limiti](docs/VERIFICATION.md#27-ottobre--launcher-glass-nativo-e-temi-0220).
+
 **Seamless Apps** integra le singole app Windows nel Mac; **Desktop Mode** apre il desktop Windows completo. Nell’interfaccia compatta: **Seamless / Desktop**. Catalogo unico con tutte le app, ultime aperte in alto, ricerca e icone originali ad alta risoluzione conservate sul Mac. Impostazioni della VM per CPU e RAM, con modifiche applicate al prossimo avvio.
 
 Prima di iniziare o riprendere leggere il [registro dei problemi](docs/KNOWN_ISSUES.md), poi il [piano di lavoro](docs/RESTART_PLAN.md) e la [TODO da mantenere obbligatoriamente aggiornata](docs/TODO.md). Il lavoro prosegue su `main` dalla base scelta dall’utente il 25 ottobre 2026.

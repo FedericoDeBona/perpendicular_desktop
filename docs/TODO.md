@@ -1,5 +1,7 @@
 # TODO — feature e correzioni
 
+**27 ottobre — launcher glass0.2.20 distribuito:** ricerca→preferiti→recenti→resto, nessuna sidebar/Schermi, materiale vetro nativo e temi Sistema/Chiaro/Scuro persistenti. Stato Windows soltanto come icona in basso con dettaglio su clic. UI, temi e preferiti0→2→riapertura→2→0→riapertura→0 verificati nella main locale; APP-003 chiuso. **Limite:** il tentativo Command Prompt→Invio è seguito da perdita del collegamento e uscita QEMU, causa non isolata; apertura/input della console non qualificati. Nuovo avvio ordinario dopo il controllo delle preferenze, nessun arresto forzato o modifica runtime/guest/configurazione. Implementazione UI e verifica main circoscritta completate, nessuna nuova prova clone; affidabilità generale TODO-009/011 ancora IN CORSO. [Prove, fallimenti e limiti](VERIFICATION.md#27-ottobre--launcher-glass-nativo-e-temi-0220).
+
 **27 ottobre — direzione launcher definita dall’utente:** ricerca grande all’apertura, poi **Preferiti → Recenti → resto del catalogo**, stile elegante/moderno nero ispirato a Raycast v2. **Nessuna sidebar e nessuna voce Schermi. Stato Windows soltanto come pallino/colore/icona nella barra inferiore**, con significato accessibile e dettaglio su hover/clic; sostituisce il precedente requisito di etichetta di stato permanente in alto. Prototipo unico Launcher Noir realizzato/verificato localmente; non è una distribuzione nativa. APP-003 resta aperto; implementazione, verifica clone e verifica main DA FARE. [Prove e limiti](VERIFICATION.md#27-ottobre--launcher-noir-ricerca-preferiti-recenti-e-stato-in-basso).
 
 **Cronologia delle direzioni precedenti:** i paragrafi immediatamente seguenti conservano il brainstorming; ordine delle sezioni e presentazione dello stato sono sostituiti dalla richiesta sopra.
@@ -143,6 +145,10 @@ Il [limite WIN-003](KNOWN_ISSUES.md#win-003--monitor-n1-e-drag-fra-scale-diverse
 **Fatto quando:** N+1 reale nell'app principale, con finestra e relativo dialogo trasferibili fra schermi di scala diversa mantenendo contenuto, posizione e input. Non contare uscite fittizie o soli ACK di configurazione. Un eventuale limite del percorso scelto va riportato con versioni e alternative; la deroga alle protezioni resta condizionata all’assenza di alternative valide, non al mancato completamento dell’integrazione.
 
 ## TODO-019 — Catalogo unico e impostazioni VM
+
+**27 ottobre0.2.20 — consegna UI FATTA nel perimetro locale:** implementazione nativa glass e temi Sistema/Chiaro/Scuro distribuita; ricerca, ordine sezioni, stato a icona, impostazioni separate e persistenza preferiti/tema verificati nell’app ordinaria. APP-003 chiuso. **Implementazione completata; verifica main UI circoscritta completata; nessuna nuova verifica clone.** Resta IN CORSO la qualifica generale del percorso app/impostazioni: prova Command Prompt interrotta dall’uscita runtime, non dichiarata riuscita. Prossimo risultato utile: attribuire quell’uscita (TODO-009/011) prima di qualificare apertura/input/chiusura; non ripetere i controlli UI già riusciti senza nuove modifiche. [Evidenze e fallimenti](VERIFICATION.md#27-ottobre--launcher-glass-nativo-e-temi-0220).
+
+**Storico del requisito e del prototipo, superato per lo stato di implementazione/verifica dalla consegna sopra.**
 
 **Direzione definita dall’utente27 ottobre:** all’apertura grande ricerca, poi preferiti, sotto recenti e sotto tutto il resto; stile elegante/moderno nero ispirato a Raycast v2. **Niente sidebar in alcuna pagina del launcher; Schermi scompare. Stato Windows soltanto pallino/colore/icona nella barra di stato in basso**, non etichetta permanente in alto. Dettaglio e azioni accessibili con tooltip/clic; simbolo e nome accessibile distinguono gli stati anche senza il colore. Questo sostituisce la precedente raccomandazione di eliminare Recenti e lo stato testuale permanente. Conservare la capacità multimonitor sottostante.
 
@@ -356,11 +362,15 @@ Prossimo passo: quando si affronta il singolo difetto, conservare un caso reale 
 
 ### TODO-009 — Arresto, riavvio e recupero
 
+**27 ottobre0.2.20:** osservata uscita QEMU86332 durante il tentativo di avvio Command Prompt, senza assertion causale identificata nel campione; nuovo boot normale87434 non è una soluzione. Nessun arresto forzato o cambio runtime. Prossimo passo raccogliere causa/contesto della terminazione se il caso viene ripreso, distinguendolo dalle assertion HVF già note. [Diario](VERIFICATION.md#27-ottobre--launcher-glass-nativo-e-temi-0220).
+
 **Stato: IN CORSO per la riconnessione frontend, ancora DA FARE per affidabilità arresto e aggiornamento.** [SYS-005](KNOWN_ISSUES.md#sys-005--aggiornamento-del-servizio-guest-interrotto-dalla-propria-chiusura): sostituzione guest dal proprio broker interrotta; completata manualmente con attività temporanea fuori dal processo, non updater automatico corretto. [SYS-001](KNOWN_ISSUES.md#sys-001--arresto-hvf-durante-riavvio-o-arresto): assertion HVF durante shutdown/restart, anche con driver ufficiale. Un successivo avvio e un controllo disco riusciti non isolano la causa.
 
 Prossimo passo: al guasto pertinente preservare istruzione/MMIO e contesto, poi correggere il percorso identificato. **Fatto quando:** il passaggio prima difettoso riesce con la correzione causale e l'app comunica perdita/recupero della sessione in modo utilizzabile. Preservare documento e identità della finestra in riconnessione; evitare duplicazioni o input rimasto premuto.
 
 ### TODO-011 — Launcher e finestre già aperte sulla main
+
+**27 ottobre0.2.20:** preferiti nativi visibili/persistenti verificati e APP-003 chiuso. Percorso ricerca Command Prompt→Invio non qualificato: richiesta seguita da scollegamento e uscita QEMU, causa non isolata. Prossimo passo correlare evento runtime e apertura app (TODO-009), non ripetere la prova come se fosse riuscita. [Evidenze](VERIFICATION.md#27-ottobre--launcher-glass-nativo-e-temi-0220).
 
 **27 ottobre, requisito preferiti:** segnalati dall’utente come non funzionanti. Lettura mirata conferma che la UI corrente mostra recenti e catalogo ma non una sezione preferiti, sebbene esista lo store pinned e il menu contestuale. APP-003 aperto; correzione nativa DA FARE nel ridisegno TODO-019. Le stelle funzionanti nei prototipi sono soltanto una verifica del comportamento simulato, non una riparazione distribuita. Prossimo risultato reale: preferiti visibili/persistenti e riconoscibili anche dopo la riapertura del frontend. [Evidenze](VERIFICATION.md#27-ottobre--prototipi-del-nuovo-launcher).
 

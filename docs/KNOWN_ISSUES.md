@@ -1,5 +1,7 @@
 # Registro dei problemi
 
+**27 ottobre — launcher glass0.2.20 distribuito:** ricerca→preferiti→recenti→resto, nessuna sidebar/Schermi, materiale vetro nativo e temi Sistema/Chiaro/Scuro persistenti. Stato Windows soltanto come icona in basso con dettaglio su clic. UI, temi e preferiti0→2→riapertura→2→0→riapertura→0 verificati nella main locale; APP-003 chiuso. **Limite:** il tentativo Command Prompt→Invio è seguito da perdita del collegamento e uscita QEMU, causa non isolata; apertura/input della console non qualificati. Nuovo avvio ordinario dopo il controllo delle preferenze, nessun arresto forzato o modifica runtime/guest/configurazione. Implementazione UI e verifica main circoscritta completate, nessuna nuova prova clone; affidabilità generale TODO-009/011 ancora IN CORSO. [Prove, fallimenti e limiti](VERIFICATION.md#27-ottobre--launcher-glass-nativo-e-temi-0220).
+
 **27 ottobre — direzione launcher definita dall’utente:** ricerca grande all’apertura, poi **Preferiti → Recenti → resto del catalogo**, stile elegante/moderno nero ispirato a Raycast v2. **Nessuna sidebar e nessuna voce Schermi. Stato Windows soltanto come pallino/colore/icona nella barra inferiore**, con significato accessibile e dettaglio su hover/clic; sostituisce il precedente requisito di etichetta di stato permanente in alto. Prototipo unico Launcher Noir realizzato/verificato localmente; non è una distribuzione nativa. APP-003 resta aperto; implementazione, verifica clone e verifica main DA FARE. [Prove e limiti](VERIFICATION.md#27-ottobre--launcher-noir-ricerca-preferiti-recenti-e-stato-in-basso).
 
 **Cronologia delle direzioni precedenti:** i paragrafi immediatamente seguenti conservano il brainstorming; ordine delle sezioni e presentazione dello stato sono sostituiti dalla richiesta sopra.
@@ -119,6 +121,8 @@ Il ciclo RAM protetto 4→2→4 GiB con dati conservati resta la qualifica prece
 
 ### SYS-001 — Arresto HVF durante riavvio o arresto
 
+- **27 ottobre, osservazione distinta da attribuire:** durante la prova launcher0.2.20 QEMU86332 esce dopo richiesta Command Prompt; nessuna assertion HVF identificata nella coda letta, nessuna causa attribuita a questa voce. Nessun arresto forzato usato; il successivo avvio normale non risolve l’affidabilità generale. [Esito negativo e contesto](VERIFICATION.md#27-ottobre--launcher-glass-nativo-e-temi-0220).
+
 - **26 ottobre, stabilizzazione app:** arresto ACPI ancora fallito. Sample della stessa VM: main in perp_balloon_output_bh→pause_all_vcpus e vCPU in virtio_gpu_reset/reset_cond; dipendenza circolare concreta distinta dalle assertion HVF precedenti. Arresto forzato soltanto dopo nuovo consenso, poi nuovo boot. Motore non modificato, voce aperta; prossimo passo eliminare l’attesa del main loop durante il reset conservando la sicurezza del remapping RAM. [Evidenze](VERIFICATION.md#26-ottobre--stabilizzazione-del-percorso-app-native).
 
 
@@ -183,10 +187,11 @@ Il ciclo RAM protetto 4→2→4 GiB con dati conservati resta la qualifica prece
 
 ### APP-003 — Preferiti del launcher senza sezione visibile
 
-- **Stato:** APERTO, segnalato dall’utente il27 ottobre come «i preferiti non funzionano». Nessuna nuova prova interattiva della persistenza nella main in questo passaggio.
-- **Evidenza sorgente circoscritta:** Launcher.swift costruisce soltanto recenti e catalogo; il menu contestuale chiama togglePin, ma i pinned non hanno un elenco dedicato né riconoscimento sulle tessere. LauncherPreferences conserva pinned e la funzione suggested non alimenta quella vista. Questo dimostra il difetto di esposizione, non esclude un ulteriore problema di salvataggio/identità da verificare.
-- **Prossimo passo:** integrare i preferiti visibili di Launcher Noir nel ridisegno nativo TODO-019, con aggiunta/rimozione esplicita e store esistente per VM. Prototipo4→5→4 e aggiunta mantenuta al reload verificati; non provano lo store della main e non chiudono il difetto. Verificare salvataggio/rilettura sulla stessa app installata. [Requisiti e prova locale](VERIFICATION.md#27-ottobre--launcher-noir-ricerca-preferiti-recenti-e-stato-in-basso).
-- **Chiusura:** aggiunta/rimozione osservabili e mantenute dopo riapertura del frontend nella main, senza perdere preferenze preesistenti. [Evidenze](VERIFICATION.md#27-ottobre--prototipi-del-nuovo-launcher).
+- **Stato:** CHIUSO nel perimetro della main locale0.2.20; criterio sotto verificato con app ordinaria, non col prototipo.
+- **Difetto e prova precedente conservati:** Launcher.swift mostrava recenti e catalogo; togglePin/store esistevano ma mancavano sezione e riconoscimento dei pinned. L’assenza della sezione non provava da sola un difetto di persistenza.
+- **Correzione:** preferiti visibili in cima, stelle/azione rimuovi, sezione separata da recenti/resto. Store esistente per VM conservato; errori di salvataggio non più ignorati.
+- **Chiusura verificata:** File Explorer/Notepad0→2→chiusura e riapertura frontend→2, poi rimozione2→0→riapertura→0; baseline vuota ripristinata e usage conservati. Nessuna nuova qualifica clone o delle finestre Windows. [Evidenze](VERIFICATION.md#27-ottobre--launcher-glass-nativo-e-temi-0220).
+- **Prossimo passo:** nessun altro intervento per il criterio soddisfatto; eventuali regressioni vanno riaperte con identità app/store osservati.
 
 ## Limite delle acquisizioni automatiche
 
