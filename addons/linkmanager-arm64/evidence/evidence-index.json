@@ -1,0 +1,604 @@
+[
+  {
+    "file": "004-tools-call.json",
+    "evidence_id": "ev_00b0077d9d83000e9566bdb0aa352ff64ef6a970a9506154c2b5d06e23fa0bb9",
+    "subject": {
+      "name": "LinkManagerSvc.exe",
+      "digest": {
+        "sha256": "ea2ee69df1e26c4d4d5eba405b2426216632737c287c132e2a50bc4613786d90"
+      },
+      "local_path": "/private/var/folders/5t/1t16twq55wl37p486mhz6y080000gn/T/linkmanager-rea-20261027-p1a2nyt2/LinkManagerSvc.exe",
+      "format": "pe",
+      "architecture": "x86_64"
+    },
+    "operation": "search_strings",
+    "parameters": {
+      "pattern": "lmtap|Global|adapter|ComponentId|tap0901",
+      "mode": "regex",
+      "case_sensitive": false
+    },
+    "confidence": "observed",
+    "authority": "shipped-artifact"
+  },
+  {
+    "file": "005-tools-call.json",
+    "evidence_id": "ev_9495eecc9e5081ec276a84d86f8bbd05937a7bb016567c23a93480dca23f676b",
+    "subject": {
+      "name": "LinkManagerSvc.exe",
+      "digest": {
+        "sha256": "ea2ee69df1e26c4d4d5eba405b2426216632737c287c132e2a50bc4613786d90"
+      },
+      "local_path": "/private/var/folders/5t/1t16twq55wl37p486mhz6y080000gn/T/linkmanager-rea-20261027-p1a2nyt2/LinkManagerSvc.exe",
+      "format": "pe",
+      "architecture": "x86_64"
+    },
+    "operation": "xrefs",
+    "parameters": {
+      "address": "0x14001d14c"
+    },
+    "confidence": "observed",
+    "authority": "shipped-artifact"
+  },
+  {
+    "file": "006-tools-call.json",
+    "evidence_id": "ev_040201d0deb44c18f39a452038bdff46ea3a89739bc81cbfd0a36fcb8d1979e4",
+    "subject": {
+      "name": "LinkManagerSvc.exe",
+      "digest": {
+        "sha256": "ea2ee69df1e26c4d4d5eba405b2426216632737c287c132e2a50bc4613786d90"
+      },
+      "local_path": "/private/var/folders/5t/1t16twq55wl37p486mhz6y080000gn/T/linkmanager-rea-20261027-p1a2nyt2/LinkManagerSvc.exe",
+      "format": "pe",
+      "architecture": "x86_64"
+    },
+    "operation": "xrefs",
+    "parameters": {
+      "address": "0x14001dbf8"
+    },
+    "confidence": "observed",
+    "authority": "shipped-artifact"
+  },
+  {
+    "file": "007-tools-call.json",
+    "evidence_id": "ev_9f2940e85c6f615d063422b8aae7f54636f17bc070c50131b9e1ec614232ae30",
+    "subject": {
+      "name": "LinkManagerSvc.exe",
+      "digest": {
+        "sha256": "ea2ee69df1e26c4d4d5eba405b2426216632737c287c132e2a50bc4613786d90"
+      },
+      "local_path": "/private/var/folders/5t/1t16twq55wl37p486mhz6y080000gn/T/linkmanager-rea-20261027-p1a2nyt2/LinkManagerSvc.exe",
+      "format": "pe",
+      "architecture": "x86_64"
+    },
+    "operation": "find_xrefs_to_name",
+    "parameters": {
+      "name": "DeviceIoControl"
+    },
+    "confidence": "derived",
+    "authority": "shipped-artifact"
+  },
+  {
+    "file": "008-tools-call.json",
+    "evidence_id": "ev_197f6735f65b2ef971615e57fa24ce62e759999027b889d9770da36266634d5c",
+    "subject": {
+      "name": "LinkManagerSvc.exe",
+      "digest": {
+        "sha256": "ea2ee69df1e26c4d4d5eba405b2426216632737c287c132e2a50bc4613786d90"
+      },
+      "local_path": "/private/var/folders/5t/1t16twq55wl37p486mhz6y080000gn/T/linkmanager-rea-20261027-p1a2nyt2/LinkManagerSvc.exe",
+      "format": "pe",
+      "architecture": "x86_64"
+    },
+    "operation": "resolve_containing_procedure",
+    "parameters": {
+      "address": "0x140003411"
+    },
+    "confidence": "observed",
+    "authority": "shipped-artifact"
+  },
+  {
+    "file": "009-tools-call.json",
+    "evidence_id": "ev_af8626a5b3f051ae4bf3bb34835c4fa061284cec6529eefba1a53004a8b4e131",
+    "subject": {
+      "name": "LinkManagerSvc.exe",
+      "digest": {
+        "sha256": "ea2ee69df1e26c4d4d5eba405b2426216632737c287c132e2a50bc4613786d90"
+      },
+      "local_path": "/private/var/folders/5t/1t16twq55wl37p486mhz6y080000gn/T/linkmanager-rea-20261027-p1a2nyt2/LinkManagerSvc.exe",
+      "format": "pe",
+      "architecture": "x86_64"
+    },
+    "operation": "resolve_containing_procedure",
+    "parameters": {
+      "address": "0x140005ab8"
+    },
+    "confidence": "observed",
+    "authority": "shipped-artifact"
+  },
+  {
+    "file": "010-tools-call.json",
+    "evidence_id": "ev_bd044a3c8e487af068829dadebfbf0bafd10d8f9594edc26e967172bad7ac317",
+    "subject": {
+      "name": "LinkManagerSvc.exe",
+      "digest": {
+        "sha256": "ea2ee69df1e26c4d4d5eba405b2426216632737c287c132e2a50bc4613786d90"
+      },
+      "local_path": "/private/var/folders/5t/1t16twq55wl37p486mhz6y080000gn/T/linkmanager-rea-20261027-p1a2nyt2/LinkManagerSvc.exe",
+      "format": "pe",
+      "architecture": "x86_64"
+    },
+    "operation": "search_procedures",
+    "parameters": {
+      "pattern": "DeviceIoControl",
+      "mode": "literal",
+      "case_sensitive": false
+    },
+    "confidence": "observed",
+    "authority": "shipped-artifact"
+  },
+  {
+    "file": "011-tools-call.json",
+    "evidence_id": "ev_fec94c9135ca5c7cbf67b6c550d2245c11409f4f5c16936f6a2f7822f0cacc56",
+    "subject": {
+      "name": "LinkManagerSvc.exe",
+      "digest": {
+        "sha256": "ea2ee69df1e26c4d4d5eba405b2426216632737c287c132e2a50bc4613786d90"
+      },
+      "local_path": "/private/var/folders/5t/1t16twq55wl37p486mhz6y080000gn/T/linkmanager-rea-20261027-p1a2nyt2/LinkManagerSvc.exe",
+      "format": "pe",
+      "architecture": "x86_64"
+    },
+    "operation": "procedure_pseudo_code",
+    "parameters": {
+      "procedure": "0x140003020"
+    },
+    "confidence": "observed",
+    "authority": "shipped-artifact"
+  },
+  {
+    "file": "012-tools-call.json",
+    "evidence_id": "ev_c6885e5f90584f04ce7819489258e5ec07856f4ab5782872f926f645f13e2856",
+    "subject": {
+      "name": "LinkManagerSvc.exe",
+      "digest": {
+        "sha256": "ea2ee69df1e26c4d4d5eba405b2426216632737c287c132e2a50bc4613786d90"
+      },
+      "local_path": "/private/var/folders/5t/1t16twq55wl37p486mhz6y080000gn/T/linkmanager-rea-20261027-p1a2nyt2/LinkManagerSvc.exe",
+      "format": "pe",
+      "architecture": "x86_64"
+    },
+    "operation": "procedure_pseudo_code",
+    "parameters": {
+      "procedure": "0x140005a50"
+    },
+    "confidence": "observed",
+    "authority": "shipped-artifact"
+  },
+  {
+    "file": "013-tools-call.json",
+    "evidence_id": "ev_31d4da7833052b08be4ca524d1609d1db89b12a97b6bd6088fb80118a12db11a",
+    "subject": {
+      "name": "LinkManagerSvc.exe",
+      "digest": {
+        "sha256": "ea2ee69df1e26c4d4d5eba405b2426216632737c287c132e2a50bc4613786d90"
+      },
+      "local_path": "/private/var/folders/5t/1t16twq55wl37p486mhz6y080000gn/T/linkmanager-rea-20261027-p1a2nyt2/LinkManagerSvc.exe",
+      "format": "pe",
+      "architecture": "x86_64"
+    },
+    "operation": "procedure_callers",
+    "parameters": {
+      "procedure": "KERNEL32.DLL::DeviceIoControl"
+    },
+    "confidence": "observed",
+    "authority": "shipped-artifact"
+  },
+  {
+    "file": "016-tools-call.json",
+    "evidence_id": "ev_b0664b459a8a928479448a69b993bc3e367c5a96c52fa403d2e272e0e79f1a5f",
+    "subject": {
+      "name": "LinkManagerTray.exe",
+      "digest": {
+        "sha256": "0d78ccee781d9e5b0b85ee805fb4a30f1170d6c0e7080a3de4f6f13c236e45bb"
+      },
+      "local_path": "/private/var/folders/5t/1t16twq55wl37p486mhz6y080000gn/T/linkmanager-rea-20261027-p1a2nyt2/LinkManagerTray.exe",
+      "format": "pe",
+      "architecture": "x86_64"
+    },
+    "operation": "search_procedures",
+    "parameters": {
+      "pattern": "DeviceIoControl|ReadFile|WriteFile",
+      "mode": "regex",
+      "case_sensitive": false
+    },
+    "confidence": "observed",
+    "authority": "shipped-artifact"
+  },
+  {
+    "file": "017-tools-call.json",
+    "evidence_id": "ev_53c0e01ba05583e08f25f379123b794bcdf5f5bc479d2061818297b1fe07210c",
+    "subject": {
+      "name": "LinkManagerTray.exe",
+      "digest": {
+        "sha256": "0d78ccee781d9e5b0b85ee805fb4a30f1170d6c0e7080a3de4f6f13c236e45bb"
+      },
+      "local_path": "/private/var/folders/5t/1t16twq55wl37p486mhz6y080000gn/T/linkmanager-rea-20261027-p1a2nyt2/LinkManagerTray.exe",
+      "format": "pe",
+      "architecture": "x86_64"
+    },
+    "operation": "procedure_callers",
+    "parameters": {
+      "procedure": "KERNEL32.DLL::DeviceIoControl"
+    },
+    "confidence": "observed",
+    "authority": "shipped-artifact"
+  },
+  {
+    "file": "018-tools-call.json",
+    "evidence_id": "ev_0cc78e75fc6e933ff34c87cfb8337970bed8e70bb050ed453f37f5f9cdc6dd0f",
+    "subject": {
+      "name": "LinkManagerTray.exe",
+      "digest": {
+        "sha256": "0d78ccee781d9e5b0b85ee805fb4a30f1170d6c0e7080a3de4f6f13c236e45bb"
+      },
+      "local_path": "/private/var/folders/5t/1t16twq55wl37p486mhz6y080000gn/T/linkmanager-rea-20261027-p1a2nyt2/LinkManagerTray.exe",
+      "format": "pe",
+      "architecture": "x86_64"
+    },
+    "operation": "search_strings",
+    "parameters": {
+      "pattern": "lmtap|Global.*tap|Could not open host|bcmasq|TAP-Windows",
+      "mode": "regex",
+      "case_sensitive": false
+    },
+    "confidence": "observed",
+    "authority": "shipped-artifact"
+  },
+  {
+    "file": "019-tools-call.json",
+    "evidence_id": "ev_5be40ab74e7bd5ae004617a3d21c2677ef733bb3ab03585b73d8f7f62ebe10d3",
+    "subject": {
+      "name": "LinkManagerTray.exe",
+      "digest": {
+        "sha256": "0d78ccee781d9e5b0b85ee805fb4a30f1170d6c0e7080a3de4f6f13c236e45bb"
+      },
+      "local_path": "/private/var/folders/5t/1t16twq55wl37p486mhz6y080000gn/T/linkmanager-rea-20261027-p1a2nyt2/LinkManagerTray.exe",
+      "format": "pe",
+      "architecture": "x86_64"
+    },
+    "operation": "procedure_pseudo_code",
+    "parameters": {
+      "procedure": "0x140088360"
+    },
+    "confidence": "observed",
+    "authority": "shipped-artifact"
+  },
+  {
+    "file": "020-tools-call.json",
+    "evidence_id": "ev_a0dd51ce1af9bf92d4e2d9e25f3377c34bfb12ed684f4b5c46dfba5923ae4d5d",
+    "subject": {
+      "name": "LinkManagerTray.exe",
+      "digest": {
+        "sha256": "0d78ccee781d9e5b0b85ee805fb4a30f1170d6c0e7080a3de4f6f13c236e45bb"
+      },
+      "local_path": "/private/var/folders/5t/1t16twq55wl37p486mhz6y080000gn/T/linkmanager-rea-20261027-p1a2nyt2/LinkManagerTray.exe",
+      "format": "pe",
+      "architecture": "x86_64"
+    },
+    "operation": "procedure_pseudo_code",
+    "parameters": {
+      "procedure": "0x14008cf00"
+    },
+    "confidence": "observed",
+    "authority": "shipped-artifact"
+  },
+  {
+    "file": "021-tools-call.json",
+    "evidence_id": "ev_df15b9ec7366d3256ca04fad29156d83c4d3544033d199c3facc0e176837599d",
+    "subject": {
+      "name": "LinkManagerTray.exe",
+      "digest": {
+        "sha256": "0d78ccee781d9e5b0b85ee805fb4a30f1170d6c0e7080a3de4f6f13c236e45bb"
+      },
+      "local_path": "/private/var/folders/5t/1t16twq55wl37p486mhz6y080000gn/T/linkmanager-rea-20261027-p1a2nyt2/LinkManagerTray.exe",
+      "format": "pe",
+      "architecture": "x86_64"
+    },
+    "operation": "procedure_pseudo_code",
+    "parameters": {
+      "procedure": "0x14008faf0"
+    },
+    "confidence": "observed",
+    "authority": "shipped-artifact"
+  },
+  {
+    "file": "022-tools-call.json",
+    "evidence_id": "ev_e5927989f223ee42152eacc6c9a488bdc51f60962caf66092708f0fe268407a6",
+    "subject": {
+      "name": "LinkManagerTray.exe",
+      "digest": {
+        "sha256": "0d78ccee781d9e5b0b85ee805fb4a30f1170d6c0e7080a3de4f6f13c236e45bb"
+      },
+      "local_path": "/private/var/folders/5t/1t16twq55wl37p486mhz6y080000gn/T/linkmanager-rea-20261027-p1a2nyt2/LinkManagerTray.exe",
+      "format": "pe",
+      "architecture": "x86_64"
+    },
+    "operation": "procedure_pseudo_code",
+    "parameters": {
+      "procedure": "0x140095e70"
+    },
+    "confidence": "observed",
+    "authority": "shipped-artifact"
+  },
+  {
+    "file": "023-tools-call.json",
+    "evidence_id": "ev_2901097910ddcebc024ffe4a9f1467fc6ed6af5604baf08c6b06bf8f3a670967",
+    "subject": {
+      "name": "LinkManagerTray.exe",
+      "digest": {
+        "sha256": "0d78ccee781d9e5b0b85ee805fb4a30f1170d6c0e7080a3de4f6f13c236e45bb"
+      },
+      "local_path": "/private/var/folders/5t/1t16twq55wl37p486mhz6y080000gn/T/linkmanager-rea-20261027-p1a2nyt2/LinkManagerTray.exe",
+      "format": "pe",
+      "architecture": "x86_64"
+    },
+    "operation": "xrefs",
+    "parameters": {
+      "address": "0x140103938"
+    },
+    "confidence": "observed",
+    "authority": "shipped-artifact"
+  },
+  {
+    "file": "024-tools-call.json",
+    "evidence_id": "ev_2891ef5791c3ff6675f46f1bcb08473722feba50411f6c88fc9a1249c68aea98",
+    "subject": {
+      "name": "LinkManagerTray.exe",
+      "digest": {
+        "sha256": "0d78ccee781d9e5b0b85ee805fb4a30f1170d6c0e7080a3de4f6f13c236e45bb"
+      },
+      "local_path": "/private/var/folders/5t/1t16twq55wl37p486mhz6y080000gn/T/linkmanager-rea-20261027-p1a2nyt2/LinkManagerTray.exe",
+      "format": "pe",
+      "architecture": "x86_64"
+    },
+    "operation": "procedure_pseudo_code",
+    "parameters": {
+      "procedure": "0x1400964e0"
+    },
+    "confidence": "observed",
+    "authority": "shipped-artifact"
+  },
+  {
+    "file": "025-tools-call.json",
+    "evidence_id": "ev_6572e59f63feb78090a9175e2ff1aba93f191c7d7f75234cbe987edcee3d18ed",
+    "subject": {
+      "name": "LinkManagerTray.exe",
+      "digest": {
+        "sha256": "0d78ccee781d9e5b0b85ee805fb4a30f1170d6c0e7080a3de4f6f13c236e45bb"
+      },
+      "local_path": "/private/var/folders/5t/1t16twq55wl37p486mhz6y080000gn/T/linkmanager-rea-20261027-p1a2nyt2/LinkManagerTray.exe",
+      "format": "pe",
+      "architecture": "x86_64"
+    },
+    "operation": "procedure_pseudo_code",
+    "parameters": {
+      "procedure": "0x1400965e0"
+    },
+    "confidence": "observed",
+    "authority": "shipped-artifact"
+  },
+  {
+    "file": "026-tools-call.json",
+    "evidence_id": "ev_b8f92a39c44a007b0390c25e686d7ab5a040d3f5c4fd87837b66941b142172e4",
+    "subject": {
+      "name": "LinkManagerTray.exe",
+      "digest": {
+        "sha256": "0d78ccee781d9e5b0b85ee805fb4a30f1170d6c0e7080a3de4f6f13c236e45bb"
+      },
+      "local_path": "/private/var/folders/5t/1t16twq55wl37p486mhz6y080000gn/T/linkmanager-rea-20261027-p1a2nyt2/LinkManagerTray.exe",
+      "format": "pe",
+      "architecture": "x86_64"
+    },
+    "operation": "xrefs",
+    "parameters": {
+      "address": "0x1400e684c"
+    },
+    "confidence": "observed",
+    "authority": "shipped-artifact"
+  },
+  {
+    "file": "027-tools-call.json",
+    "evidence_id": "ev_b8e38fd1fd88d644f1f6d7d773efb73f0017bb20eae8615e389d4a456547a9e6",
+    "subject": {
+      "name": "LinkManagerTray.exe",
+      "digest": {
+        "sha256": "0d78ccee781d9e5b0b85ee805fb4a30f1170d6c0e7080a3de4f6f13c236e45bb"
+      },
+      "local_path": "/private/var/folders/5t/1t16twq55wl37p486mhz6y080000gn/T/linkmanager-rea-20261027-p1a2nyt2/LinkManagerTray.exe",
+      "format": "pe",
+      "architecture": "x86_64"
+    },
+    "operation": "resolve_containing_procedure",
+    "parameters": {
+      "address": "0x140096816"
+    },
+    "confidence": "observed",
+    "authority": "shipped-artifact"
+  },
+  {
+    "file": "028-tools-call.json",
+    "evidence_id": "ev_5a4cc8327539596cc7cf0ca3e706c3024067f83dc2e5d48cccdb35db51786391",
+    "subject": {
+      "name": "LinkManagerTray.exe",
+      "digest": {
+        "sha256": "0d78ccee781d9e5b0b85ee805fb4a30f1170d6c0e7080a3de4f6f13c236e45bb"
+      },
+      "local_path": "/private/var/folders/5t/1t16twq55wl37p486mhz6y080000gn/T/linkmanager-rea-20261027-p1a2nyt2/LinkManagerTray.exe",
+      "format": "pe",
+      "architecture": "x86_64"
+    },
+    "operation": "resolve_containing_procedure",
+    "parameters": {
+      "address": "0x140086efd"
+    },
+    "confidence": "observed",
+    "authority": "shipped-artifact"
+  },
+  {
+    "file": "029-tools-call.json",
+    "evidence_id": "ev_3352ace05ac070709a376c41a70d5c9a5b09f0b4471f5483d2a20d311ee5a9ba",
+    "subject": {
+      "name": "LinkManagerTray.exe",
+      "digest": {
+        "sha256": "0d78ccee781d9e5b0b85ee805fb4a30f1170d6c0e7080a3de4f6f13c236e45bb"
+      },
+      "local_path": "/private/var/folders/5t/1t16twq55wl37p486mhz6y080000gn/T/linkmanager-rea-20261027-p1a2nyt2/LinkManagerTray.exe",
+      "format": "pe",
+      "architecture": "x86_64"
+    },
+    "operation": "procedure_pseudo_code",
+    "parameters": {
+      "procedure": "0x1400967f0"
+    },
+    "confidence": "observed",
+    "authority": "shipped-artifact"
+  },
+  {
+    "file": "030-tools-call.json",
+    "evidence_id": "ev_297afdd0ac24cad7f3fdf2717f6065a453dece4b243f1c9309bab381086f2322",
+    "subject": {
+      "name": "LinkManagerTray.exe",
+      "digest": {
+        "sha256": "0d78ccee781d9e5b0b85ee805fb4a30f1170d6c0e7080a3de4f6f13c236e45bb"
+      },
+      "local_path": "/private/var/folders/5t/1t16twq55wl37p486mhz6y080000gn/T/linkmanager-rea-20261027-p1a2nyt2/LinkManagerTray.exe",
+      "format": "pe",
+      "architecture": "x86_64"
+    },
+    "operation": "procedure_pseudo_code",
+    "parameters": {
+      "procedure": "0x1400869c0"
+    },
+    "confidence": "observed",
+    "authority": "shipped-artifact"
+  },
+  {
+    "file": "033-tools-call.json",
+    "evidence_id": "ev_fcabf89d3ae5eceef92e14675a9f4fc3ae470c34bcd0e3914f76232a89169b0f",
+    "subject": {
+      "name": "lmtap.sys",
+      "digest": {
+        "sha256": "734d78c959b1348d41d24ce2d86b023b7a6f469cb0d379ecfc2ccfce879261e6"
+      },
+      "local_path": "/private/var/folders/5t/1t16twq55wl37p486mhz6y080000gn/T/linkmanager-rea-20261027-p1a2nyt2/lmtap.sys",
+      "format": "pe",
+      "architecture": "x86_64"
+    },
+    "operation": "search_procedures",
+    "parameters": {
+      "pattern": "DeviceControl|DriverEntry|TapDevice",
+      "mode": "regex",
+      "case_sensitive": false
+    },
+    "confidence": "observed",
+    "authority": "shipped-artifact"
+  },
+  {
+    "file": "034-tools-call.json",
+    "evidence_id": "ev_a87cd39184227b4f67ca492b00ea8e63f1ddfbd77f21899ccaf473e2097ddc90",
+    "subject": {
+      "name": "lmtap.sys",
+      "digest": {
+        "sha256": "734d78c959b1348d41d24ce2d86b023b7a6f469cb0d379ecfc2ccfce879261e6"
+      },
+      "local_path": "/private/var/folders/5t/1t16twq55wl37p486mhz6y080000gn/T/linkmanager-rea-20261027-p1a2nyt2/lmtap.sys",
+      "format": "pe",
+      "architecture": "x86_64"
+    },
+    "operation": "search_strings",
+    "parameters": {
+      "pattern": "device.c|Set TUN|bcmasq|DHCP|TapDeviceControl|tapdrvr.c",
+      "mode": "regex",
+      "case_sensitive": false
+    },
+    "confidence": "observed",
+    "authority": "shipped-artifact"
+  },
+  {
+    "file": "035-tools-call.json",
+    "evidence_id": "ev_8f2d429ddff86e2433374539bdf6265cf23c81dedbc7f05c3798d3aecd7766f8",
+    "subject": {
+      "name": "lmtap.sys",
+      "digest": {
+        "sha256": "734d78c959b1348d41d24ce2d86b023b7a6f469cb0d379ecfc2ccfce879261e6"
+      },
+      "local_path": "/private/var/folders/5t/1t16twq55wl37p486mhz6y080000gn/T/linkmanager-rea-20261027-p1a2nyt2/lmtap.sys",
+      "format": "pe",
+      "architecture": "x86_64"
+    },
+    "operation": "search_bytes",
+    "parameters": {
+      "pattern": "08 00 22 00",
+      "limit": 100
+    },
+    "confidence": "observed",
+    "authority": "shipped-artifact"
+  },
+  {
+    "file": "036-tools-call.json",
+    "evidence_id": "ev_37e3fc812191015125571f2f763f265e31d2cff37a59624b80330964a910a38f",
+    "subject": {
+      "name": "lmtap.sys",
+      "digest": {
+        "sha256": "734d78c959b1348d41d24ce2d86b023b7a6f469cb0d379ecfc2ccfce879261e6"
+      },
+      "local_path": "/private/var/folders/5t/1t16twq55wl37p486mhz6y080000gn/T/linkmanager-rea-20261027-p1a2nyt2/lmtap.sys",
+      "format": "pe",
+      "architecture": "x86_64"
+    },
+    "operation": "xrefs",
+    "parameters": {
+      "address": "0x140006420"
+    },
+    "confidence": "observed",
+    "authority": "shipped-artifact"
+  },
+  {
+    "file": "037-tools-call.json",
+    "evidence_id": "ev_7a7890845645ffb03aa10201f19d053250fb61a1a1912437c7f8da5eb1c82c2c",
+    "subject": {
+      "name": "lmtap.sys",
+      "digest": {
+        "sha256": "734d78c959b1348d41d24ce2d86b023b7a6f469cb0d379ecfc2ccfce879261e6"
+      },
+      "local_path": "/private/var/folders/5t/1t16twq55wl37p486mhz6y080000gn/T/linkmanager-rea-20261027-p1a2nyt2/lmtap.sys",
+      "format": "pe",
+      "architecture": "x86_64"
+    },
+    "operation": "xrefs",
+    "parameters": {
+      "address": "0x14000b440"
+    },
+    "confidence": "observed",
+    "authority": "shipped-artifact"
+  },
+  {
+    "file": "038-tools-call.json",
+    "evidence_id": "ev_9cfb91e9b07bbaf1d997d4c3906f154f41de91a55a6d4dcabd622b751877c4da",
+    "subject": {
+      "name": "lmtap.sys",
+      "digest": {
+        "sha256": "734d78c959b1348d41d24ce2d86b023b7a6f469cb0d379ecfc2ccfce879261e6"
+      },
+      "local_path": "/private/var/folders/5t/1t16twq55wl37p486mhz6y080000gn/T/linkmanager-rea-20261027-p1a2nyt2/lmtap.sys",
+      "format": "pe",
+      "architecture": "x86_64"
+    },
+    "operation": "procedure_pseudo_code",
+    "parameters": {
+      "procedure": "0x14000a360"
+    },
+    "confidence": "observed",
+    "authority": "shipped-artifact"
+  }
+]

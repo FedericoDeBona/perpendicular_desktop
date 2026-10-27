@@ -1,0 +1,107 @@
+{
+  "result": {
+    "_meta": {
+      "provenance": {
+        "untrusted_content": true,
+        "source": "analysis_target"
+      }
+    },
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"evidence_id\":\"ev_6572e59f63feb78090a9175e2ff1aba93f191c7d7f75234cbe987edcee3d18ed\",\"subject\":{\"name\":\"LinkManagerTray.exe\",\"digest\":{\"sha256\":\"0d78ccee781d9e5b0b85ee805fb4a30f1170d6c0e7080a3de4f6f13c236e45bb\"},\"local_path\":\"/private/var/folders/5t/1t16twq55wl37p486mhz6y080000gn/T/linkmanager-rea-20261027-p1a2nyt2/LinkManagerTray.exe\",\"format\":\"pe\",\"architecture\":\"x86_64\"},\"provider\":{\"id\":\"ghidra\",\"name\":\"Ghidra\",\"version\":\"12.1.4\"},\"analysis_profile\":{\"provider\":{\"id\":\"ghidra\",\"name\":\"Ghidra\",\"version\":\"12.1.4\"},\"parameters\":{\"target_kind\":\"executable\",\"target_format\":\"pe\",\"executable_role\":\"application\",\"managed\":false,\"native_aot_metadata\":{\"contract_revision\":\"rtr-9.1-x64-pe-read-only-v3\",\"source_bytes\":134217728,\"work_units\":67108864,\"working_memory_bytes\":67108864,\"report_bytes\":4194304},\"architecture\":\"x86_64\",\"available_architectures\":[\"x86_64\"],\"import_mode\":\"ephemeral-source-immutable\",\"pdb_observations\":\"program-info-v1\",\"annotation_policy\":\"atomic-function-entry-metadata-v1\",\"load_image_observations\":\"source-mappings-entry-context-v2\",\"function_body_evidence\":\"complete-inclusive-ranges-v1\",\"function_references\":\"complete-body-and-entry-reference-manager-v2\",\"call_relationship_coverage\":\"function-body-call-coverage-v5\",\"function_dossier_coverage\":\"observed-facets-and-call-relationships-v1\",\"string_inventory_evidence\":\"defined-data-coverage-v1\",\"location_resolution\":\"explicit-address-exact-entry-symbol-first-v3\",\"procedure_file_offset_resolution\":\"address-first-unique-target-source-mapping-v2\",\"instruction_flow_evidence\":\"decoded-return-pcode-v1\",\"instruction_references\":\"exact-address-incoming-v1\",\"function_boundary_observations\":\"ghidra-function-boundary-limitations-v3\",\"no_return_repair\":\"returning-imports-decoded-return-v2\",\"process_launch\":\"inspected-jvm-launch-support-v1\",\"jump_table_evidence\":\"typed-case-default-blocks-v1\",\"decompiler_jump_loads\":true,\"loader\":\"auto-from-header\",\"language_id\":\"auto-from-header\",\"compiler_spec_id\":\"auto-default\",\"analyzer_preset\":\"ghidra-default\"},\"digest\":\"59e0d37bce87c1b8ccb70c6062be2383648a35642f5a6c85b1db0939164d5e55\"},\"predicate_type\":\"rea.analysis\",\"operation\":\"procedure_pseudo_code\",\"parameters\":{\"procedure\":\"0x1400965e0\"},\"raw_result\":{\"value\":\"\\nundefined8 FUN_1400965e0(int param_1,LPVOID param_2,uint param_3,undefined *param_4)\\n\\n{\\n  undefined8 uVar1;\\n  LPDWORD pDVar2;\\n  ulonglong uVar3;\\n  DWORD local_18;\\n  int local_14;\\n  DWORD local_10;\\n  DWORD local_c;\\n  \\n  uVar1 = FUN_140096790(param_1);\\n  local_14 = (int)uVar1;\\n  local_18 = 0;\\n  if (local_14 == 1) {\\n    uVar1 = 0;\\n  }\\n  else if (local_14 == 2) {\\n    uVar1 = 1;\\n    pDVar2 = &local_18;\\n    local_10 = GetOverlappedResult(*(HANDLE *)(&DAT_140107068 + (longlong)param_1 * 8),\\n                                   (LPOVERLAPPED)(&DAT_140107180 + (longlong)param_1 * 0x20),pDVar2,\\n                                   1);\\n    if (local_10 == 0) {\\n      local_c = GetLastError();\\n      if (local_c == 0x3e3) {\\n        FUN_140006130(s_GetOverlappedResult_failed___ld__1401038c0,0x3e3,\\n                      s__normal_after_wakeup__1401038a8,uVar1);\\n      }\\n      else {\\n        FUN_140006090(s_GetOverlappedResult_failed___ld_1401038e8,(ulonglong)local_c,pDVar2,uVar1);\\n      }\\n      SetLastError(local_c);\\n      uVar1 = 0xffffffff;\\n    }\\n    else {\\n      ResetEvent(*(HANDLE *)(&DAT_140107198 + (longlong)param_1 * 0x20));\\n      uVar1 = (*(code *)param_4)(param_2,local_18);\\n    }\\n  }\\n  else {\\n    pDVar2 = &local_18;\\n    uVar3 = (ulonglong)param_3;\\n    local_10 = ReadFile(*(HANDLE *)(&DAT_140107068 + (longlong)param_1 * 8),param_2,param_3,pDVar2,\\n                        (LPOVERLAPPED)(&DAT_140107180 + (longlong)param_1 * 0x20));\\n    if (local_10 == 0) {\\n      local_10 = GetLastError();\\n      if (local_10 == 0x3e5) {\\n        uVar1 = 0;\\n      }\\n      else {\\n        FUN_140006090(s_ReadFile_failed___ld_140103908,(ulonglong)local_10,uVar3,pDVar2);\\n        uVar1 = 0xffffffff;\\n      }\\n    }\\n    else {\\n      ResetEvent(*(HANDLE *)(&DAT_140107198 + (longlong)param_1 * 0x20));\\n      uVar1 = (*(code *)param_4)(param_2,local_18);\\n    }\\n  }\\n  return uVar1;\\n}\\n\\n\",\"limitations\":[]},\"normalized_result\":\"\\nundefined8 FUN_1400965e0(int param_1,LPVOID param_2,uint param_3,undefined *param_4)\\n\\n{\\n  undefined8 uVar1;\\n  LPDWORD pDVar2;\\n  ulonglong uVar3;\\n  DWORD local_18;\\n  int local_14;\\n  DWORD local_10;\\n  DWORD local_c;\\n  \\n  uVar1 = FUN_140096790(param_1);\\n  local_14 = (int)uVar1;\\n  local_18 = 0;\\n  if (local_14 == 1) {\\n    uVar1 = 0;\\n  }\\n  else if (local_14 == 2) {\\n    uVar1 = 1;\\n    pDVar2 = &local_18;\\n    local_10 = GetOverlappedResult(*(HANDLE *)(&DAT_140107068 + (longlong)param_1 * 8),\\n                                   (LPOVERLAPPED)(&DAT_140107180 + (longlong)param_1 * 0x20),pDVar2,\\n                                   1);\\n    if (local_10 == 0) {\\n      local_c = GetLastError();\\n      if (local_c == 0x3e3) {\\n        FUN_140006130(s_GetOverlappedResult_failed___ld__1401038c0,0x3e3,\\n                      s__normal_after_wakeup__1401038a8,uVar1);\\n      }\\n      else {\\n        FUN_140006090(s_GetOverlappedResult_failed___ld_1401038e8,(ulonglong)local_c,pDVar2,uVar1);\\n      }\\n      SetLastError(local_c);\\n      uVar1 = 0xffffffff;\\n    }\\n    else {\\n      ResetEvent(*(HANDLE *)(&DAT_140107198 + (longlong)param_1 * 0x20));\\n      uVar1 = (*(code *)param_4)(param_2,local_18);\\n    }\\n  }\\n  else {\\n    pDVar2 = &local_18;\\n    uVar3 = (ulonglong)param_3;\\n    local_10 = ReadFile(*(HANDLE *)(&DAT_140107068 + (longlong)param_1 * 8),param_2,param_3,pDVar2,\\n                        (LPOVERLAPPED)(&DAT_140107180 + (longlong)param_1 * 0x20));\\n    if (local_10 == 0) {\\n      local_10 = GetLastError();\\n      if (local_10 == 0x3e5) {\\n        uVar1 = 0;\\n      }\\n      else {\\n        FUN_140006090(s_ReadFile_failed___ld_140103908,(ulonglong)local_10,uVar3,pDVar2);\\n        uVar1 = 0xffffffff;\\n      }\\n    }\\n    else {\\n      ResetEvent(*(HANDLE *)(&DAT_140107198 + (longlong)param_1 * 0x20));\\n      uVar1 = (*(code *)param_4)(param_2,local_18);\\n    }\\n  }\\n  return uVar1;\\n}\\n\\n\",\"confidence\":\"observed\",\"authority\":\"shipped-artifact\",\"environment\":null,\"limitations\":[\"The session serves operations only after Ghidra reports default auto-analysis complete; incomplete analysis does not expose partial results.\",\"The imported Program and temporary project are ephemeral and deleted on close. Annotation operations edit session database metadata; original executable bytes are never written.\",\"Cancelling an active Ghidra request terminates its ephemeral database and discards session annotations. The selected target remains open; the next provider query imports the original artifact again.\",\"Default-space addresses use lowercase 0x-prefixed hexadecimal; other address spaces use <percent-encoded-space>:0x<hex>.\",\"Pseudocode is Ghidra decompiler output, not original source and not text-equivalent to Hopper output.\",\"External functions and functions without an analyzable body return null; other decompiler failures remain explicit.\",\"macOS sessions require a matching executable Ghidra native decompiler; REA checks for it but does not build native components or change Gatekeeper quarantine state.\"],\"relationship_coverage\":null,\"locations\":[],\"evidence_links\":[]}"
+      }
+    ],
+    "structuredContent": {
+      "evidence_id": "ev_6572e59f63feb78090a9175e2ff1aba93f191c7d7f75234cbe987edcee3d18ed",
+      "subject": {
+        "name": "LinkManagerTray.exe",
+        "digest": {
+          "sha256": "0d78ccee781d9e5b0b85ee805fb4a30f1170d6c0e7080a3de4f6f13c236e45bb"
+        },
+        "local_path": "/private/var/folders/5t/1t16twq55wl37p486mhz6y080000gn/T/linkmanager-rea-20261027-p1a2nyt2/LinkManagerTray.exe",
+        "format": "pe",
+        "architecture": "x86_64"
+      },
+      "provider": {
+        "id": "ghidra",
+        "name": "Ghidra",
+        "version": "12.1.4"
+      },
+      "analysis_profile": {
+        "provider": {
+          "id": "ghidra",
+          "name": "Ghidra",
+          "version": "12.1.4"
+        },
+        "parameters": {
+          "target_kind": "executable",
+          "target_format": "pe",
+          "executable_role": "application",
+          "managed": false,
+          "native_aot_metadata": {
+            "contract_revision": "rtr-9.1-x64-pe-read-only-v3",
+            "source_bytes": 134217728,
+            "work_units": 67108864,
+            "working_memory_bytes": 67108864,
+            "report_bytes": 4194304
+          },
+          "architecture": "x86_64",
+          "available_architectures": [
+            "x86_64"
+          ],
+          "import_mode": "ephemeral-source-immutable",
+          "pdb_observations": "program-info-v1",
+          "annotation_policy": "atomic-function-entry-metadata-v1",
+          "load_image_observations": "source-mappings-entry-context-v2",
+          "function_body_evidence": "complete-inclusive-ranges-v1",
+          "function_references": "complete-body-and-entry-reference-manager-v2",
+          "call_relationship_coverage": "function-body-call-coverage-v5",
+          "function_dossier_coverage": "observed-facets-and-call-relationships-v1",
+          "string_inventory_evidence": "defined-data-coverage-v1",
+          "location_resolution": "explicit-address-exact-entry-symbol-first-v3",
+          "procedure_file_offset_resolution": "address-first-unique-target-source-mapping-v2",
+          "instruction_flow_evidence": "decoded-return-pcode-v1",
+          "instruction_references": "exact-address-incoming-v1",
+          "function_boundary_observations": "ghidra-function-boundary-limitations-v3",
+          "no_return_repair": "returning-imports-decoded-return-v2",
+          "process_launch": "inspected-jvm-launch-support-v1",
+          "jump_table_evidence": "typed-case-default-blocks-v1",
+          "decompiler_jump_loads": true,
+          "loader": "auto-from-header",
+          "language_id": "auto-from-header",
+          "compiler_spec_id": "auto-default",
+          "analyzer_preset": "ghidra-default"
+        },
+        "digest": "59e0d37bce87c1b8ccb70c6062be2383648a35642f5a6c85b1db0939164d5e55"
+      },
+      "predicate_type": "rea.analysis",
+      "operation": "procedure_pseudo_code",
+      "parameters": {
+        "procedure": "0x1400965e0"
+      },
+      "raw_result": {
+        "value": "\nundefined8 FUN_1400965e0(int param_1,LPVOID param_2,uint param_3,undefined *param_4)\n\n{\n  undefined8 uVar1;\n  LPDWORD pDVar2;\n  ulonglong uVar3;\n  DWORD local_18;\n  int local_14;\n  DWORD local_10;\n  DWORD local_c;\n  \n  uVar1 = FUN_140096790(param_1);\n  local_14 = (int)uVar1;\n  local_18 = 0;\n  if (local_14 == 1) {\n    uVar1 = 0;\n  }\n  else if (local_14 == 2) {\n    uVar1 = 1;\n    pDVar2 = &local_18;\n    local_10 = GetOverlappedResult(*(HANDLE *)(&DAT_140107068 + (longlong)param_1 * 8),\n                                   (LPOVERLAPPED)(&DAT_140107180 + (longlong)param_1 * 0x20),pDVar2,\n                                   1);\n    if (local_10 == 0) {\n      local_c = GetLastError();\n      if (local_c == 0x3e3) {\n        FUN_140006130(s_GetOverlappedResult_failed___ld__1401038c0,0x3e3,\n                      s__normal_after_wakeup__1401038a8,uVar1);\n      }\n      else {\n        FUN_140006090(s_GetOverlappedResult_failed___ld_1401038e8,(ulonglong)local_c,pDVar2,uVar1);\n      }\n      SetLastError(local_c);\n      uVar1 = 0xffffffff;\n    }\n    else {\n      ResetEvent(*(HANDLE *)(&DAT_140107198 + (longlong)param_1 * 0x20));\n      uVar1 = (*(code *)param_4)(param_2,local_18);\n    }\n  }\n  else {\n    pDVar2 = &local_18;\n    uVar3 = (ulonglong)param_3;\n    local_10 = ReadFile(*(HANDLE *)(&DAT_140107068 + (longlong)param_1 * 8),param_2,param_3,pDVar2,\n                        (LPOVERLAPPED)(&DAT_140107180 + (longlong)param_1 * 0x20));\n    if (local_10 == 0) {\n      local_10 = GetLastError();\n      if (local_10 == 0x3e5) {\n        uVar1 = 0;\n      }\n      else {\n        FUN_140006090(s_ReadFile_failed___ld_140103908,(ulonglong)local_10,uVar3,pDVar2);\n        uVar1 = 0xffffffff;\n      }\n    }\n    else {\n      ResetEvent(*(HANDLE *)(&DAT_140107198 + (longlong)param_1 * 0x20));\n      uVar1 = (*(code *)param_4)(param_2,local_18);\n    }\n  }\n  return uVar1;\n}\n\n",
+        "limitations": []
+      },
+      "normalized_result": "\nundefined8 FUN_1400965e0(int param_1,LPVOID param_2,uint param_3,undefined *param_4)\n\n{\n  undefined8 uVar1;\n  LPDWORD pDVar2;\n  ulonglong uVar3;\n  DWORD local_18;\n  int local_14;\n  DWORD local_10;\n  DWORD local_c;\n  \n  uVar1 = FUN_140096790(param_1);\n  local_14 = (int)uVar1;\n  local_18 = 0;\n  if (local_14 == 1) {\n    uVar1 = 0;\n  }\n  else if (local_14 == 2) {\n    uVar1 = 1;\n    pDVar2 = &local_18;\n    local_10 = GetOverlappedResult(*(HANDLE *)(&DAT_140107068 + (longlong)param_1 * 8),\n                                   (LPOVERLAPPED)(&DAT_140107180 + (longlong)param_1 * 0x20),pDVar2,\n                                   1);\n    if (local_10 == 0) {\n      local_c = GetLastError();\n      if (local_c == 0x3e3) {\n        FUN_140006130(s_GetOverlappedResult_failed___ld__1401038c0,0x3e3,\n                      s__normal_after_wakeup__1401038a8,uVar1);\n      }\n      else {\n        FUN_140006090(s_GetOverlappedResult_failed___ld_1401038e8,(ulonglong)local_c,pDVar2,uVar1);\n      }\n      SetLastError(local_c);\n      uVar1 = 0xffffffff;\n    }\n    else {\n      ResetEvent(*(HANDLE *)(&DAT_140107198 + (longlong)param_1 * 0x20));\n      uVar1 = (*(code *)param_4)(param_2,local_18);\n    }\n  }\n  else {\n    pDVar2 = &local_18;\n    uVar3 = (ulonglong)param_3;\n    local_10 = ReadFile(*(HANDLE *)(&DAT_140107068 + (longlong)param_1 * 8),param_2,param_3,pDVar2,\n                        (LPOVERLAPPED)(&DAT_140107180 + (longlong)param_1 * 0x20));\n    if (local_10 == 0) {\n      local_10 = GetLastError();\n      if (local_10 == 0x3e5) {\n        uVar1 = 0;\n      }\n      else {\n        FUN_140006090(s_ReadFile_failed___ld_140103908,(ulonglong)local_10,uVar3,pDVar2);\n        uVar1 = 0xffffffff;\n      }\n    }\n    else {\n      ResetEvent(*(HANDLE *)(&DAT_140107198 + (longlong)param_1 * 0x20));\n      uVar1 = (*(code *)param_4)(param_2,local_18);\n    }\n  }\n  return uVar1;\n}\n\n",
+      "confidence": "observed",
+      "authority": "shipped-artifact",
+      "environment": null,
+      "limitations": [
+        "The session serves operations only after Ghidra reports default auto-analysis complete; incomplete analysis does not expose partial results.",
+        "The imported Program and temporary project are ephemeral and deleted on close. Annotation operations edit session database metadata; original executable bytes are never written.",
+        "Cancelling an active Ghidra request terminates its ephemeral database and discards session annotations. The selected target remains open; the next provider query imports the original artifact again.",
+        "Default-space addresses use lowercase 0x-prefixed hexadecimal; other address spaces use <percent-encoded-space>:0x<hex>.",
+        "Pseudocode is Ghidra decompiler output, not original source and not text-equivalent to Hopper output.",
+        "External functions and functions without an analyzable body return null; other decompiler failures remain explicit.",
+        "macOS sessions require a matching executable Ghidra native decompiler; REA checks for it but does not build native components or change Gatekeeper quarantine state."
+      ],
+      "relationship_coverage": null,
+      "locations": [],
+      "evidence_links": []
+    }
+  },
+  "jsonrpc": "2.0",
+  "id": 25
+}

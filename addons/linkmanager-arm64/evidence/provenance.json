@@ -1,0 +1,31 @@
+{
+  "original": "/Users/federico/Downloads/v6051_11.9.626364010_LinkManager_Setup.exe",
+  "sha256": "e8cf6131dd37d91bcda35a2de7f61f910c62be0bddf5d8a91ecb0dd82a01f03c",
+  "inner_sha256": "b872e377cf5908794f2d76106d31039f256f48282aa7e37af7a773da1e8c6202",
+  "extracted": [
+    {
+      "name": "LinkManagerTray.exe",
+      "decompressed_offset": 102046,
+      "size": 1139640,
+      "sha256": "0d78ccee781d9e5b0b85ee805fb4a30f1170d6c0e7080a3de4f6f13c236e45bb"
+    },
+    {
+      "name": "LinkManagerSvc.exe",
+      "decompressed_offset": 1241690,
+      "size": 176056,
+      "sha256": "ea2ee69df1e26c4d4d5eba405b2426216632737c287c132e2a50bc4613786d90"
+    },
+    {
+      "name": "lmtap.sys",
+      "decompressed_offset": 1579327,
+      "size": 54296,
+      "sha256": "734d78c959b1348d41d24ce2d86b023b7a6f469cb0d379ecfc2ccfce879261e6"
+    },
+    {
+      "name": "tapmgr.exe",
+      "decompressed_offset": 1707878,
+      "size": 142848,
+      "sha256": "a3315c2123e8ebc510d540b752ab356c6b5eeff0034c531d3454a5b0a6a0e130"
+    }
+  ]
+}

@@ -47,17 +47,30 @@ Strumenti: REA 6.5.0, Ghidra 12.1.4, Java 21.0.12.1 su macOS ARM64. Il recupero 
 
 La prima ricognizione dei due payload aveva individuato `lmtap.sys` (rete), `com0com.sys` (seriale) e `USBIPEnum.sys` (USB), tutti in varianti Intel, senza sezioni ARM64 negli INF esaminati. Alcuni componenti sono presenti in più versioni: prima di una futura installazione individuare esattamente la variante selezionata dal setup. La decompilazione di una copia di `lmtap.sys` non qualifica automaticamente tutte le copie.
 
-Le evidenze grezze, i manifesti e il report iniziale sono conservati **fuori dal repository** in:
+Su richiesta esplicita dell'utente, **evidenze e input di analisi sono ora inclusi nel repository**, per proseguire da un altro PC senza dipendere dai percorsi del primo Mac:
 
 ```text
-~/Library/Application Support/REA/Investigations/linkmanager-11.9-arm64-20261027/
-    provenance.json
-    evidence-index.json
-    report.md
-    NNN-tools-call.json   (31 record REA completi)
+addons/linkmanager-arm64/
+    REPORT.md
+    verify_evidence.py
+    artifacts/
+        v6051_11.9.626364010_LinkManager_Setup.exe
+        nsis-archive-listing.txt
+        x64/{LinkManagerTray.exe,LinkManagerSvc.exe,lmtap.sys,tapmgr.exe}
+    evidence/
+        README.md
+        manifest.json
+        provenance.json
+        evidence-index.json
+        rea/initial-report.md
+        package-inventory.json
+        decompilation.md
+        rea/NNN-tools-call.json   (31 record REA completi)
 ```
 
-Gli hash e gli ID riportati qui consentono di riconoscere i materiali anche su un altro Mac. La cartella privata non viene distribuita con Git; il dossier rimane leggibile senza di essa. I binari estratti erano in una cartella temporanea e possono essere ricavati di nuovo dall'installer con hash corrispondente. Non aggiungere EXE/SYS, certificati, credenziali, dischi o dump privati al repository.
+L'[indice del pacchetto portabile](evidence/README.md) spiega i file e la verifica con Python, senza REA/Ghidra e senza eseguire programmi Windows. Il [pseudocodice leggibile](evidence/decompilation.md) permette di studiare le funzioni senza riaprire il decompilatore. I 31 JSON REA e i due manifesti originali sono copie identiche, con gli stessi ID: i loro percorsi assoluti sono metadati storici della cattura, non dipendenze. Il nuovo [manifesto portabile](evidence/manifest.json) associa soggetti/hash ai percorsi relativi effettivi e registra hash e dimensioni dei materiali.
+
+L'[inventario completo dei due payload](evidence/package-inventory.json), ricostruito il 27 ottobre dallo stesso installer, conserva i 40 PE interni e i testi dei 18 INF. È un'osservazione di parsing/decompressione, non una nuova evidenza prodotta da REA né una prova runtime. Il report iniziale è conservato come documento storico: le sue indicazioni sulla conservazione esterna sono superate da questa consegna. Gli unici binari aggiunti sono l'installer fornito e le quattro copie derivate con hash già identificati; credenziali, certificati privati, dati e dischi VM restano esclusi.
 
 ## 4. Risultati della decompilazione
 
@@ -120,14 +133,14 @@ Le attività sono un piano futuro. Gli ID LM appartengono a TODO-024; lo stato g
 | --- | --- | --- | --- |
 | LM-001 | P0, concluso prima dello sviluppo | FATTO, solo studio statico | Analisi con REA/Ghidra di servizio, Tray e una variante del driver; hash, indirizzi, limiti e ID disponibili nelle sezioni 3–4 e 8. Evidenza nel diario; nessuna qualifica runtime. |
 | LM-002 | P0, primo passo operativo | DA FARE | Definire programma Windows, dispositivo, agente, protocollo TCP/UDP/L2 e operazione osservabile; verificare accesso/licenza e disponibilità di un target di prova. Senza target il successo end-to-end non è misurabile: dichiarare il limite, non sostituirlo con un ping. |
-| LM-003 | P0, con LM-002 | DA FARE | Congelare i materiali: versione installer, hash delle copie effettivamente usate, INF/cataloghi e candidato ARM64. Identificare quale variante sceglie il setup e conservare una ricetta di estrazione ripetibile. Verifica: due estrazioni dei soli file necessari hanno gli stessi hash, se si implementa la ricetta. |
+| LM-003 | P0, con LM-002 | IN CORSO | Installer, quattro file studiati, inventario/INF e31 record REA ora versionati e verificabili su altro PC; nuova estrazione confrontata con gli hash originali. Restano da fissare INF/cataloghi e versione del candidato ARM64, determinare la variante selezionata dal setup e documentare l'estrazione di nuovi componenti quando necessaria. |
 | LM-004 | P0, dipende da LM-003 | DA FARE | Completare la mappa statica dei confronti HardwareID e delle operazioni necessarie in Tray, servizio e tapmgr, incluse le quattro stringhe `lmtap` già trovate. Verifica: tabella indirizzo→creazione/selezione/rimozione/apertura, controlli versione ed eventuali chiamate indirette ancora irrisolte. Non decompilare indiscriminatamente tutto il prodotto. |
 | LM-005 | P0, dipende da LM-004 | DA FARE | Scegliere una delle strategie della sezione 5 e risolvere provenienza/licenza/firma. Verifica: pacchetto ARM64 candidato identificato e percorso concreto per usarlo su Windows protetto; oppure ostacolo preciso con alternativa e condizione di sblocco. Non compilare ripetutamente un driver senza percorso di firma utilizzabile. |
 | LM-006 | P0, prima di modificare Windows | DA FARE | Concordare il contesto di prova e un ripristino coerente. Non ricreare automaticamente i vecchi clone eliminati. Se si usa una copia isolata, identificarla come tale; se si lavora sulla principale, mantenerne esplicito il perimetro autorizzato. Registrare OS ARM64/build, NIC, route/DNS, servizi e protezioni prima dell'intervento, senza credenziali nei log. |
 | LM-007 | P0, dipende da LM-005/006 | DA FARE | Primo percorso driver minimo: pacchetto ARM64 accettato, dispositivo sano, apertura del TAP e lettura versione/MAC/MTU; cambio media senza errore. Verifica nel contesto isolato scelto con Code Integrity/Secure Boot invariati. Un piccolo probe temporaneo è giustificato solo per distinguere un problema del driver da quello del programma; non equivale al traguardo Ethernet. |
 | LM-008 | P0, dipende da LM-007 | DA FARE | Adattamento minimo della selezione del dispositivo e degli helper, secondo LM-005. Verifica: il LinkManager reale avvia servizio/app, seleziona la NIC candidata, apre il TAP e non fallisce nelle chiamate SetupDi da processo emulato. Registrare gli eventuali errori di architettura invece di attribuirli genericamente al driver. |
 | LM-009 | P0, dipende da LM-002/008 | DA FARE | Prova completa Ethernet: login GateManager→Connect agente→lettura riconoscibile nel programma Windows→Disconnect→nuovo Connect→stessa lettura. Registrare endpoint/operazione in modo non sensibile, risultato e percorso effettivo. Qualificare UDP/discovery/L2 soltanto se necessari al caso scelto. È il primo criterio di “utilizzabile”. |
-| LM-010 | P1, dopo LM-009 | DA FARE | Rendere installazione e rimozione ripetibili: manifesto versioni/hash, avvio del servizio, creazione della sola NIC addon, errori comprensibili, ripristino e disinstallazione. Verifica breve: installazione→collegamento→rimozione, rete ordinaria ancora funzionante e nessuna credenziale/policy di test lasciata dal pacchetto. Le patch/sorgenti possono stare qui, binari e dati privati restano esterni. |
+| LM-010 | P1, dopo LM-009 | DA FARE | Rendere installazione e rimozione ripetibili: manifesto versioni/hash, avvio del servizio, creazione della sola NIC addon, errori comprensibili, ripristino e disinstallazione. Verifica breve: installazione→collegamento→rimozione, rete ordinaria ancora funzionante e nessuna credenziale/policy di test lasciata dal pacchetto. Patch/sorgenti possono stare qui; gli input di analisi sono già versionati su richiesta, mentre futuri output di build e dati privati non vanno aggiunti automaticamente. |
 | LM-011 | P1, dipende da LM-009/010 | DA FARE | Verifica nell'app principale, separata da quella isolata: stesso programma utente, accesso reale e contenuto osservato; poi un riavvio ordinario autorizzato e nuova connessione. Accertare recupero del servizio/NIC e assenza di route/DNS residui. Un riavvio riuscito non chiude l'affidabilità generale e non autorizza spegnimenti forzati. |
 | LM-012 | P2, solo se richiesto dal caso d'uso | DA FARE, fuori dal primo traguardo | Seriali: contratti com0com e impostazioni/modem, poi una lettura reale. USB: compatibilità USB/IP Secomea, controller ARM64 e driver ARM64 del dispositivo finale, poi attach/uso/detach. Ciascuna capacità ha esito proprio; il fallimento USB non annulla un Ethernet già qualificato. |
 
@@ -152,7 +165,7 @@ Nel diario distinguere sempre implementazione, ambiente isolato e app principale
 
 ## 8. Indice delle evidenze REA principali
 
-Il file indicato è nella cartella privata della sezione 3. I JSON contengono record completi con target/hash, profilo Ghidra e limiti; gli ID non sono URL di servizi esterni.
+I file indicati sono inclusi nella [cartella evidence/rea](evidence/rea/). I JSON contengono record completi con target/hash, profilo Ghidra e limiti; gli ID non sono URL di servizi esterni. Il [manifesto](evidence/manifest.json) e il [pseudocodice leggibile](evidence/decompilation.md) permettono di verificarli e consultarli direttamente dopo un clone del repository.
 
 | Osservazione | File / funzione | ID evidenza |
 | --- | --- | --- |

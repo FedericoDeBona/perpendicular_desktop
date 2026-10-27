@@ -1,0 +1,87 @@
+
+7-Zip [64] 17.05 : Copyright (c) 1999-2021 Igor Pavlov : 2017-08-28
+p7zip Version 17.05 (locale=utf8,Utf16=on,HugeFiles=on,64 bits,10 CPUs LE)
+
+Scanning the drive for archives:
+1 file, 1330944 bytes (1300 KiB)
+
+Listing archive: /Users/federico/Downloads/v6051_11.9.626364010_LinkManager_Setup.exe
+
+--
+Path = /Users/federico/Downloads/v6051_11.9.626364010_LinkManager_Setup.exe
+Type = PE
+Physical Size = 1330944
+CPU = x86
+Characteristics = Executable 32-bit NoRelocs NoLineNums NoLocalSyms
+Created = 2023-07-02 03:09:43
+Headers Size = 1024
+Checksum = 1358054
+Image Size = 253952
+Section Alignment = 4096
+File Alignment = 512
+Code Size = 26624
+Initialized Data Size = 139776
+Uninitialized Data Size = 2048
+Linker Version = 6.0
+OS Version = 4.0
+Image Version = 6.0
+Subsystem Version = 4.0
+Subsystem = Windows GUI
+DLL Characteristics = Relocated NX-Compatible NoSEH TerminalServerAware
+Stack Reserve = 1048576
+Stack Commit = 4096
+Heap Reserve = 1048576
+Heap Commit = 4096
+Image Base = 4194304
+Comment = FileVersion: 11.9.9557.36458
+FileVersion: 11.9.626364010
+ProductVersion: 11.9.9557.36458
+ProductVersion: 11.9.626364010
+FileDescription: LinkManager Setup
+LegalCopyright: Copyright © 2026 Secomea A/S
+ProductName: LinkManager
+----
+Path = [0]
+Size = 1272648
+Packed Size = 1272648
+Virtual Size = 1272648
+Offset = 46592
+--
+Path = [0]
+Type = Nsis
+Physical Size = 1272644
+Tail Size = 4
+Method = LZMA:23
+Solid = +
+Headers Size = 6104
+Embedded Stub Size = 0
+SubType = NSIS-3 Unicode
+
+----------
+Path = $PLUGINSDIR/System.dll
+Size = 12288
+Packed Size = 1272640
+Modified = 
+Attributes = 
+Method = LZMA:23
+Solid = +
+Offset = 0
+
+Path = $PROGRAMFILES64/LinkManager-x64-setup.exe
+Size = 707264
+Packed Size = 
+Modified = 2026-09-03 13:36:02
+Attributes = 
+Method = LZMA:23
+Solid = +
+Offset = 12292
+
+Path = $PROGRAMFILES/LinkManager-x86-setup.exe
+Size = 
+Packed Size = 
+Modified = 2026-09-03 13:38:42
+Attributes = 
+Method = LZMA:23
+Solid = +
+Offset = 719560
+

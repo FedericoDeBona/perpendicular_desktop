@@ -1,0 +1,264 @@
+{
+  "schema_version": 1,
+  "created_on": "2026-10-27",
+  "description": "Portable LinkManager static-analysis evidence and exact user-supplied/derived inputs; no Windows target execution",
+  "path_base": "addons/linkmanager-arm64",
+  "rea_version": "6.5.0",
+  "ghidra_version": "12.1.4",
+  "record_count": 31,
+  "original_installer": {
+    "path": "artifacts/v6051_11.9.626364010_LinkManager_Setup.exe",
+    "sha256": "e8cf6131dd37d91bcda35a2de7f61f910c62be0bddf5d8a91ecb0dd82a01f03c"
+  },
+  "subjects": [
+    {
+      "name": "LinkManagerTray.exe",
+      "path": "artifacts/x64/LinkManagerTray.exe",
+      "size": 1139640,
+      "sha256": "0d78ccee781d9e5b0b85ee805fb4a30f1170d6c0e7080a3de4f6f13c236e45bb"
+    },
+    {
+      "name": "LinkManagerSvc.exe",
+      "path": "artifacts/x64/LinkManagerSvc.exe",
+      "size": 176056,
+      "sha256": "ea2ee69df1e26c4d4d5eba405b2426216632737c287c132e2a50bc4613786d90"
+    },
+    {
+      "name": "lmtap.sys",
+      "path": "artifacts/x64/lmtap.sys",
+      "size": 54296,
+      "sha256": "734d78c959b1348d41d24ce2d86b023b7a6f469cb0d379ecfc2ccfce879261e6"
+    },
+    {
+      "name": "tapmgr.exe",
+      "path": "artifacts/x64/tapmgr.exe",
+      "size": 142848,
+      "sha256": "a3315c2123e8ebc510d540b752ab356c6b5eeff0034c531d3454a5b0a6a0e130"
+    }
+  ],
+  "record_directory": "evidence/rea",
+  "record_index": "evidence/evidence-index.json",
+  "historical_paths": "Absolute paths inside original records are capture metadata, not dependencies. Resolve subjects by SHA-256 using the relative paths above. Original records are byte-for-byte unchanged.",
+  "files": [
+    {
+      "path": "artifacts/nsis-archive-listing.txt",
+      "size": 1943,
+      "sha256": "27d601a902cd31d3e13cd7d60daa2afd5a6e70bd061973dfaa93099569618da1"
+    },
+    {
+      "path": "artifacts/v6051_11.9.626364010_LinkManager_Setup.exe",
+      "size": 1330944,
+      "sha256": "e8cf6131dd37d91bcda35a2de7f61f910c62be0bddf5d8a91ecb0dd82a01f03c"
+    },
+    {
+      "path": "artifacts/x64/LinkManagerSvc.exe",
+      "size": 176056,
+      "sha256": "ea2ee69df1e26c4d4d5eba405b2426216632737c287c132e2a50bc4613786d90"
+    },
+    {
+      "path": "artifacts/x64/LinkManagerTray.exe",
+      "size": 1139640,
+      "sha256": "0d78ccee781d9e5b0b85ee805fb4a30f1170d6c0e7080a3de4f6f13c236e45bb"
+    },
+    {
+      "path": "artifacts/x64/lmtap.sys",
+      "size": 54296,
+      "sha256": "734d78c959b1348d41d24ce2d86b023b7a6f469cb0d379ecfc2ccfce879261e6"
+    },
+    {
+      "path": "artifacts/x64/tapmgr.exe",
+      "size": 142848,
+      "sha256": "a3315c2123e8ebc510d540b752ab356c6b5eeff0034c531d3454a5b0a6a0e130"
+    },
+    {
+      "path": "evidence/README.md",
+      "size": 4265,
+      "sha256": "f4b72a17c7cdfc300f227b30dc9274e676ef5521028f4ffc4346b52ca5db7540"
+    },
+    {
+      "path": "evidence/decompilation.md",
+      "size": 41368,
+      "sha256": "bc56053444f8e7c9a7f54f5744e776e86efbe628d5ca5a74331f21815a217614"
+    },
+    {
+      "path": "evidence/evidence-index.json",
+      "size": 20778,
+      "sha256": "5544e550d223e9864943d68438f94b8bd1e13c8704fe121bf436bbeb35a56cbd"
+    },
+    {
+      "path": "evidence/package-inventory.json",
+      "size": 71666,
+      "sha256": "f7a2e49331e0b680a4ce21ee16306e980a9ea697ec9da2f0adc48216c2a85adc"
+    },
+    {
+      "path": "evidence/provenance.json",
+      "size": 1026,
+      "sha256": "e6b87eab0d7ff4a8da0c43bc5419b093efa5f945bc08ae6e78b8a3a22d5dd7ae"
+    },
+    {
+      "path": "evidence/rea/004-tools-call.json",
+      "size": 18505,
+      "sha256": "3e5be28c3680d8e12d610d852f46f6dd92b3777f10ec8222f532d74b0b3ee420"
+    },
+    {
+      "path": "evidence/rea/005-tools-call.json",
+      "size": 8445,
+      "sha256": "d0c40de84f85440df240a267b70ecb0ae3656514515c13e3bd3d14070bd5f66d"
+    },
+    {
+      "path": "evidence/rea/006-tools-call.json",
+      "size": 8445,
+      "sha256": "eb5ad52c66f51a4f55b703e1708210b799b5fb7b2ca81e8a483ff3156ba67e97"
+    },
+    {
+      "path": "evidence/rea/007-tools-call.json",
+      "size": 9197,
+      "sha256": "3a4befe0a695b84c9e029283439ac3cbebc514e87d35e39afeb172750b95b314"
+    },
+    {
+      "path": "evidence/rea/008-tools-call.json",
+      "size": 16556,
+      "sha256": "0bc76cf27f0f8f254ca74f4d96c03d7e9e9eacbf39b62dbd37a9ff71c5f760d7"
+    },
+    {
+      "path": "evidence/rea/009-tools-call.json",
+      "size": 11688,
+      "sha256": "898a8df91d1caa3eacee201ea2422f97f65409e0c14003ec1675dd2deb8d8dae"
+    },
+    {
+      "path": "evidence/rea/010-tools-call.json",
+      "size": 8747,
+      "sha256": "564468b769792a72eca6b5f0655db312ce21191cfbe0c96c93bb0b81f75b941e"
+    },
+    {
+      "path": "evidence/rea/011-tools-call.json",
+      "size": 77825,
+      "sha256": "168be0f30f7db6d9000d758f0e50b1a4d2457bada736e5cf8ce916d04716e018"
+    },
+    {
+      "path": "evidence/rea/012-tools-call.json",
+      "size": 18137,
+      "sha256": "0ea94009ea73814030101582afc3bba27f6d5414933da09af4728ffcd0301b97"
+    },
+    {
+      "path": "evidence/rea/013-tools-call.json",
+      "size": 9043,
+      "sha256": "4e1ff7ac8cdb70be52594350f66132dd1a3e815a9300364cf98821fa7d384455"
+    },
+    {
+      "path": "evidence/rea/016-tools-call.json",
+      "size": 9477,
+      "sha256": "6c135eb8d19e72389ddae6f6194bf6c0e8d4abdc88511986fcfb080d79d87703"
+    },
+    {
+      "path": "evidence/rea/017-tools-call.json",
+      "size": 9287,
+      "sha256": "e179961a3195e54d52a44d42d66dcd5ee0add802489865a084d6e5007d789adf"
+    },
+    {
+      "path": "evidence/rea/018-tools-call.json",
+      "size": 22026,
+      "sha256": "9d559534a7fa720927f54d34cb11239142f1bcf8282b5b5a19db1b237f798efa"
+    },
+    {
+      "path": "evidence/rea/019-tools-call.json",
+      "size": 18141,
+      "sha256": "babf3d57e59119f1ed0944c5a8ded144c01aae50e74378b41e64093f297b61f1"
+    },
+    {
+      "path": "evidence/rea/020-tools-call.json",
+      "size": 71229,
+      "sha256": "12b28045bdb271cc1607c739f97de22dd5c1fcd0dc64883a214dced01ccb79d2"
+    },
+    {
+      "path": "evidence/rea/021-tools-call.json",
+      "size": 57375,
+      "sha256": "911e882119a15d8f270fba00c0dd0509d0eaafc3262dce5fee7728180598deb4"
+    },
+    {
+      "path": "evidence/rea/022-tools-call.json",
+      "size": 23003,
+      "sha256": "ed01417b26d2e5cccc952b71c1e38a4210d61b5188cd4898d170d4dee374322b"
+    },
+    {
+      "path": "evidence/rea/023-tools-call.json",
+      "size": 8450,
+      "sha256": "e8f3d9fd92a3b2276765e6188be32649d3757e3fcce80d31c1509a47acbe6f04"
+    },
+    {
+      "path": "evidence/rea/024-tools-call.json",
+      "size": 10767,
+      "sha256": "fae34a6706c10735f385dcd7e0ff4697ad0a4c39e11becb1b3a9b656638b86e2"
+    },
+    {
+      "path": "evidence/rea/025-tools-call.json",
+      "size": 16243,
+      "sha256": "3edc5f023ad4bd2c4c12d3d26b5d99a0ef48be8ecc1b46494cc705e784f553a4"
+    },
+    {
+      "path": "evidence/rea/026-tools-call.json",
+      "size": 8450,
+      "sha256": "2d037d22403a557823173a5229a6c5ccc4db35b6c7f60e0ceb0c9f378555fdbd"
+    },
+    {
+      "path": "evidence/rea/027-tools-call.json",
+      "size": 10725,
+      "sha256": "a10406a04fc0d8aba7428718fd7eb9867cc0c3c771f4f14e91a61532c974cc07"
+    },
+    {
+      "path": "evidence/rea/028-tools-call.json",
+      "size": 13321,
+      "sha256": "03af52ab5b71ffc34aee0d23686edc8ad0a16928c67fe596d555637134fa34bc"
+    },
+    {
+      "path": "evidence/rea/029-tools-call.json",
+      "size": 10393,
+      "sha256": "02244df763eaa334068d159a2c85f284cb3236b3af831040730c3128ddfc8a13"
+    },
+    {
+      "path": "evidence/rea/030-tools-call.json",
+      "size": 36153,
+      "sha256": "792163b78c29dbd15097c50275da8d6728b7df7f565bedb5b241b33b1ce8550a"
+    },
+    {
+      "path": "evidence/rea/033-tools-call.json",
+      "size": 9166,
+      "sha256": "882739d50dc06f528513cebd1d5cbd110b037a0ce7a9a2b5a0bebd1185867683"
+    },
+    {
+      "path": "evidence/rea/034-tools-call.json",
+      "size": 11231,
+      "sha256": "9749f7f00d237e34045972a6839b4634e24ac74a34040ce03f910c9a2d7cc773"
+    },
+    {
+      "path": "evidence/rea/035-tools-call.json",
+      "size": 16098,
+      "sha256": "4a2d9e4933eb715008c7ad0fed6d7da69808f3536c32617911145a48f082c63d"
+    },
+    {
+      "path": "evidence/rea/036-tools-call.json",
+      "size": 9367,
+      "sha256": "ae1e2f87ba9349a4c10b6b822f7f3724516fad9919235651253394aade035834"
+    },
+    {
+      "path": "evidence/rea/037-tools-call.json",
+      "size": 10069,
+      "sha256": "a520f0af98dd9b29b334132c7cf6b9f1b93c8d15c3c28bd8daa1ca61b82c64a1"
+    },
+    {
+      "path": "evidence/rea/038-tools-call.json",
+      "size": 31116,
+      "sha256": "147033bdd6f4def7930654146055b7f0903df75605c3e90b8792614ae4be1eef"
+    },
+    {
+      "path": "evidence/rea/initial-report.md",
+      "size": 7551,
+      "sha256": "7cbd46e82999b221d621d67ebce158ba386a4fd1765875f9a092fbbf8f5c18bc"
+    },
+    {
+      "path": "verify_evidence.py",
+      "size": 3477,
+      "sha256": "b9526ddb4e14ebd03de50deec784ca5ffbac7febe87b76e0a916fdd7ef331bad"
+    }
+  ]
+}

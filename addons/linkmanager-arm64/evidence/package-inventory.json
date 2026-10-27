@@ -1,0 +1,475 @@
+{
+  "source_sha256": "e8cf6131dd37d91bcda35a2de7f61f910c62be0bddf5d8a91ecb0dd82a01f03c",
+  "method": "7-Zip extraction to stdout, Python raw LZMA decompression of NSIS solid streams; no target execution",
+  "created_on": "2026-10-27",
+  "payloads": [
+    {
+      "archive_member": "$PROGRAMFILES64/LinkManager-x64-setup.exe",
+      "sha256": "b872e377cf5908794f2d76106d31039f256f48282aa7e37af7a773da1e8c6202",
+      "decompressed_bytes": 3020549,
+      "executables": [
+        {
+          "block_index": 1,
+          "decompressed_offset": 46352,
+          "bytes": 12288,
+          "machine": "0x14c",
+          "subsystem": 2,
+          "sha256": "9111099efe9d5c9b391dc132b2faf0a3851a760d4106d5368e30ac744eb42706"
+        },
+        {
+          "block_index": 2,
+          "decompressed_offset": 58644,
+          "bytes": 7168,
+          "machine": "0x14c",
+          "subsystem": 2,
+          "sha256": "01e72332362345c415a7edcb366d6a1b52be9ac6e946fb9da49785c140ba1a4b"
+        },
+        {
+          "block_index": 4,
+          "decompressed_offset": 92314,
+          "bytes": 9728,
+          "machine": "0x14c",
+          "subsystem": 2,
+          "sha256": "4b7d17da290f41ebe244827cc295ce7e580da2f7e9f7cc3efc1abc6898e3c9ed"
+        },
+        {
+          "block_index": 5,
+          "decompressed_offset": 102046,
+          "bytes": 1139640,
+          "machine": "0x8664",
+          "subsystem": 2,
+          "sha256": "0d78ccee781d9e5b0b85ee805fb4a30f1170d6c0e7080a3de4f6f13c236e45bb"
+        },
+        {
+          "block_index": 6,
+          "decompressed_offset": 1241690,
+          "bytes": 176056,
+          "machine": "0x8664",
+          "subsystem": 2,
+          "sha256": "ea2ee69df1e26c4d4d5eba405b2426216632737c287c132e2a50bc4613786d90"
+        },
+        {
+          "block_index": 7,
+          "decompressed_offset": 1417750,
+          "bytes": 156424,
+          "machine": "0x14c",
+          "subsystem": 2,
+          "sha256": "5fbeee2ca6292e46407f14baaaab86165cef9e680141d95b745c4c67dd62bfcf"
+        },
+        {
+          "block_index": 10,
+          "decompressed_offset": 1579327,
+          "bytes": 54296,
+          "machine": "0x8664",
+          "subsystem": 1,
+          "sha256": "734d78c959b1348d41d24ce2d86b023b7a6f469cb0d379ecfc2ccfce879261e6"
+        },
+        {
+          "block_index": 12,
+          "decompressed_offset": 1643650,
+          "bytes": 54304,
+          "machine": "0x8664",
+          "subsystem": 1,
+          "sha256": "64e89e47ad667be6169a5e3069d59d1e37d124bd6f6489e5c139e2530f15b3ae"
+        },
+        {
+          "block_index": 14,
+          "decompressed_offset": 1707878,
+          "bytes": 142848,
+          "machine": "0x8664",
+          "subsystem": 3,
+          "sha256": "a3315c2123e8ebc510d540b752ab356c6b5eeff0034c531d3454a5b0a6a0e130"
+        },
+        {
+          "block_index": 18,
+          "decompressed_offset": 1860205,
+          "bytes": 100728,
+          "machine": "0x8664",
+          "subsystem": 1,
+          "sha256": "9000df52026bee914e4c3ac613f65150c98cbe96e92d19e214b8c07aba0ec507"
+        },
+        {
+          "block_index": 23,
+          "decompressed_offset": 1981294,
+          "bytes": 100320,
+          "machine": "0x8664",
+          "subsystem": 1,
+          "sha256": "65bd43d9b84e834e95cfd04269c76fd805c93f01e903dbfdb908c0e3c8d220d5"
+        },
+        {
+          "block_index": 25,
+          "decompressed_offset": 2092472,
+          "bytes": 100320,
+          "machine": "0x8664",
+          "subsystem": 1,
+          "sha256": "25f876c4a38b458ab5050743d5bf45703d8993e5db7de34ec880ba1a3adfd428"
+        },
+        {
+          "block_index": 27,
+          "decompressed_offset": 2203641,
+          "bytes": 99344,
+          "machine": "0x8664",
+          "subsystem": 1,
+          "sha256": "d0ec21bbf84a3d252035b968e344707be8ae57b9ead7667969d2ffd4c3594015"
+        },
+        {
+          "block_index": 29,
+          "decompressed_offset": 2312007,
+          "bytes": 133632,
+          "machine": "0x8664",
+          "subsystem": 3,
+          "sha256": "e67d43b1e79335f89307512659447271908ed0dc5e0863ff9cc333319e585c93"
+        },
+        {
+          "block_index": 31,
+          "decompressed_offset": 2447503,
+          "bytes": 90488,
+          "machine": "0x8664",
+          "subsystem": 1,
+          "sha256": "5c95dbfc41f3668b744ca71d84e78f5875669bad52af03c76e1c3f66eb040862"
+        },
+        {
+          "block_index": 34,
+          "decompressed_offset": 2549760,
+          "bytes": 90080,
+          "machine": "0x8664",
+          "subsystem": 1,
+          "sha256": "224e816b7a56c0bafbb747cbf154f5e1d8c3089f7cd3e0abb1cc71f75e317252"
+        },
+        {
+          "block_index": 36,
+          "decompressed_offset": 2649749,
+          "bytes": 90080,
+          "machine": "0x8664",
+          "subsystem": 1,
+          "sha256": "e288ca36af9843fff964bcd96eebe03b9c7e3678dd69f4e604df8295fe20129a"
+        },
+        {
+          "block_index": 38,
+          "decompressed_offset": 2749729,
+          "bytes": 89104,
+          "machine": "0x8664",
+          "subsystem": 1,
+          "sha256": "75d5b218cc4620c9d7c02515f7defb95c0192d4ae883aa52ea1b453f32bc9c9b"
+        },
+        {
+          "block_index": 40,
+          "decompressed_offset": 2846977,
+          "bytes": 95744,
+          "machine": "0x8664",
+          "subsystem": 3,
+          "sha256": "9228779f0d91b3e88717a21f5e65e6582d1da273e0798c86481fdfae59e164b3"
+        },
+        {
+          "block_index": 41,
+          "decompressed_offset": 2942725,
+          "bytes": 77824,
+          "machine": "0x8664",
+          "subsystem": 3,
+          "sha256": "f57b6f9f1867bd8d8e5eb97aff65d4aeb9a51f6264616eb86179741007138d1f"
+        }
+      ],
+      "inf_texts": [
+        {
+          "block_index": 9,
+          "decompressed_offset": 1575177,
+          "bytes": 4146,
+          "sha256": "70f58010820d19847fe8f3228393a459485610f2216c92149efee8918b223048",
+          "text": "; ****************************************************************************\r\n; * Copyright (C) 2020 Secomea A/S                                           *\r\n; ****************************************************************************\r\n\r\n[Version]\r\n   Signature = \"$Windows NT$\"\r\n   CatalogFile = lmtap.cat\r\n   Class = Net\r\n   ClassGUID = {4d36e972-e325-11ce-bfc1-08002be10318}\r\n   PnpLockDown = 1\r\n   Provider = %Provider%\r\n   DriverVer = 09/23/2020,9.0.0.23\r\n\r\n[Strings]\r\n   DeviceDescription = \"LinkManager Adapter\"\r\n   Provider = \"Secomea A/S\"\r\n\r\n[Manufacturer]\r\n   %Provider% = lmtap, NTamd64\r\n\r\n[lmtap.NTamd64]\r\n   %DeviceDescription% = lmtap.ndi, lmtap\r\n\r\n;----------------- Characteristics ------------\r\n;    NCF_PHYSICAL = 0x04\r\n;    NCF_VIRTUAL = 0x01\r\n;    NCF_SOFTWARE_ENUMERATED = 0x02\r\n;    NCF_HIDDEN = 0x08\r\n;    NCF_NO_SERVICE = 0x10\r\n;    NCF_HAS_UI = 0x80\r\n;----------------- Characteristics ------------\r\n\r\n[lmtap.ndi]\r\n   CopyFiles       = lmtap.driver\r\n   AddReg          = lmtap.reg\r\n   AddReg          = lmtap.params.reg\r\n   Characteristics = 0x01  ; NCF_VIRTUAL\r\n   BusType         = 1\r\n   *IfType            = 0x6 ; IF_TYPE_ETHERNET_CSMACD\r\n   *MediaType         = 0x0 ; NdisMedium802_3\r\n   *PhysicalMediaType = 14  ; NdisPhysicalMedium802_3\r\n\r\n[lmtap.ndi.Services]\r\n   AddService = lmtap,        2, lmtap.service\r\n\r\n[lmtap.reg]\r\n   HKR, Ndi,            Service,      0, \"lmtap\"\r\n   HKR, Ndi\\Interfaces, UpperRange,   0, \"ndis5\"\r\n   HKR, Ndi\\Interfaces, LowerRange,   0, \"ethernet\"\r\n   HKR, ,               Manufacturer, 0, \"%Provider%\"\r\n   HKR, ,               ProductName,  0, \"%DeviceDescription%\"\r\n\r\n[lmtap.params.reg]\r\n   HKR, Ndi\\params\\MTU,                  ParamDesc, 0, \"MTU\"\r\n   HKR, Ndi\\params\\MTU,                  Type,      0, \"int\"\r\n   HKR, Ndi\\params\\MTU,                  Default,   0, \"1500\"\r\n   HKR, Ndi\\params\\MTU,                  Optional,  0, \"0\"\r\n   HKR, Ndi\\params\\MTU,                  Min,       0, \"100\"\r\n   HKR, Ndi\\params\\MTU,                  Max,       0, \"1500\"\r\n   HKR, Ndi\\params\\MTU,                  Step,      0, \"1\"\r\n   HKR, Ndi\\params\\MediaStatus,          ParamDesc, 0, \"Media Status\"\r\n   HKR, Ndi\\params\\MediaStatus,          Type,      0, \"enum\"\r\n   HKR, Ndi\\params\\MediaStatus,          Optional,  0, \"1\"\r\n   HKR, Ndi\\params\\MediaStatus\\enum,     \"0\",       0, \"Application Controlled\"\r\n   HKR, Ndi\\params\\MediaStatus\\enum,     \"1\",       0, \"Always Connected\"\r\n   HKR, Ndi\\params\\MAC,                  ParamDesc, 0, \"MAC Address\"\r\n   HKR, Ndi\\params\\MAC,                  Type,      0, \"edit\"\r\n   HKR, Ndi\\params\\MAC,                  Optional,  0, \"1\"\r\n\r\n;----------------------------------------------------------------\r\n;                             Service Section\r\n;----------------------------------------------------------------\r\n\r\n;---------- Service Type -------------\r\n;    SERVICE_KERNEL_DRIVER     = 0x01\r\n;    SERVICE_WIN32_OWN_PROCESS = 0x10\r\n;---------- Service Type -------------\r\n\r\n;---------- Start Mode ---------------\r\n;    SERVICE_BOOT_START   = 0x0\r\n;    SERVICE_SYSTEM_START = 0x1\r\n;    SERVICE_AUTO_START   = 0x2\r\n;    SERVICE_DEMAND_START = 0x3\r\n;    SERVICE_DISABLED     = 0x4\r\n;---------- Start Mode ---------------\r\n\r\n[lmtap.service]\r\n   DisplayName = %DeviceDescription%\r\n   ServiceType = 1\r\n   StartType = 3\r\n   ErrorControl = 1\r\n   LoadOrderGroup = NDIS\r\n   ServiceBinary = %12%\\lmtap.sys\r\n\r\n;-----------------------------------------------------------------\r\n;                                File Installation\r\n;-----------------------------------------------------------------\r\n\r\n;----------------- Copy Flags ------------\r\n;    COPYFLG_NOSKIP = 0x02\r\n;    COPYFLG_NOVERSIONCHECK = 0x04\r\n;----------------- Copy Flags ------------\r\n\r\n[SourceDisksNames]\r\n   1 = %DeviceDescription%, lmtap.sys\r\n\r\n[SourceDisksFiles]\r\n   lmtap.sys = 1\r\n\r\n[DestinationDirs]\r\n   lmtap.driver = 12\r\n\r\n[lmtap.driver]\r\n   lmtap.sys,,,6     ; COPYFLG_NOSKIP | COPYFLG_NOVERSIONCHECK\r\n\r\n;---------------------------------------------------------------\r\n;                                      End\r\n;---------------------------------------------------------------\r\n\r\n"
+        },
+        {
+          "block_index": 15,
+          "decompressed_offset": 1850730,
+          "bytes": 3475,
+          "sha256": "1481137fa4454f13b1cd6a38ac586496dc89cd7bfa1e98c1113ae9c6b13aba97",
+          "text": ";******************************************************************************\n;\n; com0com.inf\n;\n; Installation file for the Null-modem emulator driver.\n;\n; Copyright (c) 2004-2012 Vyacheslav Frolov\n; Copyright (c) 2017 Secomea A/S\n;\n;******************************************************************************\n\n[Version]\nSignature = \"$Windows NT$\"\nProvider = %SECOMEA%\nClass = CNCPorts\nClassGUID = {df799e12-3c56-421b-b298-b6d3642bc878}\nCatalogFile = com0com.cat\n;           MM/DD/YYYY\nDriverVer = 03/10/2017,7.2.0.17105\nUninstallInfTag = {df799e12-3c56-421b-b298-b6d3642bc878}\n\n;******************************************************************************\n;\n; Class section\n;\n;******************************************************************************\n\n[ClassInstall32]\nAddReg = com0com_ClassReg\n\n[com0com_ClassReg]\nHKR,,,0,%ClassName%\nHKR,,Icon,,-23\n\n;******************************************************************************\n;\n; Source and Destination information\n;\n;******************************************************************************\n\n[SourceDisksNames]\n1 = %DiskId1%,,,\"\"\n\n[SourceDisksFiles]\ncom0com.sys = 1,,\n\n[DestinationDirs]\ncom0com_CopyDrivers = 12\n\n[com0com_CopyDrivers]\ncom0com.sys\n\n;******************************************************************************\n;\n; Driver information\n;\n;******************************************************************************\n\n[Manufacturer]\n%SECOMEA% = com0com, NTx86, NTamd64\n\n[com0com]\n%com0com.BusDesc% = com0com_inst, root\\com0com\n\n[com0com.NTx86]\n%com0com.BusDesc% = com0com_inst, root\\com0com\n\n[com0com.NTamd64]\n%com0com.BusDesc% = com0com_inst, root\\com0com\n\n;******************************************************************************\n;\n; Bus install section\n;\n;******************************************************************************\n\n[com0com_inst]\nAddReg = com0com_AddReg\nCopyFiles = com0com_CopyDrivers\nCopyINF = cncport.inf\n;CopyINF = comport.inf\n\n[com0com_inst.Services]\nAddService = com0com, %SPSVCINST_ASSOCSERVICE%, com0com_Service_Inst, com0com_EventLog_Inst\n\n[com0com_AddReg]\n\n;******************************************************************************\n;\n; Common section\n;\n;******************************************************************************\n\n[com0com_Service_Inst]\nDisplayName    = %com0com.SrvDesc%\nServiceType    = %SERVICE_KERNEL_DRIVER%\nStartType      = %SERVICE_DEMAND_START%\nErrorControl   = %SERVICE_ERROR_NORMAL%\nServiceBinary  = %12%\\com0com.sys\n\n[com0com_EventLog_Inst]\nAddReg = com0com_EventLog_AddReg\n\n[com0com_EventLog_AddReg]\nHKR,,EventMessageFile,%REG_EXPAND_SZ%,\"%%SystemRoot%%\\System32\\IoLogMsg.dll;%%SystemRoot%%\\System32\\drivers\\com0com.sys\"\nHKR,,TypesSupported,%REG_DWORD%,7\n\n;******************************************************************************\n;\n; Strings\n;\n;******************************************************************************\n\n[Strings]\n\nSPSVCINST_ASSOCSERVICE = 0x00000002\n\nREG_EXPAND_SZ          = 0x00020000\nREG_DWORD              = 0x00010001\n\nSERVICE_KERNEL_DRIVER  = 1\nSERVICE_DEMAND_START   = 3\nSERVICE_ERROR_NORMAL   = 1\n\nDiskId1 = \"Installation Disk #1 (com0com - Null-modem emulator)\"\nSECOMEA = \"Secomea A/S\"\ncom0com.BusDesc = \"com0com - bus for serial port pair emulator\"\ncom0com.SrvDesc = \"com0com - emulates the serial ports interconnected via a null-modem cable\"\nClassName = \"com0com - serial port emulators\"\n\n;******************************************************************************\n"
+        },
+        {
+          "block_index": 16,
+          "decompressed_offset": 1854209,
+          "bytes": 2954,
+          "sha256": "16afa61df1dbdef5268900e6fe1f9dae40e4f9f18234e74e34cec78c4816a3c5",
+          "text": ";******************************************************************************\n;\n; cncport.inf\n;\n; Installation file for the Null-modem emulator driver.\n;\n; Copyright (c) 2010-2012 Vyacheslav Frolov\n; Copyright (c) 2017 Secomea A/S\n;\n;******************************************************************************\n\n[Version]\nSignature = \"$Windows NT$\"\nProvider = %SECOMEA%\nClass = CNCPorts\nClassGUID = {df799e12-3c56-421b-b298-b6d3642bc878}\nCatalogFile = com0com.cat\n;           MM/DD/YYYY\nDriverVer = 03/10/2017,7.2.0.17105\nUninstallInfTag = {df799e12-3c56-421b-b298-b6d3642bc878}\n\n;******************************************************************************\n;\n; Driver information\n;\n;******************************************************************************\n\n[Manufacturer]\n%SECOMEA% = com0com, NTx86, NTamd64\n\n[ControlFlags]\nExcludeFromSelect = com0com\\cncport\n\n[com0com]\n%com0com.PortDesc% = com0com_inst_port, com0com\\cncport\n\n[com0com.NTx86]\n%com0com.PortDesc% = com0com_inst_port, com0com\\cncport\n\n[com0com.NTamd64]\n%com0com.PortDesc% = com0com_inst_port, com0com\\cncport\n\n;******************************************************************************\n;\n; Port install section\n;\n;******************************************************************************\n\n[com0com_inst_port]\nAddReg = com0com_AddReg\n;Include = msports.inf\n;Needs = SerialEnumerator.NT\n\n[com0com_inst_port.Services]\nAddService = com0com, %SPSVCINST_ASSOCSERVICE%, com0com_Service_Inst, com0com_EventLog_Inst\n;Include = msports.inf\n;Needs = SerialEnumerator.NT.Services\n\n[com0com_inst_port.HW]\nAddReg = com0com_HW_AddReg\n\n[com0com_AddReg]\n\n[com0com_HW_AddReg]\n;HKR,,\"UpperFilters\",0x00010000,\"serenum\"\n\n;******************************************************************************\n;\n; Common section\n;\n;******************************************************************************\n\n[com0com_Service_Inst]\nDisplayName    = %com0com.SrvDesc%\nServiceType    = %SERVICE_KERNEL_DRIVER%\nStartType      = %SERVICE_DEMAND_START%\nErrorControl   = %SERVICE_ERROR_NORMAL%\nServiceBinary  = %12%\\com0com.sys\n\n[com0com_EventLog_Inst]\nAddReg = com0com_EventLog_AddReg\n\n[com0com_EventLog_AddReg]\nHKR,,EventMessageFile,%REG_EXPAND_SZ%,\"%%SystemRoot%%\\System32\\IoLogMsg.dll;%%SystemRoot%%\\System32\\drivers\\com0com.sys\"\nHKR,,TypesSupported,%REG_DWORD%,7\n\n;******************************************************************************\n;\n; Strings\n;\n;******************************************************************************\n\n[Strings]\n\nSPSVCINST_ASSOCSERVICE = 0x00000002\n\nREG_EXPAND_SZ          = 0x00020000\nREG_DWORD              = 0x00010001\n\nSERVICE_KERNEL_DRIVER  = 1\nSERVICE_DEMAND_START   = 3\nSERVICE_ERROR_NORMAL   = 1\n\nSECOMEA = \"Secomea A/S\"\ncom0com.PortDesc = \"com0com - serial port emulator\"\ncom0com.SrvDesc = \"com0com - emulates the serial ports interconnected via a null-modem cable\"\n\n;******************************************************************************\n"
+        },
+        {
+          "block_index": 17,
+          "decompressed_offset": 1857167,
+          "bytes": 3034,
+          "sha256": "ac63329512d9113cb6d96fa7755f3b9ff74406256bdeda9356a8296f7bd17429",
+          "text": ";******************************************************************************\n;\n; comport.inf\n;\n; Installation file for the Null-modem emulator driver.\n;\n; Copyright (c) 2010-2012 Vyacheslav Frolov\n; Copyright (c) 2017 Secomea A/S\n;\n;******************************************************************************\n\n[Version]\nSignature = \"$Windows NT$\"\nProvider = %SECOMEA%\nClass = Ports\nClassGUID = {4D36E978-E325-11CE-BFC1-08002BE10318}\nCatalogFile = com0com.cat\n;           MM/DD/YYYY\nDriverVer = 03/10/2017,7.2.0.17105\nUninstallInfTag = {df799e12-3c56-421b-b298-b6d3642bc878}\n\n;******************************************************************************\n;\n; Driver information\n;\n;******************************************************************************\n\n[Manufacturer]\n%SECOMEA% = com0com, NTx86, NTamd64\n\n[ControlFlags]\nExcludeFromSelect = com0com\\comport\n\n[com0com]\n%com0com.PortDesc% = com0com_inst_port, com0com\\comport\n\n[com0com.NTx86]\n%com0com.PortDesc% = com0com_inst_port, com0com\\comport\n\n[com0com.NTamd64]\n%com0com.PortDesc% = com0com_inst_port, com0com\\comport\n\n;******************************************************************************\n;\n; Port install section\n;\n;******************************************************************************\n\n[com0com_inst_port]\nAddReg = com0com_AddReg\nInclude = msports.inf\nNeeds = SerialEnumerator.NT\n\n[com0com_inst_port.Services]\nAddService = com0com, %SPSVCINST_ASSOCSERVICE%, com0com_Service_Inst, com0com_EventLog_Inst\nInclude = msports.inf\nNeeds = SerialEnumerator.NT.Services\n\n[com0com_inst_port.HW]\nAddReg = com0com_HW_AddReg\n\n[com0com_AddReg]\n;HKR,,PortSubClass,1,01\n;HKR,,EnumPropPages32,,\"MsPorts.dll,SerialPortPropPageProvider\"\n\n[com0com_HW_AddReg]\nHKR,,\"UpperFilters\",0x00010000,\"serenum\"\n\n;******************************************************************************\n;\n; Common section\n;\n;******************************************************************************\n\n[com0com_Service_Inst]\nDisplayName    = %com0com.SrvDesc%\nServiceType    = %SERVICE_KERNEL_DRIVER%\nStartType      = %SERVICE_DEMAND_START%\nErrorControl   = %SERVICE_ERROR_NORMAL%\nServiceBinary  = %12%\\com0com.sys\n\n[com0com_EventLog_Inst]\nAddReg = com0com_EventLog_AddReg\n\n[com0com_EventLog_AddReg]\nHKR,,EventMessageFile,%REG_EXPAND_SZ%,\"%%SystemRoot%%\\System32\\IoLogMsg.dll;%%SystemRoot%%\\System32\\drivers\\com0com.sys\"\nHKR,,TypesSupported,%REG_DWORD%,7\n\n;******************************************************************************\n;\n; Strings\n;\n;******************************************************************************\n\n[Strings]\n\nSPSVCINST_ASSOCSERVICE = 0x00000002\n\nREG_EXPAND_SZ          = 0x00020000\nREG_DWORD              = 0x00010001\n\nSERVICE_KERNEL_DRIVER  = 1\nSERVICE_DEMAND_START   = 3\nSERVICE_ERROR_NORMAL   = 1\n\nSECOMEA = \"Secomea A/S\"\ncom0com.PortDesc = \"com0com - serial port emulator\"\ncom0com.SrvDesc = \"com0com - emulates the serial ports interconnected via a null-modem cable\"\n\n;******************************************************************************\n"
+        },
+        {
+          "block_index": 20,
+          "decompressed_offset": 1971819,
+          "bytes": 3475,
+          "sha256": "e371f8a7464480f4f117650fe8df915273757c1f21e26a1eedf6abf1baa3d906",
+          "text": ";******************************************************************************\n;\n; com0com.inf\n;\n; Installation file for the Null-modem emulator driver.\n;\n; Copyright (c) 2004-2012 Vyacheslav Frolov\n; Copyright (c) 2017 Secomea A/S\n;\n;******************************************************************************\n\n[Version]\nSignature = \"$Windows NT$\"\nProvider = %SECOMEA%\nClass = CNCPorts\nClassGUID = {df799e12-3c56-421b-b298-b6d3642bc878}\nCatalogFile = com0com.cat\n;           MM/DD/YYYY\nDriverVer = 03/15/2017,7.2.0.17113\nUninstallInfTag = {df799e12-3c56-421b-b298-b6d3642bc878}\n\n;******************************************************************************\n;\n; Class section\n;\n;******************************************************************************\n\n[ClassInstall32]\nAddReg = com0com_ClassReg\n\n[com0com_ClassReg]\nHKR,,,0,%ClassName%\nHKR,,Icon,,-23\n\n;******************************************************************************\n;\n; Source and Destination information\n;\n;******************************************************************************\n\n[SourceDisksNames]\n1 = %DiskId1%,,,\"\"\n\n[SourceDisksFiles]\ncom0com.sys = 1,,\n\n[DestinationDirs]\ncom0com_CopyDrivers = 12\n\n[com0com_CopyDrivers]\ncom0com.sys\n\n;******************************************************************************\n;\n; Driver information\n;\n;******************************************************************************\n\n[Manufacturer]\n%SECOMEA% = com0com, NTx86, NTamd64\n\n[com0com]\n%com0com.BusDesc% = com0com_inst, root\\com0com\n\n[com0com.NTx86]\n%com0com.BusDesc% = com0com_inst, root\\com0com\n\n[com0com.NTamd64]\n%com0com.BusDesc% = com0com_inst, root\\com0com\n\n;******************************************************************************\n;\n; Bus install section\n;\n;******************************************************************************\n\n[com0com_inst]\nAddReg = com0com_AddReg\nCopyFiles = com0com_CopyDrivers\nCopyINF = cncport.inf\n;CopyINF = comport.inf\n\n[com0com_inst.Services]\nAddService = com0com, %SPSVCINST_ASSOCSERVICE%, com0com_Service_Inst, com0com_EventLog_Inst\n\n[com0com_AddReg]\n\n;******************************************************************************\n;\n; Common section\n;\n;******************************************************************************\n\n[com0com_Service_Inst]\nDisplayName    = %com0com.SrvDesc%\nServiceType    = %SERVICE_KERNEL_DRIVER%\nStartType      = %SERVICE_DEMAND_START%\nErrorControl   = %SERVICE_ERROR_NORMAL%\nServiceBinary  = %12%\\com0com.sys\n\n[com0com_EventLog_Inst]\nAddReg = com0com_EventLog_AddReg\n\n[com0com_EventLog_AddReg]\nHKR,,EventMessageFile,%REG_EXPAND_SZ%,\"%%SystemRoot%%\\System32\\IoLogMsg.dll;%%SystemRoot%%\\System32\\drivers\\com0com.sys\"\nHKR,,TypesSupported,%REG_DWORD%,7\n\n;******************************************************************************\n;\n; Strings\n;\n;******************************************************************************\n\n[Strings]\n\nSPSVCINST_ASSOCSERVICE = 0x00000002\n\nREG_EXPAND_SZ          = 0x00020000\nREG_DWORD              = 0x00010001\n\nSERVICE_KERNEL_DRIVER  = 1\nSERVICE_DEMAND_START   = 3\nSERVICE_ERROR_NORMAL   = 1\n\nDiskId1 = \"Installation Disk #1 (com0com - Null-modem emulator)\"\nSECOMEA = \"Secomea A/S\"\ncom0com.BusDesc = \"com0com - bus for serial port pair emulator\"\ncom0com.SrvDesc = \"com0com - emulates the serial ports interconnected via a null-modem cable\"\nClassName = \"com0com - serial port emulators\"\n\n;******************************************************************************\n"
+        },
+        {
+          "block_index": 21,
+          "decompressed_offset": 1975298,
+          "bytes": 2954,
+          "sha256": "8de1a105a2f6ebe3ea33a7b2a6da3881d3e509e82b1d65a45a6d688d478d65e4",
+          "text": ";******************************************************************************\n;\n; cncport.inf\n;\n; Installation file for the Null-modem emulator driver.\n;\n; Copyright (c) 2010-2012 Vyacheslav Frolov\n; Copyright (c) 2017 Secomea A/S\n;\n;******************************************************************************\n\n[Version]\nSignature = \"$Windows NT$\"\nProvider = %SECOMEA%\nClass = CNCPorts\nClassGUID = {df799e12-3c56-421b-b298-b6d3642bc878}\nCatalogFile = com0com.cat\n;           MM/DD/YYYY\nDriverVer = 03/15/2017,7.2.0.17113\nUninstallInfTag = {df799e12-3c56-421b-b298-b6d3642bc878}\n\n;******************************************************************************\n;\n; Driver information\n;\n;******************************************************************************\n\n[Manufacturer]\n%SECOMEA% = com0com, NTx86, NTamd64\n\n[ControlFlags]\nExcludeFromSelect = com0com\\cncport\n\n[com0com]\n%com0com.PortDesc% = com0com_inst_port, com0com\\cncport\n\n[com0com.NTx86]\n%com0com.PortDesc% = com0com_inst_port, com0com\\cncport\n\n[com0com.NTamd64]\n%com0com.PortDesc% = com0com_inst_port, com0com\\cncport\n\n;******************************************************************************\n;\n; Port install section\n;\n;******************************************************************************\n\n[com0com_inst_port]\nAddReg = com0com_AddReg\n;Include = msports.inf\n;Needs = SerialEnumerator.NT\n\n[com0com_inst_port.Services]\nAddService = com0com, %SPSVCINST_ASSOCSERVICE%, com0com_Service_Inst, com0com_EventLog_Inst\n;Include = msports.inf\n;Needs = SerialEnumerator.NT.Services\n\n[com0com_inst_port.HW]\nAddReg = com0com_HW_AddReg\n\n[com0com_AddReg]\n\n[com0com_HW_AddReg]\n;HKR,,\"UpperFilters\",0x00010000,\"serenum\"\n\n;******************************************************************************\n;\n; Common section\n;\n;******************************************************************************\n\n[com0com_Service_Inst]\nDisplayName    = %com0com.SrvDesc%\nServiceType    = %SERVICE_KERNEL_DRIVER%\nStartType      = %SERVICE_DEMAND_START%\nErrorControl   = %SERVICE_ERROR_NORMAL%\nServiceBinary  = %12%\\com0com.sys\n\n[com0com_EventLog_Inst]\nAddReg = com0com_EventLog_AddReg\n\n[com0com_EventLog_AddReg]\nHKR,,EventMessageFile,%REG_EXPAND_SZ%,\"%%SystemRoot%%\\System32\\IoLogMsg.dll;%%SystemRoot%%\\System32\\drivers\\com0com.sys\"\nHKR,,TypesSupported,%REG_DWORD%,7\n\n;******************************************************************************\n;\n; Strings\n;\n;******************************************************************************\n\n[Strings]\n\nSPSVCINST_ASSOCSERVICE = 0x00000002\n\nREG_EXPAND_SZ          = 0x00020000\nREG_DWORD              = 0x00010001\n\nSERVICE_KERNEL_DRIVER  = 1\nSERVICE_DEMAND_START   = 3\nSERVICE_ERROR_NORMAL   = 1\n\nSECOMEA = \"Secomea A/S\"\ncom0com.PortDesc = \"com0com - serial port emulator\"\ncom0com.SrvDesc = \"com0com - emulates the serial ports interconnected via a null-modem cable\"\n\n;******************************************************************************\n"
+        },
+        {
+          "block_index": 22,
+          "decompressed_offset": 1978256,
+          "bytes": 3034,
+          "sha256": "a7f96e648068015d6a859f90260693d0bd49e6cdf283bd7b51c0ff923bebcd80",
+          "text": ";******************************************************************************\n;\n; comport.inf\n;\n; Installation file for the Null-modem emulator driver.\n;\n; Copyright (c) 2010-2012 Vyacheslav Frolov\n; Copyright (c) 2017 Secomea A/S\n;\n;******************************************************************************\n\n[Version]\nSignature = \"$Windows NT$\"\nProvider = %SECOMEA%\nClass = Ports\nClassGUID = {4D36E978-E325-11CE-BFC1-08002BE10318}\nCatalogFile = com0com.cat\n;           MM/DD/YYYY\nDriverVer = 03/15/2017,7.2.0.17113\nUninstallInfTag = {df799e12-3c56-421b-b298-b6d3642bc878}\n\n;******************************************************************************\n;\n; Driver information\n;\n;******************************************************************************\n\n[Manufacturer]\n%SECOMEA% = com0com, NTx86, NTamd64\n\n[ControlFlags]\nExcludeFromSelect = com0com\\comport\n\n[com0com]\n%com0com.PortDesc% = com0com_inst_port, com0com\\comport\n\n[com0com.NTx86]\n%com0com.PortDesc% = com0com_inst_port, com0com\\comport\n\n[com0com.NTamd64]\n%com0com.PortDesc% = com0com_inst_port, com0com\\comport\n\n;******************************************************************************\n;\n; Port install section\n;\n;******************************************************************************\n\n[com0com_inst_port]\nAddReg = com0com_AddReg\nInclude = msports.inf\nNeeds = SerialEnumerator.NT\n\n[com0com_inst_port.Services]\nAddService = com0com, %SPSVCINST_ASSOCSERVICE%, com0com_Service_Inst, com0com_EventLog_Inst\nInclude = msports.inf\nNeeds = SerialEnumerator.NT.Services\n\n[com0com_inst_port.HW]\nAddReg = com0com_HW_AddReg\n\n[com0com_AddReg]\n;HKR,,PortSubClass,1,01\n;HKR,,EnumPropPages32,,\"MsPorts.dll,SerialPortPropPageProvider\"\n\n[com0com_HW_AddReg]\nHKR,,\"UpperFilters\",0x00010000,\"serenum\"\n\n;******************************************************************************\n;\n; Common section\n;\n;******************************************************************************\n\n[com0com_Service_Inst]\nDisplayName    = %com0com.SrvDesc%\nServiceType    = %SERVICE_KERNEL_DRIVER%\nStartType      = %SERVICE_DEMAND_START%\nErrorControl   = %SERVICE_ERROR_NORMAL%\nServiceBinary  = %12%\\com0com.sys\n\n[com0com_EventLog_Inst]\nAddReg = com0com_EventLog_AddReg\n\n[com0com_EventLog_AddReg]\nHKR,,EventMessageFile,%REG_EXPAND_SZ%,\"%%SystemRoot%%\\System32\\IoLogMsg.dll;%%SystemRoot%%\\System32\\drivers\\com0com.sys\"\nHKR,,TypesSupported,%REG_DWORD%,7\n\n;******************************************************************************\n;\n; Strings\n;\n;******************************************************************************\n\n[Strings]\n\nSPSVCINST_ASSOCSERVICE = 0x00000002\n\nREG_EXPAND_SZ          = 0x00020000\nREG_DWORD              = 0x00010001\n\nSERVICE_KERNEL_DRIVER  = 1\nSERVICE_DEMAND_START   = 3\nSERVICE_ERROR_NORMAL   = 1\n\nSECOMEA = \"Secomea A/S\"\ncom0com.PortDesc = \"com0com - serial port emulator\"\ncom0com.SrvDesc = \"com0com - emulates the serial ports interconnected via a null-modem cable\"\n\n;******************************************************************************\n"
+        },
+        {
+          "block_index": 30,
+          "decompressed_offset": 2445643,
+          "bytes": 1856,
+          "sha256": "517d6f44f71994dca461b915b4cac0bcae4099543d77107a714a9a3bfc842885",
+          "text": ";/*++\n;\n;    INF file for installing USB/IP bus enumerator driver\n;    Copyright (c) 2017 Secomea A/S\n;\n;--*/\n[Version]\nSignature=\"$WINDOWS NT$\"\nClass=USB\nClassGUID={36FC9E60-C465-11CF-8056-444553540000}\nProvider=%SECOMEA%\nDriverVer=03/10/2017,7.2.0.17105\nCatalogFile=USBIPEnum.cat\n\n[Manufacturer]\n%StdMfg%=Standard,NTx86\n%StdMfg%=Standard,NTamd64\n\n[Standard.NTx86]\n%DeviceDesc%=USBIP_Device, root\\USBIPEnum\n\n[Standard.NTamd64]\n%DeviceDesc%=USBIP_Device, root\\USBIPEnum\n\n[DestinationDirs]\nDefaultDestDir = 12\n\n[SourceDisksNames]\n1 = %DiskId1%,,,\"\"\n\n[SourceDisksFiles]\nUSBIPEnum.sys  = 1,,\n\n[Drivers_Dir_x86]\nUSBIPEnum.sys,USBIPEnum.sys\n\n[Drivers_Dir_x64]\nUSBIPEnum.sys,USBIPEnum.sys\n\n[USBIP_Device.NTx86]\nCopyFiles=Drivers_Dir_x86\n\n[USBIP_Device.NTamd64]\nCopyFiles=Drivers_Dir_x64\n\n[USBIP_Device.NTx86.HW]\nAddReg=USBIP_Device_AddReg\n\n[USBIP_Device.NTamd64.HW]\nAddReg=USBIP_Device_AddReg\n\n[USBIP_Device_AddReg]                            \nHKR,,DeviceCharacteristics,0x10001,0x0100         ; Use same security checks on relative opens\n\n;-------------- Service installation\n[USBIP_Device.NTx86.Services]\nAddService = USBIPEnum,%SPSVCINST_ASSOCSERVICE%, USBIP_Service_Inst\n\n[USBIP_Device.NTamd64.Services]\nAddService = USBIPEnum,%SPSVCINST_ASSOCSERVICE%, USBIP_Service_Inst\n\n; -------------- busenum driver install sections\n[USBIP_Service_Inst]\nDisplayName    = %ServiceDesc%\nServiceType    = 1               ; SERVICE_KERNEL_DRIVER\nStartType      = 3               ; SERVICE_DEMAND_START \nErrorControl   = 1               ; SERVICE_ERROR_NORMAL\nServiceBinary  = %12%\\USBIPEnum.sys\nLoadOrderGroup = Extended Base\n\n\n[Strings]\nSPSVCINST_ASSOCSERVICE= 0x00000002\nSECOMEA = \"Secomea A/S\"\nStdMfg = \"LinkManager USB Controller\"\nDiskId1 = \"LinkManager USB Controller Disk\"\nDeviceDesc = \"LinkManager USB Controller\"\nServiceDesc = \"LinkManager USB Controller Service\"\n\n"
+        },
+        {
+          "block_index": 33,
+          "decompressed_offset": 2547918,
+          "bytes": 1838,
+          "sha256": "ada175ef973b9cefc19c00d194d92facbe00dd46bf89ca65cf1b290fab5d3167",
+          "text": ";/*++\n;\n;    INF file for installing USB/IP bus enumerator driver\n;    Copyright (c) 2017 Secomea A/S\n;\n;--*/\n[Version]\nSignature=\"$WINDOWS NT$\"\nClass=USB\nClassGUID={36FC9E60-C465-11CF-8056-444553540000}\nProvider=%SECOMEA%\nDriverVer=03/16/2017,7.2.0.17114\nCatalogFile=USBIPEnum.cat\n\n[Manufacturer]\n%StdMfg%=Standard,NTx86,NTamd64\n\n[Standard.NTx86]\n%DeviceDesc%=USBIP_Device, root\\USBIPEnum\n\n[Standard.NTamd64]\n%DeviceDesc%=USBIP_Device, root\\USBIPEnum\n\n[DestinationDirs]\nDefaultDestDir = 12\n\n[SourceDisksNames]\n1 = %DiskId1%,,,\"\"\n\n[SourceDisksFiles]\nUSBIPEnum.sys  = 1,,\n\n[Drivers_Dir_x86]\nUSBIPEnum.sys,USBIPEnum.sys\n\n[Drivers_Dir_x64]\nUSBIPEnum.sys,USBIPEnum.sys\n\n[USBIP_Device.NTx86]\nCopyFiles=Drivers_Dir_x86\n\n[USBIP_Device.NTamd64]\nCopyFiles=Drivers_Dir_x64\n\n[USBIP_Device.NTx86.HW]\nAddReg=USBIP_Device_AddReg\n\n[USBIP_Device.NTamd64.HW]\nAddReg=USBIP_Device_AddReg\n\n[USBIP_Device_AddReg]                            \nHKR,,DeviceCharacteristics,0x10001,0x0100         ; Use same security checks on relative opens\n\n;-------------- Service installation\n[USBIP_Device.NTx86.Services]\nAddService = USBIPEnum,%SPSVCINST_ASSOCSERVICE%, USBIP_Service_Inst\n\n[USBIP_Device.NTamd64.Services]\nAddService = USBIPEnum,%SPSVCINST_ASSOCSERVICE%, USBIP_Service_Inst\n\n; -------------- busenum driver install sections\n[USBIP_Service_Inst]\nDisplayName    = %ServiceDesc%\nServiceType    = 1               ; SERVICE_KERNEL_DRIVER\nStartType      = 3               ; SERVICE_DEMAND_START \nErrorControl   = 1               ; SERVICE_ERROR_NORMAL\nServiceBinary  = %12%\\USBIPEnum.sys\nLoadOrderGroup = Extended Base\n\n\n[Strings]\nSPSVCINST_ASSOCSERVICE= 0x00000002\nSECOMEA = \"Secomea A/S\"\nStdMfg = \"LinkManager USB Controller\"\nDiskId1 = \"LinkManager USB Controller Disk\"\nDeviceDesc = \"LinkManager USB Controller\"\nServiceDesc = \"LinkManager USB Controller Service\"\n\n"
+        }
+      ],
+      "block_count": 42,
+      "complete_stream_consumed": true
+    },
+    {
+      "archive_member": "$PROGRAMFILES/LinkManager-x86-setup.exe",
+      "sha256": "f23590d15ff37d08631c00d4d17b3bf23f7ef6d88246a3bf935d1bae5569fb7c",
+      "decompressed_bytes": 2548116,
+      "executables": [
+        {
+          "block_index": 1,
+          "decompressed_offset": 46180,
+          "bytes": 12288,
+          "machine": "0x14c",
+          "subsystem": 2,
+          "sha256": "9111099efe9d5c9b391dc132b2faf0a3851a760d4106d5368e30ac744eb42706"
+        },
+        {
+          "block_index": 2,
+          "decompressed_offset": 58472,
+          "bytes": 7168,
+          "machine": "0x14c",
+          "subsystem": 2,
+          "sha256": "01e72332362345c415a7edcb366d6a1b52be9ac6e946fb9da49785c140ba1a4b"
+        },
+        {
+          "block_index": 4,
+          "decompressed_offset": 92142,
+          "bytes": 9728,
+          "machine": "0x14c",
+          "subsystem": 2,
+          "sha256": "4b7d17da290f41ebe244827cc295ce7e580da2f7e9f7cc3efc1abc6898e3c9ed"
+        },
+        {
+          "block_index": 5,
+          "decompressed_offset": 101874,
+          "bytes": 914360,
+          "machine": "0x14c",
+          "subsystem": 2,
+          "sha256": "56d54317484a5058ae211a908a4c523eecd07e03ac537a3c9618f91e0130413b"
+        },
+        {
+          "block_index": 6,
+          "decompressed_offset": 1016238,
+          "bytes": 145848,
+          "machine": "0x14c",
+          "subsystem": 2,
+          "sha256": "521e428ce24597b71130407222d4eff607f534eb26f3b77a939dde87984291b5"
+        },
+        {
+          "block_index": 7,
+          "decompressed_offset": 1162090,
+          "bytes": 156424,
+          "machine": "0x14c",
+          "subsystem": 2,
+          "sha256": "f2c0678e8220ae9eedeebeed9647fb8a1af60a37fa5760d156b7bc95ebef6e08"
+        },
+        {
+          "block_index": 10,
+          "decompressed_offset": 1323663,
+          "bytes": 45520,
+          "machine": "0x14c",
+          "subsystem": 1,
+          "sha256": "3c45dc248636011ef7308bc728a00989128916b9ceb46f76686a7b6bfeb3aca8"
+        },
+        {
+          "block_index": 12,
+          "decompressed_offset": 1379200,
+          "bytes": 45520,
+          "machine": "0x14c",
+          "subsystem": 1,
+          "sha256": "7e42775eb928afa38b3d3984c3aedf1ac1bebf1bb4fe01637ea778ad65495f76"
+        },
+        {
+          "block_index": 14,
+          "decompressed_offset": 1434642,
+          "bytes": 115712,
+          "machine": "0x14c",
+          "subsystem": 3,
+          "sha256": "dea5d9d2388197cd28bb605aeb63399b13bede597c82712794bb79ea83542167"
+        },
+        {
+          "block_index": 18,
+          "decompressed_offset": 1559833,
+          "bytes": 83832,
+          "machine": "0x14c",
+          "subsystem": 1,
+          "sha256": "5b0f57ae5b7deaacf7fef79e50fe09506601bcba6401096e3b83825b118844f8"
+        },
+        {
+          "block_index": 23,
+          "decompressed_offset": 1664021,
+          "bytes": 83424,
+          "machine": "0x14c",
+          "subsystem": 1,
+          "sha256": "a7fe131fcbc78e7ad996a26f5b85a77b85539a47a0843898c2fdc359771c2dc5"
+        },
+        {
+          "block_index": 25,
+          "decompressed_offset": 1758295,
+          "bytes": 83424,
+          "machine": "0x14c",
+          "subsystem": 1,
+          "sha256": "078d258ad1fa4072a64be3a7c62420af4c9df16b21a91ced454e125476d80240"
+        },
+        {
+          "block_index": 27,
+          "decompressed_offset": 1852568,
+          "bytes": 81424,
+          "machine": "0x14c",
+          "subsystem": 1,
+          "sha256": "457d231ef91dc208b5940bba29cdc29a315b6f3ba268ccb32de14f5b96f90232"
+        },
+        {
+          "block_index": 29,
+          "decompressed_offset": 1943014,
+          "bytes": 113664,
+          "machine": "0x14c",
+          "subsystem": 3,
+          "sha256": "5a34ce696ac92a5eede6ed72d50bc35c6ea3b17cd5b8f513aeaec9a5768c6d09"
+        },
+        {
+          "block_index": 31,
+          "decompressed_offset": 2058542,
+          "bytes": 74104,
+          "machine": "0x14c",
+          "subsystem": 1,
+          "sha256": "21fe4189e96ece18173d68e9d5a503683605c1fe5ef10fd87e4c21115a8a2fc0"
+        },
+        {
+          "block_index": 34,
+          "decompressed_offset": 2144407,
+          "bytes": 73696,
+          "machine": "0x14c",
+          "subsystem": 1,
+          "sha256": "02b8832152187a5e7b5bd9ea0afb3621d5ce27f286f35714147a5acb056a8d82"
+        },
+        {
+          "block_index": 36,
+          "decompressed_offset": 2228004,
+          "bytes": 73696,
+          "machine": "0x14c",
+          "subsystem": 1,
+          "sha256": "8cee10df737d7c9f97b57c53efbadca404760abb82952c04ee066ac35eb55fd2"
+        },
+        {
+          "block_index": 38,
+          "decompressed_offset": 2311600,
+          "bytes": 72720,
+          "machine": "0x14c",
+          "subsystem": 1,
+          "sha256": "e1de6578090c1040a649d57c513d64c7cee1cc4f20ace8fe9a96e50baef5a168"
+        },
+        {
+          "block_index": 40,
+          "decompressed_offset": 2392464,
+          "bytes": 87552,
+          "machine": "0x14c",
+          "subsystem": 3,
+          "sha256": "302929190b0c3cf1d472da2b04466fd0cbb36c8b0d5044f6c219beb1c24bed10"
+        },
+        {
+          "block_index": 41,
+          "decompressed_offset": 2480020,
+          "bytes": 68096,
+          "machine": "0x14c",
+          "subsystem": 3,
+          "sha256": "206c6ea9ea7ea3fa1db2d7da6bde88c57f533f7850317e1ebdc2d213bb7ecd35"
+        }
+      ],
+      "inf_texts": [
+        {
+          "block_index": 9,
+          "decompressed_offset": 1319517,
+          "bytes": 4142,
+          "sha256": "d1e067b5baf2e449b063dd1d052d5929b94a124d56e5491b3f2a923d50d198a1",
+          "text": "; ****************************************************************************\r\n; * Copyright (C) 2020 Secomea A/S                                           *\r\n; ****************************************************************************\r\n\r\n[Version]\r\n   Signature = \"$Windows NT$\"\r\n   CatalogFile = lmtap.cat\r\n   Class = Net\r\n   ClassGUID = {4d36e972-e325-11ce-bfc1-08002be10318}\r\n   PnpLockDown = 1\r\n   Provider = %Provider%\r\n   DriverVer = 09/23/2020,9.0.0.23\r\n\r\n[Strings]\r\n   DeviceDescription = \"LinkManager Adapter\"\r\n   Provider = \"Secomea A/S\"\r\n\r\n[Manufacturer]\r\n   %Provider% = lmtap, NTx86\r\n\r\n[lmtap.NTx86]\r\n   %DeviceDescription% = lmtap.ndi, lmtap\r\n\r\n;----------------- Characteristics ------------\r\n;    NCF_PHYSICAL = 0x04\r\n;    NCF_VIRTUAL = 0x01\r\n;    NCF_SOFTWARE_ENUMERATED = 0x02\r\n;    NCF_HIDDEN = 0x08\r\n;    NCF_NO_SERVICE = 0x10\r\n;    NCF_HAS_UI = 0x80\r\n;----------------- Characteristics ------------\r\n\r\n[lmtap.ndi]\r\n   CopyFiles       = lmtap.driver\r\n   AddReg          = lmtap.reg\r\n   AddReg          = lmtap.params.reg\r\n   Characteristics = 0x01  ; NCF_VIRTUAL\r\n   BusType         = 1\r\n   *IfType            = 0x6 ; IF_TYPE_ETHERNET_CSMACD\r\n   *MediaType         = 0x0 ; NdisMedium802_3\r\n   *PhysicalMediaType = 14  ; NdisPhysicalMedium802_3\r\n\r\n[lmtap.ndi.Services]\r\n   AddService = lmtap,        2, lmtap.service\r\n\r\n[lmtap.reg]\r\n   HKR, Ndi,            Service,      0, \"lmtap\"\r\n   HKR, Ndi\\Interfaces, UpperRange,   0, \"ndis5\"\r\n   HKR, Ndi\\Interfaces, LowerRange,   0, \"ethernet\"\r\n   HKR, ,               Manufacturer, 0, \"%Provider%\"\r\n   HKR, ,               ProductName,  0, \"%DeviceDescription%\"\r\n\r\n[lmtap.params.reg]\r\n   HKR, Ndi\\params\\MTU,                  ParamDesc, 0, \"MTU\"\r\n   HKR, Ndi\\params\\MTU,                  Type,      0, \"int\"\r\n   HKR, Ndi\\params\\MTU,                  Default,   0, \"1500\"\r\n   HKR, Ndi\\params\\MTU,                  Optional,  0, \"0\"\r\n   HKR, Ndi\\params\\MTU,                  Min,       0, \"100\"\r\n   HKR, Ndi\\params\\MTU,                  Max,       0, \"1500\"\r\n   HKR, Ndi\\params\\MTU,                  Step,      0, \"1\"\r\n   HKR, Ndi\\params\\MediaStatus,          ParamDesc, 0, \"Media Status\"\r\n   HKR, Ndi\\params\\MediaStatus,          Type,      0, \"enum\"\r\n   HKR, Ndi\\params\\MediaStatus,          Optional,  0, \"1\"\r\n   HKR, Ndi\\params\\MediaStatus\\enum,     \"0\",       0, \"Application Controlled\"\r\n   HKR, Ndi\\params\\MediaStatus\\enum,     \"1\",       0, \"Always Connected\"\r\n   HKR, Ndi\\params\\MAC,                  ParamDesc, 0, \"MAC Address\"\r\n   HKR, Ndi\\params\\MAC,                  Type,      0, \"edit\"\r\n   HKR, Ndi\\params\\MAC,                  Optional,  0, \"1\"\r\n\r\n;----------------------------------------------------------------\r\n;                             Service Section\r\n;----------------------------------------------------------------\r\n\r\n;---------- Service Type -------------\r\n;    SERVICE_KERNEL_DRIVER     = 0x01\r\n;    SERVICE_WIN32_OWN_PROCESS = 0x10\r\n;---------- Service Type -------------\r\n\r\n;---------- Start Mode ---------------\r\n;    SERVICE_BOOT_START   = 0x0\r\n;    SERVICE_SYSTEM_START = 0x1\r\n;    SERVICE_AUTO_START   = 0x2\r\n;    SERVICE_DEMAND_START = 0x3\r\n;    SERVICE_DISABLED     = 0x4\r\n;---------- Start Mode ---------------\r\n\r\n[lmtap.service]\r\n   DisplayName = %DeviceDescription%\r\n   ServiceType = 1\r\n   StartType = 3\r\n   ErrorControl = 1\r\n   LoadOrderGroup = NDIS\r\n   ServiceBinary = %12%\\lmtap.sys\r\n\r\n;-----------------------------------------------------------------\r\n;                                File Installation\r\n;-----------------------------------------------------------------\r\n\r\n;----------------- Copy Flags ------------\r\n;    COPYFLG_NOSKIP = 0x02\r\n;    COPYFLG_NOVERSIONCHECK = 0x04\r\n;----------------- Copy Flags ------------\r\n\r\n[SourceDisksNames]\r\n   1 = %DeviceDescription%, lmtap.sys\r\n\r\n[SourceDisksFiles]\r\n   lmtap.sys = 1\r\n\r\n[DestinationDirs]\r\n   lmtap.driver = 12\r\n\r\n[lmtap.driver]\r\n   lmtap.sys,,,6     ; COPYFLG_NOSKIP | COPYFLG_NOVERSIONCHECK\r\n\r\n;---------------------------------------------------------------\r\n;                                      End\r\n;---------------------------------------------------------------\r\n\r\n"
+        },
+        {
+          "block_index": 15,
+          "decompressed_offset": 1550358,
+          "bytes": 3475,
+          "sha256": "1481137fa4454f13b1cd6a38ac586496dc89cd7bfa1e98c1113ae9c6b13aba97",
+          "text": ";******************************************************************************\n;\n; com0com.inf\n;\n; Installation file for the Null-modem emulator driver.\n;\n; Copyright (c) 2004-2012 Vyacheslav Frolov\n; Copyright (c) 2017 Secomea A/S\n;\n;******************************************************************************\n\n[Version]\nSignature = \"$Windows NT$\"\nProvider = %SECOMEA%\nClass = CNCPorts\nClassGUID = {df799e12-3c56-421b-b298-b6d3642bc878}\nCatalogFile = com0com.cat\n;           MM/DD/YYYY\nDriverVer = 03/10/2017,7.2.0.17105\nUninstallInfTag = {df799e12-3c56-421b-b298-b6d3642bc878}\n\n;******************************************************************************\n;\n; Class section\n;\n;******************************************************************************\n\n[ClassInstall32]\nAddReg = com0com_ClassReg\n\n[com0com_ClassReg]\nHKR,,,0,%ClassName%\nHKR,,Icon,,-23\n\n;******************************************************************************\n;\n; Source and Destination information\n;\n;******************************************************************************\n\n[SourceDisksNames]\n1 = %DiskId1%,,,\"\"\n\n[SourceDisksFiles]\ncom0com.sys = 1,,\n\n[DestinationDirs]\ncom0com_CopyDrivers = 12\n\n[com0com_CopyDrivers]\ncom0com.sys\n\n;******************************************************************************\n;\n; Driver information\n;\n;******************************************************************************\n\n[Manufacturer]\n%SECOMEA% = com0com, NTx86, NTamd64\n\n[com0com]\n%com0com.BusDesc% = com0com_inst, root\\com0com\n\n[com0com.NTx86]\n%com0com.BusDesc% = com0com_inst, root\\com0com\n\n[com0com.NTamd64]\n%com0com.BusDesc% = com0com_inst, root\\com0com\n\n;******************************************************************************\n;\n; Bus install section\n;\n;******************************************************************************\n\n[com0com_inst]\nAddReg = com0com_AddReg\nCopyFiles = com0com_CopyDrivers\nCopyINF = cncport.inf\n;CopyINF = comport.inf\n\n[com0com_inst.Services]\nAddService = com0com, %SPSVCINST_ASSOCSERVICE%, com0com_Service_Inst, com0com_EventLog_Inst\n\n[com0com_AddReg]\n\n;******************************************************************************\n;\n; Common section\n;\n;******************************************************************************\n\n[com0com_Service_Inst]\nDisplayName    = %com0com.SrvDesc%\nServiceType    = %SERVICE_KERNEL_DRIVER%\nStartType      = %SERVICE_DEMAND_START%\nErrorControl   = %SERVICE_ERROR_NORMAL%\nServiceBinary  = %12%\\com0com.sys\n\n[com0com_EventLog_Inst]\nAddReg = com0com_EventLog_AddReg\n\n[com0com_EventLog_AddReg]\nHKR,,EventMessageFile,%REG_EXPAND_SZ%,\"%%SystemRoot%%\\System32\\IoLogMsg.dll;%%SystemRoot%%\\System32\\drivers\\com0com.sys\"\nHKR,,TypesSupported,%REG_DWORD%,7\n\n;******************************************************************************\n;\n; Strings\n;\n;******************************************************************************\n\n[Strings]\n\nSPSVCINST_ASSOCSERVICE = 0x00000002\n\nREG_EXPAND_SZ          = 0x00020000\nREG_DWORD              = 0x00010001\n\nSERVICE_KERNEL_DRIVER  = 1\nSERVICE_DEMAND_START   = 3\nSERVICE_ERROR_NORMAL   = 1\n\nDiskId1 = \"Installation Disk #1 (com0com - Null-modem emulator)\"\nSECOMEA = \"Secomea A/S\"\ncom0com.BusDesc = \"com0com - bus for serial port pair emulator\"\ncom0com.SrvDesc = \"com0com - emulates the serial ports interconnected via a null-modem cable\"\nClassName = \"com0com - serial port emulators\"\n\n;******************************************************************************\n"
+        },
+        {
+          "block_index": 16,
+          "decompressed_offset": 1553837,
+          "bytes": 2954,
+          "sha256": "16afa61df1dbdef5268900e6fe1f9dae40e4f9f18234e74e34cec78c4816a3c5",
+          "text": ";******************************************************************************\n;\n; cncport.inf\n;\n; Installation file for the Null-modem emulator driver.\n;\n; Copyright (c) 2010-2012 Vyacheslav Frolov\n; Copyright (c) 2017 Secomea A/S\n;\n;******************************************************************************\n\n[Version]\nSignature = \"$Windows NT$\"\nProvider = %SECOMEA%\nClass = CNCPorts\nClassGUID = {df799e12-3c56-421b-b298-b6d3642bc878}\nCatalogFile = com0com.cat\n;           MM/DD/YYYY\nDriverVer = 03/10/2017,7.2.0.17105\nUninstallInfTag = {df799e12-3c56-421b-b298-b6d3642bc878}\n\n;******************************************************************************\n;\n; Driver information\n;\n;******************************************************************************\n\n[Manufacturer]\n%SECOMEA% = com0com, NTx86, NTamd64\n\n[ControlFlags]\nExcludeFromSelect = com0com\\cncport\n\n[com0com]\n%com0com.PortDesc% = com0com_inst_port, com0com\\cncport\n\n[com0com.NTx86]\n%com0com.PortDesc% = com0com_inst_port, com0com\\cncport\n\n[com0com.NTamd64]\n%com0com.PortDesc% = com0com_inst_port, com0com\\cncport\n\n;******************************************************************************\n;\n; Port install section\n;\n;******************************************************************************\n\n[com0com_inst_port]\nAddReg = com0com_AddReg\n;Include = msports.inf\n;Needs = SerialEnumerator.NT\n\n[com0com_inst_port.Services]\nAddService = com0com, %SPSVCINST_ASSOCSERVICE%, com0com_Service_Inst, com0com_EventLog_Inst\n;Include = msports.inf\n;Needs = SerialEnumerator.NT.Services\n\n[com0com_inst_port.HW]\nAddReg = com0com_HW_AddReg\n\n[com0com_AddReg]\n\n[com0com_HW_AddReg]\n;HKR,,\"UpperFilters\",0x00010000,\"serenum\"\n\n;******************************************************************************\n;\n; Common section\n;\n;******************************************************************************\n\n[com0com_Service_Inst]\nDisplayName    = %com0com.SrvDesc%\nServiceType    = %SERVICE_KERNEL_DRIVER%\nStartType      = %SERVICE_DEMAND_START%\nErrorControl   = %SERVICE_ERROR_NORMAL%\nServiceBinary  = %12%\\com0com.sys\n\n[com0com_EventLog_Inst]\nAddReg = com0com_EventLog_AddReg\n\n[com0com_EventLog_AddReg]\nHKR,,EventMessageFile,%REG_EXPAND_SZ%,\"%%SystemRoot%%\\System32\\IoLogMsg.dll;%%SystemRoot%%\\System32\\drivers\\com0com.sys\"\nHKR,,TypesSupported,%REG_DWORD%,7\n\n;******************************************************************************\n;\n; Strings\n;\n;******************************************************************************\n\n[Strings]\n\nSPSVCINST_ASSOCSERVICE = 0x00000002\n\nREG_EXPAND_SZ          = 0x00020000\nREG_DWORD              = 0x00010001\n\nSERVICE_KERNEL_DRIVER  = 1\nSERVICE_DEMAND_START   = 3\nSERVICE_ERROR_NORMAL   = 1\n\nSECOMEA = \"Secomea A/S\"\ncom0com.PortDesc = \"com0com - serial port emulator\"\ncom0com.SrvDesc = \"com0com - emulates the serial ports interconnected via a null-modem cable\"\n\n;******************************************************************************\n"
+        },
+        {
+          "block_index": 17,
+          "decompressed_offset": 1556795,
+          "bytes": 3034,
+          "sha256": "ac63329512d9113cb6d96fa7755f3b9ff74406256bdeda9356a8296f7bd17429",
+          "text": ";******************************************************************************\n;\n; comport.inf\n;\n; Installation file for the Null-modem emulator driver.\n;\n; Copyright (c) 2010-2012 Vyacheslav Frolov\n; Copyright (c) 2017 Secomea A/S\n;\n;******************************************************************************\n\n[Version]\nSignature = \"$Windows NT$\"\nProvider = %SECOMEA%\nClass = Ports\nClassGUID = {4D36E978-E325-11CE-BFC1-08002BE10318}\nCatalogFile = com0com.cat\n;           MM/DD/YYYY\nDriverVer = 03/10/2017,7.2.0.17105\nUninstallInfTag = {df799e12-3c56-421b-b298-b6d3642bc878}\n\n;******************************************************************************\n;\n; Driver information\n;\n;******************************************************************************\n\n[Manufacturer]\n%SECOMEA% = com0com, NTx86, NTamd64\n\n[ControlFlags]\nExcludeFromSelect = com0com\\comport\n\n[com0com]\n%com0com.PortDesc% = com0com_inst_port, com0com\\comport\n\n[com0com.NTx86]\n%com0com.PortDesc% = com0com_inst_port, com0com\\comport\n\n[com0com.NTamd64]\n%com0com.PortDesc% = com0com_inst_port, com0com\\comport\n\n;******************************************************************************\n;\n; Port install section\n;\n;******************************************************************************\n\n[com0com_inst_port]\nAddReg = com0com_AddReg\nInclude = msports.inf\nNeeds = SerialEnumerator.NT\n\n[com0com_inst_port.Services]\nAddService = com0com, %SPSVCINST_ASSOCSERVICE%, com0com_Service_Inst, com0com_EventLog_Inst\nInclude = msports.inf\nNeeds = SerialEnumerator.NT.Services\n\n[com0com_inst_port.HW]\nAddReg = com0com_HW_AddReg\n\n[com0com_AddReg]\n;HKR,,PortSubClass,1,01\n;HKR,,EnumPropPages32,,\"MsPorts.dll,SerialPortPropPageProvider\"\n\n[com0com_HW_AddReg]\nHKR,,\"UpperFilters\",0x00010000,\"serenum\"\n\n;******************************************************************************\n;\n; Common section\n;\n;******************************************************************************\n\n[com0com_Service_Inst]\nDisplayName    = %com0com.SrvDesc%\nServiceType    = %SERVICE_KERNEL_DRIVER%\nStartType      = %SERVICE_DEMAND_START%\nErrorControl   = %SERVICE_ERROR_NORMAL%\nServiceBinary  = %12%\\com0com.sys\n\n[com0com_EventLog_Inst]\nAddReg = com0com_EventLog_AddReg\n\n[com0com_EventLog_AddReg]\nHKR,,EventMessageFile,%REG_EXPAND_SZ%,\"%%SystemRoot%%\\System32\\IoLogMsg.dll;%%SystemRoot%%\\System32\\drivers\\com0com.sys\"\nHKR,,TypesSupported,%REG_DWORD%,7\n\n;******************************************************************************\n;\n; Strings\n;\n;******************************************************************************\n\n[Strings]\n\nSPSVCINST_ASSOCSERVICE = 0x00000002\n\nREG_EXPAND_SZ          = 0x00020000\nREG_DWORD              = 0x00010001\n\nSERVICE_KERNEL_DRIVER  = 1\nSERVICE_DEMAND_START   = 3\nSERVICE_ERROR_NORMAL   = 1\n\nSECOMEA = \"Secomea A/S\"\ncom0com.PortDesc = \"com0com - serial port emulator\"\ncom0com.SrvDesc = \"com0com - emulates the serial ports interconnected via a null-modem cable\"\n\n;******************************************************************************\n"
+        },
+        {
+          "block_index": 20,
+          "decompressed_offset": 1654546,
+          "bytes": 3475,
+          "sha256": "e371f8a7464480f4f117650fe8df915273757c1f21e26a1eedf6abf1baa3d906",
+          "text": ";******************************************************************************\n;\n; com0com.inf\n;\n; Installation file for the Null-modem emulator driver.\n;\n; Copyright (c) 2004-2012 Vyacheslav Frolov\n; Copyright (c) 2017 Secomea A/S\n;\n;******************************************************************************\n\n[Version]\nSignature = \"$Windows NT$\"\nProvider = %SECOMEA%\nClass = CNCPorts\nClassGUID = {df799e12-3c56-421b-b298-b6d3642bc878}\nCatalogFile = com0com.cat\n;           MM/DD/YYYY\nDriverVer = 03/15/2017,7.2.0.17113\nUninstallInfTag = {df799e12-3c56-421b-b298-b6d3642bc878}\n\n;******************************************************************************\n;\n; Class section\n;\n;******************************************************************************\n\n[ClassInstall32]\nAddReg = com0com_ClassReg\n\n[com0com_ClassReg]\nHKR,,,0,%ClassName%\nHKR,,Icon,,-23\n\n;******************************************************************************\n;\n; Source and Destination information\n;\n;******************************************************************************\n\n[SourceDisksNames]\n1 = %DiskId1%,,,\"\"\n\n[SourceDisksFiles]\ncom0com.sys = 1,,\n\n[DestinationDirs]\ncom0com_CopyDrivers = 12\n\n[com0com_CopyDrivers]\ncom0com.sys\n\n;******************************************************************************\n;\n; Driver information\n;\n;******************************************************************************\n\n[Manufacturer]\n%SECOMEA% = com0com, NTx86, NTamd64\n\n[com0com]\n%com0com.BusDesc% = com0com_inst, root\\com0com\n\n[com0com.NTx86]\n%com0com.BusDesc% = com0com_inst, root\\com0com\n\n[com0com.NTamd64]\n%com0com.BusDesc% = com0com_inst, root\\com0com\n\n;******************************************************************************\n;\n; Bus install section\n;\n;******************************************************************************\n\n[com0com_inst]\nAddReg = com0com_AddReg\nCopyFiles = com0com_CopyDrivers\nCopyINF = cncport.inf\n;CopyINF = comport.inf\n\n[com0com_inst.Services]\nAddService = com0com, %SPSVCINST_ASSOCSERVICE%, com0com_Service_Inst, com0com_EventLog_Inst\n\n[com0com_AddReg]\n\n;******************************************************************************\n;\n; Common section\n;\n;******************************************************************************\n\n[com0com_Service_Inst]\nDisplayName    = %com0com.SrvDesc%\nServiceType    = %SERVICE_KERNEL_DRIVER%\nStartType      = %SERVICE_DEMAND_START%\nErrorControl   = %SERVICE_ERROR_NORMAL%\nServiceBinary  = %12%\\com0com.sys\n\n[com0com_EventLog_Inst]\nAddReg = com0com_EventLog_AddReg\n\n[com0com_EventLog_AddReg]\nHKR,,EventMessageFile,%REG_EXPAND_SZ%,\"%%SystemRoot%%\\System32\\IoLogMsg.dll;%%SystemRoot%%\\System32\\drivers\\com0com.sys\"\nHKR,,TypesSupported,%REG_DWORD%,7\n\n;******************************************************************************\n;\n; Strings\n;\n;******************************************************************************\n\n[Strings]\n\nSPSVCINST_ASSOCSERVICE = 0x00000002\n\nREG_EXPAND_SZ          = 0x00020000\nREG_DWORD              = 0x00010001\n\nSERVICE_KERNEL_DRIVER  = 1\nSERVICE_DEMAND_START   = 3\nSERVICE_ERROR_NORMAL   = 1\n\nDiskId1 = \"Installation Disk #1 (com0com - Null-modem emulator)\"\nSECOMEA = \"Secomea A/S\"\ncom0com.BusDesc = \"com0com - bus for serial port pair emulator\"\ncom0com.SrvDesc = \"com0com - emulates the serial ports interconnected via a null-modem cable\"\nClassName = \"com0com - serial port emulators\"\n\n;******************************************************************************\n"
+        },
+        {
+          "block_index": 21,
+          "decompressed_offset": 1658025,
+          "bytes": 2954,
+          "sha256": "8de1a105a2f6ebe3ea33a7b2a6da3881d3e509e82b1d65a45a6d688d478d65e4",
+          "text": ";******************************************************************************\n;\n; cncport.inf\n;\n; Installation file for the Null-modem emulator driver.\n;\n; Copyright (c) 2010-2012 Vyacheslav Frolov\n; Copyright (c) 2017 Secomea A/S\n;\n;******************************************************************************\n\n[Version]\nSignature = \"$Windows NT$\"\nProvider = %SECOMEA%\nClass = CNCPorts\nClassGUID = {df799e12-3c56-421b-b298-b6d3642bc878}\nCatalogFile = com0com.cat\n;           MM/DD/YYYY\nDriverVer = 03/15/2017,7.2.0.17113\nUninstallInfTag = {df799e12-3c56-421b-b298-b6d3642bc878}\n\n;******************************************************************************\n;\n; Driver information\n;\n;******************************************************************************\n\n[Manufacturer]\n%SECOMEA% = com0com, NTx86, NTamd64\n\n[ControlFlags]\nExcludeFromSelect = com0com\\cncport\n\n[com0com]\n%com0com.PortDesc% = com0com_inst_port, com0com\\cncport\n\n[com0com.NTx86]\n%com0com.PortDesc% = com0com_inst_port, com0com\\cncport\n\n[com0com.NTamd64]\n%com0com.PortDesc% = com0com_inst_port, com0com\\cncport\n\n;******************************************************************************\n;\n; Port install section\n;\n;******************************************************************************\n\n[com0com_inst_port]\nAddReg = com0com_AddReg\n;Include = msports.inf\n;Needs = SerialEnumerator.NT\n\n[com0com_inst_port.Services]\nAddService = com0com, %SPSVCINST_ASSOCSERVICE%, com0com_Service_Inst, com0com_EventLog_Inst\n;Include = msports.inf\n;Needs = SerialEnumerator.NT.Services\n\n[com0com_inst_port.HW]\nAddReg = com0com_HW_AddReg\n\n[com0com_AddReg]\n\n[com0com_HW_AddReg]\n;HKR,,\"UpperFilters\",0x00010000,\"serenum\"\n\n;******************************************************************************\n;\n; Common section\n;\n;******************************************************************************\n\n[com0com_Service_Inst]\nDisplayName    = %com0com.SrvDesc%\nServiceType    = %SERVICE_KERNEL_DRIVER%\nStartType      = %SERVICE_DEMAND_START%\nErrorControl   = %SERVICE_ERROR_NORMAL%\nServiceBinary  = %12%\\com0com.sys\n\n[com0com_EventLog_Inst]\nAddReg = com0com_EventLog_AddReg\n\n[com0com_EventLog_AddReg]\nHKR,,EventMessageFile,%REG_EXPAND_SZ%,\"%%SystemRoot%%\\System32\\IoLogMsg.dll;%%SystemRoot%%\\System32\\drivers\\com0com.sys\"\nHKR,,TypesSupported,%REG_DWORD%,7\n\n;******************************************************************************\n;\n; Strings\n;\n;******************************************************************************\n\n[Strings]\n\nSPSVCINST_ASSOCSERVICE = 0x00000002\n\nREG_EXPAND_SZ          = 0x00020000\nREG_DWORD              = 0x00010001\n\nSERVICE_KERNEL_DRIVER  = 1\nSERVICE_DEMAND_START   = 3\nSERVICE_ERROR_NORMAL   = 1\n\nSECOMEA = \"Secomea A/S\"\ncom0com.PortDesc = \"com0com - serial port emulator\"\ncom0com.SrvDesc = \"com0com - emulates the serial ports interconnected via a null-modem cable\"\n\n;******************************************************************************\n"
+        },
+        {
+          "block_index": 22,
+          "decompressed_offset": 1660983,
+          "bytes": 3034,
+          "sha256": "a7f96e648068015d6a859f90260693d0bd49e6cdf283bd7b51c0ff923bebcd80",
+          "text": ";******************************************************************************\n;\n; comport.inf\n;\n; Installation file for the Null-modem emulator driver.\n;\n; Copyright (c) 2010-2012 Vyacheslav Frolov\n; Copyright (c) 2017 Secomea A/S\n;\n;******************************************************************************\n\n[Version]\nSignature = \"$Windows NT$\"\nProvider = %SECOMEA%\nClass = Ports\nClassGUID = {4D36E978-E325-11CE-BFC1-08002BE10318}\nCatalogFile = com0com.cat\n;           MM/DD/YYYY\nDriverVer = 03/15/2017,7.2.0.17113\nUninstallInfTag = {df799e12-3c56-421b-b298-b6d3642bc878}\n\n;******************************************************************************\n;\n; Driver information\n;\n;******************************************************************************\n\n[Manufacturer]\n%SECOMEA% = com0com, NTx86, NTamd64\n\n[ControlFlags]\nExcludeFromSelect = com0com\\comport\n\n[com0com]\n%com0com.PortDesc% = com0com_inst_port, com0com\\comport\n\n[com0com.NTx86]\n%com0com.PortDesc% = com0com_inst_port, com0com\\comport\n\n[com0com.NTamd64]\n%com0com.PortDesc% = com0com_inst_port, com0com\\comport\n\n;******************************************************************************\n;\n; Port install section\n;\n;******************************************************************************\n\n[com0com_inst_port]\nAddReg = com0com_AddReg\nInclude = msports.inf\nNeeds = SerialEnumerator.NT\n\n[com0com_inst_port.Services]\nAddService = com0com, %SPSVCINST_ASSOCSERVICE%, com0com_Service_Inst, com0com_EventLog_Inst\nInclude = msports.inf\nNeeds = SerialEnumerator.NT.Services\n\n[com0com_inst_port.HW]\nAddReg = com0com_HW_AddReg\n\n[com0com_AddReg]\n;HKR,,PortSubClass,1,01\n;HKR,,EnumPropPages32,,\"MsPorts.dll,SerialPortPropPageProvider\"\n\n[com0com_HW_AddReg]\nHKR,,\"UpperFilters\",0x00010000,\"serenum\"\n\n;******************************************************************************\n;\n; Common section\n;\n;******************************************************************************\n\n[com0com_Service_Inst]\nDisplayName    = %com0com.SrvDesc%\nServiceType    = %SERVICE_KERNEL_DRIVER%\nStartType      = %SERVICE_DEMAND_START%\nErrorControl   = %SERVICE_ERROR_NORMAL%\nServiceBinary  = %12%\\com0com.sys\n\n[com0com_EventLog_Inst]\nAddReg = com0com_EventLog_AddReg\n\n[com0com_EventLog_AddReg]\nHKR,,EventMessageFile,%REG_EXPAND_SZ%,\"%%SystemRoot%%\\System32\\IoLogMsg.dll;%%SystemRoot%%\\System32\\drivers\\com0com.sys\"\nHKR,,TypesSupported,%REG_DWORD%,7\n\n;******************************************************************************\n;\n; Strings\n;\n;******************************************************************************\n\n[Strings]\n\nSPSVCINST_ASSOCSERVICE = 0x00000002\n\nREG_EXPAND_SZ          = 0x00020000\nREG_DWORD              = 0x00010001\n\nSERVICE_KERNEL_DRIVER  = 1\nSERVICE_DEMAND_START   = 3\nSERVICE_ERROR_NORMAL   = 1\n\nSECOMEA = \"Secomea A/S\"\ncom0com.PortDesc = \"com0com - serial port emulator\"\ncom0com.SrvDesc = \"com0com - emulates the serial ports interconnected via a null-modem cable\"\n\n;******************************************************************************\n"
+        },
+        {
+          "block_index": 30,
+          "decompressed_offset": 2056682,
+          "bytes": 1856,
+          "sha256": "517d6f44f71994dca461b915b4cac0bcae4099543d77107a714a9a3bfc842885",
+          "text": ";/*++\n;\n;    INF file for installing USB/IP bus enumerator driver\n;    Copyright (c) 2017 Secomea A/S\n;\n;--*/\n[Version]\nSignature=\"$WINDOWS NT$\"\nClass=USB\nClassGUID={36FC9E60-C465-11CF-8056-444553540000}\nProvider=%SECOMEA%\nDriverVer=03/10/2017,7.2.0.17105\nCatalogFile=USBIPEnum.cat\n\n[Manufacturer]\n%StdMfg%=Standard,NTx86\n%StdMfg%=Standard,NTamd64\n\n[Standard.NTx86]\n%DeviceDesc%=USBIP_Device, root\\USBIPEnum\n\n[Standard.NTamd64]\n%DeviceDesc%=USBIP_Device, root\\USBIPEnum\n\n[DestinationDirs]\nDefaultDestDir = 12\n\n[SourceDisksNames]\n1 = %DiskId1%,,,\"\"\n\n[SourceDisksFiles]\nUSBIPEnum.sys  = 1,,\n\n[Drivers_Dir_x86]\nUSBIPEnum.sys,USBIPEnum.sys\n\n[Drivers_Dir_x64]\nUSBIPEnum.sys,USBIPEnum.sys\n\n[USBIP_Device.NTx86]\nCopyFiles=Drivers_Dir_x86\n\n[USBIP_Device.NTamd64]\nCopyFiles=Drivers_Dir_x64\n\n[USBIP_Device.NTx86.HW]\nAddReg=USBIP_Device_AddReg\n\n[USBIP_Device.NTamd64.HW]\nAddReg=USBIP_Device_AddReg\n\n[USBIP_Device_AddReg]                            \nHKR,,DeviceCharacteristics,0x10001,0x0100         ; Use same security checks on relative opens\n\n;-------------- Service installation\n[USBIP_Device.NTx86.Services]\nAddService = USBIPEnum,%SPSVCINST_ASSOCSERVICE%, USBIP_Service_Inst\n\n[USBIP_Device.NTamd64.Services]\nAddService = USBIPEnum,%SPSVCINST_ASSOCSERVICE%, USBIP_Service_Inst\n\n; -------------- busenum driver install sections\n[USBIP_Service_Inst]\nDisplayName    = %ServiceDesc%\nServiceType    = 1               ; SERVICE_KERNEL_DRIVER\nStartType      = 3               ; SERVICE_DEMAND_START \nErrorControl   = 1               ; SERVICE_ERROR_NORMAL\nServiceBinary  = %12%\\USBIPEnum.sys\nLoadOrderGroup = Extended Base\n\n\n[Strings]\nSPSVCINST_ASSOCSERVICE= 0x00000002\nSECOMEA = \"Secomea A/S\"\nStdMfg = \"LinkManager USB Controller\"\nDiskId1 = \"LinkManager USB Controller Disk\"\nDeviceDesc = \"LinkManager USB Controller\"\nServiceDesc = \"LinkManager USB Controller Service\"\n\n"
+        },
+        {
+          "block_index": 33,
+          "decompressed_offset": 2142565,
+          "bytes": 1838,
+          "sha256": "ada175ef973b9cefc19c00d194d92facbe00dd46bf89ca65cf1b290fab5d3167",
+          "text": ";/*++\n;\n;    INF file for installing USB/IP bus enumerator driver\n;    Copyright (c) 2017 Secomea A/S\n;\n;--*/\n[Version]\nSignature=\"$WINDOWS NT$\"\nClass=USB\nClassGUID={36FC9E60-C465-11CF-8056-444553540000}\nProvider=%SECOMEA%\nDriverVer=03/16/2017,7.2.0.17114\nCatalogFile=USBIPEnum.cat\n\n[Manufacturer]\n%StdMfg%=Standard,NTx86,NTamd64\n\n[Standard.NTx86]\n%DeviceDesc%=USBIP_Device, root\\USBIPEnum\n\n[Standard.NTamd64]\n%DeviceDesc%=USBIP_Device, root\\USBIPEnum\n\n[DestinationDirs]\nDefaultDestDir = 12\n\n[SourceDisksNames]\n1 = %DiskId1%,,,\"\"\n\n[SourceDisksFiles]\nUSBIPEnum.sys  = 1,,\n\n[Drivers_Dir_x86]\nUSBIPEnum.sys,USBIPEnum.sys\n\n[Drivers_Dir_x64]\nUSBIPEnum.sys,USBIPEnum.sys\n\n[USBIP_Device.NTx86]\nCopyFiles=Drivers_Dir_x86\n\n[USBIP_Device.NTamd64]\nCopyFiles=Drivers_Dir_x64\n\n[USBIP_Device.NTx86.HW]\nAddReg=USBIP_Device_AddReg\n\n[USBIP_Device.NTamd64.HW]\nAddReg=USBIP_Device_AddReg\n\n[USBIP_Device_AddReg]                            \nHKR,,DeviceCharacteristics,0x10001,0x0100         ; Use same security checks on relative opens\n\n;-------------- Service installation\n[USBIP_Device.NTx86.Services]\nAddService = USBIPEnum,%SPSVCINST_ASSOCSERVICE%, USBIP_Service_Inst\n\n[USBIP_Device.NTamd64.Services]\nAddService = USBIPEnum,%SPSVCINST_ASSOCSERVICE%, USBIP_Service_Inst\n\n; -------------- busenum driver install sections\n[USBIP_Service_Inst]\nDisplayName    = %ServiceDesc%\nServiceType    = 1               ; SERVICE_KERNEL_DRIVER\nStartType      = 3               ; SERVICE_DEMAND_START \nErrorControl   = 1               ; SERVICE_ERROR_NORMAL\nServiceBinary  = %12%\\USBIPEnum.sys\nLoadOrderGroup = Extended Base\n\n\n[Strings]\nSPSVCINST_ASSOCSERVICE= 0x00000002\nSECOMEA = \"Secomea A/S\"\nStdMfg = \"LinkManager USB Controller\"\nDiskId1 = \"LinkManager USB Controller Disk\"\nDeviceDesc = \"LinkManager USB Controller\"\nServiceDesc = \"LinkManager USB Controller Service\"\n\n"
+        }
+      ],
+      "block_count": 42,
+      "complete_stream_consumed": true
+    }
+  ]
+}

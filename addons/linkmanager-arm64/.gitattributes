@@ -1,0 +1,8 @@
+# Preserve captured evidence and target bytes on every operating system.
+evidence/** -text
+artifacts/** -text
+REPORT.md text eol=lf
+verify_evidence.py text eol=lf
+# Captured output and verbatim pseudocode retain their original whitespace.
+artifacts/nsis-archive-listing.txt whitespace=-blank-at-eol,-blank-at-eof
+evidence/decompilation.md whitespace=-blank-at-eol,-blank-at-eof

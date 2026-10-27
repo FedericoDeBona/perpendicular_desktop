@@ -1,0 +1,188 @@
+{
+  "result": {
+    "_meta": {
+      "provenance": {
+        "untrusted_content": true,
+        "source": "analysis_target"
+      }
+    },
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"evidence_id\":\"ev_0cc78e75fc6e933ff34c87cfb8337970bed8e70bb050ed453f37f5f9cdc6dd0f\",\"subject\":{\"name\":\"LinkManagerTray.exe\",\"digest\":{\"sha256\":\"0d78ccee781d9e5b0b85ee805fb4a30f1170d6c0e7080a3de4f6f13c236e45bb\"},\"local_path\":\"/private/var/folders/5t/1t16twq55wl37p486mhz6y080000gn/T/linkmanager-rea-20261027-p1a2nyt2/LinkManagerTray.exe\",\"format\":\"pe\",\"architecture\":\"x86_64\"},\"provider\":{\"id\":\"ghidra\",\"name\":\"Ghidra\",\"version\":\"12.1.4\"},\"analysis_profile\":{\"provider\":{\"id\":\"ghidra\",\"name\":\"Ghidra\",\"version\":\"12.1.4\"},\"parameters\":{\"target_kind\":\"executable\",\"target_format\":\"pe\",\"executable_role\":\"application\",\"managed\":false,\"native_aot_metadata\":{\"contract_revision\":\"rtr-9.1-x64-pe-read-only-v3\",\"source_bytes\":134217728,\"work_units\":67108864,\"working_memory_bytes\":67108864,\"report_bytes\":4194304},\"architecture\":\"x86_64\",\"available_architectures\":[\"x86_64\"],\"import_mode\":\"ephemeral-source-immutable\",\"pdb_observations\":\"program-info-v1\",\"annotation_policy\":\"atomic-function-entry-metadata-v1\",\"load_image_observations\":\"source-mappings-entry-context-v2\",\"function_body_evidence\":\"complete-inclusive-ranges-v1\",\"function_references\":\"complete-body-and-entry-reference-manager-v2\",\"call_relationship_coverage\":\"function-body-call-coverage-v5\",\"function_dossier_coverage\":\"observed-facets-and-call-relationships-v1\",\"string_inventory_evidence\":\"defined-data-coverage-v1\",\"location_resolution\":\"explicit-address-exact-entry-symbol-first-v3\",\"procedure_file_offset_resolution\":\"address-first-unique-target-source-mapping-v2\",\"instruction_flow_evidence\":\"decoded-return-pcode-v1\",\"instruction_references\":\"exact-address-incoming-v1\",\"function_boundary_observations\":\"ghidra-function-boundary-limitations-v3\",\"no_return_repair\":\"returning-imports-decoded-return-v2\",\"process_launch\":\"inspected-jvm-launch-support-v1\",\"jump_table_evidence\":\"typed-case-default-blocks-v1\",\"decompiler_jump_loads\":true,\"loader\":\"auto-from-header\",\"language_id\":\"auto-from-header\",\"compiler_spec_id\":\"auto-default\",\"analyzer_preset\":\"ghidra-default\"},\"digest\":\"59e0d37bce87c1b8ccb70c6062be2383648a35642f5a6c85b1db0939164d5e55\"},\"predicate_type\":\"rea.analysis\",\"operation\":\"search_strings\",\"parameters\":{\"pattern\":\"lmtap|Global.*tap|Could not open host|bcmasq|TAP-Windows\",\"mode\":\"regex\",\"case_sensitive\":false},\"raw_result\":[{\"address\":\"0x1400cf920\",\"value\":\"<!DOCTYPE html>\\n<html><head><title>Third Party Credits</title>\\n<link rel=\\\"stylesheet\\\" type=\\\"text/css\\\" href=\\\"help.css\\\">\\n</head>\\n<body>\\n<img src=\\\"model.png\\\" width=\\\"771\\\" height=\\\"52\\\">\\n<h3>Third Party Credits</h3>\\nThis product contains Free Software and Open Source components, which are\\nused in accordance with their respective licenses.<br>\\nBy using this product you accept and acknowledge the copyright and\\nterms of use of these components.<br>\\nIn accordance with the GNU GPL terms, the relevant source code modules will be provided\\nupon a written request to your reseller.\\n<p>\\n<table>\\n<tr><td><b>Name</b></td><td><b>Version</b></td><td><b>License</b></td><td><b>Website</b></td></tr>\\n<tr><td>AES code</td><td>2002.01.10</td><td><a href=\\\"lic-30a06bf58ff9848d89dab6044b1de0ca.txt\\\">BSD-3-Clause-AES</a></td><td><a href=\\\"https://github.com/BrianGladman/aes\\\" rel=\\\"noopener noreferrer\\\">https://github.com/BrianGladman/aes</a></td></tr>\\n<tr><td>axTLS Embedded SSL</td><td>2.1.5+</td><td><a href=\\\"lic-b13db531df44af57e1340512fd5fb5f8.txt\\\">BSD-3-Clause</a></td><td><a href=\\\"http://axtls.sourceforge.net\\\" rel=\\\"noopener noreferrer\\\">http://axtls.sourceforge.net</a></td></tr>\\n<tr><td>com0com</td><td>3.0.0.0</td><td><a href=\\\"lic-1d08abb5fc4ba2b44f9dcd41d939bfa6.txt\\\">GPL_v2.0</a></td><td><a href=\\\"http://com0com.sourceforge.net\\\" rel=\\\"noopener noreferrer\\\">http://com0com.sourceforge.net</a></td></tr>\\n<tr><td>NSIS</td><td>3.09</td><td><a href=\\\"lic-029cf2c42d9448d90829abbfc7095d32.txt\\\">Various</a></td><td><a href=\\\"http://nsis.sourceforge.net\\\" rel=\\\"noopener noreferrer\\\">http://nsis.sourceforge.net</a></td></tr>\\n<tr><td>Slirp</td><td>1.0.17+</td><td><a href=\\\"lic-13f6dc911b9c7134ae030360974e81b9.txt\\\">Free_slirp</a></td><td><a href=\\\"https://sourceforge.net/projects/slirp\\\" rel=\\\"noopener noreferrer\\\">https://sourceforge.net/projects/slirp</a></td></tr>\\n<tr><td>TAP-Windows</td><td>9.0.0.23</td><td><a href=\\\"lic-b234ee4d69f5fce4486a80fdaf4a4263.txt\\\">GPL_v2.0</a></td><td><a href=\\\"https://github.com/OpenVPN/tap-windows6.git\\\" rel=\\\"noopener noreferrer\\\">https://github.com/OpenVPN/tap-windows6.git</a></td></tr>\\n<tr><td>USB/IP for Windows</td><td>0.2.0.0</td><td><a href=\\\"lic-fda71b5dd0bb2b476f029370982eb9cf.txt\\\">Want_GPL</a></td><td><a href=\\\"http://usbip.sourceforge.net\\\" rel=\\\"noopener noreferrer\\\">http://usbip.sourceforge.net</a></td></tr>\\n</table>\\n</body></html>\\n\"},{\"address\":\"0x1400e638c\",\"value\":\"lmtap\"},{\"address\":\"0x1400e684c\",\"value\":\"lmtap\"},{\"address\":\"0x1400e6a14\",\"value\":\"lmtap\"},{\"address\":\"0x1400e6cc4\",\"value\":\"lmtap\"},{\"address\":\"0x1400e6e38\",\"value\":\"\\\\\\\\.\\\\Global\\\\%s.tap\"},{\"address\":\"0x1400e6e50\",\"value\":\"Could not open host interface device %s (0x%08X)\"},{\"address\":\"0x1400e72b8\",\"value\":\"bcmasq\"},{\"address\":\"0x1400e72f0\",\"value\":\"bcmasq\"},{\"address\":\"0x140103938\",\"value\":\"\\\\\\\\.\\\\Global\\\\%s.tap\"}],\"normalized_result\":[{\"address\":\"0x1400cf920\",\"value\":\"<!DOCTYPE html>\\n<html><head><title>Third Party Credits</title>\\n<link rel=\\\"stylesheet\\\" type=\\\"text/css\\\" href=\\\"help.css\\\">\\n</head>\\n<body>\\n<img src=\\\"model.png\\\" width=\\\"771\\\" height=\\\"52\\\">\\n<h3>Third Party Credits</h3>\\nThis product contains Free Software and Open Source components, which are\\nused in accordance with their respective licenses.<br>\\nBy using this product you accept and acknowledge the copyright and\\nterms of use of these components.<br>\\nIn accordance with the GNU GPL terms, the relevant source code modules will be provided\\nupon a written request to your reseller.\\n<p>\\n<table>\\n<tr><td><b>Name</b></td><td><b>Version</b></td><td><b>License</b></td><td><b>Website</b></td></tr>\\n<tr><td>AES code</td><td>2002.01.10</td><td><a href=\\\"lic-30a06bf58ff9848d89dab6044b1de0ca.txt\\\">BSD-3-Clause-AES</a></td><td><a href=\\\"https://github.com/BrianGladman/aes\\\" rel=\\\"noopener noreferrer\\\">https://github.com/BrianGladman/aes</a></td></tr>\\n<tr><td>axTLS Embedded SSL</td><td>2.1.5+</td><td><a href=\\\"lic-b13db531df44af57e1340512fd5fb5f8.txt\\\">BSD-3-Clause</a></td><td><a href=\\\"http://axtls.sourceforge.net\\\" rel=\\\"noopener noreferrer\\\">http://axtls.sourceforge.net</a></td></tr>\\n<tr><td>com0com</td><td>3.0.0.0</td><td><a href=\\\"lic-1d08abb5fc4ba2b44f9dcd41d939bfa6.txt\\\">GPL_v2.0</a></td><td><a href=\\\"http://com0com.sourceforge.net\\\" rel=\\\"noopener noreferrer\\\">http://com0com.sourceforge.net</a></td></tr>\\n<tr><td>NSIS</td><td>3.09</td><td><a href=\\\"lic-029cf2c42d9448d90829abbfc7095d32.txt\\\">Various</a></td><td><a href=\\\"http://nsis.sourceforge.net\\\" rel=\\\"noopener noreferrer\\\">http://nsis.sourceforge.net</a></td></tr>\\n<tr><td>Slirp</td><td>1.0.17+</td><td><a href=\\\"lic-13f6dc911b9c7134ae030360974e81b9.txt\\\">Free_slirp</a></td><td><a href=\\\"https://sourceforge.net/projects/slirp\\\" rel=\\\"noopener noreferrer\\\">https://sourceforge.net/projects/slirp</a></td></tr>\\n<tr><td>TAP-Windows</td><td>9.0.0.23</td><td><a href=\\\"lic-b234ee4d69f5fce4486a80fdaf4a4263.txt\\\">GPL_v2.0</a></td><td><a href=\\\"https://github.com/OpenVPN/tap-windows6.git\\\" rel=\\\"noopener noreferrer\\\">https://github.com/OpenVPN/tap-windows6.git</a></td></tr>\\n<tr><td>USB/IP for Windows</td><td>0.2.0.0</td><td><a href=\\\"lic-fda71b5dd0bb2b476f029370982eb9cf.txt\\\">Want_GPL</a></td><td><a href=\\\"http://usbip.sourceforge.net\\\" rel=\\\"noopener noreferrer\\\">http://usbip.sourceforge.net</a></td></tr>\\n</table>\\n</body></html>\\n\"},{\"address\":\"0x1400e638c\",\"value\":\"lmtap\"},{\"address\":\"0x1400e684c\",\"value\":\"lmtap\"},{\"address\":\"0x1400e6a14\",\"value\":\"lmtap\"},{\"address\":\"0x1400e6cc4\",\"value\":\"lmtap\"},{\"address\":\"0x1400e6e38\",\"value\":\"\\\\\\\\.\\\\Global\\\\%s.tap\"},{\"address\":\"0x1400e6e50\",\"value\":\"Could not open host interface device %s (0x%08X)\"},{\"address\":\"0x1400e72b8\",\"value\":\"bcmasq\"},{\"address\":\"0x1400e72f0\",\"value\":\"bcmasq\"},{\"address\":\"0x140103938\",\"value\":\"\\\\\\\\.\\\\Global\\\\%s.tap\"}],\"confidence\":\"observed\",\"authority\":\"shipped-artifact\",\"environment\":null,\"limitations\":[\"The session serves operations only after Ghidra reports default auto-analysis complete; incomplete analysis does not expose partial results.\",\"The imported Program and temporary project are ephemeral and deleted on close. Annotation operations edit session database metadata; original executable bytes are never written.\",\"Cancelling an active Ghidra request terminates its ephemeral database and discards session annotations. The selected target remains open; the next provider query imports the original artifact again.\",\"Default-space addresses use lowercase 0x-prefixed hexadecimal; other address spaces use <percent-encoded-space>:0x<hex>.\",\"Only Ghidra-defined string Data is observed; packed or undefined string bytes may be absent. Completeness applies to that inventory, and an empty search does not establish that text is absent from the artifact. If an address is known, use read_bytes and xrefs to inspect bytes and references.\",\"Regex mode uses Java Pattern semantics. Matcher or compiler stack exhaustion returns a resource constraint without closing the session; literal mode avoids regex recursion and returns complete matching values.\",\"macOS sessions require a matching executable Ghidra native decompiler; REA checks for it but does not build native components or change Gatekeeper quarantine state.\"],\"relationship_coverage\":null,\"locations\":[],\"evidence_links\":[]}"
+      }
+    ],
+    "structuredContent": {
+      "evidence_id": "ev_0cc78e75fc6e933ff34c87cfb8337970bed8e70bb050ed453f37f5f9cdc6dd0f",
+      "subject": {
+        "name": "LinkManagerTray.exe",
+        "digest": {
+          "sha256": "0d78ccee781d9e5b0b85ee805fb4a30f1170d6c0e7080a3de4f6f13c236e45bb"
+        },
+        "local_path": "/private/var/folders/5t/1t16twq55wl37p486mhz6y080000gn/T/linkmanager-rea-20261027-p1a2nyt2/LinkManagerTray.exe",
+        "format": "pe",
+        "architecture": "x86_64"
+      },
+      "provider": {
+        "id": "ghidra",
+        "name": "Ghidra",
+        "version": "12.1.4"
+      },
+      "analysis_profile": {
+        "provider": {
+          "id": "ghidra",
+          "name": "Ghidra",
+          "version": "12.1.4"
+        },
+        "parameters": {
+          "target_kind": "executable",
+          "target_format": "pe",
+          "executable_role": "application",
+          "managed": false,
+          "native_aot_metadata": {
+            "contract_revision": "rtr-9.1-x64-pe-read-only-v3",
+            "source_bytes": 134217728,
+            "work_units": 67108864,
+            "working_memory_bytes": 67108864,
+            "report_bytes": 4194304
+          },
+          "architecture": "x86_64",
+          "available_architectures": [
+            "x86_64"
+          ],
+          "import_mode": "ephemeral-source-immutable",
+          "pdb_observations": "program-info-v1",
+          "annotation_policy": "atomic-function-entry-metadata-v1",
+          "load_image_observations": "source-mappings-entry-context-v2",
+          "function_body_evidence": "complete-inclusive-ranges-v1",
+          "function_references": "complete-body-and-entry-reference-manager-v2",
+          "call_relationship_coverage": "function-body-call-coverage-v5",
+          "function_dossier_coverage": "observed-facets-and-call-relationships-v1",
+          "string_inventory_evidence": "defined-data-coverage-v1",
+          "location_resolution": "explicit-address-exact-entry-symbol-first-v3",
+          "procedure_file_offset_resolution": "address-first-unique-target-source-mapping-v2",
+          "instruction_flow_evidence": "decoded-return-pcode-v1",
+          "instruction_references": "exact-address-incoming-v1",
+          "function_boundary_observations": "ghidra-function-boundary-limitations-v3",
+          "no_return_repair": "returning-imports-decoded-return-v2",
+          "process_launch": "inspected-jvm-launch-support-v1",
+          "jump_table_evidence": "typed-case-default-blocks-v1",
+          "decompiler_jump_loads": true,
+          "loader": "auto-from-header",
+          "language_id": "auto-from-header",
+          "compiler_spec_id": "auto-default",
+          "analyzer_preset": "ghidra-default"
+        },
+        "digest": "59e0d37bce87c1b8ccb70c6062be2383648a35642f5a6c85b1db0939164d5e55"
+      },
+      "predicate_type": "rea.analysis",
+      "operation": "search_strings",
+      "parameters": {
+        "pattern": "lmtap|Global.*tap|Could not open host|bcmasq|TAP-Windows",
+        "mode": "regex",
+        "case_sensitive": false
+      },
+      "raw_result": [
+        {
+          "address": "0x1400cf920",
+          "value": "<!DOCTYPE html>\n<html><head><title>Third Party Credits</title>\n<link rel=\"stylesheet\" type=\"text/css\" href=\"help.css\">\n</head>\n<body>\n<img src=\"model.png\" width=\"771\" height=\"52\">\n<h3>Third Party Credits</h3>\nThis product contains Free Software and Open Source components, which are\nused in accordance with their respective licenses.<br>\nBy using this product you accept and acknowledge the copyright and\nterms of use of these components.<br>\nIn accordance with the GNU GPL terms, the relevant source code modules will be provided\nupon a written request to your reseller.\n<p>\n<table>\n<tr><td><b>Name</b></td><td><b>Version</b></td><td><b>License</b></td><td><b>Website</b></td></tr>\n<tr><td>AES code</td><td>2002.01.10</td><td><a href=\"lic-30a06bf58ff9848d89dab6044b1de0ca.txt\">BSD-3-Clause-AES</a></td><td><a href=\"https://github.com/BrianGladman/aes\" rel=\"noopener noreferrer\">https://github.com/BrianGladman/aes</a></td></tr>\n<tr><td>axTLS Embedded SSL</td><td>2.1.5+</td><td><a href=\"lic-b13db531df44af57e1340512fd5fb5f8.txt\">BSD-3-Clause</a></td><td><a href=\"http://axtls.sourceforge.net\" rel=\"noopener noreferrer\">http://axtls.sourceforge.net</a></td></tr>\n<tr><td>com0com</td><td>3.0.0.0</td><td><a href=\"lic-1d08abb5fc4ba2b44f9dcd41d939bfa6.txt\">GPL_v2.0</a></td><td><a href=\"http://com0com.sourceforge.net\" rel=\"noopener noreferrer\">http://com0com.sourceforge.net</a></td></tr>\n<tr><td>NSIS</td><td>3.09</td><td><a href=\"lic-029cf2c42d9448d90829abbfc7095d32.txt\">Various</a></td><td><a href=\"http://nsis.sourceforge.net\" rel=\"noopener noreferrer\">http://nsis.sourceforge.net</a></td></tr>\n<tr><td>Slirp</td><td>1.0.17+</td><td><a href=\"lic-13f6dc911b9c7134ae030360974e81b9.txt\">Free_slirp</a></td><td><a href=\"https://sourceforge.net/projects/slirp\" rel=\"noopener noreferrer\">https://sourceforge.net/projects/slirp</a></td></tr>\n<tr><td>TAP-Windows</td><td>9.0.0.23</td><td><a href=\"lic-b234ee4d69f5fce4486a80fdaf4a4263.txt\">GPL_v2.0</a></td><td><a href=\"https://github.com/OpenVPN/tap-windows6.git\" rel=\"noopener noreferrer\">https://github.com/OpenVPN/tap-windows6.git</a></td></tr>\n<tr><td>USB/IP for Windows</td><td>0.2.0.0</td><td><a href=\"lic-fda71b5dd0bb2b476f029370982eb9cf.txt\">Want_GPL</a></td><td><a href=\"http://usbip.sourceforge.net\" rel=\"noopener noreferrer\">http://usbip.sourceforge.net</a></td></tr>\n</table>\n</body></html>\n"
+        },
+        {
+          "address": "0x1400e638c",
+          "value": "lmtap"
+        },
+        {
+          "address": "0x1400e684c",
+          "value": "lmtap"
+        },
+        {
+          "address": "0x1400e6a14",
+          "value": "lmtap"
+        },
+        {
+          "address": "0x1400e6cc4",
+          "value": "lmtap"
+        },
+        {
+          "address": "0x1400e6e38",
+          "value": "\\\\.\\Global\\%s.tap"
+        },
+        {
+          "address": "0x1400e6e50",
+          "value": "Could not open host interface device %s (0x%08X)"
+        },
+        {
+          "address": "0x1400e72b8",
+          "value": "bcmasq"
+        },
+        {
+          "address": "0x1400e72f0",
+          "value": "bcmasq"
+        },
+        {
+          "address": "0x140103938",
+          "value": "\\\\.\\Global\\%s.tap"
+        }
+      ],
+      "normalized_result": [
+        {
+          "address": "0x1400cf920",
+          "value": "<!DOCTYPE html>\n<html><head><title>Third Party Credits</title>\n<link rel=\"stylesheet\" type=\"text/css\" href=\"help.css\">\n</head>\n<body>\n<img src=\"model.png\" width=\"771\" height=\"52\">\n<h3>Third Party Credits</h3>\nThis product contains Free Software and Open Source components, which are\nused in accordance with their respective licenses.<br>\nBy using this product you accept and acknowledge the copyright and\nterms of use of these components.<br>\nIn accordance with the GNU GPL terms, the relevant source code modules will be provided\nupon a written request to your reseller.\n<p>\n<table>\n<tr><td><b>Name</b></td><td><b>Version</b></td><td><b>License</b></td><td><b>Website</b></td></tr>\n<tr><td>AES code</td><td>2002.01.10</td><td><a href=\"lic-30a06bf58ff9848d89dab6044b1de0ca.txt\">BSD-3-Clause-AES</a></td><td><a href=\"https://github.com/BrianGladman/aes\" rel=\"noopener noreferrer\">https://github.com/BrianGladman/aes</a></td></tr>\n<tr><td>axTLS Embedded SSL</td><td>2.1.5+</td><td><a href=\"lic-b13db531df44af57e1340512fd5fb5f8.txt\">BSD-3-Clause</a></td><td><a href=\"http://axtls.sourceforge.net\" rel=\"noopener noreferrer\">http://axtls.sourceforge.net</a></td></tr>\n<tr><td>com0com</td><td>3.0.0.0</td><td><a href=\"lic-1d08abb5fc4ba2b44f9dcd41d939bfa6.txt\">GPL_v2.0</a></td><td><a href=\"http://com0com.sourceforge.net\" rel=\"noopener noreferrer\">http://com0com.sourceforge.net</a></td></tr>\n<tr><td>NSIS</td><td>3.09</td><td><a href=\"lic-029cf2c42d9448d90829abbfc7095d32.txt\">Various</a></td><td><a href=\"http://nsis.sourceforge.net\" rel=\"noopener noreferrer\">http://nsis.sourceforge.net</a></td></tr>\n<tr><td>Slirp</td><td>1.0.17+</td><td><a href=\"lic-13f6dc911b9c7134ae030360974e81b9.txt\">Free_slirp</a></td><td><a href=\"https://sourceforge.net/projects/slirp\" rel=\"noopener noreferrer\">https://sourceforge.net/projects/slirp</a></td></tr>\n<tr><td>TAP-Windows</td><td>9.0.0.23</td><td><a href=\"lic-b234ee4d69f5fce4486a80fdaf4a4263.txt\">GPL_v2.0</a></td><td><a href=\"https://github.com/OpenVPN/tap-windows6.git\" rel=\"noopener noreferrer\">https://github.com/OpenVPN/tap-windows6.git</a></td></tr>\n<tr><td>USB/IP for Windows</td><td>0.2.0.0</td><td><a href=\"lic-fda71b5dd0bb2b476f029370982eb9cf.txt\">Want_GPL</a></td><td><a href=\"http://usbip.sourceforge.net\" rel=\"noopener noreferrer\">http://usbip.sourceforge.net</a></td></tr>\n</table>\n</body></html>\n"
+        },
+        {
+          "address": "0x1400e638c",
+          "value": "lmtap"
+        },
+        {
+          "address": "0x1400e684c",
+          "value": "lmtap"
+        },
+        {
+          "address": "0x1400e6a14",
+          "value": "lmtap"
+        },
+        {
+          "address": "0x1400e6cc4",
+          "value": "lmtap"
+        },
+        {
+          "address": "0x1400e6e38",
+          "value": "\\\\.\\Global\\%s.tap"
+        },
+        {
+          "address": "0x1400e6e50",
+          "value": "Could not open host interface device %s (0x%08X)"
+        },
+        {
+          "address": "0x1400e72b8",
+          "value": "bcmasq"
+        },
+        {
+          "address": "0x1400e72f0",
+          "value": "bcmasq"
+        },
+        {
+          "address": "0x140103938",
+          "value": "\\\\.\\Global\\%s.tap"
+        }
+      ],
+      "confidence": "observed",
+      "authority": "shipped-artifact",
+      "environment": null,
+      "limitations": [
+        "The session serves operations only after Ghidra reports default auto-analysis complete; incomplete analysis does not expose partial results.",
+        "The imported Program and temporary project are ephemeral and deleted on close. Annotation operations edit session database metadata; original executable bytes are never written.",
+        "Cancelling an active Ghidra request terminates its ephemeral database and discards session annotations. The selected target remains open; the next provider query imports the original artifact again.",
+        "Default-space addresses use lowercase 0x-prefixed hexadecimal; other address spaces use <percent-encoded-space>:0x<hex>.",
+        "Only Ghidra-defined string Data is observed; packed or undefined string bytes may be absent. Completeness applies to that inventory, and an empty search does not establish that text is absent from the artifact. If an address is known, use read_bytes and xrefs to inspect bytes and references.",
+        "Regex mode uses Java Pattern semantics. Matcher or compiler stack exhaustion returns a resource constraint without closing the session; literal mode avoids regex recursion and returns complete matching values.",
+        "macOS sessions require a matching executable Ghidra native decompiler; REA checks for it but does not build native components or change Gatekeeper quarantine state."
+      ],
+      "relationship_coverage": null,
+      "locations": [],
+      "evidence_links": []
+    }
+  },
+  "jsonrpc": "2.0",
+  "id": 18
+}
