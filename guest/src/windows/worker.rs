@@ -473,16 +473,18 @@ impl Worker {
         Err("Host disconnected; retaining application identities".into())
     }
 
-    fn desktop_singleton(&self,app:&str,raw:usize)->Option<Value> {
-        if raw==0 || !self.catalogue.singleton(app) || !self.catalogue.matches(app,raw)
+    fn desktop_application(&self,app:&str,raw:usize)->Option<Value> {
+        if raw==0 || !self.catalogue.matches(app,raw)
             || self.windows.values().any(|w|w.mac_owned && w.target.hwnd==raw) {return None;}
+        let details=catalogue::details(raw,&self.sid,self.session)?;
+        if catalogue::transient(&details) || catalogue::shell_surface(raw) {return None;}
         let owner=identity::owner(HWND(raw as _),&self.sid,self.session)?;
         Some(json!({"app":app,"target":{"hwnd":raw,"pid":owner.0,"creation":owner.1.to_string()}}))
     }
     fn desktop_singleton_state(&self,value:&Value)->Result<Value,String> {
         let app=value["app"].as_str().ok_or("Missing app identity")?;
         let raw=value["target"]["hwnd"].as_u64().ok_or("Missing window identity")? as usize;
-        let actual=self.desktop_singleton(app,raw).ok_or("The Windows application changed")?;
+        let actual=self.desktop_application(app,raw).ok_or("The Windows application changed")?;
         if actual["target"]!=value["target"] {return Err("The Windows application changed".into());}
         unsafe {
             let hwnd=HWND(raw as _);
@@ -492,7 +494,14 @@ impl Worker {
             let primary=MonitorFromPoint(POINT{x:0,y:0},MONITOR_DEFAULTTOPRIMARY);
             let mut info=MONITORINFO{cbSize:size_of::<MONITORINFO>() as u32,..Default::default()};
             if !GetMonitorInfoW(primary,&mut info).as_bool() || info.dwFlags&1==0 {return Err("Windows desktop display unavailable".into());}
-            let work=info.rcWork;
+            let seamless=value["destination"]=="seamless";
+            if seamless && !self.catalogue.singleton(app) {return Err("This application requires a new Seamless window".into());}
+            let (destination,work)=if seamless {
+                let (frame,work)=window_control::first_app_work_area().ok_or("Seamless displays are not ready")?;
+                let monitor=MonitorFromPoint(POINT{x:frame.left+1,y:frame.top+1},MONITOR_DEFAULTTONEAREST);
+                if monitor==primary {return Err("Seamless display cannot be the Windows desktop".into());}
+                (monitor,work)
+            }else{(primary,info.rcWork)};
             let mut bounds=catalogue::frame_bounds(hwnd).ok_or("Window geometry unavailable")?;
             let focused=GetAncestor(GetForegroundWindow(),GA_ROOT)==hwnd;
             let mut gui=GUITHREADINFO{cbSize:size_of::<GUITHREADINFO>() as u32,..Default::default()};
@@ -512,10 +521,23 @@ impl Worker {
                     SWP_NOZORDER|SWP_NOACTIVATE|SWP_ASYNCWINDOWPOS) {direct_error=Some(error(cause));}
                 bounds=catalogue::frame_bounds(hwnd).ok_or("Window geometry unavailable")?;
             }
-            let on_desktop=MonitorFromWindow(hwnd,MONITOR_DEFAULTTONEAREST)==primary && contained(bounds);
-            log(format!("Desktop singleton hwnd={raw} focused={focused} visible={on_desktop} rect={},{},{},{} directError={direct_error:?}",bounds.left,bounds.top,bounds.right,bounds.bottom));
-            Ok(json!({"focused":focused,"onDesktop":on_desktop,"onPrimary":MonitorFromWindow(hwnd,MONITOR_DEFAULTTONEAREST)==primary,"rect":[bounds.left,bounds.top,bounds.right,bounds.bottom],
-                "maxMoves":GetSystemMetrics(SM_CMONITORS).clamp(1,8)}))
+            let on_destination=MonitorFromWindow(hwnd,MONITOR_DEFAULTTONEAREST)==destination;
+            let mut move_key=None;
+            if seamless && on_destination && !contained(bounds) && !IsZoomed(hwnd).as_bool() {
+                let mut title=[0u16;128];
+                let count=GetMenuStringW(GetSystemMenu(hwnd,false),SC_MOVE,Some(&mut title),MF_BYCOMMAND).max(0) as usize;
+                let title=String::from_utf16_lossy(&title[..count]);
+                move_key=title.split('&').nth(1).and_then(|v|v.chars().next())
+                    .filter(char::is_ascii_alphabetic).map(|v|v.to_ascii_lowercase().to_string());
+            }
+            let adjustment=if bounds.right-bounds.left>work.right-work.left || bounds.bottom-bounds.top>work.bottom-work.top {None}
+                else if bounds.top<work.top {Some("down")}else if bounds.bottom>work.bottom {Some("up")}
+                else if bounds.left<work.left {Some("right")}else if bounds.right>work.right {Some("left")}else{None};
+            let on_desktop=on_destination && contained(bounds);
+            log(format!("Application destination seamless={seamless} hwnd={raw} focused={focused} visible={on_desktop} rect={},{},{},{} directError={direct_error:?}",bounds.left,bounds.top,bounds.right,bounds.bottom));
+            Ok(json!({"focused":focused,"onDesktop":on_desktop,"onPrimary":MonitorFromWindow(hwnd,MONITOR_DEFAULTTONEAREST)==destination,"rect":[bounds.left,bounds.top,bounds.right,bounds.bottom],
+                "maxMoves":GetSystemMetrics(SM_CMONITORS).clamp(1,8),"zoomed":IsZoomed(hwnd).as_bool(),
+                "moveKey":move_key,"adjustment":adjustment}))
         }
     }
     fn command(&mut self, value: &Value, outbox: &Arc<Outbox>) -> Result<Value, String> {
@@ -550,19 +572,44 @@ impl Worker {
             "desktop_focus_target" => {
                 let foreground=catalogue::foreground();
                 let window=self.windows.values().find(|w|w.mac_owned && self.catalogue.singleton(&w.app)
-                    && w.target.hwnd==foreground && w.target.valid());
+                    && w.target.hwnd==foreground && w.target.valid()).map(|w|(w.target.id.clone(),w.app.clone()));
                 let off_primary=unsafe {MonitorFromWindow(HWND(foreground as _),MONITOR_DEFAULTTONEAREST)
                     !=MonitorFromPoint(POINT{x:0,y:0},MONITOR_DEFAULTTOPRIMARY)};
                 let idle=unsafe {
                     let mut gui=GUITHREADINFO{cbSize:size_of::<GUITHREADINFO>() as u32,..Default::default()};
                     GetGUIThreadInfo(0,&mut gui).is_ok() && gui.hwndCapture.is_invalid() && gui.flags.0&0x1e==0
                 };
+                // An explicit Desktop input that activates the Mac-owned
+                // singleton transfers ownership, rather than pulling focus
+                // back into its Mac mirror. Retire children before the owner.
+                if let Some((id,app))=window.as_ref().filter(|_|idle && value["transfer"]==true) {
+                    let mut ids:Vec<_>=self.windows.iter().filter(|(_,w)|w.app==*app && w.target.id!=*id)
+                        .map(|(id,_)|id.clone()).collect();
+                    ids.push(id.clone());
+                    for id in ids {self.retire_window(&id,outbox);}
+                    self.pending.retain(|p|p.app!=*app);
+                    self.save();self.snapshot(outbox);
+                    let target=self.desktop_application(app,foreground).ok_or("Application changed during transfer")?;
+                    log(format!("Application transferred to Desktop app={app} hwnd={foreground}"));
+                    return Ok(json!({"desktopSingleton":target,"transferred":true}));
+                }
                 let singleton=if window.is_none() && off_primary && idle {
-                    self.catalogue.items.keys().find_map(|app|self.desktop_singleton(app,foreground))
+                    self.catalogue.items.keys().find_map(|app|self.desktop_application(app,foreground))
                 }else{None};
-                Ok(json!({"window":window.map(|w|w.target.id.as_str()),"desktopSingleton":singleton}))
+                Ok(json!({"window":window.map(|w|w.0),"desktopSingleton":singleton}))
             }
             "desktop_singleton_state" => self.desktop_singleton_state(value),
+            "seamless_adopt" => {
+                let mut state_request=value.clone();state_request["destination"]=json!("seamless");
+                let state=self.desktop_singleton_state(&state_request)?;
+                if state["onDesktop"]!=true {return Err("The application has not reached its Seamless display".into());}
+                let app=value["app"].as_str().ok_or("Missing app identity")?.to_owned();
+                let raw=value["target"]["hwnd"].as_u64().ok_or("Missing window identity")? as usize;
+                if !self.add(raw,app.clone(),outbox) {return Err("The existing application could not be transferred".into());}
+                self.save();self.snapshot(outbox);
+                log(format!("Application transferred to Seamless app={app} hwnd={raw}"));
+                Ok(json!({"accepted":true}))
+            }
             "window_refresh" => {
                 let id=value["window"].as_str().ok_or("Missing window identity")?;
                 let window=self.windows.get_mut(id).ok_or("Window retired")?;
@@ -602,18 +649,28 @@ impl Worker {
                         identity::owner(HWND(raw as _),&self.sid,self.session).map(|owner|(raw,owner))
                     });
                     if let Some((raw,owner))=existing {
+                        if self.document_count()>=4 {return Err("Close an application before opening another".into());}
+                        // This is an explicit request for the exact existing
+                        // singleton. Move it before admitting it to capture.
+                        // Let Windows perform normal single-instance
+                        // activation before attempting the cross-mode move.
+                        // SetForegroundWindow alone is often denied after
+                        // the user has been interacting with another app.
                         let activation=self.catalogue.prepare_launch(app)?;
                         let sender=outbox.clone();let app=app.to_owned();let sid=self.sid.clone();let session=self.session;
-                        std::thread::Builder::new().name("singleton-activation".into()).spawn(move || {
+                        std::thread::Builder::new().name("singleton-transfer".into()).spawn(move || {
                             let result=if identity::owner(HWND(raw as _),&sid,session)==Some(owner) {
-                                activation.run().map(|_|())
+                                activation.run().and_then(|_| {
+                                    if identity::owner(HWND(raw as _),&sid,session)==Some(owner) {Ok(())}
+                                    else {Err("The existing application window changed".into())}
+                                })
                             }else{Err("The existing application window changed".into())};
                             sender.control(match result {
-                                Ok(())=>json!({"type":"desktop_focus","app":app,"target":{"hwnd":raw,"pid":owner.0,"creation":owner.1.to_string()}}),
+                                Ok(())=>json!({"type":"seamless_transfer","app":app,"target":{"hwnd":raw,"pid":owner.0,"creation":owner.1.to_string()}}),
                                 Err(message)=>json!({"type":"launch_error","app":app,"message":message}),
                             });
                         }).map_err(error)?;
-                        return Ok(json!({"accepted":true,"existing":true,"ready":false,"destination":"desktop"}));
+                        return Ok(json!({"accepted":true,"existing":true,"ready":false,"destination":"seamless"}));
                     }
                 }
                 if self.pending.iter().any(|p| p.app == app) {

@@ -32,6 +32,14 @@ pub fn native_app_input_allowed(hwnd:HWND)->bool {
 }
 pub fn native_app_input_configured()->bool {NATIVE_APP_INPUT.load(Ordering::Acquire)}
 
+// The first confirmed app display is the initial destination for a transfer;
+// the Mac frontend can subsequently move it between its mapped displays.
+pub fn first_app_work_area()->Option<(RECT,RECT)> {
+    if !native_app_input_configured(){return None;}
+    APP_AREAS.get()?.lock().ok()?.first().copied()
+}
+
+
 /// Limits of authenticated native app windows, separate from Explorer's
 /// global work areas. Never move the taskbar or reserve space on the desktop.
 pub fn set_app_work_areas(areas: Vec<(RECT,RECT)>) -> Result<(),String> {

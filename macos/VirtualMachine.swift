@@ -202,6 +202,21 @@ final class VirtualMachineController {
     func moveApplicationToNextDisplay(notAfter:Double) async throws {
         try await sendApplicationChord(["meta_l","shift","right"],notAfter:notAfter)
     }
+    func restoreDesktopApplication(notAfter:Double) async throws {
+        try await sendApplicationChord(["meta_l","down"],notAfter:notAfter)
+    }
+    func nudgeApplication(moveKey:String,direction:String,notAfter:Double) async throws {
+        guard moveKey.utf8.count==1,let key=moveKey.utf8.first,(97...122).contains(key),
+              ["up","down","left","right"].contains(direction) else{throw CocoaError(.coderInvalidValue)}
+        // Read the system-menu accelerator from this exact target's Windows
+        // menu instead of assuming an English installation. Each key has a
+        // bounded release; cancellation stops the sequence at a key boundary.
+        for keys in [["alt","spc"],[moveKey],[direction],["ret"]] {
+            try Task.checkCancellation()
+            try await sendApplicationChord(keys,notAfter:notAfter)
+            try await Task.sleep(for:.milliseconds(130))
+        }
+    }
     func fitDesktopApplication(notAfter:Double) async throws {
         try await sendApplicationChord(["meta_l","up"],notAfter:notAfter)
     }

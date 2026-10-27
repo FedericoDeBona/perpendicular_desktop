@@ -10,6 +10,9 @@ private struct DesktopSingletonState:Sendable {
     let maxMoves:Int
     let rect:String
     let checkedAt:Double
+    let zoomed:Bool
+    let moveKey:String?
+    let adjustment:String?
 }
 @MainActor
 final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation,ObservableObject {
@@ -32,6 +35,7 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
     @Published var launcherNotice:String?
     private var windowNotice:(id:String,message:String,frame:Bool)?
     @Published private(set) var openingApps:Set<String>=[]
+    private var seamlessTransferApps:Set<String>=[]
     @Published private(set) var activeApps:Set<String>=[]
     @Published private(set) var applicationIcons:[String:NSImage]=[:]
     @Published private(set) var loadingIconID:String?
@@ -357,7 +361,7 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
                 guard let self,!Task.isCancelled,self.desktopFocusRequest == request,
                       self.displayEpoch == epoch,self.machine?.desktopIsKey == true else{return}
                 let handled:Bool=await withCheckedContinuation { continuation in
-                    self.bridge.command("desktop_focus_target",timeout:.seconds(1)){[weak self] result in
+                    self.bridge.command("desktop_focus_target",["transfer":true],timeout:.seconds(1)){[weak self] result in
                         guard let self,self.desktopFocusRequest == request,self.displayEpoch == epoch,
                               self.machine?.desktopIsKey == true,case .success(let reply)=result,
                               let value=reply["value"] as? [String:Any] else{continuation.resume(returning:false);return}
@@ -374,22 +378,23 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
             }
         }
     }
-    private func desktopSingletonState(app:String,target:[String:Any],place:Bool=false) async throws->DesktopSingletonState {
+    private func desktopSingletonState(app:String,target:[String:Any],place:Bool=false,seamless:Bool=false) async throws->DesktopSingletonState {
         let checkedAt=ProcessInfo.processInfo.systemUptime
         return try await withCheckedThrowingContinuation {continuation in
-            bridge.command("desktop_singleton_state",["app":app,"target":target,"place":place],timeout:.seconds(1)){result in
+            bridge.command("desktop_singleton_state",["app":app,"target":target,"place":place,"destination":seamless ? "seamless":"desktop"],timeout:.seconds(1)){result in
                 switch result {
                 case .failure(let error):continuation.resume(throwing:error)
                 case .success(let reply):
                     let value=reply["value"] as? [String:Any] ?? [:]
                     continuation.resume(returning:DesktopSingletonState(focused:value["focused"] as? Bool == true,
                         visible:value["onDesktop"] as? Bool == true,primary:value["onPrimary"] as? Bool == true,
-                        maxMoves:min(8,max(1,value["maxMoves"] as? Int ?? 1)),rect:String(describing:value["rect"] ?? ""),checkedAt:checkedAt))
+                        maxMoves:min(8,max(1,value["maxMoves"] as? Int ?? 1)),rect:String(describing:value["rect"] ?? ""),checkedAt:checkedAt,
+                        zoomed:value["zoomed"] as? Bool == true,moveKey:value["moveKey"] as? String,adjustment:value["adjustment"] as? String))
                 }
             }
         }
     }
-    private func recoverDesktopSingleton(app:String,target:[String:Any]){
+    private func recoverDesktopSingleton(app:String,target:[String:Any],seamless:Bool=false,restoringAfterFailure:String?=nil){
         desktopRecoveryTask?.cancel();let request=UUID();desktopRecoveryRequest=request
         let epoch=displayEpoch
         desktopRecoveryTask=Task{@MainActor [weak self] in
@@ -407,44 +412,80 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
                     }
                 }
                 try current()
-                _=try await self.desktopSingletonState(app:app,target:target,place:true)
+                _=try await self.desktopSingletonState(app:app,target:target,place:true,seamless:seamless)
                 try await Task.sleep(for:.milliseconds(180));try current()
-                var state=try await self.desktopSingletonState(app:app,target:target)
+                var state=try await self.desktopSingletonState(app:app,target:target,seamless:seamless)
                 for _ in 0..<8 where !state.focused {
                     try current()
                     try await machine.cycleApplicationFocus(notAfter:state.checkedAt+0.5)
                     try await Task.sleep(for:.milliseconds(160));try current()
-                    state=try await self.desktopSingletonState(app:app,target:target)
+                    state=try await self.desktopSingletonState(app:app,target:target,seamless:seamless)
                 }
                 var seen=Set<String>()
                 var fitted=false
-                for _ in 0...state.maxMoves {
+                var restored=false
+                var moves=0
+                for _ in 0..<(seamless ? 32:state.maxMoves+1) {
                     try current()
                     if state.focused && state.visible {
-                        self.finishOpening(app,appeared:true);self.launcherNotice=nil;return
+                        if seamless {
+                            try await withCheckedThrowingContinuation {(continuation:CheckedContinuation<Void,Error>) in
+                                self.bridge.command("seamless_adopt",["app":app,"target":target],timeout:.seconds(2)){ result in
+                                    switch result {
+                                    case .success:continuation.resume()
+                                    case .failure(let error):continuation.resume(throwing:error)
+                                    }
+                                }
+                            }
+                            // The first captured frame, rather than this ACK,
+                            // completes the normal launcher opening gate.
+                        }else{self.finishOpening(app,appeared:true)}
+                        self.launcherNotice=restoringAfterFailure;return
                     }
-                    guard state.focused,seen.insert(state.rect).inserted else{break}
+                    guard state.focused else{break}
                     if state.primary {
-                        guard !fitted else{break};fitted=true
-                        try await machine.fitDesktopApplication(notAfter:state.checkedAt+0.5)
+                        if seamless,state.zoomed,!restored {
+                            restored=true
+                            try await machine.restoreDesktopApplication(notAfter:state.checkedAt+0.5)
+                        }else if seamless,let key=state.moveKey,let direction=state.adjustment {
+                            try await machine.nudgeApplication(moveKey:key,direction:direction,notAfter:state.checkedAt+1)
+                        }else {
+                            guard !fitted else{break};fitted=true
+                            try await machine.fitDesktopApplication(notAfter:state.checkedAt+0.5)
+                        }
+                    }else {
+                        guard moves<state.maxMoves,seen.insert(state.rect).inserted else{break};moves+=1
+                        try await machine.moveApplicationToNextDisplay(notAfter:state.checkedAt+0.5)
                     }
-                    else {try await machine.moveApplicationToNextDisplay(notAfter:state.checkedAt+0.5)}
                     let previous=state.rect
                     // Display/DPI changes arrive after the device ACK. Wait
                     // for Windows' geometry, never replay the move merely
                     // because its first readback still has the old rectangle.
                     for _ in 0..<10 {
                         try await Task.sleep(for:.milliseconds(150));try current()
-                        state=try await self.desktopSingletonState(app:app,target:target)
+                        do {
+                            state=try await self.desktopSingletonState(app:app,target:target,seamless:seamless)
+                        }catch {
+                            // Windows can still be completing our system-menu
+                            // gesture after the device has released its keys.
+                            // Wait for idle readback before any further input.
+                            if error.localizedDescription.contains("Finish the current Windows interaction") {continue}
+                            throw error
+                        }
                         if state.visible || state.rect != previous {break}
                     }
+                    if !state.visible && state.rect == previous {break}
                 }
-                throw NSError(domain:"Guest",code:1,userInfo:[NSLocalizedDescriptionKey:"Windows non ha riportato l’app nel Desktop visibile. L’istanza è stata conservata."])
+                throw NSError(domain:"Guest",code:1,userInfo:[NSLocalizedDescriptionKey:"Windows non ha completato il passaggio dell’app alla modalità richiesta. L’istanza è stata conservata."])
             }catch {
                 guard self.desktopRecoveryRequest==request else{return}
                 self.finishOpening(app)
                 guard !Task.isCancelled,machine.desktopIsKey,self.displayEpoch==epoch else{return}
-                self.launcherNotice=error.localizedDescription
+                if seamless {
+                    self.seamlessTransferApps.remove(app)
+                    self.recoverDesktopSingleton(app:app,target:target,restoringAfterFailure:
+                        "Passaggio a Seamless non completato; l’app è stata conservata nel Desktop. "+error.localizedDescription)
+                }else{self.launcherNotice=error.localizedDescription}
             }
         }
     }
@@ -714,6 +755,7 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
         }
     }
     private func finishOpening(_ id:String,appeared:Bool=false){
+        seamlessTransferApps.remove(id)
         guard openingApps.contains(id) || openingTasks[id] != nil || (appeared && openingNoticeApp == id) else{return}
         openingTasks.removeValue(forKey:id)?.cancel()
         if openingApps.contains(id) {openingApps.remove(id)}
@@ -1212,7 +1254,8 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
                         }
                         try await machine.cycleApplicationFocus(notAfter:deadline)
                     }
-                    controller.activateOnFirstShow=openingApps.contains(item["app"] as? String ?? "") && machine?.desktopIsKey != true
+                    controller.activateOnFirstShow=openingApps.contains(item["app"] as? String ?? "")
+                        && (machine?.desktopIsKey != true || seamlessTransferApps.contains(item["app"] as? String ?? ""))
                     controller.onError={ [weak self] message in
                         self?.status=message;self?.launcherNotice=message;self?.windowNotice=(id,message,false)
                     }
@@ -1256,6 +1299,11 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
             if let window=windows[id]{window.present(packet)}else if earlyFrames.count<16{earlyFrames[id]=packet}
         case "activate":
             if machine?.desktopIsKey != true,let id=value["window"] as? String {windows[id]?.activate()}
+        case "seamless_transfer":
+            guard let app=value["app"] as? String,openingApps.contains(app),!cancelledOpeningApps.contains(app),
+                  let target=value["target"] as? [String:Any] else{return}
+            seamlessTransferApps.insert(app)
+            recoverDesktopSingleton(app:app,target:target,seamless:true)
         case "desktop_focus":
             guard let app=value["app"] as? String,openingApps.contains(app),!cancelledOpeningApps.contains(app) else{return}
             if let target=value["target"] as? [String:Any] {recoverDesktopSingleton(app:app,target:target)}
