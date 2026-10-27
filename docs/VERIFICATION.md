@@ -1,5 +1,15 @@
 # Diario delle verifiche
 
+## 27 ottobre — tre direzioni radicali per il launcher
+
+**Esito negativo conservato:** l’utente respinge Essenziale/Compatto/Libreria come insufficientemente diversi e richiede tre idee pazze, completamente distinte. La selezione Essenziale ricevuta dal carosello non è una scelta approvata, superata dal rifiuto esplicito. Nuovi concetti progettati da zero nelle forme/interazioni: Mission Control (console verde/monospazio, stato gigante e comandi/tasti funzione), Orbita (Windows come centro e app favorite su orbite, riposizionabili), Officina (oggetto hardware beige, display LCD, rocker arancione, cartucce favorite, manopole Schermi/Risorse).
+
+**Verifica locale:** tutte e tre le proposte visualizzate nel browser. Officina: rimozione cartuccia6→5, riaggiunta dal catalogo→6; interruttore con conferma apre stato ARRESTO e disabilita app mentre chiude la simulazione. Stati e gestione implementati nel prototipo; niente comandi alla VM. Corrette in autoverifica le etichette ON quando lo stato non è confermato, il nome dell’azione power e il limite artificiale dei favoriti; layout Orbita stretto adattato a una composizione senza sovrapposizioni. Icone originali incluse, nessun documento utente letto. Prototipo `radical-launchers.html` nella directory visualizzazioni di questo thread, inferiore a1MiB, link browser locale dedicato54322. Il precedente link/prototipo resta distinto.
+
+**Perimetro:** prototipazione soltanto, nessuna modifica Swift, rebuild, distribuzione, verifica clone/main, impostazione reale o reset Windows. APP-003 non chiuso. Prossimo passo: riscontro umano sui tre concetti, poi implementazione nativa con i criteri di TODO-019; nessun disegno ancora approvato.
+
+**Limite del controllo gesto Orbita:** primo drag dell’acquisitore non modifica la posizione; rilevate coordinate di screenshot e DOM diverse, il secondo tentativo incontra il tab non più appartenente alla sessione del browser. Non dichiarato riuscito il drag end-to-end. Il gestore locale conserva ora l’offset del punto afferrato e limita la posizione all’area utile; resta una capacità implementata da qualificare con il gesto nel browser dell’utente. Le altre verifiche sopra restano valide; nessuna prova ripetuta sulla VM per compensare questo limite.
+
 ## 27 ottobre — prototipi del nuovo launcher
 
 **Richiesta:** riprogettare il launcher mostrando prima prototipi in chat. Stato chiaro Windows acceso/spento/altro, preferiti funzionanti, Schermi/Impostazioni separati e rimozione della sidebar predefinita corrente. Questi sono requisiti dell’utente, non una scelta già approvata fra le proposte.
