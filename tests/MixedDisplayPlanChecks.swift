@@ -7,14 +7,14 @@ import AppKit
         let binding=AppDisplayBinding(hostID:first.stableID!,slot:9)
         let bindings=AppDisplayBindings(machineID:"test",pid:1,displays:[binding])
         let desktop:[String:Any]=["device":"D1","pciAddress":8<<16,"service":"VioGpu3D","problem":0,"width":1920,"height":1280]
-        let app:[String:Any]=["device":"D2","pciAddress":9<<16,"service":"VioGpuDod","problem":0,"width":2940,"height":1912]
+        let app:[String:Any]=["device":"D2","pciAddress":9<<16,"service":"VioGpuDod","problem":0,"width":2940,"height":1912,"x":0,"y":0,"dpi":192,"workArea":["x":0,"y":0,"width":2940,"height":1816]]
         let topology:[String:Any]=["paths":[desktop,app],"monitors":["displays":[desktop,app]]]
         let connected=try MixedDisplayPlan(hosts:[first,second],bindings:bindings,topology:topology)
         precondition(connected.hosts.count==1 && connected.unavailableHosts==1 && connected.devices==["D2"],"Adding an unprovisioned monitor must keep the verified monitor usable")
         precondition(connected.layout.count==2,"Every real Windows output must remain described")
         let secondBinding=AppDisplayBinding(hostID:second.stableID!,slot:10)
         let provisioned=AppDisplayBindings(machineID:"test",pid:1,displays:[binding,secondBinding])
-        let orphan:[String:Any]=["device":"D3","pciAddress":10<<16,"service":"VioGpuDod","problem":0,"width":3840,"height":2160]
+        let orphan:[String:Any]=["device":"D3","pciAddress":10<<16,"service":"VioGpuDod","problem":0,"width":3840,"height":2160,"x":0,"y":0,"dpi":192,"workArea":["x":0,"y":0,"width":3840,"height":2064]]
         let unplugged=try MixedDisplayPlan(hosts:[first],bindings:provisioned,topology:["paths":[desktop,app,orphan],"monitors":["displays":[desktop,app,orphan]]])
         precondition(unplugged.hosts.count==1 && unplugged.layout.count==3 && unplugged.unavailableHosts==0,"Unplugging a Mac must preserve active guest outputs without inventing a Mac mapping")
         do {
@@ -33,7 +33,10 @@ import AppKit
         let applied=connected.layout.map { fields -> [String:Any] in
             var actual=fields
             let area=fields["workArea"] ?? ["x":fields["x"]!,"y":fields["y"]!,"width":fields["width"]!,"height":fields["height"]!]
-            actual["workArea"]=area;actual["appWorkArea"]=area
+            if fields["primary"] as? Bool == false {
+                actual["workArea"]=["x":fields["x"]!,"y":fields["y"]!,"width":fields["width"]!,"height":(fields["height"] as! Int)-96]
+            }else{actual["workArea"]=area}
+            actual["appWorkArea"]=area
             return actual
         }
         let reused=try connected.mappings(snapshot:["monitors":["displays":applied]])
@@ -50,6 +53,21 @@ import AppKit
             _=try connected.mappings(snapshot:["monitors":["displays":changed]])
             preconditionFailure("A stale private app work area must require configuration")
         }catch{}
+        precondition(connected.modes[0].width==2940 && connected.modes[0].height==2008,
+                     "The dedicated raster must include the Windows taskbar outside the Mac viewport")
+        precondition(reused[0].macFrame(forGuest:reused[0].guestWorkArea!)==first.workArea,
+                     "Maximize must occupy exactly the ordinary Mac work area with a hidden Dock")
+        for area in [NSRect(x:0,y:70,width:1470,height:853),NSRect(x:80,y:0,width:1390,height:923)] {
+            let dock=HostDisplay(id:1,frame:first.frame,workArea:area,scale:2,primary:true,stableID:first.stableID)
+            let plan=try MixedDisplayPlan(hosts:[dock],bindings:bindings,topology:topology)
+            var result=plan.layout
+            result[1]["workArea"]=["x":result[1]["x"]!,"y":0,"width":2940,"height":1912]
+            result[1]["appWorkArea"]=plan.layout[1]["workArea"]
+            let mapping=try plan.mappings(snapshot:["monitors":["displays":result]])[0]
+            precondition(mapping.macFrame(forGuest:mapping.guestWorkArea!)==area,
+                         "A visible bottom or side Dock must use the area reported by macOS")
+            precondition(mapping.pixelScale==0.5,"Dock changes must not stretch Windows pixels")
+        }
         print("Mixed displays: binding checks and unchanged-layout verification passed")
     }
 }

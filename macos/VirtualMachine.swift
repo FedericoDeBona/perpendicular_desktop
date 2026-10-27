@@ -176,6 +176,45 @@ final class VirtualMachineController {
               let application=NSRunningApplication(processIdentifier:pid) else {return}
         application.unhide();application.activate(options:[])
     }
+    /// Publish exact modes to the dedicated app consoles. The primary VNC
+    /// connection and its input stay bound to the reserved Windows desktop.
+    func prepareAppMonitorModes(_ modes:[AppMonitorMode]) async throws {
+        let changed=modes.filter(\.changed)
+        guard !changed.isEmpty else{return}
+        guard case .running(let pid)=await observedState() else {throw CocoaError(.executableRuntimeMismatch)}
+        let socket=controlSocket,id=configuration.id
+        try await Task.detached {
+            func value(_ operation:String,_ arguments:[String:Any]) throws -> Any {
+                try MachineControl.value(socket:socket,operation:operation,arguments:arguments,expectedUUID:id,expectedPID:pid)
+            }
+            let consoles=try value("qom-list",["path":"/backend"]) as? [[String:Any]] ?? []
+            for mode in changed {
+                guard (9...23).contains(mode.slot),(640...4096).contains(mode.width),(480...4096).contains(mode.height) else {
+                    throw CocoaError(.coderInvalidValue)
+                }
+                let device="/machine/peripheral/appdisplay\(mode.slot-9)"
+                var selected:String?
+                for console in consoles {
+                    guard let name=console["name"] as? String,name.hasPrefix("console[") else {continue}
+                    let path="/backend/"+name
+                    if try value("qom-get",["path":path,"property":"device"]) as? String == device {selected=path;break}
+                }
+                guard let path=selected else {throw CocoaError(.coderReadCorrupt)}
+                let target="\(mode.width)x\(mode.height)"
+                _=try value("qom-get",["path":path,"property":"perpendicular-mode"])
+                func publish(_ size:String) throws { _=try value("qom-set",["path":path,"property":"perpendicular-mode","value":size]) }
+                do {
+                    try publish(target);try await Task.sleep(for:.seconds(1))
+                    try publish("0x0");try await Task.sleep(for:.seconds(1))
+                    try publish(target);try await Task.sleep(for:.seconds(1))
+                }catch {
+                    // Reconnect before reporting a failed update; never leave
+                    // an admitted app display intentionally disconnected.
+                    try? publish(target);throw error
+                }
+            }
+        }.value
+    }
     func requestDesktopResolution(_ size:NSSize){
         guard let launch=desktopLaunch() else{return}
         displayControl?.stop()

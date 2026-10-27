@@ -33,6 +33,7 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
     private var machineStateRevision=UUID()
     @Published private(set) var catalogueLoading=false
     @Published var launcherNotice:String?
+    private var mixedDisplayNotice:String?
     private var windowNotice:(id:String,message:String,frame:Bool)?
     @Published private(set) var openingApps:Set<String>=[]
     private var seamlessTransferApps:Set<String>=[]
@@ -1001,11 +1002,11 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
             }else{monitor["label"]="Desktop Mode";monitor["appScreen"]=false}
             return monitor
         }
-        let previousStatus=displayStatus
         displayStatus=plan.unavailableHosts==0 ? "\(mappings.count) schermi Mac collegati, desktop Windows separato.":
             "\(mappings.count) di \(mappings.count+plan.unavailableHosts) schermi pronti. Puoi aprire le app sugli schermi disponibili; spegni e avvia Windows da Perpendicular per aggiungere gli altri."
-        if plan.unavailableHosts>0 {launcherNotice=displayStatus}
-        else if launcherNotice==previousStatus {launcherNotice=nil}
+        if launcherNotice==mixedDisplayNotice {launcherNotice=nil}
+        mixedDisplayNotice=nil
+        if plan.unavailableHosts>0 {launcherNotice=displayStatus;mixedDisplayNotice=displayStatus}
         for window in windows.values {
             window.setSharedDisplays(mappings);window.setDisplayUpdating(false)
             if machine.desktopIsKey != true,let first=mappings.first {window.placeOnAppDisplayIfNeeded(first)}
@@ -1013,6 +1014,9 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
         if let primary=launcherDisplays.first(where:{$0["primary"] as? Bool == true}),
            let width=primary["width"] as? Int,let height=primary["height"] as? Int {
             desktopConfirmed=NSSize(width:width,height:height)
+            if desktopConfirmed==desktopAttempted,launcherNotice=="Windows non ha confermato la risoluzione richiesta." {
+                launcherNotice=nil
+            }
         }
         layoutChildren()
         scheduleDesktopResize()
@@ -1038,30 +1042,44 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
                 }
                 self.invalidateDisplay("Aggiornamento degli schermi…")
                 self.mixedDisplayApplies+=1
-                self.bridge.command("display_layout",["layout":plan.layout],timeout:.seconds(12)){[weak self] result in
-                    guard let self,self.connected,self.displayEpoch==epoch,self.displaySetupID==request else{return}
+                Task{@MainActor [weak self] in
+                    guard let self else{return}
                     do {
-                        let reply=try result.get()
-                        guard let snapshot=reply["value"] as? [String:Any] else{throw CocoaError(.coderReadCorrupt)}
-                        try self.acceptMixedDisplay(plan,snapshot)
-                    }catch{self.failMixedDisplay(error.localizedDescription)}
+                        try await self.machine.prepareAppMonitorModes(plan.modes)
+                        guard self.connected,self.displayEpoch==epoch,self.displaySetupID==request else{return}
+                        self.bridge.command("display_layout",["layout":plan.layout],timeout:.seconds(12)){[weak self] result in
+                            guard let self,self.connected,self.displayEpoch==epoch,self.displaySetupID==request else{return}
+                            do {
+                                let reply=try result.get()
+                                guard let snapshot=reply["value"] as? [String:Any] else{throw CocoaError(.coderReadCorrupt)}
+                                try self.acceptMixedDisplay(plan,snapshot)
+                            }catch{self.retryMixedDisplay(error.localizedDescription,attempt:attempt,epoch:epoch,request:request)}
+                        }
+                    }catch{
+                        guard self.connected,self.displayEpoch==epoch,self.displaySetupID==request else{return}
+                        self.retryMixedDisplay(error.localizedDescription,attempt:attempt,epoch:epoch,request:request)
+                    }
                 }
             }catch{
-                self.mixedDisplayConfiguring=false
-                if attempt<2 {
-                    self.displayReadTask?.cancel()
-                    self.displayReadTask=Task{@MainActor [weak self] in
-                        try? await Task.sleep(for:.milliseconds(300))
-                        guard !Task.isCancelled,let self,self.connected,self.displayEpoch==epoch,self.displaySetupID==request else{return}
-                        self.displayReadTask=nil;self.readMixedDisplay(attempt:attempt+1)
-                    }
-                }else{self.failMixedDisplay(error.localizedDescription)}
+                self.retryMixedDisplay(error.localizedDescription,attempt:attempt,epoch:epoch,request:request)
             }
+        }
+    }
+    private func retryMixedDisplay(_ message:String,attempt:Int,epoch:String,request:UUID){
+        mixedDisplayConfiguring=false
+        guard attempt<2 else{failMixedDisplay(message);return}
+        // Re-enumerating an app monitor can temporarily invalidate Windows'
+        // configuration. Read a fresh topology before another exact apply.
+        displayReadTask?.cancel()
+        displayReadTask=Task{@MainActor [weak self] in
+            try? await Task.sleep(for:.milliseconds(300))
+            guard !Task.isCancelled,let self,self.connected,self.displayEpoch==epoch,self.displaySetupID==request else{return}
+            self.displayReadTask=nil;self.readMixedDisplay(attempt:attempt+1)
         }
     }
     private func failMixedDisplay(_ message:String){
         mixedDisplayConfiguring=false;sharedDisplay=nil;sharedDisplays=[];displayUpdating=false
-        displayStatus=message;launcherNotice=message
+        displayStatus=message;launcherNotice=message;mixedDisplayNotice=message
         for window in windows.values {window.setSharedDisplay(nil);window.setDisplayUpdating(false);window.failFrameTransition()}
     }
     private func readDesktopDisplay(){

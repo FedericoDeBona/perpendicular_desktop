@@ -156,6 +156,8 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
     private var geometryRead:Task<Void,Never>?
     private var nativeMoveTimer:Timer?
     private var zoomRestore:NSRect?
+    private var displaySavedFrame:NSRect?
+    private var displaySavedZoomRestore:NSRect?
     var onError:((String)->Void)?
     var parentID:String?
     var zOrder=0
@@ -237,7 +239,10 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
         requestActivation()
     }
     func setDisplayUpdating(_ updating:Bool){
-        if updating,!displayUpdating {displayPriorRaster=sharedDisplay?.guestFrame.size}
+        if updating,!displayUpdating {
+            displayPriorRaster=sharedDisplay?.guestFrame.size
+            if hasFrame,!role.transient {displaySavedFrame=window.frame;displaySavedZoomRestore=zoomRestore}
+        }
         displayUpdating=updating
         if updating {beginFrameTransition("Connessione a Windows…")}
         else if transitionActive,hasFrame,sourceRect.size == frameSize,
@@ -248,6 +253,22 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
             content.redrawCurrentFrame()
         }
         if !updating {
+            if let saved=displaySavedFrame,let display=SharedDisplay.best(sharedDisplays,host:saved) ?? sharedDisplay {
+                let restore=displaySavedZoomRestore
+                displaySavedFrame=nil;displaySavedZoomRestore=nil
+                setSelectedDisplay(display)
+                let area=window.frameRect(forContentRect:display.macFrame(forGuest:display.guestWorkArea ?? display.guestFrame))
+                var target=restore != nil ? area:saved
+                target.size.width=min(target.width,area.width);target.size.height=min(target.height,area.height)
+                target.origin.x=min(max(target.minX,area.minX),area.maxX-target.width)
+                target.origin.y=min(max(target.minY,area.minY),area.maxY-target.height)
+                zoomRestore=restore
+                if canResize,window.frame != target || display.guestFrame(forMac:window.contentRect(forFrameRect:target)) != sourceRect {
+                    beginResize(preview:false)
+                    applyingSourceGeometry=true;window.setFrame(target,display:true);applyingSourceGeometry=false
+                    commitResize()
+                }
+            }
             presentInitialPlacementPacketIfReady()
             finishPresentedTransition();if transitionActive {requestFreshFrame()}
         }

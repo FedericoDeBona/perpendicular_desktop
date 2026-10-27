@@ -18,12 +18,15 @@ struct SharedDisplay:Equatable {
         self.guestWorkArea = guestWorkArea
     }
 
-    static func mapped(host:HostDisplay,monitor:[String:Any],requested:[String:Any],scale:Int)->SharedDisplay? {
+    static func mapped(host:HostDisplay,monitor:[String:Any],requested:[String:Any],scale:Int,viewport:NSRect?=nil)->SharedDisplay? {
         guard let frame=rectangle(monitor),let expected=rectangle(requested),frame==expected,
               integer(monitor["dpi"])==CGFloat(96*scale),
               let fields=(monitor["appWorkArea"] ?? monitor["workArea"]) as? [String:Any],let area=rectangle(fields),frame.contains(area),
               let device=monitor["device"] as? String else{return nil}
-        let mapping=SharedDisplay(host:host,guestFrame:frame,guestWorkArea:area,full:true,device:device)
+        let viewport=viewport ?? frame
+        guard frame.contains(viewport),viewport.width==host.frame.width*CGFloat(scale),
+              viewport.height==host.frame.height*CGFloat(scale) else{return nil}
+        let mapping=SharedDisplay(host:host,guestFrame:viewport,guestWorkArea:area,full:true,device:device)
         let actual=mapping.macFrame(forGuest:area)
         guard host.workArea.insetBy(dx:-1,dy:-1).contains(actual) else{return nil}
         return mapping

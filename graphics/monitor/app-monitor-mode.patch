@@ -1,0 +1,49 @@
+--- a/ui/console.c
++++ b/ui/console.c
+@@ -436,9 +436,46 @@
+     visit_type_uint32(v, name, &c->head, errp);
+ }
+ 
++/* Publish one monitor's exact mode without rebinding the desktop's input.
++ * Windows consumes the same UI-info event as RFB SetDesktopSize. The frontend
++ * primes the mode, disconnects, then reconnects only this dedicated console. */
++static char *perp_console_get_mode(Object *obj, Error **errp)
++{
++    QemuConsole *con = QEMU_CONSOLE(obj);
++    if (!dpy_ui_info_supported(con)) {
++        error_setg(errp, "Console does not support monitor modes");
++        return NULL;
++    }
++    const QemuUIInfo *info = dpy_get_ui_info(con);
++    return g_strdup_printf("%ux%u", info->width, info->height);
++}
++
++static void perp_console_set_mode(Object *obj, const char *value, Error **errp)
++{
++    QemuConsole *con = QEMU_CONSOLE(obj);
++    unsigned width, height;
++    char tail;
++    if (!value || sscanf(value, "%ux%u%c", &width, &height, &tail) != 2 ||
++        !((width == 0 && height == 0) ||
++          (width >= 640 && width <= 4096 && height >= 480 && height <= 4096))) {
++        error_setg(errp, "Expected 640..4096 x 480..4096 or 0x0");
++        return;
++    }
++    if (!dpy_ui_info_supported(con)) {
++        error_setg(errp, "Console does not support monitor modes");
++        return;
++    }
++    QemuUIInfo info = *dpy_get_ui_info(con);
++    info.width = width;
++    info.height = height;
++    dpy_set_ui_info(con, &info, false);
++}
++
+ static void
+ qemu_graphic_console_class_init(ObjectClass *oc, void *data)
+ {
++    object_class_property_add_str(oc, "perpendicular-mode",
++                                  perp_console_get_mode, perp_console_set_mode);
+     object_class_property_add_link(oc, "device", TYPE_DEVICE,
+                                    offsetof(QemuGraphicConsole, device),
+                                    object_property_allow_set_link,

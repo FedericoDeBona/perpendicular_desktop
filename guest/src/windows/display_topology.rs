@@ -209,7 +209,7 @@ impl Topology {
                 || monitor.y.abs_diff(0) > 1_000_000
                 || !(640..=4096).contains(&monitor.width)
                 || !(480..=4096).contains(&monitor.height)
-                || u64::from(monitor.width) * u64::from(monitor.height) > 8_388_608
+                || u64::from(monitor.width) * u64::from(monitor.height) > if !monitor.primary && monitor.work_area.is_some() {16_777_216} else {8_388_608}
                 || (monitor.primary && (monitor.x != 0 || monitor.y != 0))
             {
                 return Err("Invalid display layout coordinates or dimensions".into());
@@ -218,7 +218,8 @@ impl Topology {
                 return Err("Unsupported display DPI".into());
             }
             if let Some(area) = &monitor.work_area {
-                if area.width < 160 || area.height < 100 || area.x < monitor.x || area.y < monitor.y
+                if area.width < 160 || area.height < 100 || i64::from(area.width)*i64::from(area.height)>8_388_608
+                    || area.x < monitor.x || area.y < monitor.y
                     || i64::from(area.x)+i64::from(area.width) > i64::from(monitor.x)+i64::from(monitor.width)
                     || i64::from(area.y)+i64::from(area.height) > i64::from(monitor.y)+i64::from(monitor.height) {
                     return Err("Work area must fit its display".into());

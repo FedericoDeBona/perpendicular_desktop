@@ -64,12 +64,21 @@ struct AppDisplayBindings:Codable {let machineID:String;let pid:Int32;let displa
 /// One Windows DIP per Mac point. Keep a uniform guest DPI so ordinary and
 /// legacy Windows apps do not change logical size while moving between Macs.
 /// A non-Retina Mac downsamples the same raster through its normal presenter.
+struct AppMonitorMode:Sendable {
+    let slot:Int
+    let width:Int
+    let height:Int
+    let changed:Bool
+}
+
 struct MixedDisplayPlan {
     let layout:[[String:Any]]
     let hosts:[HostDisplay]
     let devices:[String]
     let scale:Int
     let unavailableHosts:Int
+    let modes:[AppMonitorMode]
+    private let viewports:[String:NSRect]
 
     static func rasterScale(_ hosts:[HostDisplay])->Int {
         hosts.allSatisfy{fits($0.frame.size,scale:2)} ? 2:1
@@ -124,25 +133,43 @@ struct MixedDisplayPlan {
         // raster. Only the app displays need the common 1-DIP/1-point scale.
         var layout:[[String:Any]]=[["device":primaryName,"x":0,"y":0,"width":width,"height":height,"primary":true]]
         var devices:[String]=[]
-        // The app monitors preserve the actual Mac arrangement. Their group
-        // touches the reserved desktop independently of its changing width.
-        let anchor=available.min{a,b in a.frame.minX == b.frame.minX ? a.frame.maxY>b.frame.maxY:a.frame.minX<b.frame.minX}!
-        // Keep app outputs to the left of x=0. Their right edge touches the
-        // primary, so Windows keeps a connected topology at every desktop size.
-        let appOriginX = -Int(((available.map{$0.frame.maxX}.max()!-anchor.frame.minX)*CGFloat(scale)).rounded())
+        // These are dedicated Windows surfaces. Taskbar pixels live outside
+        // the 1:1 Mac viewport; pack the padded rasters in a connected strip so
+        // their invisible padding cannot overlap a neighbouring monitor.
+        var left=0
+        var modes:[AppMonitorMode]=[]
+        var viewports:[String:NSRect]=[:]
         for host in available {
             guard let binding=bindings.displays.first(where:{$0.hostID==host.stableID}),
                   (9...23).contains(binding.slot) else {throw Self.failure("Gli schermi sono cambiati. Riavvia Windows per aggiornarli.")}
             let device=try path(slot:binding.slot,service:"VioGpuDod")["device"] as! String
-            let x=appOriginX+Int(((host.frame.minX-anchor.frame.minX)*CGFloat(scale)).rounded())
-            let y=Int(((anchor.frame.maxY-host.frame.maxY)*CGFloat(scale)).rounded())
+            guard let actual=monitors.first(where:{$0["device"] as? String==device}),
+                  let frame=Self.area(actual.compactMapValues{$0 as? Int}),
+                  let fields=actual["workArea"] as? [String:Int],let guestWork=Self.area(fields),
+                  frame.contains(guestWork),let dpi=actual["dpi"] as? Int,dpi>0 else {
+                throw Self.failure("Windows non ha comunicato l’area della barra delle applicazioni.")
+            }
+            let ratio=CGFloat(96*scale)/CGFloat(dpi)
+            let insetLeft=Int(((guestWork.minX-frame.minX)*ratio).rounded())
+            let insetTop=Int(((guestWork.minY-frame.minY)*ratio).rounded())
+            let insetRight=Int(((frame.maxX-guestWork.maxX)*ratio).rounded())
+            let insetBottom=Int(((frame.maxY-guestWork.maxY)*ratio).rounded())
+            let viewportWidth=Int((host.frame.width*CGFloat(scale)).rounded())
+            let viewportHeight=Int((host.frame.height*CGFloat(scale)).rounded())
+            let width=viewportWidth+insetLeft+insetRight,height=viewportHeight+insetTop+insetBottom
+            guard width<=4096,height<=4096 else {throw Self.failure("Lo schermo con lo spazio della barra Windows supera il limite corrente.")}
+            left-=width
+            let x=left,y=0
+            let viewport=NSRect(x:x+insetLeft,y:y+insetTop,width:viewportWidth,height:viewportHeight)
             let work=host.workArea
-            let area:[String:Int]=["x":x+Int(((work.minX-host.frame.minX)*CGFloat(scale)).rounded()),
-                "y":y+Int(((host.frame.maxY-work.maxY)*CGFloat(scale)).rounded()),
+            let area:[String:Int]=["x":Int(viewport.minX)+Int(((work.minX-host.frame.minX)*CGFloat(scale)).rounded()),
+                "y":Int(viewport.minY)+Int(((host.frame.maxY-work.maxY)*CGFloat(scale)).rounded()),
                 "width":Int((work.width*CGFloat(scale)).rounded()),"height":Int((work.height*CGFloat(scale)).rounded())]
-            layout.append(["device":device,"x":x,"y":y,"width":Int((host.frame.width*CGFloat(scale)).rounded()),
-                "height":Int((host.frame.height*CGFloat(scale)).rounded()),"primary":false,"dpi":96*scale,"workArea":area])
-            devices.append(device)
+            layout.append(["device":device,"x":x,"y":y,"width":width,"height":height,
+                "primary":false,"dpi":96*scale,"workArea":area])
+            devices.append(device);viewports[device]=viewport
+            modes.append(AppMonitorMode(slot:binding.slot,width:width,height:height,
+                changed:actual["width"] as? Int != width || actual["height"] as? Int != height))
         }
         for monitor in monitors where !layout.contains(where:{$0["device"] as? String==monitor["device"] as? String}) {
             guard let device=monitor["device"] as? String,let w=monitor["width"] as? Int,let h=monitor["height"] as? Int,
@@ -155,6 +182,7 @@ struct MixedDisplayPlan {
         }
         guard Set(devices).count==available.count,monitors.count==layout.count else {throw Self.failure("Le uscite Windows non sono distinte.")}
         self.layout=layout;self.hosts=available;self.devices=devices;self.scale=scale;self.unavailableHosts=hosts.count-available.count
+        self.modes=modes;self.viewports=viewports
     }
 
     func mappings(snapshot:[String:Any])throws->[SharedDisplay] {
@@ -169,11 +197,11 @@ struct MixedDisplayPlan {
         return try zip(hosts,devices).map { host,device in
             guard let actual=monitors.first(where:{$0["device"] as? String==device}),
                   let requested=layout.first(where:{$0["device"] as? String==device}),
-                  let mapping=SharedDisplay.mapped(host:host,monitor:actual,requested:requested,scale:scale),
+                  let mapping=SharedDisplay.mapped(host:host,monitor:actual,requested:requested,scale:scale,viewport:viewports[device]),
                   let requestedArea=requested["workArea"] as? [String:Int],
                   let osArea=actual["workArea"] as? [String:Int],
                   let expectedArea=Self.area(requestedArea),let systemArea=Self.area(osArea),
-                  mapping.guestWorkArea==expectedArea.intersection(systemArea) else {
+                  mapping.guestWorkArea==expectedArea,systemArea.contains(expectedArea) else {
                 throw Self.failure("Windows non ha confermato posizione, dimensioni e scala degli schermi.")
             }
             return mapping
