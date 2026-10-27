@@ -1,5 +1,7 @@
 # Registro dei problemi
 
+**27 ottobre — rebuild e guest tools 0.2.16 sul Mac93be6687: FATTO nel perimetro della distribuzione e della prova breve.** Applications/build allineati (frontenddb11d250ea16, guestc9ece1f561ff), servizio Running/hash corrispondente e task temporaneo rimosso. Desktop nativo1920×1280/Start e Notepad dal launcher→testo→drag→resize→Cmd+Q→Don’t Save verificati nella main locale. Tre Mac mappati, quattro uscite sane; RAM2→4GiB e driver esistenti conservati, Secure Boottrue/TestSigningfalse. Nessuna nuova implementazione o prova clone; VM inizialmente già spenta, avviata una volta e poi boot conservato. GFX-001 ancora visibile in Start; input elevato/singleton e compatibilità generale non riqualificati qui. **Prossimo passo:** input elevato Seamless (TODO-022/WIN-004); non ripetere la prova Notepad senza un nuovo motivo. [Evidenze](VERIFICATION.md#27-ottobre--rebuild-e-guest-tools-0216-sul-mac-93be6687).
+
 **27 ottobre — seconda pulizia richiesta, Mac93be6687:** rimossi anche il vecchio disco Integration da17,057 GB in `perpendicular_desktop_old/.tools`,42 app/copie obsolete e gli output compilati/supporti di prova selezionati. Recupero netto aggiuntivo40,686 GB, disponibili77,154 GB al rilievo finale. VM sempre PID2571 running, blocchi collegati invariati;244.281 record protetti e stati Git dei due repository invariati. Preservati sorgenti/modifiche locali, VM corrente e ultimo checkpoint, Parallels originale, download utente e Manga2Animate. Nessuna distribuzione o test UI. [Evidenze](VERIFICATION.md#27-ottobre--seconda-pulizia-del-vecchio-progetto-e-degli-artefatti).
 
 **27 ottobre — pull e pulizia sul Mac93be6687:** sorgenti aggiornati fast-forward0cf4edd→a243a7c (0.2.16); app installata e `.build/Perpendicular.app` restano0.2.10, senza rebuild o distribuzione. Eliminati37 vecchi dischi COW,29 runtime inattivi/di prova,13 vecchie app e12 copie di runtime di sviluppo. VM2571 sempre running; app, runtime attivo76ae8bab, configurazione e checkpoint offline più recente conservati/invariati. Recupero netto misurato72.369 GB, disponibili73.297 GB al termine (VM accesa). Nessuna verifica UI o nuova qualifica delle feature0.2.16 su questo Mac. [Evidenze e perimetro](VERIFICATION.md#27-ottobre--pull-e-pulizia-delle-varianti-sul-mac-93be6687).
@@ -173,6 +175,8 @@ Queste voci conservano limiti non risolti, senza richiedere di ripristinare codi
 
 ### GFX-001 — Flicker e cifre mancanti nelle catture WGC
 
+- **27 ottobre, main locale93be6687/0.2.16:** Start si apre realmente al clic ma mostra icone/sezioni senza numerose etichette e senza pannello completo. Nuova osservazione sul desktop diretto, non solo WGC; nessuna causa comune dimostrata o correzione applicata. Notepad osservata completa nel breve percorso. [Evidenze](VERIFICATION.md#27-ottobre--rebuild-e-guest-tools-0216-sul-mac-93be6687).
+
 - **Stato:** aperto nel percorso individuale, ora ripreso. Nel nuovo launcher Esplora file si apre e presenta immagini aggiornate, ma alcune etichette delle cartelle sono assenti: nuova riproduzione circoscritta, non una correzione del contenuto. Il desktop diretto conserva il precedente riscontro distinto. PNG già ricevuti dal Mac mostravano cifre mancanti prima del disegno Metal; i campioni completi con hash uguali non escludono la compressione nel caso parziale.
 - **Prossimo passo, se ripreso:** conservare una riproduzione pertinente e seguire produzione, cattura e lettura della superficie, senza riattivare per deduzione la candidata DWM.
 - **Chiusura:** stesso passaggio prima difettoso completo e aggiornato nell’app reale, con componenti identificati e breve verifica di input/resize.
@@ -242,6 +246,8 @@ Queste voci conservano limiti non risolti, senza richiedere di ripristinare codi
 - **Evidenze:** [diario delle verifiche](VERIFICATION.md), correzione del drag del 24 ottobre.
 
 ### WIN-002 — Resize individuale in attesa del frame
+
+- **27 ottobre, main locale93be6687/0.2.16:** Notepad nuova534→754pixel di larghezza, frame pertinente presentato e input successivo; Cmd+Q crea dialogo706×209, prima spinner e poi presentazione2/required1, transitionfalse. Screenshot reale Save/Don’t Save/Cancel e clic Don’t Save chiudono regolarmente la sola prova, finestre/cache0. Qualifica circoscritta positiva; il precedente fallimento e il criterio generale restano aperti. [Diario](VERIFICATION.md#27-ottobre--rebuild-e-guest-tools-0216-sul-mac-93be6687).
 
 - **0.2.11:** prima immagine/visibilità della main attende collocazione iniziale confermata, spinner del launcher termina al frame pronto; timeout descritto come attesa immagine invece di dichiarare un blocco dell’app. Notepad/Explorer con frame e geometria concordi nel campione; gesti non qualificati per CUA noWindowsAvailable e cambio monitor2→1. Voce generale aperta, prossimo passo gesto reale col riscontro disponibile. [Evidenze](VERIFICATION.md#26-ottobre--seamless-e-desktop-primo-incremento-0211).
 
