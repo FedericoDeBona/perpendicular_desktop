@@ -33,7 +33,21 @@ try {
     New-Item -ItemType Directory -Force $target | Out-Null
     Copy-Item (Join-Path $MediaRoot 'viofs\virtiofs.exe') $target -Force
     & pnputil.exe /add-driver (Join-Path $MediaRoot 'viofs\viofs.inf') /install
-    if ($LASTEXITCODE -notin @(0,3010)) {throw "Virtiofs driver installation failed: $LASTEXITCODE"}
+    $driverResult=$LASTEXITCODE
+    if ($driverResult -eq 259) {
+        # Reinstalling an identical package can report no more items. Accept
+        # only the exact pinned package registered for the installed driver.
+        $key=[Microsoft.Win32.Registry]::LocalMachine.OpenSubKey('SYSTEM\CurrentControlSet\Services\VirtioFsDrv')
+        if(!$key){throw 'The existing Virtiofs driver is not registered.'}
+        try{$installed=[Environment]::ExpandEnvironmentVariables([string]$key.GetValue('ImagePath'))}finally{$key.Close()}
+        if($installed.StartsWith('\SystemRoot\',[StringComparison]::OrdinalIgnoreCase)){$installed=$env:SystemRoot+'\'+$installed.Substring('\SystemRoot\'.Length)}
+        if([IO.Path]::GetFileName($installed) -ine 'viofs.sys'){throw 'The existing Virtiofs driver path differs.'}
+        foreach($name in @('viofs.inf','viofs.cat','viofs.sys')) {
+            $file=Join-Path ([IO.Path]::GetDirectoryName($installed)) $name
+            if((Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash -ine $manifest.members.('viofs/'+$name)){throw ('The installed Virtiofs package differs: '+$name)}
+        }
+        Write-Output 'The exact pinned Virtiofs driver package is already installed.'
+    } elseif ($driverResult -notin @(0,3010)) {throw "Virtiofs driver installation failed: $driverResult"}
     Copy-Item (Join-Path $MediaRoot 'configure-shared-folders.ps1') $target -Force
     Copy-Item (Join-Path $MediaRoot 'apply-shared-folders.ps1') $target -Force
     # Only this user can submit a bounded folder selection. Parent directory,

@@ -1,5 +1,7 @@
 # Registro dei problemi
 
+**28 ottobre — pull/rebuild e guest tools0.2.24 sul Mac93be6687: FATTO nel perimetro della consegna.** Sorgenti aggiornati fast-forward3db051b→ed257e6, build guest/app complete e firma deep/strict PASS; app canonica/build allineate, servizio guest279b0f60… Running/hash esatto e componenti/task cartelle installati. Corretto FS-006: reinstallazione del driver già aggiornato con codice259 ammessa soltanto dopo confronto INF/CAT/SYS con i pin. Ripetizione reale positiva, sei servizi/UI6cartelle collegate; task temporaneo rimosso e CD espulso. Un boot iniziale dalla VM spenta, poi stesso QEMU45672 conservato; machine.json byte-identico, nessuna forzatura. App lasciata aperta sul launcher con Windows collegato. Nessuna nuova prova clone o qualifica generale; prossimo passo solo su nuova priorità, SYS-005/TODO-009 restano aperti per l'updater automatico. [Evidenze e fallimenti](VERIFICATION.md#28-ottobre--pull-rebuild-e-guest-tools-sul-mac93be6687).
+
 **27 ottobre — build completa0.2.24 sulla IoT0795218c: FATTO nel perimetro locale.** Build ordinaria ora include runtime virtio-fs, driver/client ARM64 e WinFsp; installer completo e configurazione con broker non elevato. Sei cartelle standard condivise: lettura/scrittura degli stessi byte in tutte e sei PASS, file generati rimossi e assenza confermata sui due sistemi. App canonica/build e guest allineati, Windows collegato e launcher aperto; RAM fissa condivisa4GiB, SecureBoot1 e VirtioFsDrv Running. Nessuna prova clone o qualifica generale: TODO-003 resta IN CORSO per semantiche ulteriori. Prossimo passo solo su nuova priorità; criterio di questo incremento verificato nella main. [Evidenze e limiti](VERIFICATION.md#27-ottobre--build-completa-e-cartelle-condivise-sulla-iot0795218c-0224).
 
 **27 ottobre — distribuzione0.2.23 sulla IoT0795218c:** pull/rebuild, guest444668887fee installato/Running con hash concorde e app canonica aperta. Runtime RAM dinamica precedente conservato; la condivisione cartelle verificata sulla93be6687 non è distribuita qui: componenti filesystem mancanti, active=[]/errore preparazione nel nuovo frontend (TODO-003). Nessuna qualifica funzionale/clone o chiusura di difetti; SYS-005 conserva il limite dell’updater, aggiornamento completato tramite attività indipendente. [Evidenze e limiti](VERIFICATION.md#27-ottobre--pull-rebuild-e-guest-tools-0223-sulla-iot0795218c).
@@ -52,7 +54,7 @@
 
 **Incremento precedente0.2.11 — obiettivo IN CORSO:** conservato il riscontro utente negativo (input assente, soltanto resize). Richiesta UAC nascosta annullata; recupero WGC dopo sostituzione worker corretto e verificato sulle stesse Notepad/Explorer (AddTab mirato dopo0x80070057, poi nuovo isolamento app-display). Guest6c9a9d194289 e frontend875e0d824878 realmente installati, stessa VM e documenti conservati. Notepad riceve nuovo testo dopo riconnessione; Explorer aveva completato navigazione in C:\Windows, ma rendering incompleto resta aperto. modeFocus distribuito, bidirezionalità non qualificata; drag/resize e Task Manager elevata restano da completare. Nessuna qualifica nel clone o chiusura generale. [Evidenze e fallimenti](VERIFICATION.md#26-ottobre--seamless-e-desktop-primo-incremento-0211).
 
-Aggiornato il 27 ottobre 2026. Leggere questo file prima di iniziare o riprendere, poi [RESTART_PLAN.md](RESTART_PLAN.md). Qui sono descritti stato corrente, prossimi passi e criteri di chiusura. La cronologia delle prove e dei fallimenti resta in [VERIFICATION.md](VERIFICATION.md); gli esperimenti ritirati sono indicizzati separatamente in [RETIRED_EXPERIMENTS.md](RETIRED_EXPERIMENTS.md).
+Aggiornato il 28 ottobre 2026. Leggere questo file prima di iniziare o riprendere, poi [RESTART_PLAN.md](RESTART_PLAN.md). Qui sono descritti stato corrente, prossimi passi e criteri di chiusura. La cronologia delle prove e dei fallimenti resta in [VERIFICATION.md](VERIFICATION.md); gli esperimenti ritirati sono indicizzati separatamente in [RETIRED_EXPERIMENTS.md](RETIRED_EXPERIMENTS.md).
 
 Le attività richieste, incluse condivisione degli stessi file Mac e analisi delle prestazioni, sono raccolte nella [TODO obbligatoria](TODO.md), da leggere dopo il piano. La ricognizione documentale del 25 ottobre non cambia gli esiti delle verifiche: nessun nuovo test o difetto chiuso. La TODO rimanda agli ID di questo registro per i problemi già noti.
 
@@ -88,6 +90,13 @@ Il ciclo RAM protetto 4→2→4 GiB con dati conservati resta la qualifica prece
 - Conservare fallimenti nel diario e dati privati fuori Git. Non ripetere test senza modifiche pertinenti o nuove evidenze.
 
 ## Problemi pertinenti al desktop
+
+### FS-006 — Reinstallazione del driver cartelle già aggiornato dichiarata fallita
+
+- **Stato:** CORRETTO e verificato nella reinstallazione reale della main93be6687,0.2.24; nessun nuovo clone.
+- **Riproduzione:** pnputil conferma pacchetto già presente oem8.inf e aggiornato sui sei dispositivi, ma restituisce259; installer accetta soltanto0/3010 e si interrompe prima di configurare il nuovo task cartelle.
+- **Correzione:** per il solo259 verificare dal servizio VirtioFsDrv il percorso del driver registrato e gli hash INF/CAT/SYS installati contro i pin del pacchetto. Solo la corrispondenza esatta consente di proseguire; gli altri errori mantengono il fallimento.
+- **Criterio soddisfatto:** secondo installer reale sul medesimo259, INF/CAT/SYS esatti verificati, ricevuta installed/Running con hash guest atteso, nuovo task cartelle presente e sei servizi Running/UI6collegate. Nessuna deduzione dal solo disconnect. Preservare il controllo dei pin; altri errori/pacchetti non qualificati. [Diario](VERIFICATION.md#28-ottobre--pull-rebuild-e-guest-tools-sul-mac93be6687).
 
 ### FS-004 — Collegamento directory a un volume non più presente
 
@@ -224,6 +233,8 @@ Il ciclo RAM protetto 4→2→4 GiB con dati conservati resta la qualifica prece
 - **Evidenze:** [semplificazione RAM e accesso](VERIFICATION.md#25-ottobre--ram-semplificata-e-accesso-windows).
 
 ### SYS-005 — Aggiornamento del servizio guest interrotto dalla propria chiusura
+
+- **28 ottobre0.2.24 sulla93be6687:** aggiornamento tramite task interattivo elevato indipendente, atteso/effettivo279b0f60… e servizio Running, task temporaneo autoeliminato. Risolto separatamente FS-006 nella reinstallazione del driver cartelle; nessuna correzione dell’updater automatico generale. [Evidenze](VERIFICATION.md#28-ottobre--pull-rebuild-e-guest-tools-sul-mac93be6687).
 
 - **Stato:** aperto per la procedura automatica. Nella main l’installer avviato attraverso il proprio broker si interrompe durante la sostituzione: nuovo file presente ma servizio ancora sul vecchio percorso, capacità displayTopology assente. Non basta il disconnect a provare il successo.
 - **Recupero verificato:** attività Windows temporanea nello stesso account interattivo elevato, indipendente dal job del broker, completa l’aggiornamento e si elimina. Nuovo servizio6c9c494886c6 Running, transcript concluso e capacità letta. Nessuna password o modifica dei privilegi persistenti. Questa procedura manuale non è ancora un updater robusto nel prodotto.
