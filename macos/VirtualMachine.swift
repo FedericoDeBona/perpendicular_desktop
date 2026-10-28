@@ -413,7 +413,8 @@ final class VirtualMachineController {
             } ?? NSSize(width:1280,height:800)
             let scale=min(1,4096/fullDisplay.width,4096/fullDisplay.height,sqrt(8_388_608/(fullDisplay.width*fullDisplay.height)))
             let initialDisplay=NSSize(width:max(640,(fullDisplay.width*scale).rounded()),height:max(480,(fullDisplay.height*scale).rounded()))
-            arguments += ["-device","virtio-ramfb-gl,id=display0,addr=0x8,disable-legacy=on,neptune=on,blob=on,hostmem=512M,max_outputs=1,xres=\(Int(initialDisplay.width)),yres=\(Int(initialDisplay.height))"]
+            let venus=native?.supportsVenus == true ? ",venus=on":""
+            arguments += ["-device","virtio-ramfb-gl,id=display0,addr=0x8,disable-legacy=on,neptune=on\(venus),blob=on,hostmem=512M,max_outputs=1,xres=\(Int(initialDisplay.width)),yres=\(Int(initialDisplay.height))"]
             if mixedDisplaysEnabled {
                 let appScale=MixedDisplayPlan.rasterScale(hostDisplays)
                 for (index,host) in hostDisplays.enumerated() {

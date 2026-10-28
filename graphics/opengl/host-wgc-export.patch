@@ -1,0 +1,19 @@
+--- a/src/neptune/npt_shared.c
++++ b/src/neptune/npt_shared.c
+@@ -92,6 +92,8 @@
+                             * into the heap's one object); 0 otherwise */
+ };
+ #endif
++
++#include "perp-wgc-export.inc"
+ 
+ /* OPEN_RES arrives on the consumer's ring thread; the resource fd
+  * arrives on the dispatch thread via the proxy's attach-forwarding
+@@ -307,6 +309,7 @@
+       return NPT_FAILED(hr) ? hr : NPT_E_FAIL;
+    }
+ 
++   if (!nt_handle) perp_wgc_export(ctx, blob_id, (const void *)(uintptr_t)handle);
+    hr = npt_shared_export_handle(ctx, blob_id, data_res_id, data_off, handle);
+    if (NPT_SUCCEEDED(hr) && !nt_handle && perp_live_worker_source(ctx, texture)) {
+       perp_snapshot_export(ctx, texture_id, blob_id, texture, (const void *)(uintptr_t)handle);

@@ -1,0 +1,34 @@
+{
+  "schema": 1,
+  "version": "0.2.27",
+  "mesa_vulkan_source": "bf536bba65454900d782fa7417bc95c1608d7483",
+  "mesa_gallium_version": "25.1.9",
+  "moltenvk_version": "1.4.2",
+  "base_native_manifest_sha256": "6650aceb668dea6c69596230ee0244d93328111f5f76857db0d7add839355f0f",
+  "files": {
+    "arm64/libgallium_wgl.dll": "5a815353d6638299fcac6b42d79ef1bc84576d8c8bf53af99b9d2e6786f079ed",
+    "arm64/opengl32.dll": "ceb8635599bf7238831b40e43b69968ffaf4f4154be44af3da586d91bcb9e408",
+    "arm64/vulkan_virtio.dll": "17fc7b5c8858407e0e79113757a1a00fa1981522cd96063193af3045b39742e4",
+    "x64/libgallium_wgl.dll": "97e9a86f5c228e8a0a1959e597ec6362a5372bdd13495eaf90336873ad2a0aba",
+    "x64/opengl32.dll": "c169d5736e13e3b6165b00fee6668f6464aa11b8794628160f22d8bedd3fa946",
+    "x64/vulkan_virtio.dll": "5fad25ca4cf9fdf3f6ce95c39a61145eec32f8b64041e3e52bcfecf34004d52d"
+  },
+  "host_inputs": {
+    "bin/virgl_render_server": "4b29b8abf4c5de6e7fba5ebaed1497808868077a002c619cdb21920345b6692d",
+    "lib/libvirglrenderer.1.dylib": "06ab96fef88f9cfdd7b722953844d2e483be724d6a98f1961e678b9c7e52fe3e",
+    "lib/libMoltenVK.dylib": "4c45b91239e3a1d27ebca88ed321a5bdef387bea9ddf983f44416a0bcff7333e"
+  },
+  "patches": {
+    "venus-wddm2-shmem.patch": "75d021df5c17907424de6d91dfc22afa6dc0af941c7f2eff1d799acfdb8dddc1",
+    "venus-win32-blob-order.patch": "5667c80a798483ad84ac6afc13e1cea30b9bbb2095db13634955fe8e298c74aa",
+    "windows-clang-atomics.patch": "d65e99900aeb41fd3b5315c967f229f042eab319b0afd68d8c3bb0cc7a19f48c",
+    "windows-glsl-lexer.patch": "0906f134c724614556dfc810fa8dd3f8b3f8dc16c8b1bbcd5f008ca51fcac54b",
+    "windows-zink-bounded-readback.patch": "5a17243e2109348d80cc6e4eaff115ad154eabf5055b31c7652e471b8c4914c2",
+    "windows-zink-gdi-present.patch": "36a38a108b6c509b9aaf0ecd1c207bcdde2c3b2b54d4eb6bef847158e527498f",
+    "zink-moltenvk-host-depth.patch": "a54f73c1e139f122d221b633679aa0fe46bc855192a4928a325d99f3f6c93631",
+    "host-wgc-export.patch": "12ffee4cdc2f6677f20ec04f13f3bf5300c7d2db9d272be7ea453ca8c90959a1"
+  },
+  "renderer_inputs": {
+    "wgc-export.inc": "11c677e1dc74fc6c54e74ab9d2135ecc82d448f16c1d25f44039c9c5f979689c"
+  }
+}

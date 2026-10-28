@@ -1,0 +1,62 @@
+--- a/src/gallium/targets/wgl/wgl.c
++++ b/src/gallium/targets/wgl/wgl.c
+@@ -178,26 +178,41 @@
+    if (!pixels)
+       return;
+    ctx = threaded_context_unwrap_sync(ctx);
+-   struct pipe_transfer *transfer = NULL;
+-   void *map = pipe_texture_map(ctx, res, 0, 0, PIPE_MAP_READ,
+-                                0, 0, width, height, &transfer);
+-   if (map) {
++   /* Keep individual GPU-to-CPU mappings small: a full Retina window can
++    * exceed a contiguous free range in the WDDM host-visible aperture. */
++   const size_t source_row = (size_t)width * util_format_get_blocksize(res->format);
++   const unsigned rows_per_map = source_row ? MAX2(1, (2 * 1024 * 1024) / source_row) : 1;
++   bool complete = true;
++   for (unsigned y = 0; y < height;) {
++      const unsigned rows = MIN2(rows_per_map, height - y);
++      struct pipe_transfer *transfer = NULL;
++      void *map = pipe_texture_map(ctx, res, 0, 0, PIPE_MAP_READ,
++                                   0, y, width, rows, &transfer);
++      if (!map) {
++         complete = false;
++         break;
++      }
+       bool converted = util_format_translate(PIPE_FORMAT_B8G8R8A8_UNORM,
+-                                             pixels, stride, 0, 0,
+-                                             res->format, map, transfer->stride,
+-                                             0, 0, width, height);
++                                             (uint8_t *)pixels + (size_t)y * stride,
++                                             stride, 0, 0, res->format,
++                                             map, transfer->stride, 0, 0, width, rows);
+       pipe_texture_unmap(ctx, transfer);
+-      if (converted) {
+-         BITMAPINFO info = {0};
+-         info.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+-         info.bmiHeader.biWidth = width;
+-         info.bmiHeader.biHeight = -(LONG)height;
+-         info.bmiHeader.biPlanes = 1;
+-         info.bmiHeader.biBitCount = 32;
+-         info.bmiHeader.biCompression = BI_RGB;
+-         StretchDIBits(hdc, 0, 0, width, height, 0, 0, width, height,
+-                       pixels, &info, DIB_RGB_COLORS, SRCCOPY);
+-      }
++      if (!converted) {
++         complete = false;
++         break;
++      }
++      y += rows;
++   }
++   if (complete) {
++      BITMAPINFO info = {0};
++      info.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
++      info.bmiHeader.biWidth = width;
++      info.bmiHeader.biHeight = -(LONG)height;
++      info.bmiHeader.biPlanes = 1;
++      info.bmiHeader.biBitCount = 32;
++      info.bmiHeader.biCompression = BI_RGB;
++      StretchDIBits(hdc, 0, 0, width, height, 0, 0, width, height,
++                    pixels, &info, DIB_RGB_COLORS, SRCCOPY);
+    }
+    free(pixels);
+ }

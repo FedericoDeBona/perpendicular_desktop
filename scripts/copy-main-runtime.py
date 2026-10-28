@@ -30,6 +30,8 @@ def main():
         if not file.resolve().is_relative_to(native) or hashlib.sha256(file.read_bytes()).hexdigest() != expected:
             raise ValueError('Reference runtime hash differs: ' + name)
     members = ['Resources/QEMU', 'Frameworks/Runtime', 'Resources/Native3D']
+    if (source / 'Contents/Resources/Guest/OpenGL').is_dir():
+        members.append('Resources/Guest/OpenGL')
     for name in members:
         root = source / 'Contents' / name
         for file in root.rglob('*'):

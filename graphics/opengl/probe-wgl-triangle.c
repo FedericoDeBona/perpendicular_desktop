@@ -45,7 +45,7 @@ int main(int argc,char **argv)
     const int present=argc==3;
     SetUnhandledExceptionFilter(report_exception);
     setvbuf(stdout,NULL,_IONBF,0);
-    HMODULE library=LoadLibraryA(argv[1]);
+    HMODULE library=LoadLibraryExA(argv[1],NULL,LOAD_WITH_ALTERED_SEARCH_PATH);
     if(!library){printf("LoadLibrary=%lu\n",GetLastError());return 1;}
     CreateContext create=(void *)GetProcAddress(library,"wglCreateContext");
     MakeCurrent current=(void *)GetProcAddress(library,"wglMakeCurrent");

@@ -8,6 +8,7 @@ struct NativeGraphics {
     var executable:URL {root.appendingPathComponent("bin/qemu-system-aarch64")}
     var supportsDynamicMemory:Bool {manifest["hvf_dynamic_memory_version"] as? Int == 1}
     var supportsMixedDisplays:Bool {manifest["mixed_display_identity_version"] as? Int == 1}
+    var supportsVenus:Bool {manifest["venus_version"] as? Int == 1}
 
 
     init(root:URL)throws{
@@ -34,6 +35,11 @@ struct NativeGraphics {
             let data=try Data(contentsOf:root.appendingPathComponent(path),options:.mappedIfSafe)
             let actual=SHA256.hash(data:data).map{String(format:"%02x",$0)}.joined()
             guard actual == expected else{throw Self.failure("The Windows graphics runtime has changed: \(path)")}
+        }
+        if value["venus_version"] != nil {
+            guard value["venus_version"] as? Int == 1,files["lib/libMoltenVK.dylib"] != nil else {
+                throw Self.failure("The Windows OpenGL backend is incomplete.")
+            }
         }
         manifest=value
     }
