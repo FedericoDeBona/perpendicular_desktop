@@ -76,3 +76,7 @@ INF: NTARM64, HardwareID `tap0901` e `root\tap0901`, servizio tap0901, DriverVer
 4. Soltanto quando disponibili le credenziali, apertura portale→riconoscimento LinkManager→login/Connect/Disconnect/reconnect. Una lettura remota riconoscibile sarà necessaria per qualificare Ethernet end-to-end, senza richiederla per continuare ora.
 
 Nessuna installazione, prova clone o verifica main eseguita in questo incremento. USB/seriale fuori dal primo percorso. TODO-024 resta IN CORSO; diario delle verifiche nel registro principale del progetto.
+
+## Diagnostica di una connessione
+
+Al28ottobre la prima segnalazione di errore generico nel Connect è ADD-003, ancora senza causa isolata. La riproduzione è sospesa su richiesta dell'utente. `collect-debug.ps1` salva il debug già esposto dal client locale e gli eventi applicativi pertinenti nella directory privata Diagnostics dell'installazione Windows; senza argomenti esegue un solo campione, `-DurationSeconds 180` raccoglie per tre minuti. Nessun login/Connect o modifica livello debug. I file possono contenere dettagli della sessione e restano fuori Git. [Procedura ufficiale Secomea](https://kb.secomea.com/docs/how-to-collect-linkmanager-debug-log); [esiti e limiti](../../docs/VERIFICATION.md#28-ottobre--diagnosi-errore-linkmanager-e-prove-sospese). Non confondere un debug fresco di avvio con il log di un tentativo precedente non conservato.
