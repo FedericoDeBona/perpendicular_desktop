@@ -4,6 +4,10 @@ Obiettivo: OpenGL accelerato con kernel ARM64 v0.4 originale Microsoft-signed, S
 
 **Stato corrente28 ottobre —0.2.27 installata sulla VM ordinaria:** shader/profondità/pixel finestra ARM64/x64 PASS da librerie installate; Creality7.3 ordinario dal launcher reale importa e renderizza il cubo20mm anche nella finestra Mac2177×1191. Kernel originale e Secure Boot/CI conservati, TESTSIGNINGfalse. Presentazione GDI con readback suddiviso; funzioni Vulkan mancanti e compatibilità generale ancora aperte. [Evidenze e limiti main](../../docs/VERIFICATION.md#28-ottobre--installazione-opengl-sulla-vm-corrente). I paragrafi successivi conservano le tappe precedenti nel clone.
 
+## Correzione multisample0.2.30
+
+Su AppleM1 il resolve4x del blitter Gallium generava OpName `sampler`, in conflitto con il tipo Metal del traduttore MoltenVK1.4.2. `zink-moltenvk-sampler-name.patch` su Mesa25.1.9 rinomina solo quel metadato in `zink_sampler`, mantenendo istruzioni e binding. Profilo `releases/0.2.30-darwin-arm64.json`, host/Venus invariati. Probe `--msaa`: fallimento prima, ARM64/x64 PASS dopo; Creality/cubo Desktop main PASS, Seamless ancora in verifica. [Diario](../../docs/VERIFICATION.md#28-ottobre--correzione-msaa-opengl0230-e-recupero-cartelle-sulla-iot0795218c).
+
 ## Profilo locale AppleM1
 
 `releases/0.2.29-darwin-arm64.json` fissa la coppia Venus/WGC e le sei DLL ricostruite per la base IoT0795218c. Usare `--release-manifest` nel confezionatore; il manifesto predefinito mantiene la base precedente. Main M1: WGL ARM64/x64 PASS, Creality piano3D poi errore shader `sampler`; scena e artefatti ancora IN CORSO. [Evidenze](../../docs/VERIFICATION.md#28-ottobre--opengl0229-sulla-iot0795218c-e-nuovo-errore-shader).

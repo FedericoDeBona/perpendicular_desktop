@@ -80,15 +80,27 @@ function Read-Known([uint32]$flags){
  try{return [IO.Path]::GetFullPath([Runtime.InteropServices.Marshal]::PtrToStringUni($pointer))}finally{[Runtime.InteropServices.Marshal]::FreeCoTaskMem($pointer)}
 }
 function Set-Known([string]$path){if([SharedFolderNative]::SHSetKnownFolderPath([ref]$id,0,[IntPtr]::Zero,$path) -ne 0){throw 'Cannot set Windows folder location.'}}
-$path=Read-Known 0x4400;$oldKnown=Read-Known 0x4000;$profile=[IO.Path]::GetFullPath($env:USERPROFILE).TrimEnd('\')+'\'
+$profile=[IO.Path]::GetFullPath($env:USERPROFILE).TrimEnd('\')+'\'
+$stateRoot=Join-Path $env:ProgramData ('Perpendicular\SharedFolders\'+$identity.User.Value)
+$stateFile=Join-Path $stateRoot ($Folder+'.json')
+# Shell can wait indefinitely on the previous provider even with DONT_VERIFY.
+# Recover an already managed path from its protected per-user record first;
+# the ownership, profile and reparse-point checks below still apply.
+if([IO.File]::Exists($stateFile)){
+ $saved=[IO.File]::ReadAllText($stateFile)|ConvertFrom-Json
+ if($saved.schema -notin @(1,2) -or $saved.sid -ne $identity.User.Value -or $saved.folder -ne $Folder){throw 'Folder recovery state differs from this profile.'}
+ $path=[IO.Path]::GetFullPath($saved.path);$oldKnown=[IO.Path]::GetFullPath($saved.originalKnown)
+}else{$path=Read-Known 0x4400;$oldKnown=Read-Known 0x4000}
 if(!$path.StartsWith($profile,[StringComparison]::OrdinalIgnoreCase) -or $path -eq $profile.TrimEnd('\')){throw 'Only personal profile folders may be configured.'}
 if(!$Disable -and ![IO.Directory]::Exists($remote)){throw 'The selected Mac folder is not available over the private connection.'}
-$stateRoot=Join-Path $env:ProgramData ('Perpendicular\SharedFolders\'+$identity.User.Value)
-[void][IO.Directory]::CreateDirectory($stateRoot);$stateFile=Join-Path $stateRoot ($Folder+'.json')
+[void][IO.Directory]::CreateDirectory($stateRoot)
 $lock=[IO.FileStream]::new((Join-Path $stateRoot ($Folder+'.lock')),[IO.FileMode]::OpenOrCreate,[IO.FileAccess]::ReadWrite,[IO.FileShare]::None)
 try {
  $old=$null
- if([IO.File]::Exists($stateFile)){$old=Get-Content $stateFile -Raw|ConvertFrom-Json}
+ if([IO.File]::Exists($stateFile)){
+  $old=Get-Content $stateFile -Raw|ConvertFrom-Json
+  $old.path=[IO.Path]::GetFullPath($old.path);$old.originalKnown=[IO.Path]::GetFullPath($old.originalKnown)
+ }
  # The previous single-folder layout is decoded only to preserve original data.
  if(!$old -and $Folder -eq 'downloads' -and [IO.File]::Exists((Join-Path $env:ProgramData 'Perpendicular\SharedDownloads\directory-layout.json'))){
   $legacy=Get-Content (Join-Path $env:ProgramData 'Perpendicular\SharedDownloads\directory-layout.json') -Raw|ConvertFrom-Json

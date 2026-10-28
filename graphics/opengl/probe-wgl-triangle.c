@@ -1,5 +1,6 @@
-/* A WGL shader/readback smoke check. No installation or user documents.
- * Pass an explicit private opengl32.dll, optionally followed by --present. */
+/* A bounded WGL shader/readback check. No installation or user documents.
+ * Pass an explicit opengl32.dll, optionally --present or --msaa.
+ * MSAA resolves a four-sample target, reproducing the M1 sampler-name failure. */
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <GL/gl.h>
@@ -41,8 +42,9 @@ static LONG WINAPI report_exception(EXCEPTION_POINTERS *exception)
 
 int main(int argc,char **argv)
 {
-    if(argc<2||argc>3||(argc==3&&strcmp(argv[2],"--present")))return 2;
-    const int present=argc==3;
+    if(argc<2||argc>3||(argc==3&&strcmp(argv[2],"--present")&&strcmp(argv[2],"--msaa")))return 2;
+    const int present=argc==3&&!strcmp(argv[2],"--present");
+    const int msaa=argc==3&&!strcmp(argv[2],"--msaa");
     SetUnhandledExceptionFilter(report_exception);
     setvbuf(stdout,NULL,_IONBF,0);
     HMODULE library=LoadLibraryExA(argv[1],NULL,LOAD_WITH_ALTERED_SEARCH_PATH);
@@ -118,10 +120,29 @@ int main(int argc,char **argv)
     const GLfloat vertices[]={-1,-1,-0.5f,1,-1,-0.5f,0,1,-0.5f,-1,-1,0.5f,1,-1,0.5f,0,1,0.5f};GLuint vbo;pglGenBuffers(1,&vbo);pglBindBuffer(0x8892,vbo);pglBufferData(0x8892,sizeof(vertices),vertices,0x88e4);
     pglEnableVertexAttribArray(location);pglVertexAttribPointer(location,3,GL_FLOAT,GL_FALSE,0,NULL);
     GLenum buffer_error=pglGetError();printf("GL_ERROR after VBO=0x%x\n",buffer_error);
+    EXTPROC(glGenFramebuffers,void,GLsizei,GLuint *);
+    EXTPROC(glBindFramebuffer,void,GLenum,GLuint);
+    EXTPROC(glGenRenderbuffers,void,GLsizei,GLuint *);
+    EXTPROC(glBindRenderbuffer,void,GLenum,GLuint);
+    EXTPROC(glRenderbufferStorageMultisample,void,GLenum,GLsizei,GLenum,GLsizei,GLsizei);
+    EXTPROC(glFramebufferRenderbuffer,void,GLenum,GLenum,GLenum,GLuint);
+    EXTPROC(glCheckFramebufferStatus,GLenum,GLenum);
+    EXTPROC(glBlitFramebuffer,void,GLint,GLint,GLint,GLint,GLint,GLint,GLint,GLint,GLbitfield,GLenum);
+    if(msaa){
+    if(!pglGenFramebuffers||!pglBindFramebuffer||!pglGenRenderbuffers||!pglBindRenderbuffer||!pglRenderbufferStorageMultisample||!pglFramebufferRenderbuffer||!pglCheckFramebufferStatus||!pglBlitFramebuffer)goto done;
+    GLuint fbo,rb[2];pglGenFramebuffers(1,&fbo);pglBindFramebuffer(0x8d40,fbo);pglGenRenderbuffers(2,rb);
+    pglBindRenderbuffer(0x8d41,rb[0]);pglRenderbufferStorageMultisample(0x8d41,4,0x8058,128,128);pglFramebufferRenderbuffer(0x8d40,0x8ce0,0x8d41,rb[0]);
+    pglBindRenderbuffer(0x8d41,rb[1]);pglRenderbufferStorageMultisample(0x8d41,4,0x88f0,128,128);pglFramebufferRenderbuffer(0x8d40,0x821a,0x8d41,rb[1]);
+    GLenum fbo_status=pglCheckFramebufferStatus(0x8d40);printf("MSAA framebuffer=0x%x; GL_ERROR=0x%x\n",fbo_status,pglGetError());if(fbo_status!=0x8cd5)goto done;
+    }
     pglViewport(0,0,128,128);pglEnable(GL_DEPTH_TEST);pglClearColor(1,0,0,1);pglClear(GL_COLOR_BUFFER_BIT|GL_DEPTH_BUFFER_BIT);
     pglUniform4f(color,0,1,0,1);pglDrawArrays(GL_TRIANGLES,0,3);
     pglUniform4f(color,0,0,1,1);pglDrawArrays(GL_TRIANGLES,3,3);pglFinish();
     GLenum draw_error=pglGetError();printf("GL_ERROR after draw=0x%x\n",draw_error);
+    if(msaa){
+    pglBindFramebuffer(0x8ca9,0);pglBlitFramebuffer(0,0,128,128,0,0,128,128,GL_COLOR_BUFFER_BIT,GL_NEAREST);pglBindFramebuffer(0x8d40,0);pglFinish();
+    GLenum resolve_error=pglGetError();printf("MSAA resolve GL_ERROR=0x%x\n",resolve_error);if(resolve_error)goto done;
+    }
     GLubyte center[4]={0},corner[4]={0};pglReadPixels(64,64,1,1,GL_RGBA,GL_UNSIGNED_BYTE,center);pglReadPixels(1,126,1,1,GL_RGBA,GL_UNSIGNED_BYTE,corner);
     success=center[0]<8&&center[1]>247&&center[2]<8&&corner[0]>247&&corner[1]<8&&corner[2]<8;
     printf("Shader/depth triangles=%s; center=%u,%u,%u; background=%u,%u,%u\n",success?"PASS":"FAIL",center[0],center[1],center[2],corner[0],corner[1],corner[2]);

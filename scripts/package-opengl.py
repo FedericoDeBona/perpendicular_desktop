@@ -50,6 +50,9 @@ def main():
     app = args.app.resolve(strict=True)
     if app == Path('/Applications/Perpendicular.app'):
         raise ValueError('Package a separate build before installing it.')
+    guest = app / 'Contents/Resources/Guest/OpenGL'
+    if guest.exists():
+        raise ValueError('OpenGL guest output already exists; use a fresh build.')
     release_path = args.release_manifest.resolve(strict=True)
     release = json.loads(release_path.read_text())
     native = app / 'Contents/Resources/Native3D'
@@ -105,9 +108,6 @@ def main():
     if release.get('host_revision', 1) >= 2:
         manifest['initial_capture_decline'] = 1
     manifest_path.write_text(json.dumps(manifest, indent=2) + '\n')
-    guest = app / 'Contents/Resources/Guest/OpenGL'
-    if guest.exists():
-        raise ValueError('OpenGL guest output already exists; use a fresh build.')
     guest.mkdir(parents=True)
     for name in release['files']:
         destination = guest / name
