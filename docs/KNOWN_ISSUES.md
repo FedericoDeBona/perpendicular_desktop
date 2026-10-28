@@ -499,6 +499,10 @@ Queste voci conservano limiti non risolti, senza richiedere di ripristinare codi
 
 ### APP-001 — Creality / OpenGL
 
+**Scena minima WGL28 ottobre PASS nel clone ARM64 protetto:** shader/profondità/readback e pixel finestra con GLerror0, GPU AppleM4 tramite Zink25.1.9/Venus. Presentazione CPU/GDI, funzioni logicOp/bordi personalizzati/depth clip ancora mancanti; nessuna conformità generale o prestazione dichiarata. x64/Creality/main non ancora verificati/distribuiti, APP-001 APERTO. [Correzioni ed esiti negativi](VERIFICATION.md#28-ottobre--wgl-zink-e-requisiti-del-backend-mac).
+
+**Seguito WGL28 ottobre:** loader Vulkan ordinario del clone PASS con candidata user-mode e registrazione PnP temporanea; Zink26.1 fallisce per nullDescriptor realmente assente in MoltenVK1.4.2. Fallback upstream Zink25.1.9 IN PROVA, nessuna capacità dichiarata artificialmente. APP-001 APERTO, nessuna distribuzione main o scena OpenGL qualificata. [Evidenze](VERIFICATION.md#28-ottobre--wgl-zink-e-requisiti-del-backend-mac).
+
 **Nuovo incremento memoria28 ottobre:** candidata della sola libreria Vulkan supera nel clone il blocco ring e un trasferimento/readback GPU4096byte su AppleM4; confronto negativo con DLL originale nella stessa sessione conservato. Kernel/ICD installato originali, SecureBoot1. Correzione user-mode verificata nel perimetro, nessuna distribuzione o scena OpenGL main; voce APERTA per Zink/WSI/app/x64. [Evidenze](VERIFICATION.md#28-ottobre--memoria-venus-wddm2-e-primo-trasferimento-gpu-protetto).
 
 **Seguito clone protetto28 ottobre:** candidata host Venus+MoltenVK compilata; GPU AppleM4/estensioni e creazione contesto host PASS. Clone originale v0.4/SecureBoot1 conserva D3D11 hardware, ma Vulkan si collega al renderer e fallisce allocate/map ring shmem (OUT_OF_HOST_MEMORY, non prova di RAM fisica esaurita). Prossimo gate: memoria WDDM2 nella sola libreria user-mode, poi prima GPU Vulkan e Zink. Nessuna candidata distribuita o scena main qualificata, voce APERTA. [Evidenze e tentativi negativi](VERIFICATION.md#28-ottobre--candidata-venus-host-e-blocco-ring-nel-clone-protetto).

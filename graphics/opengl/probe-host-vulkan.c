@@ -32,6 +32,7 @@ int main(int argc, char **argv)
     PFN_vkEnumeratePhysicalDevices enumerate = (PFN_vkEnumeratePhysicalDevices)get(instance,"vkEnumeratePhysicalDevices");
     PFN_vkGetPhysicalDeviceProperties properties = (PFN_vkGetPhysicalDeviceProperties)get(instance,"vkGetPhysicalDeviceProperties");
     PFN_vkEnumerateDeviceExtensionProperties extensions = (PFN_vkEnumerateDeviceExtensionProperties)get(instance,"vkEnumerateDeviceExtensionProperties");
+    PFN_vkGetPhysicalDeviceFeatures2 features = (PFN_vkGetPhysicalDeviceFeatures2)get(instance,"vkGetPhysicalDeviceFeatures2");
     PFN_vkDestroyInstance destroy = (PFN_vkDestroyInstance)get(instance,"vkDestroyInstance");
     uint32_t count = 0;
     result = enumerate(instance, &count, NULL);
@@ -48,9 +49,15 @@ int main(int argc, char **argv)
             VkExtensionProperties *e=calloc(n ? n : 1,sizeof(*e));
             if (e && extensions(devices[i],NULL,&n,e)==VK_SUCCESS)
                 for(uint32_t j=0;j<n;j++)
-                    if(strstr(e[j].extensionName,"external_memory") || strstr(e[j].extensionName,"timeline_semaphore"))
+                    if(strstr(e[j].extensionName,"external_memory") || strstr(e[j].extensionName,"timeline_semaphore") || strstr(e[j].extensionName,"robustness2"))
                         printf("extension=%s\n",e[j].extensionName);
             free(e);
+            if(features) {
+                VkPhysicalDeviceRobustness2FeaturesEXT robust={.sType=VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ROBUSTNESS_2_FEATURES_EXT};
+                VkPhysicalDeviceFeatures2 f={.sType=VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2,.pNext=&robust};
+                features(devices[i],&f);
+                printf("nullDescriptor=%u; robustBufferAccess2=%u; geometryShader=%u\n",robust.nullDescriptor,robust.robustBufferAccess2,f.features.geometryShader);
+            }
         }
     }
     free(devices); destroy(instance,NULL); dlclose(library);

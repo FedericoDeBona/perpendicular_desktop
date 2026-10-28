@@ -139,7 +139,7 @@ Priorità 1–4 corrispondenti alla richiesta iniziale dell'utente; TODO-017/018
 | TODO-011 | Qualificare launcher e riconnessione delle singole app sulla main | DA FARE; correzioni nel clone | APP-002, WIN-001/002. |
 | TODO-012 | RAM dinamica reale con Windows protetto | FATTO nel perimetro documentato | SYS-003; ciclo Native3D 4→2→4 GiB, unplug parziale ammesso. |
 | TODO-013 | Base unica main/default e pulizia autorizzata | FATTO | App 0.2.0 + IoT principale; restano difetti grafici. |
-| TODO-014 | Creality/OpenGL | IN CORSO: host Venus PASS, clone ring Vulkan FAIL | APP-001; prossimo gate memoria user-mode WDDM2, kernel firmato conservato. |
+| TODO-014 | Creality/OpenGL | IN CORSO: scena minima WGL GPU ARM64 nel clone PASS; x64/app DA VERIFICARE | APP-001; GL2.1 Zink25.1.9 shader/profondità/pixel finestra PASS, main non distribuita. |
 | TODO-015 | IVSHMEM e vecchi driver candidati | Valutazione FATTA / esperimenti RITIRATI | TRN-001, GFX-002/005; il difetto sync GFX-007 resta TODO-016. |
 | TODO-024 | Addon LinkManager su Windows ARM64 | IN CORSO: studio REA e piano documentati; implementazione DA FARE | [Dossier e attività LM](../addons/linkmanager-arm64/REPORT.md); nessuna prova clone/main o installazione. |
 
@@ -446,6 +446,10 @@ Non è una promessa di unplug completo o footprint minimo fisso. La promozione h
 **Stato: FATTO.** `/Applications/Perpendicular.app` 0.2.0 e IoT principale come default; vecchi launcher/dischi eliminati su autorizzazione, backup completo offline e build qualificata originale conservati. [Evidenze](VERIFICATION.md#25-ottobre--pulizia-definitiva-e-promozione-iot-a-base-principale). Non ricreare i vecchi dischi o riprendere una pulizia delle Research incerte per completismo. Questo completamento non chiude resize, WGC o N+1.
 
 ### TODO-014 — Creality/OpenGL
+
+**Scena minima protetta ARM64 PASS:** Zink25.1.9 con risorse dummy, presentazione GDI dei pixel renderizzati sulla GPU e workaround MoltenVK adattato a Venus. Shader/VBO, triangoli a profondità diverse, readback, pixel finestra e zero erroriGL PASS; allocazioni ordinate senza VN_PERF. Implementazione/prova clone FATTE nel solo perimetro della scena; affidabilità generale e avvisi di funzioni mancanti ancora aperti. x64/Creality/main DA VERIFICARE, nessuna distribuzione. Prossimo passo: stessa scena x64, poi requisito effettivo dell'app prima di promuovere. [Evidenze e tentativi negativi](VERIFICATION.md#28-ottobre--wgl-zink-e-requisiti-del-backend-mac).
+
+**Seguito WGL:** caricamento Vulkan ordinario nel clone PASS dopo reindirizzamento PnP temporaneo alla candidata user-mode; nessun file nel DriverStore sostituito. Zink26.1 compila ma non crea contesto: MoltenVK1.4.2 dichiara realmente nullDescriptor=false (conferma nativa e sorgente ufficiale). In prova il fallback risorse fittizie di Zink25.1.9; nessuna capacità forzata. Implementazione OpenGL IN CORSO, scena clone/main NON VERIFICATE; criterio e protezioni invariati. [Evidenze](VERIFICATION.md#28-ottobre--wgl-zink-e-requisiti-del-backend-mac).
 
 **Memoria WDDM2 corretta nel clone protetto:** candidata user-mode6c645c6e…; originale fallisce ring, candidata crea istanza/1GPU e trasferimento GPU→lettura4096byte PASS su Virtio-GPU Venus AppleM4. KMD e ICD installati con hash originali, SecureBoot1/no TESTSIGNING; DLL solo da CD. Incremento memoria/clone FATTO, main NON DISTRIBUITA e OpenGL DA FARE. Prossimo passo: Zink/WGL e prova scena, build in corso. [Evidenze e fallimenti](VERIFICATION.md#28-ottobre--memoria-venus-wddm2-e-primo-trasferimento-gpu-protetto).
 

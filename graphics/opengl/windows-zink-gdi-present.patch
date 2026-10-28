@@ -1,0 +1,126 @@
+--- a/src/gallium/targets/wgl/wgl.c
++++ b/src/gallium/targets/wgl/wgl.c
+@@ -61,6 +61,9 @@
+ 
+ #ifdef GALLIUM_ZINK
+ #include "zink/zink_public.h"
++#include "util/u_inlines.h"
++#include "util/u_threaded_context.h"
++#include "util/format/u_format.h"
+ #endif
+ 
+ #ifdef GALLIUM_LLVMPIPE
+@@ -97,8 +100,14 @@
+ #ifdef GALLIUM_ZINK
+    if (strcmp(driver, "zink") == 0) {
+       screen = zink_create_screen(winsys, NULL);
+-      if (screen)
++      if (screen) {
+          use_zink = true;
++         /* Some Vulkan transports render on a GPU but cannot import the
++          * presentation fences required by native WSI. Allocate ordinary
++          * render targets and present their completed pixels through GDI. */
++         if (!zink_has_native_swapchain(screen))
++            screen->resource_create_drawable = NULL;
++      }
+    }
+ #endif
+ #ifdef GALLIUM_SOFTPIPE
+@@ -154,6 +163,46 @@
+ }
+ 
+ 
++#ifdef GALLIUM_ZINK
++static void
++wgl_zink_present_readback(struct pipe_context *ctx,
++                          struct pipe_resource *res, HDC hdc)
++{
++   if (!ctx || !res || !res->width0 || !res->height0)
++      return;
++   const unsigned width = res->width0, height = res->height0;
++   if (width > INT_MAX / 4 || height > SIZE_MAX / ((size_t)width * 4))
++      return;
++   const unsigned stride = width * 4;
++   void *pixels = malloc((size_t)stride * height);
++   if (!pixels)
++      return;
++   ctx = threaded_context_unwrap_sync(ctx);
++   struct pipe_transfer *transfer = NULL;
++   void *map = pipe_texture_map(ctx, res, 0, 0, PIPE_MAP_READ,
++                                0, 0, width, height, &transfer);
++   if (map) {
++      bool converted = util_format_translate(PIPE_FORMAT_B8G8R8A8_UNORM,
++                                             pixels, stride, 0, 0,
++                                             res->format, map, transfer->stride,
++                                             0, 0, width, height);
++      pipe_texture_unmap(ctx, transfer);
++      if (converted) {
++         BITMAPINFO info = {0};
++         info.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
++         info.bmiHeader.biWidth = width;
++         info.bmiHeader.biHeight = -(LONG)height;
++         info.bmiHeader.biPlanes = 1;
++         info.bmiHeader.biBitCount = 32;
++         info.bmiHeader.biCompression = BI_RGB;
++         StretchDIBits(hdc, 0, 0, width, height, 0, 0, width, height,
++                       pixels, &info, DIB_RGB_COLORS, SRCCOPY);
++      }
++   }
++   free(pixels);
++}
++#endif
++
+ static void
+ wgl_present(struct pipe_screen *screen,
+             struct pipe_context *ctx,
+@@ -193,7 +242,10 @@
+ 
+ #ifdef GALLIUM_ZINK
+    if (use_zink) {
+-      screen->flush_frontbuffer(screen, ctx, res, 0, 0, hDC, 0, NULL);
++      if (!screen->resource_create_drawable)
++         wgl_zink_present_readback(ctx, res, hDC);
++      else
++         screen->flush_frontbuffer(screen, ctx, res, 0, 0, hDC, 0, NULL);
+       return;
+    }
+ #endif
+--- a/src/gallium/drivers/zink/zink_public.h
++++ b/src/gallium/drivers/zink/zink_public.h
+@@ -28,6 +28,8 @@
+ struct sw_winsys;
+ struct pipe_screen_config;
+ 
++bool zink_has_native_swapchain(struct pipe_screen *screen);
++
+ struct pipe_screen *
+ zink_create_screen(struct sw_winsys *winsys, const struct pipe_screen_config *config);
+ 
+--- a/src/gallium/drivers/zink/zink_screen.c
++++ b/src/gallium/drivers/zink/zink_screen.c
+@@ -3695,6 +3695,12 @@
+    return NULL;
+ }
+ 
++bool
++zink_has_native_swapchain(struct pipe_screen *screen)
++{
++   return zink_screen(screen)->info.have_KHR_swapchain;
++}
++
+ struct pipe_screen *
+ zink_create_screen(struct sw_winsys *winsys, const struct pipe_screen_config *config)
+ {
+--- a/src/gallium/frontends/wgl/stw_device.c
++++ b/src/gallium/frontends/wgl/stw_device.c
+@@ -101,7 +101,9 @@
+ 
+    stw_dev->fscreen->screen = screen;
+    stw_dev->screen = screen;
+-   stw_dev->zink = !memcmp(screen->get_name(screen), "zink", 4);
++   /* This flag selects Kopper attachment allocation, not GPU rendering. */
++   stw_dev->zink = !memcmp(screen->get_name(screen), "zink", 4) &&
++                   screen->resource_create_drawable != NULL;
+ 
+    stw_dev->max_2d_length = screen->caps.max_texture_2d_size;
+    return true;

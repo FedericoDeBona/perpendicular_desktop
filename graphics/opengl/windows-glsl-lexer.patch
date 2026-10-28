@@ -1,0 +1,14 @@
+--- a/src/mesa/program/program_lexer.l
++++ b/src/mesa/program/program_lexer.l
+@@ -22,7 +22,10 @@
+  * DEALINGS IN THE SOFTWARE.
+  */
+ 
+-#ifndef _MSC_VER
++#ifdef _MSC_VER
++#include <io.h>
++#define isatty _isatty
++#else
+ #include <unistd.h>
+ #endif
+ 

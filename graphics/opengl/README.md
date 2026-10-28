@@ -20,3 +20,22 @@ Build privata verificata con Windows SDK/CRT ARM64 10.0.26100 tramite xwin e hea
 - `probe-vulkan-buffer.c <DLL>`: un solo trasferimento GPU con lettura dei4096byte, tramite ICD esplicito e GPU hardware. Non qualifica WSI o OpenGL.
 
 Output, DLL, ISO, log e dischi di prova vanno fuori Git. Le prove nel clone non sostituiscono la verifica di una scena nell'app principale. [Diario](../../docs/VERIFICATION.md#28-ottobre--memoria-venus-wddm2-e-primo-trasferimento-gpu-protetto).
+
+
+## Primo WGL GPU nel clone protetto
+
+Scena minima ARM64 PASS con Zink25.1.9: GL2.1, shader/VBO, due triangoli con profondità24/stencil8, readback, zero erroriGL e pixel della finestra dopo SwapBuffers. Il renderer è AppleM4 tramite Venus/MoltenVK, senza renderer software. Non è una qualifica di conformità GL, affidabilità, prestazioni, x64/Creality o distribuzione main. Rimangono avvisi per logicOp, custom_border_color e depth_clip_enable assenti.
+
+Zink26.1 richiede nullDescriptor che MoltenVK1.4.2 dichiara false. Non rimuovere il controllo o forzare capacità:25.1.9 conserva un vero fallback con risorse dummy. Base ufficiale [Mesa25.1.9](https://archive.mesa3d.org/mesa-25.1.9.tar.xz), SHA256412df33a1bb3c785ed698555a3972118a37c458e7accf6ae53f4bb87b3db454a. È una candidata di compatibilità privata; non è stata promossa a dipendenza dell'app ordinaria.
+
+Patch della prova:
+
+- Su Mesa Neptune bf536bba…: venus-wddm2-shmem.patch, poi venus-win32-blob-order.patch. La seconda attende la sequenza della vera allocazione prima dell'export blob Windows; nessun cambio ai comandi GPU o al kernel. DLL finale ARM64 SHA25617fc7b5c8858407e0e79113757a1a00fa1981522cd96063193af3045b39742e4.
+- Su Mesa25.1.9: windows-zink-gdi-present.patch e zink-moltenvk-host-depth.patch. La prima alloca normali target GPU senza swapchain nativa e presenta i pixel completati con GDI; la seconda applica il workaround HOST_TRANSFER già presente per MoltenVK anche quando il driver sottostante è raggiunto tramite Venus. Nessun override di versione o capacità.
+- Compatibilità build: windows-clang-atomics.patch e windows-glsl-lexer.patch; risorse DLL del solo zlib statico escluse nella copia privata. Build Gallium con solo zink, nome libgallium_wgl e shim opengl32 distinti, Vulkan vuoto per questa base25.1.9; ICD Vulkan compilato separatamente dalla base Neptune26.1.
+
+Shim ARM64 finale SHA2562c63cded7005e86b8c1f18da63cdfe0017b65693dfa1907576c9b7aae8cc6ef9; Gallium4ef7affbbe10f0ca51e3330b012f5db5ad8df6251f8ea32ace71ab81b96456e7. Binari e ricette fuori Git. La copia CPU per presentare è un compromesso concreto, non zero-copy; costo non misurato.
+
+Il loader standard nel clone ha richiesto manifest con library_path assoluto e reindirizzamento temporaneo delle sole VulkanDriverName PnP con backup. La sola voce globale Khronos non bastava. Nessun file DriverStore sostituito; non riutilizzare questa procedura diagnostica come installer ordinario.
+
+`probe-wgl-triangle.c <DLL> [--present]` fallisce se non vede Apple/Zink, shader/profondità/pixel corretti o se compare un errore GL; --present aggiunge SwapBuffers e lettura dei pixel della finestra sacrificabile. Errori precedenti e perimetro nel [diario](../../docs/VERIFICATION.md#28-ottobre--wgl-zink-e-requisiti-del-backend-mac).

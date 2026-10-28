@@ -1,6 +1,6 @@
 # Piano di lavoro — desktop Windows su Mac
 
-**28 ottobre — incremento OpenGL:** host Venus+MoltenVK privato compilato, AppleM4 hardware/estensioni e creazione contesto host PASS; clone con v0.4 firmato e SecureBoot1 conserva D3D11, ma Vulkan si ferma su allocate/map ring shmem. Prossimo gate nella libreria Vulkan user-mode/WDDM2, senza modificare il KMD. Nessuna distribuzione o scena OpenGL main qualificata. [Evidenze](VERIFICATION.md#28-ottobre--candidata-venus-host-e-blocco-ring-nel-clone-protetto).
+**28 ottobre — incremento OpenGL:** scena minima WGL GPU ARM64 nel clone protetto PASS: Zink25.1.9, shader/profondità/readback/pixel finestra ed erroriGL0. Correzioni user-mode di memoria/ordine, presentazione GDI e workaround MoltenVK dietro Venus. Kernel firmato e protezioni invariati. Prossimo gate x64/Creality; main non distribuita, funzioni Vulkan mancanti e affidabilità generale restano aperte. [Evidenze](VERIFICATION.md#28-ottobre--wgl-zink-e-requisiti-del-backend-mac).
 
 **28 ottobre — nuova priorità OpenGL (TODO-014/APP-001):** ripresa autorizzata. Secure Boot e CI attivi e TESTSIGNING disattivato sono vincoli inderogabili, prevalenti sulle deroghe storiche. Misurare prima il percorso effettivo e valutare librerie user-mode sopra il driver firmato. REA Parallels solo se necessario per una domanda concreta. Nessuna accelerazione OpenGL ancora qualificata; le menzioni di rinvio sotto sono storiche.
 

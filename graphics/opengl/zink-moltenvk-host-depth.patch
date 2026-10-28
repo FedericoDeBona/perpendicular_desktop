@@ -1,0 +1,21 @@
+--- a/src/gallium/drivers/zink/zink_resource.c
++++ b/src/gallium/drivers/zink/zink_resource.c
+@@ -367,12 +367,13 @@
+       image_props = props2.imageFormatProperties;
+       if (screen->info.have_EXT_host_image_copy && ici->usage & VK_IMAGE_USAGE_HOST_TRANSFER_BIT_EXT)
+          optimalDeviceAccess = hic.optimalDeviceAccess;
+-#if defined(MVK_VERSION)
+-      // MoltenVK cannot allocate a depth buffer with VK_IMAGE_USAGE_HOST_TRANSFER_BIT_EXT
+-      // As hic.identicalMemoryLayout is set, it is not needed?
+-      if (screen->info.have_EXT_host_image_copy && ici->usage & VK_IMAGE_USAGE_HOST_TRANSFER_BIT_EXT && hic.identicalMemoryLayout)
++      /* Also applies when MoltenVK is reached through a transport such as
++       * Venus: the guest build then has no compile-time MVK_VERSION. */
++      if (zink_driverid(screen) == VK_DRIVER_ID_MOLTENVK &&
++          screen->info.have_EXT_host_image_copy &&
++          (ici->usage & VK_IMAGE_USAGE_HOST_TRANSFER_BIT_EXT) &&
++          hic.identicalMemoryLayout)
+          optimalDeviceAccess = false;
+-#endif
+    } else
+       ret = VKSCR(GetPhysicalDeviceImageFormatProperties)(screen->pdev, ici->format, ici->imageType,
+                                                    ici->tiling, ici->usage, ici->flags, &image_props);
