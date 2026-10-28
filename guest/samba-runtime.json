@@ -1,0 +1,306 @@
+{
+  "schema": 1,
+  "version": "4.25.1",
+  "bottles": [
+    {
+      "formula": "samba",
+      "version": "4.25.1",
+      "tag": "arm64_tahoe",
+      "url": "https://ghcr.io/v2/homebrew/core/samba/blobs/sha256:0cf546d7167ecb38f926b3b9e31cd83d8ffdeaf448d2f17814c571fc3cdb7fca",
+      "sha256": "0cf546d7167ecb38f926b3b9e31cd83d8ffdeaf448d2f17814c571fc3cdb7fca",
+      "source": {
+        "url": "https://download.samba.org/pub/samba/stable/samba-4.25.1.tar.gz",
+        "tag": null,
+        "revision": null,
+        "using": null,
+        "checksum": "7f367545bca69aa96897628f82f0f04d4b66b3bcb36cb978b9bb952c4b4c428d"
+      },
+      "license": "GPL-3.0-or-later"
+    },
+    {
+      "formula": "gnutls",
+      "version": "3.8.13",
+      "tag": "arm64_tahoe",
+      "url": "https://ghcr.io/v2/homebrew/core/gnutls/blobs/sha256:a2334eb50a165945aad7df804a3e846053de62973f6aee8060fec8c16c59446b",
+      "sha256": "a2334eb50a165945aad7df804a3e846053de62973f6aee8060fec8c16c59446b",
+      "source": {
+        "url": "https://www.gnupg.org/ftp/gcrypt/gnutls/v3.8/gnutls-3.8.13.tar.xz",
+        "tag": null,
+        "revision": null,
+        "using": null,
+        "checksum": "ffed8ec1bf09c2426d4f14aae377de4753b53e537d685e604e99a8b16ca9c97e"
+      },
+      "license": "LGPL-2.1-or-later AND GPL-3.0-only"
+    },
+    {
+      "formula": "ca-certificates",
+      "version": "2026-10-20",
+      "tag": "all",
+      "url": "https://ghcr.io/v2/homebrew/core/ca-certificates/blobs/sha256:8589f4e61b3afcc5ea375aab11af1c891ec4c94421c699c2a5a4765078de4443",
+      "sha256": "8589f4e61b3afcc5ea375aab11af1c891ec4c94421c699c2a5a4765078de4443",
+      "source": {
+        "url": "https://curl.se/ca/cacert-2026-10-20.pem",
+        "tag": null,
+        "revision": null,
+        "using": null,
+        "checksum": "796f1389bfea13c0ed78f663b765baaff54a508e5483786bd6ece73c5e3e3cbe"
+      },
+      "license": "MPL-2.0"
+    },
+    {
+      "formula": "gmp",
+      "version": "6.3.0",
+      "tag": "arm64_tahoe",
+      "url": "https://ghcr.io/v2/homebrew/core/gmp/blobs/sha256:fa46330de5d003bd9294ae042c8f4ae0a51bcb8c57de2c94c073ff4a7ffa10c3",
+      "sha256": "fa46330de5d003bd9294ae042c8f4ae0a51bcb8c57de2c94c073ff4a7ffa10c3",
+      "source": {
+        "url": "https://ftpmirror.gnu.org/gmp/gmp-6.3.0.tar.xz",
+        "tag": null,
+        "revision": null,
+        "using": null,
+        "checksum": "a3c2b80201b89e68616f4ad30bc66aee4927c3ce50e33929ca819d5c43538898"
+      },
+      "license": "LGPL-3.0-or-later OR GPL-2.0-or-later"
+    },
+    {
+      "formula": "libidn2",
+      "version": "2.3.8",
+      "tag": "arm64_tahoe",
+      "url": "https://ghcr.io/v2/homebrew/core/libidn2/blobs/sha256:f8f1b459f15a4ac11d2dce786a9140509782227b7d499cbdf3a1279dd325d90b",
+      "sha256": "f8f1b459f15a4ac11d2dce786a9140509782227b7d499cbdf3a1279dd325d90b",
+      "source": {
+        "url": "https://ftpmirror.gnu.org/libidn/libidn2-2.3.8.tar.gz",
+        "tag": null,
+        "revision": null,
+        "using": null,
+        "checksum": "f557911bf6171621e1f72ff35f5b1825bb35b52ed45325dcdee931e5d3c0787a"
+      },
+      "license": "(GPL-2.0-or-later OR LGPL-3.0-or-later) AND (Unicode-TOU AND Unicode-DFS-2016) AND GPL-3.0-or-later AND LGPL-2.1-or-later AND FSFAP-no-warranty-disclaimer"
+    },
+    {
+      "formula": "libunistring",
+      "version": "1.5",
+      "tag": "arm64_tahoe",
+      "url": "https://ghcr.io/v2/homebrew/core/libunistring/blobs/sha256:b803434415743b204ffc6bc5415ebfceeaf3dbcb86c0c4ea8a6fc63d2a04f441",
+      "sha256": "b803434415743b204ffc6bc5415ebfceeaf3dbcb86c0c4ea8a6fc63d2a04f441",
+      "source": {
+        "url": "https://ftpmirror.gnu.org/libunistring/libunistring-1.5.tar.gz",
+        "tag": null,
+        "revision": null,
+        "using": null,
+        "checksum": "5b0ecd46cbf225375f20ab4056197e66a7ac590e2684c069af407ae3383c9d81"
+      },
+      "license": "GPL-2.0-or-later OR LGPL-3.0-or-later"
+    },
+    {
+      "formula": "gettext",
+      "version": "1.0",
+      "tag": "arm64_tahoe",
+      "url": "https://ghcr.io/v2/homebrew/core/gettext/blobs/sha256:3af5392939e50a6ef73e42799fc3ead6ef72fe0040c0a45183d04a4008306d6a",
+      "sha256": "3af5392939e50a6ef73e42799fc3ead6ef72fe0040c0a45183d04a4008306d6a",
+      "source": {
+        "url": "https://ftpmirror.gnu.org/gettext/gettext-1.0.tar.gz",
+        "tag": null,
+        "revision": null,
+        "using": null,
+        "checksum": "85d99b79c981a404874c02e0342176cf75c7698e2b51fe41031cf6526d974f1a"
+      },
+      "license": "GPL-3.0-or-later AND LGPL-2.1-or-later"
+    },
+    {
+      "formula": "json-c",
+      "version": "0.19",
+      "tag": "arm64_tahoe",
+      "url": "https://ghcr.io/v2/homebrew/core/json-c/blobs/sha256:f2da9c816501d9c3c0e5f883b60b3d2758b35a3995e20d541d4b029d8b35ef13",
+      "sha256": "f2da9c816501d9c3c0e5f883b60b3d2758b35a3995e20d541d4b029d8b35ef13",
+      "source": {
+        "url": "https://s3.amazonaws.com/json-c_releases/releases/json-c-0.19.tar.gz",
+        "tag": null,
+        "revision": null,
+        "using": null,
+        "checksum": "37ad0249902e301bd9052bf712e511fcc6acff4ecaad4b5900aad9ce564e26de"
+      },
+      "license": "MIT"
+    },
+    {
+      "formula": "libtasn1",
+      "version": "4.21.0",
+      "tag": "arm64_tahoe",
+      "url": "https://ghcr.io/v2/homebrew/core/libtasn1/blobs/sha256:ae01713eec0bd922b903ed2bf514dc085ec3108636c4ead84614b23a2c33f267",
+      "sha256": "ae01713eec0bd922b903ed2bf514dc085ec3108636c4ead84614b23a2c33f267",
+      "source": {
+        "url": "https://ftpmirror.gnu.org/libtasn1/libtasn1-4.21.0.tar.gz",
+        "tag": null,
+        "revision": null,
+        "using": null,
+        "checksum": "1d8a444a223cc5464240777346e125de51d8e6abf0b8bac742ac84609167dc87"
+      },
+      "license": "LGPL-2.1-or-later"
+    },
+    {
+      "formula": "nettle",
+      "version": "4.0",
+      "tag": "arm64_tahoe",
+      "url": "https://ghcr.io/v2/homebrew/core/nettle/blobs/sha256:ba11eb261bc502c28c9cd695f8354306d0a31cb1e55c3d3f1568e051293a0f10",
+      "sha256": "ba11eb261bc502c28c9cd695f8354306d0a31cb1e55c3d3f1568e051293a0f10",
+      "source": {
+        "url": "https://ftpmirror.gnu.org/nettle/nettle-4.0.tar.gz",
+        "tag": null,
+        "revision": null,
+        "using": null,
+        "checksum": "3addbc00da01846b232fb3bc453538ea5468da43033f21bb345cb1e9073f5094"
+      },
+      "license": "GPL-2.0-or-later OR LGPL-3.0-or-later"
+    },
+    {
+      "formula": "p11-kit",
+      "version": "0.26.5",
+      "tag": "arm64_tahoe",
+      "url": "https://ghcr.io/v2/homebrew/core/p11-kit/blobs/sha256:fd108a936783ac40b4c3ea4dda639e7d22faa063e9f40f92b0ed2b2a7e99efa6",
+      "sha256": "fd108a936783ac40b4c3ea4dda639e7d22faa063e9f40f92b0ed2b2a7e99efa6",
+      "source": {
+        "url": "https://github.com/p11-glue/p11-kit/releases/download/0.26.5/p11-kit-0.26.5.tar.xz",
+        "tag": null,
+        "revision": null,
+        "using": null,
+        "checksum": "f2cc09111e44bf3fea58f023180b33acea90aa82d042d6fbb623fbc5ba033bb7"
+      },
+      "license": "BSD-3-Clause"
+    },
+    {
+      "formula": "icu4c@79",
+      "version": "79.1",
+      "tag": "arm64_tahoe",
+      "url": "https://ghcr.io/v2/homebrew/core/icu4c/79/blobs/sha256:4424c58d257d07b28086814a575baa9e462560460fdea5455581d99062896cec",
+      "sha256": "4424c58d257d07b28086814a575baa9e462560460fdea5455581d99062896cec",
+      "source": {
+        "url": "https://github.com/unicode-org/icu/releases/download/release-79.1/icu4c-79.1-sources.tgz",
+        "tag": null,
+        "revision": null,
+        "using": null,
+        "checksum": "06fa63ecb521048f8082f12ad988f6b678d90cbd88aafce24cbc94902b191d99"
+      },
+      "license": "Unicode-3.0"
+    },
+    {
+      "formula": "krb5",
+      "version": "1.22.2",
+      "tag": "arm64_tahoe",
+      "url": "https://ghcr.io/v2/homebrew/core/krb5/blobs/sha256:8fc14b442b666d56a994cfddb47cd86071b6408905be70f10f7fcf668fc9e1cf",
+      "sha256": "8fc14b442b666d56a994cfddb47cd86071b6408905be70f10f7fcf668fc9e1cf",
+      "source": {
+        "url": "https://kerberos.org/dist/krb5/1.22/krb5-1.22.2.tar.gz",
+        "tag": null,
+        "revision": null,
+        "using": null,
+        "checksum": "3243ffbc8ea4d4ac22ddc7dd2a1dc54c57874c40648b60ff97009763554eaf13"
+      },
+      "license": "BSD-2-Clause AND BSD-2-Clause-first-lines AND BSD-3-Clause AND BSD-4-Clause AND Brian-Gladman-2-Clause AND CMU-Mach-nodoc AND FSFULLRWD AND HPND AND HPND-export2-US AND HPND-export-US AND HPND-export-US-acknowledgement AND HPND-export-US-modify AND ISC AND MIT AND MIT-CMU AND OLDAP-2.8 AND OpenVision AND (BSD-2-Clause OR GPL-2.0-or-later)"
+    },
+    {
+      "formula": "openssl@4",
+      "version": "4.1.0",
+      "tag": "arm64_tahoe",
+      "url": "https://ghcr.io/v2/homebrew/core/openssl/4/blobs/sha256:382f63e829b116d5fb9a2b186147e489631b5bbbb06ac0089f795a3fed1085c4",
+      "sha256": "382f63e829b116d5fb9a2b186147e489631b5bbbb06ac0089f795a3fed1085c4",
+      "source": {
+        "url": "https://github.com/openssl/openssl/releases/download/openssl-4.1.0/openssl-4.1.0.tar.gz",
+        "tag": null,
+        "revision": null,
+        "using": null,
+        "checksum": "50c17baf54cb008f6ce42d50deb4b28050a1aad711636cabd4b241c7e90cc2fd"
+      },
+      "license": "Apache-2.0"
+    },
+    {
+      "formula": "lmdb",
+      "version": "1.0.3",
+      "tag": "arm64_tahoe",
+      "url": "https://ghcr.io/v2/homebrew/core/lmdb/blobs/sha256:4c99379ddea7824a8242cb27f48eb88d5a153ed542e08f801f72350a21e4258b",
+      "sha256": "4c99379ddea7824a8242cb27f48eb88d5a153ed542e08f801f72350a21e4258b",
+      "source": {
+        "url": "https://git.openldap.org/openldap/openldap/-/archive/LMDB_1.0.3/openldap-LMDB_1.0.3.tar.bz2",
+        "tag": null,
+        "revision": null,
+        "using": null,
+        "checksum": "015f482ba647e926fbddc9cea49ed59281229c12896cd18675484c36712b98bd"
+      },
+      "license": "OLDAP-2.8"
+    },
+    {
+      "formula": "popt",
+      "version": "1.19",
+      "tag": "arm64_tahoe",
+      "url": "https://ghcr.io/v2/homebrew/core/popt/blobs/sha256:365d143d0d38003c60c1d6fb6d399ab4361690a64467d46a8f27c2f50d2dcfb6",
+      "sha256": "365d143d0d38003c60c1d6fb6d399ab4361690a64467d46a8f27c2f50d2dcfb6",
+      "source": {
+        "url": "https://ftp.osuosl.org/pub/rpm/popt/releases/popt-1.x/popt-1.19.tar.gz",
+        "tag": null,
+        "revision": null,
+        "using": null,
+        "checksum": "c25a4838fc8e4c1c8aacb8bd620edb3084a3d63bf8987fdad3ca2758c63240f9"
+      },
+      "license": "MIT"
+    },
+    {
+      "formula": "readline",
+      "version": "8.3.6",
+      "tag": "arm64_tahoe",
+      "url": "https://ghcr.io/v2/homebrew/core/readline/blobs/sha256:15cdd69af824537192843db389cbfd2459b3797cf4f36c906f8f8ab617d7d59f",
+      "sha256": "15cdd69af824537192843db389cbfd2459b3797cf4f36c906f8f8ab617d7d59f",
+      "source": {
+        "url": "https://ftpmirror.gnu.org/readline/readline-8.3.tar.gz",
+        "tag": null,
+        "revision": null,
+        "using": null,
+        "checksum": "fe5383204467828cd495ee8d1d3c037a7eba1389c22bc6a041f627976f9061cc"
+      },
+      "license": "GPL-3.0-or-later"
+    },
+    {
+      "formula": "talloc",
+      "version": "2.5.0",
+      "tag": "arm64_tahoe",
+      "url": "https://ghcr.io/v2/homebrew/core/talloc/blobs/sha256:33f78a2e466b5dd0585e61e12afb348d23c9f9c13a1b15372b0cd2580063fb10",
+      "sha256": "33f78a2e466b5dd0585e61e12afb348d23c9f9c13a1b15372b0cd2580063fb10",
+      "source": {
+        "url": "https://www.samba.org/ftp/talloc/talloc-2.5.0.tar.gz",
+        "tag": null,
+        "revision": null,
+        "using": null,
+        "checksum": "912afa237510ae542a7733998eb18a12bcda35ab6729c8e2ddb43e8d0ebab007"
+      },
+      "license": "GPL-3.0-or-later"
+    },
+    {
+      "formula": "tdb",
+      "version": "1.4.15",
+      "tag": "arm64_tahoe",
+      "url": "https://ghcr.io/v2/homebrew/core/tdb/blobs/sha256:263f2b310f2be1f0aeb5b98357dc28c88fbb6a46d116def650e7a30c05f3608e",
+      "sha256": "263f2b310f2be1f0aeb5b98357dc28c88fbb6a46d116def650e7a30c05f3608e",
+      "source": {
+        "url": "https://www.samba.org/ftp/tdb/tdb-1.4.15.tar.gz",
+        "tag": null,
+        "revision": null,
+        "using": null,
+        "checksum": "fba09d8df1f1b9072aeae8e78b2bd43c5afef20b2f6deefa633aa14a377a8dd2"
+      },
+      "license": "LGPL-3.0-or-later AND GPL-3.0-or-later"
+    },
+    {
+      "formula": "tevent",
+      "version": "0.17.2",
+      "tag": "arm64_tahoe",
+      "url": "https://ghcr.io/v2/homebrew/core/tevent/blobs/sha256:61d735b0f3f2b5b6d4fdda58810b10dd286bd3a584f1fb3abde8285aed6b7a40",
+      "sha256": "61d735b0f3f2b5b6d4fdda58810b10dd286bd3a584f1fb3abde8285aed6b7a40",
+      "source": {
+        "url": "https://www.samba.org/ftp/tevent/tevent-0.17.2.tar.gz",
+        "tag": null,
+        "revision": null,
+        "using": null,
+        "checksum": "e53b1ac288d017d66dde0471cd429a806168ecf07179d7f019572d7a7e05f0d6"
+      },
+      "license": "LGPL-3.0-or-later"
+    }
+  ]
+}

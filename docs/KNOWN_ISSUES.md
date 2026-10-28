@@ -1,5 +1,7 @@
 # Registro dei problemi
 
+**28 ottobre — migrazione SMB/Samba0.2.25: FATTO nel perimetro richiesto sulla main93be6687.** Sei cartelle selezionabili/default on nei normali percorsi Windows, senza lettere aggiuntive o copie. Implementazione/build/firma e clone mirato PASS; main lettura/append bidirezionali/Unicode/rinomina immediata e ciclo UI Immagini off→boot locale→on→boot condiviso PASS. Vecchi daemon/client/driver/WinFsp inutilizzato rimossi, nessun device filesystem o RAM condivisa, cache/build e quattro runtime inattivi ripuliti. FS-007/008 corretti nel percorso verificato. Explorer Documents/Downloads ordinari e sette soli file di prova eliminati; dati locali/backup originali preservati. Configurazione finale byte-identica,4GiB correnti conservati e RAM indipendente dalla condivisione; nessuna forzatura. Restano soltanto recupero dei vecchi stati, storico e capacità generiche inutilizzate del QEMU grafico qualificato. TODO-003 generale resta IN CORSO per notifiche/locking/iCloud/altri profili/prestazioni non qualificati; prossimo passo solo su una semantica concreta richiesta, senza benchmark estesi. [Evidenze e fallimenti](VERIFICATION.md#28-ottobre--migrazione-da-virtiofs-a-smbsamba).
+
 **28 ottobre — pull/rebuild e guest tools0.2.24 sul Mac93be6687: FATTO nel perimetro della consegna.** Sorgenti aggiornati fast-forward3db051b→ed257e6, build guest/app complete e firma deep/strict PASS; app canonica/build allineate, servizio guest279b0f60… Running/hash esatto e componenti/task cartelle installati. Corretto FS-006: reinstallazione del driver già aggiornato con codice259 ammessa soltanto dopo confronto INF/CAT/SYS con i pin. Ripetizione reale positiva, sei servizi/UI6cartelle collegate; task temporaneo rimosso e CD espulso. Un boot iniziale dalla VM spenta, poi stesso QEMU45672 conservato; machine.json byte-identico, nessuna forzatura. App lasciata aperta sul launcher con Windows collegato. Nessuna nuova prova clone o qualifica generale; prossimo passo solo su nuova priorità, SYS-005/TODO-009 restano aperti per l'updater automatico. [Evidenze e fallimenti](VERIFICATION.md#28-ottobre--pull-rebuild-e-guest-tools-sul-mac93be6687).
 
 **27 ottobre — build completa0.2.24 sulla IoT0795218c: FATTO nel perimetro locale.** Build ordinaria ora include runtime virtio-fs, driver/client ARM64 e WinFsp; installer completo e configurazione con broker non elevato. Sei cartelle standard condivise: lettura/scrittura degli stessi byte in tutte e sei PASS, file generati rimossi e assenza confermata sui due sistemi. App canonica/build e guest allineati, Windows collegato e launcher aperto; RAM fissa condivisa4GiB, SecureBoot1 e VirtioFsDrv Running. Nessuna prova clone o qualifica generale: TODO-003 resta IN CORSO per semantiche ulteriori. Prossimo passo solo su nuova priorità; criterio di questo incremento verificato nella main. [Evidenze e limiti](VERIFICATION.md#27-ottobre--build-completa-e-cartelle-condivise-sulla-iot0795218c-0224).
@@ -90,6 +92,20 @@ Il ciclo RAM protetto 4→2→4 GiB con dati conservati resta la qualifica prece
 - Conservare fallimenti nel diario e dati privati fuori Git. Non ripetere test senza modifiche pertinenti o nuove evidenze.
 
 ## Problemi pertinenti al desktop
+
+### FS-008 — Riconnessione SMB rifiutata dopo nuovo avvio Windows
+
+- **Stato:** CORRETTO0.2.25 e verificato nella main nel task ripetuto e successivo nuovo boot a sei cartelle.
+- **Sintomo:** task cartelle fallisce1219 (identità multiple), benché Desktop/Documents siano già connessi con SMB3.1.1 cifrato. Nessuna modifica ai file locali eseguita dal task fallito.
+- **Causa/perimetro:** Windows riconnette tramite la credenziale salvata e presenta il nome qualificato locale; WNetAddConnection con utente esplicito non qualificato entra in conflitto. Il nuovo helper salva la credenziale e richiede il riuso della sessione/credenziale Windows senza ripassare l'identità esplicita.
+- **Criterio soddisfatto:** task ripetuto→Pictures locale e sentinel esatto; UI Riprova→5collegate; on→arresto ordinario→nuovo boot→6collegate automaticamente e letture esatte nelle sei radici. Nessuna cancellazione forzata di sessioni Windows. [Evidenze](VERIFICATION.md#28-ottobre--migrazione-da-virtiofs-a-smbsamba).
+
+### FS-007 — Modifiche locali Mac nascoste dalla cache SMB Windows
+
+- **Stato:** CORRETTO0.2.25 nel perimetro main verificato, compreso nuovo avvio finale.
+- **Riproduzione:** dopo connessione SMB, nuovo file Desktop Mac assente dalla lettura Windows; nuovo client Samba host vede gli stessi byte. Nessun diniego TCC: autorizzazione Desktop confermata.
+- **Causa/perimetro:** lease/oplock non invalidati dalle modifiche dirette Mac e cache temporizzate del redirector Windows. Disabilitati lease/oplock sul server privato; durate Directory/FileInfo/FileNotFound Windows impostate a0 mentre almeno una cartella è attiva, con originali salvati/ripristinati quando tutte sono disattivate. Nessuna protezione SMB ridotta. Possibile costo prestazionale, non misurato; nessuna promessa di velocità.
+- **Verifica/prossimo passo:** nuova sessione→sei letture/append esatte; policy0→rinomina immediata e nuovi byte PASS; ripristino10/10/5→riapplicazione0 PASS. Reload server da solo non eliminava la sessione precedente. Criterio soddisfatto dopo nuovo boot: sei letture esatte, policy0 confermata e ulteriore rinomina/modifica immediata Mac→Windows riuscite. Notifiche automatiche Explorer e locking/concorrenza restano non qualificati. [Diario](VERIFICATION.md#28-ottobre--migrazione-da-virtiofs-a-smbsamba).
 
 ### FS-006 — Reinstallazione del driver cartelle già aggiornato dichiarata fallita
 

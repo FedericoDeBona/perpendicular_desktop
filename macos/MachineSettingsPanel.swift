@@ -64,14 +64,14 @@ struct MachineSettingsPanel:View {
                             Picker("RAM massima",selection:number(\.maximumMemoryMiB)){
                                 ForEach(choices(from:draft.initialMemoryMiB,through:min(MachineSettings.memoryLimitMiB,draft.initialMemoryMiB+8192),current:draft.maximumMemoryMiB),id:\.self){Text(memory($0)).tag($0)}
                             }
-                            Text(!draft.enabledSharedFolders.isEmpty || draft.maximumMemoryMiB == draft.initialMemoryMiB ? "Windows usa una quantità fissa di RAM." : "È il limite totale della RAM di Windows, inclusa quella iniziale. Perpendicular aggiunge e restituisce memoria automaticamente.")
+                            Text(draft.maximumMemoryMiB == draft.initialMemoryMiB ? "Windows usa una quantità fissa di RAM." : "È il limite totale della RAM di Windows, inclusa quella iniziale. Perpendicular aggiunge e restituisce memoria automaticamente.")
                                 .font(.caption).foregroundStyle(.secondary)
                             Text("La VM usa anche memoria per grafica e servizi: il consumo complessivo sul Mac può essere superiore a questo limite.")
                                 .font(.caption).foregroundStyle(.secondary)
                             if draft.maximumMemoryMiB == draft.initialMemoryMiB {
                                 Text("Con il massimo uguale alla RAM iniziale, la memoria rimane fissa.").font(.caption).foregroundStyle(.secondary)
                             }
-                            if draft.enabledSharedFolders.isEmpty {
+                            Group {
                             DisclosureGroup("Avanzate",isExpanded:$advanced){
                                 VStack(alignment:.leading,spacing:10){
                                     Picker("RAM all’avvio",selection:number(\.initialMemoryMiB)){

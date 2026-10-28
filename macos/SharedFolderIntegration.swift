@@ -2,7 +2,7 @@ import Foundation
 import CryptoKit
 import Darwin
 
-/// Uses the authenticated guest channel and the already installed signed client.
+/// Uses the authenticated guest channel and the installed protected folder task.
 /// The script lives under protected Program Files, never on a writable share.
 @MainActor
 final class SharedFolderIntegration {
@@ -24,9 +24,10 @@ final class SharedFolderIntegration {
             do {
                 update("Preparazione delle cartelle…",false,true)
                 try await self.installScript(bridge:bridge)
+                let credentials=try SambaServer.credentials(in:directory)
                 let selected=exports.map{$0.kind.rawValue}
                 let requestID=UUID().uuidString.lowercased()
-                let payload=try JSONSerialization.data(withJSONObject:["id":requestID,"enabled":selected]).base64EncodedString()
+                let payload=try JSONSerialization.data(withJSONObject:["id":requestID,"enabled":selected,"username":credentials.username,"password":credentials.password]).base64EncodedString()
                 let submit=#"""
                 $ErrorActionPreference='Stop';$sid=[Security.Principal.WindowsIdentity]::GetCurrent().User.Value;$root=Join-Path $env:ProgramData ('Perpendicular\FolderRequests\'+$sid);[IO.File]::WriteAllBytes((Join-Path $root 'request.json'),[Convert]::FromBase64String('\#(payload)'));& (Join-Path $env:SystemRoot 'System32\schtasks.exe') /Run /TN ('PerpendicularFolders-'+$sid)|Out-Null;if($LASTEXITCODE -ne 0){throw 'Folder configuration task is not installed'}
                 """#
@@ -59,7 +60,7 @@ final class SharedFolderIntegration {
         let data=try Data(contentsOf:url)
         let sha=SHA256.hash(data:data).map{String(format:"%02x",$0)}.joined()
         let probe="""
-        $ErrorActionPreference='Stop';$ProgressPreference='SilentlyContinue';$path='\(scriptPath)';if(![IO.File]::Exists('C:\\Program Files\\Perpendicular Shared Files\\virtiofs.exe')){throw 'Signed folder components are not installed'};if([IO.File]::Exists($path)){$sha=[Security.Cryptography.SHA256]::Create();$value=[BitConverter]::ToString($sha.ComputeHash([IO.File]::ReadAllBytes($path))).Replace('-','').ToLowerInvariant();$sha.Dispose();if($value -eq '\(sha)'){[Console]::WriteLine('MATCH')}}
+        $ErrorActionPreference='Stop';$ProgressPreference='SilentlyContinue';$path='\(scriptPath)';if([IO.File]::Exists($path)){$sha=[Security.Cryptography.SHA256]::Create();$value=[BitConverter]::ToString($sha.ComputeHash([IO.File]::ReadAllBytes($path))).Replace('-','').ToLowerInvariant();$sha.Dispose();if($value -eq '\(sha)'){[Console]::WriteLine('MATCH')}}
         """
         if try await powershell(probe,bridge:bridge).contains("MATCH") {return}
         throw Self.failure("Aggiorna i componenti Windows per collegare le cartelle.")

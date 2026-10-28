@@ -14,6 +14,16 @@ enum SharedFolderKind:String,CaseIterable,Codable,Sendable,Identifiable {
         case .videos:return "Video"
         }
     }
+    var windowsName:String {
+        switch self {
+        case .desktop:return "Desktop"
+        case .documents:return "Documents"
+        case .downloads:return "Downloads"
+        case .pictures:return "Pictures"
+        case .music:return "Music"
+        case .videos:return "Videos"
+        }
+    }
     var icon:String {
         switch self {
         case .desktop:return "desktopcomputer"

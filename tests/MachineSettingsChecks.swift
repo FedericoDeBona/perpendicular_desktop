@@ -48,13 +48,13 @@ import Foundation
         let sharedData=try JSONSerialization.data(withJSONObject:shared)
         var shareSettings=future;shareSettings.setShared(.downloads,enabled:true)
         let sharedJSON=try JSONSerialization.jsonObject(with:MachineSettingsStore.merged(shareSettings,with:sharedData,machineID:"fixture")) as! [String:Any]
-        precondition(sharedJSON["memoryMiB"] as? Int == future.maximumMemoryMiB && sharedJSON["dynamicMemory"] == nil,
-                     "Saving CPU/RAM settings must retain the fixed shared backing required by virtiofs")
+        precondition(sharedJSON["memoryMiB"] as? Int == future.initialMemoryMiB && sharedJSON["dynamicMemory"] != nil,
+                     "Shared folders must not force a RAM backing or disable automatic memory")
         let exports=try JSONDecoder().decode(SharedFoldersConfiguration.self,from:JSONSerialization.data(withJSONObject:sharedJSON["sharedFolders"]!))
         precondition(exports.folders == [SharedFolderExport(kind:.downloads,hostPath:"/Users/example/Downloads")],"Migration must preserve the selected host directory")
         precondition(sharedJSON["sharedDownloads"] == nil)
         shareSettings.useAutomaticMemoryPolicy()
-        precondition(!shareSettings.automaticMemory && shareSettings.initialMemoryMiB == shareSettings.maximumMemoryMiB)
+        precondition(shareSettings.automaticMemory && shareSettings.initialMemoryMiB == future.initialMemoryMiB)
         let disabled=try JSONSerialization.jsonObject(with:MachineSettingsStore.merged(current,with:sharedData,machineID:"fixture")) as! [String:Any]
         let noExports=try JSONDecoder().decode(SharedFoldersConfiguration.self,from:JSONSerialization.data(withJSONObject:disabled["sharedFolders"]!))
         precondition(noExports.folders.isEmpty,"Explicitly disabling every folder must remove all host exports")

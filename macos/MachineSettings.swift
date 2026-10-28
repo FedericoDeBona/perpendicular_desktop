@@ -36,8 +36,7 @@ struct MachineSettings:Codable,Equatable,Sendable {
         automaticMemory ? .init(hotplugMiB:maximumMemoryMiB-initialMemoryMiB,backgroundMiB:backgroundMemoryMiB,reserveMiB:reserveMemoryMiB):nil
     }
     mutating func useAutomaticMemoryPolicy(){
-        if !enabledSharedFolders.isEmpty {initialMemoryMiB=maximumMemoryMiB}
-        automaticMemory=enabledSharedFolders.isEmpty && maximumMemoryMiB>initialMemoryMiB
+        automaticMemory=maximumMemoryMiB>initialMemoryMiB
         backgroundMemoryMiB=1024
         reserveMemoryMiB=512
     }
@@ -102,8 +101,8 @@ enum MachineSettingsStore {
         let folders=SharedFoldersConfiguration(folders:enabled.map{SharedFolderExport(kind:$0,hostPath:sources[$0] ?? $0.hostDirectory.path)})
         value["sharedFolders"]=try JSONSerialization.jsonObject(with:JSONEncoder().encode(folders))
         value.removeValue(forKey:"sharedDownloads")
-        value["cpus"]=settings.cpus;value["memoryMiB"]=enabled.isEmpty ? settings.initialMemoryMiB:settings.maximumMemoryMiB
-        if let memory=settings.dynamicMemory,enabled.isEmpty {
+        value["cpus"]=settings.cpus;value["memoryMiB"]=settings.initialMemoryMiB
+        if let memory=settings.dynamicMemory {
             value["dynamicMemory"]=try JSONSerialization.jsonObject(with:JSONEncoder().encode(memory))
         }else{value.removeValue(forKey:"dynamicMemory")}
         return try JSONSerialization.data(withJSONObject:value,options:[.prettyPrinted,.sortedKeys])

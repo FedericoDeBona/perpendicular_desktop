@@ -34,3 +34,10 @@ Due varianti CAMetalDisplayLink e una di presentazione con transazione UI sono e
 ## 25 ottobre — Adattatori misti per N+1 (non distribuiti)
 
 GPU3D + VirtIO2D con DOD302 ARM64 firmato provati nella copia IoT: selezione mirata del driver coinvolge entrambi gli adattatori, perdendo il3D oppure lasciando codice43 sul secondo. Sottosistemi PCI distinti nella candidata host non bastano. Frontend/patch QEMU non promossi, copia spenta; sorgenti ed evidenze in Research/Multimonitor-20261025. TODO-001/WIN-003 restano bloccati nel perimetro verificato, non impossibili in generale. [Diario e ripristino main](VERIFICATION.md#25-ottobre--todo-001-prova-di-adattatori-misti-protetti).
+
+
+## 28 ottobre — trasporto virtiofs sostituito da SMB/Samba
+
+Ritirato su richiesta dell'utente: daemon macOS, patch filesystem, manifest driver/client Windows e packager dedicato. Sorgenti recuperabili dalla [revisione fb1c29b](https://github.com/FedericoDeBona/perpendicular_desktop/tree/fb1c29b); risultati e fallimenti FS-001–006 restano nel diario e nel registro. I soli riferimenti operativi residui identificano/disinstallano componenti precedenti o recuperano senza perdita di dati i vecchi mount. QEMU/renderer qualificati restano invariati: il supporto generico compilato non viene usato e nessun dispositivo o memoria condivisa filesystem viene collegato. La nuova build elimina daemon, licenze dedicate e campi del trasporto precedente dal runtime copiato; lo storico non è una dipendenza attiva.
+
+A migrazione main verificata rimossi anche quattro runtime immutabili inattivi, cache di build privata perpendicular-virtiofs-20261027 e snapshot temporaneo della vecchia app. Log storici archiviati in QA; directory locali originali Windows e relativi stati di recupero conservati.

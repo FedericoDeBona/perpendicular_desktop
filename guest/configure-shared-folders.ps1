@@ -1,12 +1,10 @@
 param(
-    [Parameter(Mandatory=$true)][ValidateSet('desktop','documents','downloads','pictures','music','videos')][string]$Folder,
-    [ValidatePattern('^[0-9]+:[0-9]+$')][string]$Owner='501:20',
-    [switch]$Disable
+ [Parameter(Mandatory=$true)][ValidateSet('desktop','documents','downloads','pictures','music','videos')][string]$Folder,
+ [switch]$Disable
 )
 $ErrorActionPreference='Stop';$ProgressPreference='SilentlyContinue'
 $identity=[Security.Principal.WindowsIdentity]::GetCurrent()
-if($identity.IsSystem){throw 'Folder integration must run in the installed interactive user profile.'}
-if(![Security.Principal.WindowsPrincipal]::new($identity).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)){throw 'Folder setup requires the Windows installation administrator.'}
+if($identity.IsSystem -or ![Security.Principal.WindowsPrincipal]::new($identity).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)){throw 'Folder setup requires the installation user with normal administration.'}
 $definitions=@{
  desktop=@('B4BFCC3A-DB2C-424C-B029-7FE99A87C641','Desktop','PerpendicularFolderDesktop')
  documents=@('FDD39AD0-238F-46AF-ADB4-6C85480369C7','Documents','PerpendicularFolderDocuments')
@@ -15,16 +13,12 @@ $definitions=@{
  music=@('4BD8D571-6D19-48D3-BE97-422220080E43','Music','PerpendicularFolderMusic')
  videos=@('18989B1D-99B5-455B-841C-AB7C74E4DDFC','Videos','PerpendicularFolderVideos')
 }
-$definition=$definitions[$Folder];$id=[Guid]$definition[0];$serviceName=$definition[2];$tag='mac-'+$Folder
-$exe=Join-Path $env:ProgramFiles 'Perpendicular Shared Files\virtiofs.exe'
-if(![IO.File]::Exists($exe)){throw 'The signed shared-folder components are not installed.'}
-$sha=[Security.Cryptography.SHA256]::Create()
-try{$actual=[BitConverter]::ToString($sha.ComputeHash([IO.File]::ReadAllBytes($exe))).Replace('-','').ToLowerInvariant()}finally{$sha.Dispose()}
-if($actual -ne 'c9371f1a2ed15c53c3c34a21cc1eec0fca63088135ef1e239876b354abe74a8f'){throw 'The installed folder client differs from the signed package.'}
+$definition=$definitions[$Folder];$id=[Guid]$definition[0];$remote='\\10.0.2.4\'+$definition[1]
 Add-Type -AssemblyName System.ServiceProcess
 Add-Type @'
 using System;using System.Text;using System.ComponentModel;using System.Runtime.InteropServices;
 public static class SharedFolderNative {
+[DllImport("kernel32.dll",CharSet=CharSet.Unicode,SetLastError=true)] public static extern bool CreateSymbolicLink(string link,string target,uint flags);
 [DllImport("shell32.dll",CharSet=CharSet.Unicode)] public static extern int SHGetKnownFolderPath(ref Guid id,uint flags,IntPtr token,out IntPtr path);
 [DllImport("shell32.dll",CharSet=CharSet.Unicode)] public static extern int SHSetKnownFolderPath(ref Guid id,uint flags,IntPtr token,string path);
 [DllImport("shell32.dll")] public static extern void SHChangeNotify(uint change,uint flags,IntPtr a,IntPtr b);
@@ -58,155 +52,98 @@ public static void RemoveStaleMount(string path) {
  if(!RemoveDirectory(path)) throw new Win32Exception();
 }
 
-[DllImport("advapi32.dll",CharSet=CharSet.Unicode,SetLastError=true)] static extern IntPtr OpenSCManager(string machine,string database,uint access);
-[DllImport("advapi32.dll",CharSet=CharSet.Unicode,SetLastError=true)] static extern IntPtr OpenService(IntPtr manager,string name,uint access);
-[DllImport("advapi32.dll",CharSet=CharSet.Unicode,SetLastError=true)] static extern IntPtr CreateService(IntPtr manager,string name,string display,uint access,uint type,uint start,uint error,string binary,string group,IntPtr tag,string dependencies,string account,string password);
-[DllImport("advapi32.dll",CharSet=CharSet.Unicode,SetLastError=true)] static extern bool ChangeServiceConfig(IntPtr service,uint type,uint start,uint error,string binary,string group,IntPtr tag,string dependencies,string account,string password,string display);
-[DllImport("advapi32.dll")] static extern bool CloseServiceHandle(IntPtr handle);
-public static void Configure(string name,string display,string binary,uint start) {
- var manager=OpenSCManager(null,null,3);if(manager==IntPtr.Zero) throw new Win32Exception();IntPtr service=IntPtr.Zero;
+
+public static bool RemoveOwnedLink(string path,string remote) {return OwnedLink(path,remote,true);}
+public static bool IsOwnedLink(string path,string remote) {return OwnedLink(path,remote,false);}
+static bool OwnedLink(string path,string remote,bool remove) {
+ var file=CreateFile(path,0,7,IntPtr.Zero,3,0x02200000,IntPtr.Zero);
+ if(file==new IntPtr(-1)) return false;
  try {
-  service=OpenService(manager,name,2);
-  if(service==IntPtr.Zero) {
-   if(Marshal.GetLastWin32Error()!=1060) throw new Win32Exception();
-   service=CreateService(manager,name,display,2,16,start,1,binary,null,IntPtr.Zero,"VirtioFsDrv\0\0",null,null);
-   if(service==IntPtr.Zero) throw new Win32Exception();
-  } else if(!ChangeServiceConfig(service,0xffffffff,start,0xffffffff,binary,null,IntPtr.Zero,null,null,null,display)) throw new Win32Exception();
- } finally {if(service!=IntPtr.Zero) CloseServiceHandle(service);CloseServiceHandle(manager);}
+  var data=new byte[16384];uint count;
+  if(!DeviceIoControl(file,0x900a8,IntPtr.Zero,0,data,(uint)data.Length,out count,IntPtr.Zero)) return false;
+  if(count<20 || BitConverter.ToUInt32(data,0)!=0xa000000c) throw new InvalidOperationException("An unrelated directory link must not be replaced.");
+  var offset=20+BitConverter.ToUInt16(data,8);var length=BitConverter.ToUInt16(data,10);
+  if(offset+length>count || length%2!=0) throw new InvalidOperationException("Invalid directory link.");
+  var target=Encoding.Unicode.GetString(data,offset,length).TrimEnd('\\');
+  var expected=@"\??\UNC\"+remote.TrimStart('\\');
+  if(!target.Equals(expected,StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("An unrelated directory link must not be replaced.");
+ } finally {CloseHandle(file);}
+ if(remove && !RemoveDirectory(path)) throw new Win32Exception();
+ return true;
 }
 }
+
 '@
 function Read-Known([uint32]$flags){
  $pointer=[IntPtr]::Zero;$hr=[SharedFolderNative]::SHGetKnownFolderPath([ref]$id,$flags,[IntPtr]::Zero,[ref]$pointer)
- if($hr -ne 0){throw "Cannot resolve the Windows folder: $hr"}
+ if($hr -ne 0){throw "Cannot resolve Windows folder: $hr"}
  try{return [IO.Path]::GetFullPath([Runtime.InteropServices.Marshal]::PtrToStringUni($pointer))}finally{[Runtime.InteropServices.Marshal]::FreeCoTaskMem($pointer)}
 }
-function Set-Known([string]$path){
- $hr=[SharedFolderNative]::SHSetKnownFolderPath([ref]$id,0,[IntPtr]::Zero,$path)
- if($hr -ne 0){throw "Cannot set the Windows folder location: $hr"}
-}
-function Volume-Label([string]$path){
- $label=[Text.StringBuilder]::new(100);$fs=[Text.StringBuilder]::new(100);$serial=[uint32]0;$maximum=[uint32]0;$flags=[uint32]0
- if([SharedFolderNative]::GetVolumeInformation($path.TrimEnd('\')+'\',$label,100,[ref]$serial,[ref]$maximum,[ref]$flags,$fs,100)){return $label.ToString()}
- return ''
-}
-$path=Read-Known 0x4400;$oldKnown=Read-Known 0x4000
-$profile=[IO.Path]::GetFullPath($env:USERPROFILE).TrimEnd('\')+'\'
-if(!$path.StartsWith($profile,[StringComparison]::OrdinalIgnoreCase) -or $path -eq $profile.TrimEnd('\')){throw 'Only the standard personal profile folders may be configured.'}
+function Set-Known([string]$path){if([SharedFolderNative]::SHSetKnownFolderPath([ref]$id,0,[IntPtr]::Zero,$path) -ne 0){throw 'Cannot set Windows folder location.'}}
+$path=Read-Known 0x4400;$oldKnown=Read-Known 0x4000;$profile=[IO.Path]::GetFullPath($env:USERPROFILE).TrimEnd('\')+'\'
+if(!$path.StartsWith($profile,[StringComparison]::OrdinalIgnoreCase) -or $path -eq $profile.TrimEnd('\')){throw 'Only personal profile folders may be configured.'}
+if(!$Disable -and ![IO.Directory]::Exists($remote)){throw 'The selected Mac folder is not available over the private connection.'}
 $stateRoot=Join-Path $env:ProgramData ('Perpendicular\SharedFolders\'+$identity.User.Value)
-[void][IO.Directory]::CreateDirectory($stateRoot)
-$stateFile=Join-Path $stateRoot ($Folder+'.json')
+[void][IO.Directory]::CreateDirectory($stateRoot);$stateFile=Join-Path $stateRoot ($Folder+'.json')
 $lock=[IO.FileStream]::new((Join-Path $stateRoot ($Folder+'.lock')),[IO.FileMode]::OpenOrCreate,[IO.FileAccess]::ReadWrite,[IO.FileShare]::None)
-$service=$null
 try {
- function Save-State {
-  $temporary=$stateFile+'.'+[Guid]::NewGuid().ToString('N')+'.tmp'
-  [IO.File]::WriteAllText($temporary,($script:record | ConvertTo-Json -Depth 6),[Text.UTF8Encoding]::new($false))
-  if(![SharedFolderNative]::MoveFileEx($temporary,$stateFile,9)){throw [ComponentModel.Win32Exception]::new()}
+ $old=$null
+ if([IO.File]::Exists($stateFile)){$old=Get-Content $stateFile -Raw|ConvertFrom-Json}
+ # The previous single-folder layout is decoded only to preserve original data.
+ if(!$old -and $Folder -eq 'downloads' -and [IO.File]::Exists((Join-Path $env:ProgramData 'Perpendicular\SharedDownloads\directory-layout.json'))){
+  $legacy=Get-Content (Join-Path $env:ProgramData 'Perpendicular\SharedDownloads\directory-layout.json') -Raw|ConvertFrom-Json
+  if($legacy.sid -ne $identity.User.Value -or $legacy.downloads -ne $path){throw 'The previous folder belongs to another profile.'}
+  $old=[pscustomobject]@{schema=1;sid=$identity.User.Value;folder=$Folder;path=$path;originalKnown=$path;localBackup=$legacy.originalDirectoryBackup;recoveredLocalDirectories=@()}
  }
- function Stop-OwnedService {
-  if(!$script:priorImage){return}
-  $script:service=[ServiceProcess.ServiceController]::new($serviceName);$script:service.Refresh()
-  if($script:service.Status -ne [ServiceProcess.ServiceControllerStatus]::Stopped){$script:service.Stop();$script:service.WaitForStatus([ServiceProcess.ServiceControllerStatus]::Stopped,[TimeSpan]::FromSeconds(15))}
-  $until=[DateTime]::UtcNow.AddSeconds(10)
-  while((Volume-Label $path) -eq $tag -and [DateTime]::UtcNow -lt $until){[Threading.Thread]::Sleep(100)}
-  if((Volume-Label $path) -eq $tag){throw 'The shared folder has not finished closing; local data has not been moved.'}
+ if($old -and ($old.schema -notin @(1,2) -or $old.sid -ne $identity.User.Value -or $old.folder -ne $Folder -or $old.path -ne $path)){throw 'Folder recovery state differs from this profile.'}
+ $record=[pscustomobject]@{schema=2;backend='smb';sid=$identity.User.Value;folder=$Folder;path=$path;originalKnown=$path;localBackup=(Join-Path $stateRoot ($Folder+'-local'));phase='local';recoveredLocalDirectories=@()}
+ if($old){$record.originalKnown=$old.originalKnown;$record.localBackup=$old.localBackup;$record.recoveredLocalDirectories=@($old.recoveredLocalDirectories)}
+ elseif($oldKnown.StartsWith($profile,[StringComparison]::OrdinalIgnoreCase)){$record.originalKnown=$oldKnown}
+ $backup=[IO.Path]::GetFullPath($record.localBackup)
+ $legacyPrefix=Join-Path $env:ProgramData ('Perpendicular\SharedDownloads\OriginalDownloads-'+$identity.User.Value+'-')
+ if(!$backup.StartsWith($stateRoot+'\',[StringComparison]::OrdinalIgnoreCase) -and !($Folder -eq 'downloads' -and $backup.StartsWith($legacyPrefix,[StringComparison]::OrdinalIgnoreCase))){throw 'Recovery directory is outside managed data.'}
+ if(!$record.originalKnown.StartsWith($profile,[StringComparison]::OrdinalIgnoreCase) -or [IO.Path]::GetPathRoot($path) -ne [IO.Path]::GetPathRoot($backup)){throw 'Invalid original folder location.'}
+ function Save-State {
+  $temp=$stateFile+'.'+[Guid]::NewGuid().ToString('N')+'.tmp';[IO.File]::WriteAllText($temp,($record|ConvertTo-Json -Depth 6),[Text.UTF8Encoding]::new($false))
+  if(![SharedFolderNative]::MoveFileEx($temp,$stateFile,9)){throw [ComponentModel.Win32Exception]::new()}
+ }
+ function Preserve-Local {
+  if(![IO.Directory]::Exists($path)){return}
+  if(([IO.File]::GetAttributes($path) -band [IO.FileAttributes]::ReparsePoint) -ne 0){throw 'An unrelated directory link must not be moved.'}
+  if(![IO.Directory]::Exists($backup)){[IO.Directory]::Move($path,$backup)}
+  else{$recovery=Join-Path $stateRoot ($Folder+'-recovered-'+[Guid]::NewGuid().ToString('N'));$record.recoveredLocalDirectories+=@($recovery);Save-State;[IO.Directory]::Move($path,$recovery)}
+ }
+ # Transitional cleanup only: stop an owned previous client before touching its
+ # mount point. No old transport or Windows filesystem driver is installed.
+ $key=[Microsoft.Win32.Registry]::LocalMachine.OpenSubKey('SYSTEM\CurrentControlSet\Services\'+$definition[2])
+ if($key){
+  try{$image=$key.GetValue('ImagePath')}finally{$key.Close()}
+  if(!$image.StartsWith('"C:\Program Files\Perpendicular Shared Files\virtiofs.exe"',[StringComparison]::OrdinalIgnoreCase)){throw 'An unrelated folder service must not be changed.'}
+  $service=[ServiceProcess.ServiceController]::new($definition[2]);try{if($service.Status -ne 'Stopped'){$service.Stop();$service.WaitForStatus([ServiceProcess.ServiceControllerStatus]::Stopped,[TimeSpan]::FromSeconds(15))}}finally{$service.Dispose()}
   [SharedFolderNative]::RemoveStaleMount($path)
  }
- function Move-LocalAside {
-  if(![IO.Directory]::Exists($path)){return}
-  if((Volume-Label $path).StartsWith('mac-',[StringComparison]::OrdinalIgnoreCase)){throw 'An active shared folder must never be moved as local data.'}
-  if(([IO.File]::GetAttributes($path) -band [IO.FileAttributes]::ReparsePoint) -ne 0){throw 'An unrelated directory link must not be replaced.'}
-  if(![IO.Directory]::Exists($script:record.localBackup)){
-   [IO.Directory]::Move($path,$script:record.localBackup)
-  }else{
-   # Preserve files created locally during a disconnected boot without merging.
-   $recovery=Join-Path $stateRoot ($Folder+'-recovered-'+[Guid]::NewGuid().ToString('N'))
-   $script:record.recoveredLocalDirectories=@($script:record.recoveredLocalDirectories)+@($recovery);Save-State
-   [IO.Directory]::Move($path,$recovery)
-  }
- }
- $serviceKey=[Microsoft.Win32.Registry]::LocalMachine.OpenSubKey('SYSTEM\CurrentControlSet\Services\'+$serviceName)
- $priorImage=$null;$priorStart=3
- if($serviceKey){$priorImage=$serviceKey.GetValue('ImagePath');$priorStart=$serviceKey.GetValue('Start');$serviceKey.Close()}
- if($priorImage -and !$priorImage.StartsWith(('"'+$exe+'"'),[StringComparison]::OrdinalIgnoreCase)){throw 'An unrelated service must not be changed.'}
- $binary='"'+$exe+'" -t '+$tag+' -m "'+$path+'" -o '+$Owner+' -i -F NTFS'
- $record=$null
- if([IO.File]::Exists($stateFile)){$record=Get-Content $stateFile -Raw | ConvertFrom-Json}
- elseif($Folder -eq 'downloads' -and [IO.File]::Exists((Join-Path $env:ProgramData 'Perpendicular\SharedDownloads\directory-layout.json'))){
-  $legacy=Get-Content (Join-Path $env:ProgramData 'Perpendicular\SharedDownloads\directory-layout.json') -Raw | ConvertFrom-Json
-  if($legacy.sid -ne $identity.User.Value -or $legacy.downloads -ne $path){throw 'The previous Downloads layout belongs to another profile.'}
-  $record=[pscustomobject]@{schema=1;sid=$identity.User.Value;folder=$Folder;path=$path;originalKnown=$path;localBackup=$legacy.originalDirectoryBackup;phase='shared';recoveredLocalDirectories=@()}
- }
- if(!$record){
-  if($Disable){Write-Output ('PERP_FOLDER_READY:'+$Folder+':local');return}
-  $originalKnown=if($oldKnown.StartsWith($profile,[StringComparison]::OrdinalIgnoreCase)){$oldKnown}else{$path}
-  $record=[pscustomobject]@{schema=1;sid=$identity.User.Value;folder=$Folder;path=$path;originalKnown=$originalKnown;localBackup=(Join-Path $stateRoot ($Folder+'-local'));phase='local';recoveredLocalDirectories=@()}
- }
- if($record.schema -ne 1 -or $record.sid -ne $identity.User.Value -or $record.folder -ne $Folder -or $record.path -ne $path){throw 'The folder recovery record does not match this profile.'}
- $backup=[IO.Path]::GetFullPath($record.localBackup)
- $legacyPrefix=(Join-Path $env:ProgramData ('Perpendicular\SharedDownloads\OriginalDownloads-'+$identity.User.Value+'-'))
- if(!$backup.StartsWith(($stateRoot+'\'),[StringComparison]::OrdinalIgnoreCase) -and !($Folder -eq 'downloads' -and $backup.StartsWith($legacyPrefix,[StringComparison]::OrdinalIgnoreCase))){throw 'The recovery folder is outside the managed data directory.'}
- if([IO.Path]::GetPathRoot($path) -ne [IO.Path]::GetPathRoot($backup)){throw 'Local recovery must remain on the same Windows volume.'}
- if(!$record.originalKnown.StartsWith($profile,[StringComparison]::OrdinalIgnoreCase)){throw 'The previous folder location is outside this profile.'}
+ $isLink=[SharedFolderNative]::IsOwnedLink($path,$remote)
+ if($isLink -and !$Disable -and [SharedFolderNative]::IsOwnedLink($path,$remote)){Set-Known $path;$record.phase='shared';Save-State;Write-Output ('PERP_FOLDER_READY:'+$Folder+':shared');return}
+ if($isLink){[void][SharedFolderNative]::RemoveOwnedLink($path,$remote)}
  if($Disable){
-  $record.phase='disabling';Save-State;Stop-OwnedService
-  if($priorImage){[SharedFolderNative]::Configure($serviceName,('Perpendicular '+$definition[1]),$priorImage,4)}
-  if([IO.Directory]::Exists($backup)){
-   if([IO.Directory]::Exists($path)){
-    if((Volume-Label $path).StartsWith('mac-',[StringComparison]::OrdinalIgnoreCase)){throw 'A shared folder is still active; local restore was not attempted.'}
-    $recovery=Join-Path $stateRoot ($Folder+'-recovered-'+[Guid]::NewGuid().ToString('N'))
-    $record.recoveredLocalDirectories=@($record.recoveredLocalDirectories)+@($recovery);Save-State
-    [IO.Directory]::Move($path,$recovery)
-   }
-   [IO.Directory]::Move($backup,$path)
-  }elseif(![IO.Directory]::Exists($path)){[void][IO.Directory]::CreateDirectory($path)}
+  if(!$old -and !$key){Write-Output ('PERP_FOLDER_READY:'+$Folder+':local');return}
+  $record.phase='disabling';Save-State
+  if([IO.Directory]::Exists($backup)){Preserve-Local;[IO.Directory]::Move($backup,$path)}
+  elseif(![IO.Directory]::Exists($path)){[void][IO.Directory]::CreateDirectory($path)}
   Set-Known $record.originalKnown;$record.phase='local';Save-State
  }else{
-  if($priorImage -eq $binary -and (Volume-Label $path) -eq $tag){
-   $service=[ServiceProcess.ServiceController]::new($serviceName)
-   if($service.Status -eq [ServiceProcess.ServiceControllerStatus]::Running){
-    if($oldKnown -ne $path){Set-Known $path}
-    $record.phase='shared';Save-State;Write-Output ('PERP_FOLDER_READY:'+$Folder+':shared');return
-   }
-  }
-  $record.phase='enabling';Save-State;Stop-OwnedService
+  $record.phase='enabling';Save-State;Preserve-Local
   try {
-   Move-LocalAside
-   [SharedFolderNative]::Configure($serviceName,('Perpendicular '+$definition[1]),$binary,2)
-   $service=[ServiceProcess.ServiceController]::new($serviceName);$service.Start()
-   $service.WaitForStatus([ServiceProcess.ServiceControllerStatus]::Running,[TimeSpan]::FromSeconds(15))
-   $until=[DateTime]::UtcNow.AddSeconds(20)
-   while((Volume-Label $path) -ne $tag -and [DateTime]::UtcNow -lt $until){
-    $service.Refresh();if($service.Status -eq [ServiceProcess.ServiceControllerStatus]::Stopped){throw 'The folder service stopped before publishing its mount.'}
-    [Threading.Thread]::Sleep(100)
-   }
-   if((Volume-Label $path) -ne $tag){throw 'The expected Mac folder is not mounted.'}
+   if(![SharedFolderNative]::CreateSymbolicLink($path,$remote,1)){throw [ComponentModel.Win32Exception]::new()}
+   if(![IO.Directory]::Exists($path)){throw 'Windows cannot access the prepared Mac folder.'}
    Set-Known $path;$record.phase='shared';Save-State
-   & sc.exe failure $serviceName reset= 60 actions= restart/3000/restart/10000/restart/30000 | Out-Null
   }catch{
    $failure=$_
-   try {
-    if($service){$service.Refresh();if($service.Status -ne [ServiceProcess.ServiceControllerStatus]::Stopped){$service.Stop();$service.WaitForStatus([ServiceProcess.ServiceControllerStatus]::Stopped,[TimeSpan]::FromSeconds(15))}}
-    if($priorImage){[SharedFolderNative]::RemoveStaleMount($path)}
-    if((Volume-Label $path) -eq $tag){throw 'The shared folder is still active; recovery data was not moved.'}
-    if([IO.Directory]::Exists($backup)){
-     if([IO.Directory]::Exists($path)){
-      if(([IO.File]::GetAttributes($path) -band [IO.FileAttributes]::ReparsePoint) -ne 0){throw 'An unrelated link prevents local recovery.'}
-      $recovery=Join-Path $stateRoot ($Folder+'-recovered-'+[Guid]::NewGuid().ToString('N'))
-      $record.recoveredLocalDirectories=@($record.recoveredLocalDirectories)+@($recovery);Save-State
-      [IO.Directory]::Move($path,$recovery)
-     }
-     [IO.Directory]::Move($backup,$path)
-    }
-    if(![IO.Directory]::Exists($path)){[void][IO.Directory]::CreateDirectory($path)}
-    Set-Known $record.originalKnown;$record.phase='local';Save-State
-   }catch{Write-Warning 'Folder setup failed; preserved local files remain in the recovery directory.'}
+   try{[void][SharedFolderNative]::RemoveOwnedLink($path,$remote);if(![IO.Directory]::Exists($path) -and [IO.Directory]::Exists($backup)){[IO.Directory]::Move($backup,$path)};Set-Known $record.originalKnown;$record.phase='local';Save-State}catch{Write-Warning 'Preserved local files remain in the recovery directory.'}
    throw $failure
   }
  }
- $result=[IntPtr]::Zero
- [void][SharedFolderNative]::SendMessageTimeout([IntPtr]0xffff,0x1a,[IntPtr]::Zero,'User Shell Folders',2,1000,[ref]$result)
+ $result=[IntPtr]::Zero;[void][SharedFolderNative]::SendMessageTimeout([IntPtr]0xffff,0x1a,[IntPtr]::Zero,'User Shell Folders',2,1000,[ref]$result)
  [SharedFolderNative]::SHChangeNotify(0x08000000,0,[IntPtr]::Zero,[IntPtr]::Zero)
  Write-Output ('PERP_FOLDER_READY:'+$Folder+':'+$(if($Disable){'local'}else{'shared'}))
-}finally{if($service){$service.Dispose()};$lock.Dispose()}
+}finally{$lock.Dispose()}

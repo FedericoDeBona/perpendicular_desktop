@@ -6,7 +6,7 @@ La0.2.20 introduce il launcher glass nativo: ricerca grande, Preferiti, Recenti 
 
 Prima di iniziare o riprendere leggere il [registro dei problemi](docs/KNOWN_ISSUES.md), poi il [piano di lavoro](docs/RESTART_PLAN.md) e la [TODO da mantenere obbligatoriamente aggiornata](docs/TODO.md). Il lavoro prosegue su `main` dalla base scelta dall’utente il 25 ottobre 2026.
 
-La base principale è **Perpendicular 0.2.24**, installata in `/Applications/Perpendicular.app`, con collegamento `Perpendicular.app` sul Desktop. App, strumenti di controllo e build selezionano per default la VM in `~/Library/Application Support/Perpendicular Memory IoT`.
+La base principale è **Perpendicular 0.2.25**, installata in `/Applications/Perpendicular.app`, con collegamento `Perpendicular.app` sul Desktop. App, strumenti di controllo e build selezionano per default la VM in `~/Library/Application Support/Perpendicular Memory IoT`.
 
 La0.2.5 integra il percorso protetto N+1: desktop Windows separato e un’uscita per ciascun monitor Mac, con mapping e scala delle app verificati. Nella main con un Mac fisico sono riusciti testo, drag, resize, dialogo e ripresa dello stesso documento lasciando Windows acceso. Trasferimento fra monitor di scala diversa, cambio monitor e alcuni problemi grafici restano aperti; [stato e limiti](docs/TODO.md#todo-001--schermi-n1), [verifiche](docs/VERIFICATION.md#25-ottobre--integrazione-n1-e-distribuzione-025).
 
@@ -18,7 +18,7 @@ La sezione Impostazioni sostituisce il pannello dei processi. La0.2.3 mostra un 
 
 Ripristinato l’accesso automatico Windows senza scadenza, con password originale conservata in LSA: nuovo avvio al desktop senza reinserirla, Secure Boot/CI attivi e modalità test disattivata. Il riavvio ha riprodotto il difetto HVF già noto, distinto dall’accesso automatico. [Verifiche e limiti](docs/VERIFICATION.md#25-ottobre--ram-semplificata-e-accesso-windows).
 
-Questa VM è una nuova Windows 11 IoT Enterprise LTSC ARM64, senza importare i Tools Parallels. Desktop Native3D, driver Microsoft-signed, Secure Boot e Code Integrity attivi, modalità test disattivata. La IoT con le sei cartelle condivise usa ora4GiB fissi/backing condiviso. Il precedente profilo di [RAM dinamica](memory/README.md) conserva la qualifica storica: ciclo effettivo 4→2→4 GiB senza riavvio e dati conservati verificato prima della promozione. Hot-unplug può rimanere parziale per pagine pinned; il balloon compensa senza rimuoverle forzatamente.
+Questa VM è una nuova Windows 11 IoT Enterprise LTSC ARM64, senza importare i Tools Parallels. Desktop Native3D, driver Microsoft-signed, Secure Boot e Code Integrity attivi, modalità test disattivata. La migrazione SMB conserva i4GiB fissi attuali e usa RAM privata; la condivisione non impone più backing condiviso o una politica RAM. Il precedente profilo di [RAM dinamica](memory/README.md) conserva la qualifica storica: ciclo effettivo 4→2→4 GiB senza riavvio e dati conservati verificato prima della promozione. Hot-unplug può rimanere parziale per pagine pinned; il balloon compensa senza rimuoverle forzatamente.
 
 La pulizia autorizzata ha eliminato i vecchi dischi VM e launcher. Restano un backup completo offline della IoT, la build originale qualificata come riferimento e i sorgenti/materiali di ricerca conservati per prudenza. La build normale riutilizza il runtime verificato dell'app installata; non lo sostituisce automaticamente con QEMU upstream. Identità, backup e verifiche della promozione sono nel piano.
 
@@ -38,21 +38,25 @@ Il diario e Git conservano la storia delle prove. Le descrizioni dei vecchi pacc
 ## Build e aggiornamento completi
 
 Eseguire `zsh scripts/build-guest.sh`, poi `zsh scripts/build-macos.sh`.
-La build macOS verifica ora anche il runtime host virtio-fs e confeziona in
-`Guest/SharedFiles` driver/client ARM64 e WinFsp, scaricati dalle origini del
-manifest e controllati tramite SHA256. Un runtime installato precedente viene
-completato nella cache privata, senza modificare il runtime della VM accesa.
-Il primo completamento richiede il profilo QEMU nativo conservato; se non viene
-individuato univocamente, `PERPENDICULAR_QEMU_SEED` indica la directory con
-`qemu`, `tools` e `deps`. `PERPENDICULAR_COMPLETE_RUNTIME_APP` può selezionare
-esplicitamente un pacchetto completo già verificato. Il controllo non accetta
-un pacchetto privo delle capacità richieste. Artefatti e download rimangono
-fuori Git in `~/.local/share/perpendicular-dependencies`.
+La build macOS conserva/verifica il runtime grafico qualificato e confeziona un
+server Samba privato con librerie e dipendenze fissate tramite SHA256 in
+`guest/samba-runtime.json`. I download ufficiali Homebrew sono estratti nella
+cache privata senza installare Homebrew o servizi di sistema. Il pacchetto
+è autonomo: non richiede Samba sul computer di destinazione.
 
-`bootstrap-guest.py` include l’intero payload nel CD; `install.cmd`/`install.ps1`
-installano anche i componenti filesystem con il normale consenso amministratore.
-La configurazione delle sei cartelle avviene poi con un’attività per il solo
-utente installante, con azione protetta e richiesta limitata agli ID delle
-cartelle: non richiede che il broker o tutte le app Windows siano elevati.
-Il profilo con cartelle condivise usa RAM fissa condivisa, applicata soltanto
-al prossimo avvio ordinario di Windows. La build non modifica la VM da sola.
+La VM raggiunge il server autenticato soltanto tramite il proprio indirizzo
+privato; il processo host ascolta sul loopback, senza condivisioni sulla LAN.
+SMB3 e cifratura sono obbligatori, con credenziali casuali specifiche della VM,
+distinte dalla password dell'account Mac. Windows usa il proprio client SMB e
+mantiene Desktop, Documenti, Download, Immagini, Musica e Video nei normali
+percorsi del profilo tramite collegamenti directory; nessuna unità aggiuntiva.
+
+`bootstrap-guest.py` include gli helper nel CD; il setup prepara l'attività
+limitata al solo utente installante e alla selezione dei sei ID. La migrazione
+preserva le directory locali precedenti tramite rinomina, senza copiare i file
+Mac. Disattivando una cartella vengono ripristinati i file Windows conservati.
+I componenti precedenti vengono soltanto recuperati/disinstallati; driver e
+client filesystem aggiuntivi non fanno parte della nuova distribuzione.
+Per rendere subito visibili anche le modifiche fatte direttamente dal Mac, il server non concede lease/oplock e gli helper azzerano tre cache temporizzate dei metadati SMB Windows. I valori originali vengono ripristinati quando tutte le cartelle sono disattivate; questo criterio può influire sulle prestazioni, non misurate qui.
+La selezione delle cartelle non impone più una politica RAM. La migrazione
+mantiene i limiti correnti finché l'utente non li modifica.

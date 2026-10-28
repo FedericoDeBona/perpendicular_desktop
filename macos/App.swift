@@ -322,6 +322,10 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
     }
     func prepareSharedFolders(){
         guard connected,guestCapabilities["execute"] == true,let machine else{return}
+        guard machine.usesSMBFolders else {
+            folderIntegrationStatus="Le cartelle passeranno al nuovo collegamento al prossimo avvio di Windows."
+            return
+        }
         folderIntegration.apply(exports:machine.configuration.folderExports,bridge:bridge,directory:machine.directory){[weak self] text,failed,busy in
             self?.folderIntegrationStatus=text;self?.folderIntegrationFailed=failed;self?.folderIntegrationBusy=busy
         }
@@ -583,9 +587,9 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
         if command == "status" {
             let running:Any
             switch machineState {case .running:running=true;case .stopped:running=false;case .unreachable:running=NSNull()}
-            let memoryState:[String:Any]=memoryController?.state ?? ["enabled":false,"fixedForSharedFolders":!(machine?.configuration.folderExports.isEmpty ?? true)]
+            let memoryState:[String:Any]=memoryController?.state ?? ["enabled":false]
             let sharedDownloads:[String:String]
-            if let share=machine?.configuration.folderExports.first(where:{$0.kind == .downloads}) {sharedDownloads=["hostPath":share.hostPath,"tag":share.tag]}
+            if let share=machine?.configuration.folderExports.first(where:{$0.kind == .downloads}) {sharedDownloads=["hostPath":share.hostPath]}
             else {sharedDownloads=[:]}
             let folderState:[String:Any]=["status":folderIntegrationStatus,"failed":folderIntegrationFailed,
                 "active":machine?.configuration.folderExports.map{["id":$0.kind.rawValue,"hostPath":$0.hostPath]} ?? [],

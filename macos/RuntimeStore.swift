@@ -5,7 +5,7 @@ import CryptoKit
 /// or overwritten while Windows is still running. Keep each runtime immutable.
 enum RuntimeStore {
     static func prepare(contents:URL,directory:URL)throws->URL {
-        let paths=["Resources/QEMU","Frameworks/Runtime"] +
+        let paths=["Resources/QEMU","Frameworks/Runtime","Resources/Samba"] +
             (FileManager.default.fileExists(atPath:contents.appendingPathComponent("Resources/Native3D").path) ? ["Resources/Native3D"]:[])
         let identity=try digest(contents:contents,paths:paths)
         let store=directory.appendingPathComponent("Runtimes",isDirectory:true)

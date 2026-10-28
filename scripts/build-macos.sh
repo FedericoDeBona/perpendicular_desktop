@@ -30,11 +30,11 @@ xcrun clang -O2 -target arm64-apple-macosx14.0 -c macos/NativeTransport/gpu-rece
 xcrun swiftc -swift-version 6 -O -parse-as-library -target arm64-apple-macosx14.0 \
     -import-objc-header macos/NativeTransport/bridge.h .build/native-transport.o .build/gpu-receiver.o \
     macos/RuntimeStore.swift macos/NativeWindowFrames.swift macos/NativeGraphics.swift macos/NativeDisplay.swift macos/DesktopConnection.swift macos/DesktopWindow.swift \
-    macos/VirtualMachine.swift macos/VirtioFS.swift macos/SharedFolderIntegration.swift macos/MachineControl.swift macos/MachineSettings.swift macos/MachineSettingsPanel.swift macos/MemoryControl.swift macos/GuestBridge.swift macos/GuestFrameSurface.swift macos/MacLocalControl.swift macos/DisplayTopology.swift macos/SharedDisplay.swift \
+    macos/VirtualMachine.swift macos/SharedFolders.swift macos/SambaServer.swift macos/SharedFolderIntegration.swift macos/MachineControl.swift macos/MachineSettings.swift macos/MachineSettingsPanel.swift macos/MemoryControl.swift macos/GuestBridge.swift macos/GuestFrameSurface.swift macos/MacLocalControl.swift macos/DisplayTopology.swift macos/SharedDisplay.swift \
     macos/WindowGeometry.swift macos/WindowRenderer.swift macos/WindowTransitionView.swift macos/ApplicationContent.swift macos/ApplicationWindow.swift macos/LauncherLibrary.swift macos/Launcher.swift macos/GuestApplicationState.swift macos/App.swift \
     -o "$app/Contents/MacOS/Perpendicular"
 cp "$guest" guest/install.ps1 guest/install.cmd "$app/Contents/Resources/Guest/"
-cp guest/apply-shared-folders.ps1 guest/configure-shared-folders.ps1 guest/install-shared-downloads.ps1 guest/redirect-shared-downloads.ps1 guest/virtiofs-drivers.json "$app/Contents/Resources/Guest/"
+cp guest/apply-shared-folders.ps1 guest/configure-shared-folders.ps1 guest/connect-shared-folders.ps1 guest/retire-shared-files.ps1 guest/configure-smb-cache.ps1 guest/install-shared-folders.ps1 "$app/Contents/Resources/Guest/"
 zsh scripts/package-app-icon.sh "$app"
 if [[ "${SKIP_RUNTIME:-0}" != 1 ]]; then
     python3 scripts/copy-main-runtime.py --from-app "$runtime_app" --to-app "$app"

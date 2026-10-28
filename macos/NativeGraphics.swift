@@ -8,8 +8,7 @@ struct NativeGraphics {
     var executable:URL {root.appendingPathComponent("bin/qemu-system-aarch64")}
     var supportsDynamicMemory:Bool {manifest["hvf_dynamic_memory_version"] as? Int == 1}
     var supportsMixedDisplays:Bool {manifest["mixed_display_identity_version"] as? Int == 1}
-    var supportsVirtioFS:Bool {manifest["virtiofs_version"] as? Int == 1 &&
-        (manifest["files"] as? [String:String])?["bin/macosvirtiofsd"] != nil}
+
 
     init(root:URL)throws{
         self.root=root
@@ -81,4 +80,5 @@ struct DesktopLaunch:Codable {
     let socket:String
     let native:NativeDisplayEndpoint?
     let wgcSocket:String?
+    var fileSharing:String? = nil
 }
