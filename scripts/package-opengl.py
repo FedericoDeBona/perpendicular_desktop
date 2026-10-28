@@ -43,11 +43,14 @@ def main():
     parser.add_argument('--guest', type=Path, required=True)
     parser.add_argument('--moltenvk-license', type=Path, required=True)
     parser.add_argument('--mesa-license', type=Path, required=True)
+    parser.add_argument('--release-manifest', type=Path,
+                        default=REPO / 'graphics/opengl/release.json',
+                        help='Pinned release for this qualified base runtime')
     args = parser.parse_args()
     app = args.app.resolve(strict=True)
     if app == Path('/Applications/Perpendicular.app'):
         raise ValueError('Package a separate build before installing it.')
-    release_path = REPO / 'graphics/opengl/release.json'
+    release_path = args.release_manifest.resolve(strict=True)
     release = json.loads(release_path.read_text())
     native = app / 'Contents/Resources/Native3D'
     manifest_path = native / 'runtime.json'
@@ -60,7 +63,10 @@ def main():
     for name, expected in release['host_inputs'].items():
         if sha(args.host / name) != expected:
             raise ValueError('Host input changed: ' + name)
-        require_host_capabilities(name, (args.host / name).read_bytes(), manifest)
+        required = dict(manifest)
+        if release.get('host_revision', 1) >= 2:
+            required['initial_capture_decline'] = 1
+        require_host_capabilities(name, (args.host / name).read_bytes(), required)
     for name, expected in release['files'].items():
         file = args.guest / name
         if sha(file) != expected:
@@ -96,6 +102,8 @@ def main():
     manifest['venus_version'] = 1
     manifest['opengl_release'] = release['version']
     manifest['opengl_host_revision'] = release.get('host_revision', 1)
+    if release.get('host_revision', 1) >= 2:
+        manifest['initial_capture_decline'] = 1
     manifest_path.write_text(json.dumps(manifest, indent=2) + '\n')
     guest = app / 'Contents/Resources/Guest/OpenGL'
     if guest.exists():

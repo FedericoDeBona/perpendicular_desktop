@@ -4,6 +4,10 @@ Obiettivo: OpenGL accelerato con kernel ARM64 v0.4 originale Microsoft-signed, S
 
 **Stato corrente28 ottobre —0.2.27 installata sulla VM ordinaria:** shader/profondità/pixel finestra ARM64/x64 PASS da librerie installate; Creality7.3 ordinario dal launcher reale importa e renderizza il cubo20mm anche nella finestra Mac2177×1191. Kernel originale e Secure Boot/CI conservati, TESTSIGNINGfalse. Presentazione GDI con readback suddiviso; funzioni Vulkan mancanti e compatibilità generale ancora aperte. [Evidenze e limiti main](../../docs/VERIFICATION.md#28-ottobre--installazione-opengl-sulla-vm-corrente). I paragrafi successivi conservano le tappe precedenti nel clone.
 
+## Profilo locale AppleM1
+
+`releases/0.2.29-darwin-arm64.json` fissa la coppia Venus/WGC e le sei DLL ricostruite per la base IoT0795218c. Usare `--release-manifest` nel confezionatore; il manifesto predefinito mantiene la base precedente. Main M1: WGL ARM64/x64 PASS, Creality piano3D poi errore shader `sampler`; scena e artefatti ancora IN CORSO. [Evidenze](../../docs/VERIFICATION.md#28-ottobre--opengl0229-sulla-iot0795218c-e-nuovo-errore-shader).
+
 ## Memoria Vulkan WDDM2
 
 `venus-wddm2-shmem.patch` si applica a [Mesa Neptune bf536bba65454900d782fa7417bc95c1608d7483](https://github.com/osy/virtio-win-mesa/tree/bf536bba65454900d782fa7417bc95c1608d7483). Per il percorso standalone WDDM2 usa l'identità di allocazione con cookie e la finestra CPU restituita da RES_INFO, come il transport Neptune della stessa base. La finestra viene distrutta dal KMD, senza Lock/Unlock o MAP_BLOB legacy. Le attese della vita dell'allocazione seguono il percorso nativo; non sono disattivate le sincronizzazioni dei comandi Vulkan. Gli altri percorsi mantengono la gestione precedente.

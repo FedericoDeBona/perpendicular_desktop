@@ -1,0 +1,45 @@
+{
+  "schema": 1,
+  "version": "0.2.29",
+  "mesa_vulkan_source": "bf536bba65454900d782fa7417bc95c1608d7483",
+  "mesa_gallium_version": "25.1.9",
+  "moltenvk_version": "1.4.2",
+  "base_native_manifest_sha256": "76610d17c3a82bb6c7d4c27a0fe499ff2eaffc9d41692c38d9934da304636c21",
+  "files": {
+    "arm64/libgallium_wgl.dll": "f51919bd3ac91f5424940dad41f3a55e00a16c1e6c8b068355a4d38a0703d02a",
+    "arm64/opengl32.dll": "23a5dcefe0ab41b5cdf80ef391f108f16b2fc28596b41f33a36fcb2d4e51c91b",
+    "arm64/vulkan_virtio.dll": "265f269ea3ed3b71ca544234b762e5dd05f228c07dd5d85179de91af2316f4ac",
+    "x64/libgallium_wgl.dll": "32abe45749881a86b05fb5d2a6e97f11c2d6d69cf33b0b52383d95140a0abc72",
+    "x64/opengl32.dll": "48d31fa5b9c1746d046b6ac4c24ce06e92cb4998997daeea0642acc1c6171e27",
+    "x64/vulkan_virtio.dll": "1e3c36214370f45a751a3ee2780d3aae6475a36fc3e8055d5cdfa9ddcac9e426"
+  },
+  "host_inputs": {
+    "bin/virgl_render_server": "fea6e5eadbb22e1a6782443a9deb885d0ef7f7647ccc7a237cbab93a1b5adaca",
+    "lib/libvirglrenderer.1.dylib": "de1b45938792f0db847659e54072ab52e9597ee6b211df491211c21198796ca5",
+    "lib/libMoltenVK.dylib": "aef00b13bcc808adf15b85bef9ae67393d92be7ed5dfe41cad16fa809e4a4c5f"
+  },
+  "patches": {
+    "venus-wddm2-shmem.patch": "75d021df5c17907424de6d91dfc22afa6dc0af941c7f2eff1d799acfdb8dddc1",
+    "venus-win32-blob-order.patch": "5667c80a798483ad84ac6afc13e1cea30b9bbb2095db13634955fe8e298c74aa",
+    "windows-clang-atomics.patch": "d65e99900aeb41fd3b5315c967f229f042eab319b0afd68d8c3bb0cc7a19f48c",
+    "windows-glsl-lexer.patch": "0906f134c724614556dfc810fa8dd3f8b3f8dc16c8b1bbcd5f008ca51fcac54b",
+    "windows-zink-bounded-readback.patch": "5a17243e2109348d80cc6e4eaff115ad154eabf5055b31c7652e471b8c4914c2",
+    "windows-zink-gdi-present.patch": "36a38a108b6c509b9aaf0ecd1c207bcdde2c3b2b54d4eb6bef847158e527498f",
+    "zink-moltenvk-host-depth.patch": "a54f73c1e139f122d221b633679aa0fe46bc855192a4928a325d99f3f6c93631",
+    "host-wgc-export.patch": "12ffee4cdc2f6677f20ec04f13f3bf5300c7d2db9d272be7ea453ca8c90959a1"
+  },
+  "renderer_inputs": {
+    "wgc-export.inc": "11c677e1dc74fc6c54e74ab9d2135ecc82d448f16c1d25f44039c9c5f979689c",
+    "initial-capture-decline.patch": "bccb4604402286bd5cd79efc075e57d662ebe786efd0ec9e2f27f93734a7394c"
+  },
+  "host_revision": 3,
+  "build_options": {
+    "guest_zlib": false,
+    "guest_zstd": false,
+    "guest_crt": "static",
+    "host_arch": "arm64",
+    "reference_gpu": "Apple M1",
+    "sdk": "10.0.26100",
+    "wdk": "10.0.26100.6584"
+  }
+}
