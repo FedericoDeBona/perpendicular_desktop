@@ -3,7 +3,7 @@ import hashlib
 from pathlib import Path
 import struct
 import unittest
-from prepare_candidate import ROOT, INPUTS, IDENTITY_SLOTS, IDENTITY_VALUES, patch
+from prepare_candidate import ROOT, INPUTS, IDENTITY_SLOTS, IDENTITY_VALUES, OPERATIONAL_SLOT, patch
 
 
 class CandidateChecks(unittest.TestCase):
@@ -16,6 +16,8 @@ class CandidateChecks(unittest.TestCase):
                 self.assertEqual(changed[offset:offset+8], b'tap0901\0')
             for offset, (_, value) in zip(IDENTITY_SLOTS[expected], IDENTITY_VALUES):
                 self.assertEqual(changed[offset:offset+24].split(b'\0')[0], value)
+            if name == 'LinkManagerTray.exe':
+                self.assertEqual(changed[OPERATIONAL_SLOT:OPERATIONAL_SLOT+24].split(b'\0')[0], b'TAP-Windows Adapter V9')
             pe = int.from_bytes(original[60:64], 'little')
             sections = pe+24+int.from_bytes(original[pe+20:pe+22], 'little')
             for i in range(int.from_bytes(original[pe+6:pe+8], 'little')):

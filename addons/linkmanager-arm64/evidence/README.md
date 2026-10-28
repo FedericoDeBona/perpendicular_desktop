@@ -50,4 +50,4 @@ La presenza dei file nel repository consente la ricerca, non dimostra funzioname
 
 ## Seguito ARM64 del28ottobre
 
-[arm64/index.json](arm64/index.json) indicizza27nuovi record REA completi (xref/pseudocodice tapmgr, funzioni mancanti Svc/Tray e filtro prodotto/produttore del primo avvio), ciascuno con hash e subject hash portabile. Non sostituiscono i31record originali. Il verifier controlla entrambi gli insiemi; i nuovi file conservano direttamente l'oggetto Evidence restituito da structuredContent. Mappa e candidato in [CANDIDATE.md](../CANDIDATE.md).
+[arm64/index.json](arm64/index.json) indicizza31nuovi record REA completi (xref/pseudocodice tapmgr, funzioni mancanti Svc/Tray filtro prodotto/produttore del primo avvio e controllo GetIfEntry della descrizione operativa), ciascuno con hash e subject hash portabile. Non sostituiscono i31record originali. Il verifier controlla entrambi gli insiemi; i nuovi file conservano direttamente l'oggetto Evidence restituito da structuredContent. Mappa e candidato in [CANDIDATE.md](../CANDIDATE.md).

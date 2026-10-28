@@ -72,6 +72,34 @@
       "operation": "procedure_pseudo_code"
     },
     {
+      "file": "adapter-description-assembly.json",
+      "sha256": "09fd162f0654a3f6409de621357230083dacaa9c79a345fc01809eaafa0bf73c",
+      "evidence_id": "ev_409a0789b222ad6e6f55356b9806008142282f8a507747d5623a906421afa622",
+      "subject_sha256": "0d78ccee781d9e5b0b85ee805fb4a30f1170d6c0e7080a3de4f6f13c236e45bb",
+      "operation": "procedure_assembly"
+    },
+    {
+      "file": "adapter-description-check.json",
+      "sha256": "5f5231c3792f28bc5ae58683933c4581c29d998e4bfd93472747bfd054d38e9b",
+      "evidence_id": "ev_e81a6a1448298f27c069052252068ee231d7851dcc978a03704b4d0bbea8ec75",
+      "subject_sha256": "0d78ccee781d9e5b0b85ee805fb4a30f1170d6c0e7080a3de4f6f13c236e45bb",
+      "operation": "procedure_pseudo_code"
+    },
+    {
+      "file": "adapter-description-xrefs.json",
+      "sha256": "a22d4ce46b12af23efd5272057745bc65fe24eb6ce3f12e2aff2f86ea1db540a",
+      "evidence_id": "ev_75887698bc9a1d5727e1812113c420c7bcaaf3df691a60126ebf7336071194bb",
+      "subject_sha256": "0d78ccee781d9e5b0b85ee805fb4a30f1170d6c0e7080a3de4f6f13c236e45bb",
+      "operation": "xrefs"
+    },
+    {
+      "file": "tap-error-flags-refs.json",
+      "sha256": "88014ded77f2fb45730dff83b431f6155a7cc7e681c072f0aac47c29c8e51bdf",
+      "evidence_id": "ev_d1d8bd28c314c28d92369cf1a0b28650b29df96a80c3e02620ce419e97e75d7b",
+      "subject_sha256": "0d78ccee781d9e5b0b85ee805fb4a30f1170d6c0e7080a3de4f6f13c236e45bb",
+      "operation": "xrefs"
+    },
+    {
       "file": "tapmgr-0x140004c21.json",
       "sha256": "2c29511cfd6677c368e295ffda8e9b64c823f5390ef83db9d1849c8a33329f1d",
       "evidence_id": "ev_c0b8ad4e91736abe3f6590efea0e9621eb9a89e168b6313d19b05b702b01d7c3",

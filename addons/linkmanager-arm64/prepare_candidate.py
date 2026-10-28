@@ -31,6 +31,9 @@ IDENTITY_SLOTS = {
 IDENTITY_VALUES = [(b'VirtualBox TAP Adapter', b'TAP-Windows Adapter V9'),
                    (b'Sun Microsystems, Inc.', b'TAP-Windows Provider V9')]
 
+# Separate GetIfEntry description prefix check; this literal has one xref.
+OPERATIONAL_SLOT = 0xe5f68
+
 DRIVER = {
     'OemVista.inf': '87a47a05eab6428efbafc7324366fe951a3b5f0693247736b2c75d7d3adda891',
     'tap0901.cat': '28821d476a4708b2e530d9952ca6b13b7af10cd8d1b6a953f72a6056727cac07',
@@ -97,6 +100,18 @@ def patch(data, expected_hash, offsets):
         require(len(new) < 24, 'Identity replacement too long')
         output[offset:offset+24] = new+b'\0'*(24-len(new))
         identity_ranges.extend(range(offset, offset+24))
+    if expected_hash == INPUTS['LinkManagerTray.exe'][0]:
+        offset = OPERATIONAL_SLOT
+        old = b'LinkManager Adapter'
+        new = b'TAP-Windows Adapter V9'
+        require(any(start <= offset and offset+24 <= end for start, end in ranges),
+                'Operational description patch outside read-only data')
+        require(data[offset:offset+24] == old+b'\0'*(24-len(old)),
+                'Operational description slot changed')
+        # Preserve the original 19-byte prefix comparison and every instruction.
+        # The separate ProductName/provider/GUID checks still identify the NIC.
+        output[offset:offset+24] = new+b'\0'*(24-len(new))
+        identity_ranges.extend(range(offset, offset+24))
     # Do not present the original Authenticode certificate as a valid signature
     # on modified code. Keep the overlay bytes so every other file byte is stable.
     security = optional+112+4*8
@@ -129,6 +144,7 @@ def build(archive, destination):
         patches.append({'file': name, 'input_sha256': expected,
                         'output_sha256': digest(result), 'file_offsets': offsets,
                         'identity_file_offsets': list(IDENTITY_SLOTS[expected]),
+                        'operational_description_file_offset': (OPERATIONAL_SLOT if name == 'LinkManagerTray.exe' else None),
                         'original_security_directory': security,
                         'signature': 'unsigned modified candidate; not Secomea signed'})
     with zipfile.ZipFile(archive) as zipped:
@@ -176,7 +192,7 @@ def main():
     args = parser.parse_args()
     manifest = build(args.tap_archive, args.output)
     print('Prepared experimental candidate: '+str(args.output.resolve()))
-    print('12 HardwareID and 6 product/provider slots patched; ARM64 driver preserved byte for byte.')
+    print('12 HardwareID, 6 product/provider and 1 operational description slots patched; ARM64 driver preserved byte for byte.')
     print('No Windows code executed. Runtime/portal verification NOT performed.')
     return manifest
 
