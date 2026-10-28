@@ -1,5 +1,16 @@
 # Diario delle verifiche
 
+## 28 ottobre — aggiunta secondo IP VPN sul Mac
+
+**Richiesta.** L'utente chiede dove impostare gli indirizzi e autorizza aggiungere192.168.27.100. Conservato il target precedente192.168.10.111. Riletti registri/piano/TODO e gestione addon; nessuna UI impostazioni ancora disponibile, procedura Terminale aggiornata con semantica di sostituzione elenco.
+
+**Ciclo reale e fallimento ADD-002.** Stop completo via host_vpn.py esce0, arresta supervisore/relay e ritira gli hostfwd posseduti. Primo targets a dueIP fallisce prima di attivare: sing-box rifiuta route.rules[0].ip_cidr perché contiene array/oggetto invece di stringhe. Un aggiornamento diagnostico circoscritto con stringhe PowerShell letterali riesce, confermando che percorso/privilegi/input sono disponibili. Aggiunto last-guest-error.json privato con risposta effettiva, riprodotto l'errore dallo strumento; corretto @ConvertFrom-Json con variabile intermedia e cast string[] esplicito. Nuova invocazione del comando ufficiale targets192.168.10.111192.168.27.100 PASS, configurazioni validate da sing-box, copie precedenti private conservate.
+
+**Ritorno attivo PASS.** start ripristina mapping TCP/UDPloopback, avvia task relay e supervisore65014; autorizzazione macOS completata dall'utente. Rilettura Windows: esattamente dueCIDR192.168.10.111/32 e192.168.27.100/32, binding LinkManager Adapter, un listenerTCP e unoUDP, servizioLinkManagerRunning. Rilettura Mac: elenco identico e due route host via198.18.88.1/utun88, default192.168.2.1/en0 invariata. Nessun nuovo boot, nessuna connessione/test sul dispositivo remoto. L'intero ciclo gestione IP viene qualificato in questo perimetro, senza trasformarlo in una qualifica di connessioneVPN o affidabilità generale.
+
+**Esito/prossimo passo.** Aggiunta IP main FATTA, clone NON ESEGUITO, operazione dispositivo ancora NON VERIFICATA; TODO-024 generale IN CORSO. Utente può usare il Terminale/procedura README; tutti gli IP da conservare devono comparire nel comando targets. Nessuna nuova UI o ricognizione automatica degli indirizzi. Credenziali/configurazioni private/log fuori Git. Prossimo passo è la prova reale quando il dispositivo sarà disponibile.
+
+
 ## 28 ottobre — IP VPN sul Mac primo percorso TCPUDP
 
 **Requisito e scelta.** L'utente sospende la richiesta stessoIP Mac/VM e autorizza altre schede/meccanismi per raggiungere dal Mac gli stessi IP VPN originali. Primo target esplicito192.168.10.111. Riletti registri/piano/TODO. LinkManager già Ready, target reale rinviato. Scelta sul sistema effettivo: TUN macOS + relay di socket TCP/UDP vincolati alla NIC LinkManager Windows, riusando la NIC QEMU user e due soli hostfwd loopback. Evitati nuovi driver/NIC/WinNAT/riavvio perché non necessari al primo percorso. Runtime grafico,4GiB e Samba conservati, QEMU61742 sempre vivo. Non è una qualifica di tutto il trafficoIP o discoveryL2.

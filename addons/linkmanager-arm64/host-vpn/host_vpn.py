@@ -66,6 +66,8 @@ def guest(root, script):
         reply=json.loads(receive_exact(s,size))
     result=reply.get('result',{})
     if not reply.get('ok') or result.get('exitCode')!=0 or result.get('timedOut'):
+        error_path=root/'last-guest-error.json'
+        error_path.write_text(json.dumps(reply,indent=2)+'\n');error_path.chmod(0o600)
         raise ValueError('Windows relay operation failed; inspect private diagnostics')
     return result.get('stdout','')
 
@@ -163,7 +165,8 @@ def main():
 $c=Get-Content -LiteralPath "$d\server.json" -Raw|ConvertFrom-Json;
 $r=@($c.route.rules|Where-Object {$_.outbound -eq 'vpn'});
 if($r.Count -ne 1){throw 'Unexpected relay rules'};
-$r[0].ip_cidr=@(ConvertFrom-Json '__TARGETS__');
+$newTargets=ConvertFrom-Json -InputObject '__TARGETS__';
+$r[0].ip_cidr=[string[]]$newTargets;
 [IO.File]::WriteAllText("$d\server.pending.json",($c|ConvertTo-Json -Depth 12),[Text.UTF8Encoding]::new($false));
 & "$d\sing-box.exe" check -c "$d\server.pending.json";
 if($LASTEXITCODE -ne 0){throw 'Relay config invalid'};

@@ -1,6 +1,6 @@
 # IP LinkManager disponibili sul Mac
 
-Prima implementazione locale del28ottobre2026: normali socket Mac raggiungono gli IP/porte IPv4 scelti passando per Windows. TCP e UDP verificati sullo stesso indirizzo di un endpoint temporaneo Windows, senza proxy configurato nell'app Mac. La configurazione lasciata attiva riguarda **192.168.10.111/32**. Il dispositivo remoto è ancora da provare quando disponibile: non dichiarare riuscita dal solo percorso locale.
+Prima implementazione locale del28ottobre2026: normali socket Mac raggiungono gli IP/porte IPv4 scelti passando per Windows. TCP e UDP verificati sullo stesso indirizzo di un endpoint temporaneo Windows, senza proxy configurato nell'app Mac. La configurazione lasciata attiva riguarda **192.168.10.111/32 e 192.168.27.100/32**. Il dispositivo remoto è ancora da provare quando disponibile: non dichiarare riuscita dal solo percorso locale.
 
 ## Percorso effettivo
 
@@ -14,18 +14,18 @@ Questa è connettività TCP/UDP unicast. ICMP/ping, broadcast, discoveryL2, prot
 
 Runtime Mac privato: `~/Library/Application Support/Perpendicular Restart/HostVPN` (0700, configurazione/chiave0600). Runtime Windows protetto: `C:\ProgramData\Perpendicular\HostVPN`, task `PerpendicularHostVPN`, regole `PerpendicularHostVPN-TCP/UDP`. Il servizio LinkManager e il Tray sono componenti distinti e rimangono quelli già installati. Nessun task/daemon di avvio Mac o trigger al boot Windows aggiunto.
 
-Dalla radice del progetto:
+Per ora gli indirizzi si impostano dal Terminale: non esiste ancora una schermata nell’app. Il comando `targets` sostituisce l’intero elenco: includere tutti gli IP che si vogliono mantenere. Dalla radice del progetto:
 
 ```sh
 python3 addons/linkmanager-arm64/host-vpn/host_vpn.py status
 python3 addons/linkmanager-arm64/host-vpn/host_vpn.py stop
-python3 addons/linkmanager-arm64/host-vpn/host_vpn.py targets 192.168.10.111 192.168.10.112
+python3 addons/linkmanager-arm64/host-vpn/host_vpn.py targets 192.168.10.111 192.168.27.100
 python3 addons/linkmanager-arm64/host-vpn/host_vpn.py start
 ```
 
 Cambiare gli IP richiede TUN fermo: aggiorna allowlist Windows e configurazione Mac, con controllo prima dell'attivazione e copie private delle configurazioni precedenti. `start` verifica VM/UUID, ripristina i soli forwarding QEMU del relay, avvia il task Windows e chiede l'autorizzazione amministrativa macOS per il TUN. Il piccolo supervisore privilegiato esegue un singolo binario con SHA256 fissato; il socket privato dell'utente consente l'arresto. Non installa helper privilegiati permanenti. `stop` chiude TUN, ferma il relay e ritira i due forwarding QEMU; le regole firewall e i file restano per il successivo avvio.
 
-**Verifiche distinte:** supervisore QA→stop→routeTUN ritirate e successivo avvio finale riusciti; riconoscimento dei forwarding già esistenti e task start idempotente verificati. I wrapper Python completi `stop` con rimozione forwarding e `targets` sono implementati ma non ripetuti sull'assetto finale attivo; parser/test della logica di scoping PASS. Nessun ciclo reboot, autoavvio, reconnect remoto o rimozione completa qualificato.
+**Verifiche distinte:** supervisore QA→stop→routeTUN ritirate e successivo avvio finale riusciti; riconoscimento dei forwarding già esistenti e task start idempotente verificati. Successivamente eseguito realmente il ciclo completo stop→targets a due IP→start per aggiungere 192.168.27.100, con serializzazione PowerShell corretta e conferma delle allowlist e delle due route attive. Parser/test della logica di scoping PASS. Nessun ciclo reboot, autoavvio, reconnect remoto o rimozione completa qualificato.
 
 ## Preparazione su un'altra macchina
 
