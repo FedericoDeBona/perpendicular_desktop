@@ -1,5 +1,12 @@
 # Diario delle verifiche
 
+## 28 ottobre — chiarimento stesso IP Mac e Windows
+
+**Richiesta.** L'utente precisa stessa rete e stesso IP Mac/VM, senza bridge, con VPN automaticamente utilizzabile in entrambi. Nessuna modifica operativa richiesta/eseguita in questo chiarimento. Riletti stato problemi, piano e TODO-024; installazione e Ready precedenti restano distinti dalla prova remota rinviata.
+
+**Analisi e limite.** Confermata la descrizione del backend user nella [documentazione QEMU](https://www.qemu.org/docs/master/system/devices/net.html): guest su rete privata, traffico inoltrato dallo stack host e ingressi espliciti hostfwd. Il backend corrente già osservato non è uno stack IP unico macOS/Windows. Condividere l'IP sorgente esposto dal NAT non condivide le route/interfacce TAP interne Windows; duplicare l'indirizzo locale non realizza quella condivisione. Una modalità con connettività VPN coordinata richiede integrazione di instradamento/trasporto fra i sistemi; network mirroring con identità unica non disponibile né qualificato nell'implementazione attuale. Non dichiarata impossibilità teorica di ogni tecnica di IP sharing. Registrato il requisito esplicito nella TODO, senza sostituirlo con “stessa LAN”. Nessun test significativo possibile per la sola precisazione concettuale, nessun nuovo difetto riprodotto, nessuna implementazione/qualifica clone/main. Prossimo passo invariato: dispositivo reale disponibile e scelta concreta dell'integrazione.
+
+
 ## 28 ottobre — LinkManager installazione protetta e portale Ready
 
 **Autorizzazione e contesto.** Terminato Samba, utente autorizza installazione/prova driver sulla main93be6687 e si riserva il login. Cartelle condivise disponibili, Windows11IoTEnterpriseLTSC build26100, WindowsPowerShell5.1 ARM64 e broker attualmente amministratore. QEMU61742 conservato; nessun reboot/forzatura, runtime/RAM/grafica/Samba non modificati. Copia privata protetta C:\ProgramData\Perpendicular\LinkManagerArm64-20261028; directory scrivibile soltanto amministratori/SYSTEM, utente interattivo RX per il client. Registri privati in ~/Library/Application Support/Perpendicular Restart/QA/linkmanager-20261028, credenziali e dati dell'account esclusi da Git.
