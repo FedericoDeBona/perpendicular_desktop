@@ -1,0 +1,257 @@
+--- a/src/virtio/vulkan/vn_renderer_virtgpu_win32.c
++++ b/src/virtio/vulkan/vn_renderer_virtgpu_win32.c
+@@ -24,6 +24,7 @@
+ struct virtgpu_shmem {
+    struct vn_renderer_shmem base;
+    D3DKMT_HANDLE alloc;
++   bool kmd_mapped;
+    union {
+       D3DKMT_HANDLE kmt;
+       HANDLE h;
+@@ -33,6 +34,7 @@
+ struct virtgpu_bo {
+    struct vn_renderer_bo base;
+    D3DKMT_HANDLE alloc;
++   bool kmd_mapped;
+    union {
+       struct {
+          D3DKMT_HANDLE local;
+@@ -71,6 +73,7 @@
+    struct vn_instance *instance;
+ 
+    VkD3DDDICallbacks *ddicb;
++   bool wddm2;
+    struct {
+       D3DKMT_HANDLE adapter;
+       D3DKMT_HANDLE device;
+@@ -924,6 +927,21 @@
+       } \
+    } while (0)
+ 
++/* Allocation identity follows the signed KMD's native Neptune transport.
++ * The mapping returned by RES_INFO is owned by the KMD, never D3DKMTLock. */
++static uint64_t
++virtgpu_alloc_cookie(void)
++{
++   static volatile LONG counter;
++   return ((uint64_t)GetCurrentProcessId() << 32) |
++          (uint32_t)InterlockedIncrement(&counter);
++}
++
++static NTSTATUS
++virtgpu_ioctl_resource_destroy_blob(struct virtgpu *gpu,
++                                    D3DKMT_HANDLE alloc_handle,
++                                    D3DKMT_HANDLE res_kmt, HANDLE res_h);
++
+ static NTSTATUS
+ virtgpu_ioctl_resource_create_blob(struct virtgpu *gpu,
+                                    uint32_t blob_mem,
+@@ -934,32 +952,37 @@
+                                    D3DKMT_HANDLE *alloc_handle,
+                                    D3DKMT_HANDLE *res_kmt_local,
+                                    D3DKMT_HANDLE *res_kmt_global,
+-                                   HANDLE *res_h)
+-{
++                                   HANDLE *res_h, void **mapped_ptr)
++{
++   *mapped_ptr = NULL;
+    blob_size = align64(blob_size, 4096);
+ 
+-   VIOGPU_CREATE_ALLOCATION_EXCHANGE alloc_priv = {
+-       .Type = VIOGPU_RESOURCE_TYPE_BLOB,
+-       .OptionsBlob = {
+-           .blob_mem = blob_mem,
+-           .blob_flags = blob_flags,
+-           .blob_id = blob_id,
+-       },
+-       .Size = blob_size,
++   VIOGPU_CREATE_ALLOCATION_EXCHANGE_EX alloc_priv = {
++      .Base = {
++         .Type = VIOGPU_RESOURCE_TYPE_BLOB,
++         .OptionsBlob = {
++            .blob_mem = blob_mem,
++            .blob_flags = blob_flags,
++            .blob_id = blob_id,
++         },
++         .Size = blob_size,
++      },
++      .LookupCookie = gpu->wddm2 ? virtgpu_alloc_cookie() : 0,
+    };
+ 
+    VIOGPU_CREATE_RESOURCE_EXCHANGE res_priv = { 0 };
+ 
+    D3DDDI_ALLOCATIONINFO alloc_info = {
+       .pPrivateDriverData = &alloc_priv,
+-      .PrivateDriverDataSize = sizeof(alloc_priv),
++      .PrivateDriverDataSize = gpu->wddm2 ? sizeof(alloc_priv) : sizeof(alloc_priv.Base),
+    };
+ 
+    bool is_shareable = !!(blob_flags & VIOGPU_BLOB_FLAG_USE_SHAREABLE);
+    bool is_mappable = !!(blob_flags & VIOGPU_BLOB_FLAG_USE_MAPPABLE);
+ 
+    // TODO: is this required?
+-   VIRTGPU_SYNC_OR_RETURN_NTSTATUS(gpu);
++   if (!gpu->wddm2)
++      VIRTGPU_SYNC_OR_RETURN_NTSTATUS(gpu);
+ 
+    if (gpu->ddicb != NULL) {
+       D3DDDICB_ALLOCATE alloc = {
+@@ -1001,27 +1024,47 @@
+    }
+ 
+    // TODO: is this required?
+-   VIRTGPU_SYNC_OR_RETURN_NTSTATUS(gpu);
++   if (!gpu->wddm2)
++      VIRTGPU_SYNC_OR_RETURN_NTSTATUS(gpu);
+ 
+    VIOGPU_ESCAPE res_info = {
+       .Type = VIOGPU_RES_INFO,
+       .DataLength = sizeof(res_info.ResourceInfo),
+       .ResourceInfo = {
+          .ResHandle = *alloc_handle,
++         .LookupCookie = alloc_priv.LookupCookie,
+       },
+    };
+ 
+-   NTSTATUS status = virtgpu_ioctl_escape(gpu, &res_info);
++   NTSTATUS status;
++   for (unsigned attempt = 0;; ++attempt) {
++      status = virtgpu_ioctl_escape(gpu, &res_info);
++      if (!NT_SUCCESS(status))
++         break;
++      if (res_info.ResourceInfo.IsBlob && res_info.ResourceInfo.IsCreated)
++         break;
++      if (!gpu->wddm2 || attempt == 100) {
++         status = STATUS_INVALID_PARAMETER;
++         break;
++      }
++      Sleep(1);
++   }
+    if (!NT_SUCCESS(status)) {
++      vn_log(gpu->instance, "RES_INFO failed: 0x%lx", status);
++      virtgpu_ioctl_resource_destroy_blob(gpu, *alloc_handle, *res_kmt_local, *res_h);
+       return status;
+    }
+ 
+-   if (!res_info.ResourceInfo.IsBlob || !res_info.ResourceInfo.IsCreated) {
+-      return STATUS_INVALID_PARAMETER;
+-   }
+-
+    *res_id = res_info.ResourceInfo.Id;
+-
++   if (gpu->wddm2 && is_mappable) {
++      *mapped_ptr = (void *)(uintptr_t)res_info.ResourceInfo.UserVa;
++      if (!*mapped_ptr) {
++         vn_log(gpu->instance, "WDDM2 RES_INFO returned no CPU mapping");
++         virtgpu_ioctl_resource_destroy_blob(gpu, *alloc_handle, *res_kmt_local, *res_h);
++         return STATUS_INVALID_PARAMETER;
++      }
++      return STATUS_SUCCESS;
++   }
+    return is_mappable ? virtgpu_ioctl_init_map(gpu, *alloc_handle)
+                       : STATUS_SUCCESS;
+ }
+@@ -1033,7 +1076,8 @@
+                                     HANDLE res_h)
+ {
+    // TODO: is this required?
+-   VIRTGPU_SYNC_OR_RETURN_NTSTATUS(gpu);
++   if (!gpu->wddm2)
++      VIRTGPU_SYNC_OR_RETURN_NTSTATUS(gpu);
+ 
+    if (gpu->ddicb != NULL) {
+       D3DDDICB_DEALLOCATE destroy = {
+@@ -1064,7 +1108,8 @@
+    }
+ 
+    // TODO: is this required?
+-   VIRTGPU_SYNC_OR_RETURN_NTSTATUS(gpu);
++   if (!gpu->wddm2)
++      VIRTGPU_SYNC_OR_RETURN_NTSTATUS(gpu);
+ 
+    return STATUS_SUCCESS;
+ }
+@@ -1235,6 +1280,10 @@
+       }
+       return VK_ERROR_INITIALIZATION_FAILED;
+    }
++
++   gpu->wddm2 = !gpu->ddicb && info.Flags.Wddm2;
++   vn_log(gpu->instance, "virtgpu KMD mode: %s",
++          gpu->wddm2 ? "WDDM2" : "legacy");
+ 
+    /* Don't care for VIRTGPU_BLOB_MEM_GUEST_VRAM since this driver is mainly
+     * developed for QEMU, but whoever needs it may feel free to implement this */
+@@ -1668,9 +1717,10 @@
+    }
+ 
+    D3DKMT_HANDLE alloc, kmt_local, kmt_global;
++   void *mapped_ptr = NULL;
+    NTSTATUS status = virtgpu_ioctl_resource_create_blob(
+       gpu, gpu->bo_blob_mem, blob_flags, size, mem_id, &res_id, &alloc,
+-      &kmt_local, &kmt_global, &h);
++      &kmt_local, &kmt_global, &h, &mapped_ptr);
+    if (!NT_SUCCESS(status)) {
+       vn_log(gpu->instance,
+              "RESOURCE_CREATE_BLOB failed: type=%u, flags=%u, size=%zu, "
+@@ -1722,8 +1772,10 @@
+          .refcount = VN_REFCOUNT_INIT(1),
+          .res_id = res_id,
+          .mmap_size = size,
++         .mmap_ptr = mapped_ptr,
+       },
+       .alloc = alloc,
++      .kmd_mapped = mapped_ptr != NULL,
+       .blob_flags = blob_flags,
+    };
+ 
+@@ -1817,7 +1869,7 @@
+       return false;
+    }
+ 
+-   if (bo->base.mmap_ptr) {
++   if (bo->base.mmap_ptr && !bo->kmd_mapped) {
+       virtgpu_ioctl_unlock(gpu, bo->alloc);
+       virtgpu_ioctl_destroy_map(gpu, bo->alloc);
+    }
+@@ -1981,8 +2033,10 @@
+    struct virtgpu *gpu = (struct virtgpu *)renderer;
+    struct virtgpu_shmem *shmem = (struct virtgpu_shmem *)_shmem;
+ 
+-   virtgpu_ioctl_unlock(gpu, shmem->alloc);
+-   virtgpu_ioctl_destroy_map(gpu, shmem->alloc);
++   if (!shmem->kmd_mapped) {
++      virtgpu_ioctl_unlock(gpu, shmem->alloc);
++      virtgpu_ioctl_destroy_map(gpu, shmem->alloc);
++   }
+    virtgpu_ioctl_resource_destroy_blob(gpu, shmem->alloc, shmem->kmt,
+                                        shmem->h);
+ }
+@@ -2014,15 +2068,16 @@
+    uint32_t res_id;
+    HANDLE h = NULL; /* This is a device allocation */
+    D3DKMT_HANDLE alloc, kmt;
++   void *ptr = NULL;
+ 
+    NTSTATUS status = virtgpu_ioctl_resource_create_blob(
+       gpu, gpu->shmem_blob_mem, VIOGPU_BLOB_FLAG_USE_MAPPABLE, size, 0,
+-      &res_id, &alloc, &kmt, NULL, &h);
++      &res_id, &alloc, &kmt, NULL, &h, &ptr);
+    if (!NT_SUCCESS(status))
+       return NULL;
+ 
+-   void *ptr = NULL;
+-   status = virtgpu_ioctl_lock(gpu, alloc, &ptr);
++   if (!ptr)
++      status = virtgpu_ioctl_lock(gpu, alloc, &ptr);
+    if (!NT_SUCCESS(status)) {
+       virtgpu_ioctl_resource_destroy_blob(gpu, alloc, kmt, h);
+       vn_log(gpu->instance, "failed to map blob resource: 0x%lx", status);
+@@ -2039,6 +2094,7 @@
+          .mmap_ptr = ptr,
+       },
+       .alloc = alloc,
++      .kmd_mapped = gpu->wddm2,
+    };
+ 
+    if (gpu->ddicb != NULL) {
