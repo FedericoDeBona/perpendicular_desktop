@@ -12,6 +12,8 @@ La preparazione definitiva con script client incluso è in QA/linkmanager-202610
 
 ## Accesso dal Mac alla VPN Windows
 
+**Aggiornamento operativo successivo:** prima implementazione [host-vpn](host-vpn/README.md) installata/attiva, TCP/UDP da socket Mac verso endpoint Windows sullo stesso IP verificati; configurazione finale per192.168.10.111/32, prova dispositivo remoto ancora rinviata. Interfaccia TUN Mac e relay cifrato sulla rete QEMU esistente, senza NIC aggiuntive/reboot/forwarding Windows. La descrizione di assenza del percorso nel paragrafo sotto è lo stato precedente, superato soltanto per questo incremento circoscritto. Altri IP, scoperta automatica, ICMP/L2 e persistenza al boot non qualificati.
+
 Nuovo obiettivo dell'utente: raggiungere anche dal Mac lo stesso IP remoto, per esempio192.168.10.111. **Con il setup corrente non è disponibile:** QEMU attivo usa netdev user/NAT con il solo guestfwd Samba; Windows ha forwardingIPv4 disabilitato sulle due NIC. Le cartelle condivise non condividono il tunnel.
 
 Per mantenere l'IP originale serve un percorso privato Mac→Windows, route host mirata al dispositivo, inoltro/NAT Windows→TAP e gestione del ritorno. È una strategia da implementare e verificare quando sarà disponibile il dispositivo, non una capacità qualificata dal Ready. Un'alternativa circoscritta è proxy/inoltro di singole porte sulla rete esistente, con indirizzo/porta locali e limiti di protocollo. Nessuna modifica route, NAT, rete VM o Samba eseguita per questa richiesta. Evitare di deviare l'intero traffico Internet Mac; rimuovere route alla disconnessione e valutare sovrapposizioni con la LAN locale. [Rete user-mode QEMU](https://www.qemu.org/docs/master/system/devices/net.html).
