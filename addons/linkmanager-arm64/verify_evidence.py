@@ -44,6 +44,22 @@ def main():
         check(record["subject"]["digest"] == item["subject"]["digest"],
               "Subject mismatch in " + item["file"])
 
+    extra = json.loads((root / "evidence/arm64/index.json").read_text(encoding="utf-8"))
+    extra_files = {item["file"] for item in extra["records"]}
+    check(extra_files == {p.name for p in (root / "evidence/arm64").glob("*.json")
+                          if p.name != "index.json"}, "Unindexed ARM64 evidence")
+    for item in extra["records"]:
+        check(Path(item["file"]).name == item["file"], "Unsafe ARM64 record filename")
+        data = (root / "evidence/arm64" / item["file"]).read_bytes()
+        check(hashlib.sha256(data).hexdigest() == item["sha256"], "ARM64 evidence hash mismatch")
+        record = json.loads(data)
+        check(record["evidence_id"] == item["evidence_id"], "ARM64 evidence ID mismatch")
+        check(record["operation"] == item["operation"], "ARM64 operation mismatch")
+        check(record["subject"]["digest"]["sha256"] == item["subject_sha256"],
+              "ARM64 subject mismatch")
+        check(item["subject_sha256"] in subjects, "ARM64 evidence input not portable")
+    print("PASS: %d additional ARM64 REA records." % len(extra["records"]))
+
     provenance = json.loads((root / "evidence/provenance.json").read_text(encoding="utf-8"))
     for item in provenance["extracted"]:
         path = root / "artifacts/x64" / item["name"]

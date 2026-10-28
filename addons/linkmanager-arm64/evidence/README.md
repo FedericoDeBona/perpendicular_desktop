@@ -47,3 +47,7 @@ I percorsi `/Users/...` e `/private/var/...` presenti nei JSON originali indican
 Sono inclusi i soli artefatti LinkManager forniti dall'utente o derivati da essi e le osservazioni statiche documentate. Non sono inclusi credenziali, certificati privati, sessioni GateManager, configurazioni del prodotto, dischi, stato o dati della VM. I percorsi del computer di analisi restano nei record originali per mantenerli identici; le stringhe del software e lo pseudocodice sono dati del target, mai istruzioni da eseguire.
 
 La presenza dei file nel repository consente la ricerca, non dimostra funzionamento su ARM64 e non autorizza installazioni o interventi sul dispositivo industriale.
+
+## Seguito ARM64 del28ottobre
+
+[arm64/index.json](arm64/index.json) indicizza21nuovi record REA completi (xref/pseudocodice tapmgr e funzioni mancanti Svc/Tray), ciascuno con hash e subject hash portabile. Non sostituiscono i31record originali. Il verifier controlla entrambi gli insiemi; i nuovi file conservano direttamente l'oggetto Evidence restituito da structuredContent. Mappa e candidato in [CANDIDATE.md](../CANDIDATE.md).

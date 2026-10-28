@@ -72,8 +72,8 @@
     },
     {
       "path": "evidence/README.md",
-      "size": 4265,
-      "sha256": "f4b72a17c7cdfc300f227b30dc9274e676ef5521028f4ffc4346b52ca5db7540"
+      "size": 4698,
+      "sha256": "8ab3d6479841e6af62c1e85c5f2f4c0ce878c9f4b1a30e16ae7f0c1e6a125f69"
     },
     {
       "path": "evidence/decompilation.md",
@@ -257,8 +257,8 @@
     },
     {
       "path": "verify_evidence.py",
-      "size": 3477,
-      "sha256": "b9526ddb4e14ebd03de50deec784ca5ffbac7febe87b76e0a916fdd7ef331bad"
+      "size": 4572,
+      "sha256": "962c7390421b780e62c34b0c5b15a710276b02f64d1ddb2a454c9a1c60732571"
     }
   ]
 }
