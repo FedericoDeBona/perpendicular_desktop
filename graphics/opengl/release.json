@@ -14,8 +14,8 @@
     "x64/vulkan_virtio.dll": "5fad25ca4cf9fdf3f6ce95c39a61145eec32f8b64041e3e52bcfecf34004d52d"
   },
   "host_inputs": {
-    "bin/virgl_render_server": "4b29b8abf4c5de6e7fba5ebaed1497808868077a002c619cdb21920345b6692d",
-    "lib/libvirglrenderer.1.dylib": "06ab96fef88f9cfdd7b722953844d2e483be724d6a98f1961e678b9c7e52fe3e",
+    "bin/virgl_render_server": "fca23f9d8b291e265c71c0daf61f8009a94b18cd22563009570bdac40418fa58",
+    "lib/libvirglrenderer.1.dylib": "de4a4f8bcf176b0f89522b8e936a63389984aa108e075daaec7780f9579a7c29",
     "lib/libMoltenVK.dylib": "4c45b91239e3a1d27ebca88ed321a5bdef387bea9ddf983f44416a0bcff7333e"
   },
   "patches": {
@@ -29,6 +29,8 @@
     "host-wgc-export.patch": "12ffee4cdc2f6677f20ec04f13f3bf5300c7d2db9d272be7ea453ca8c90959a1"
   },
   "renderer_inputs": {
-    "wgc-export.inc": "11c677e1dc74fc6c54e74ab9d2135ecc82d448f16c1d25f44039c9c5f979689c"
-  }
+    "wgc-export.inc": "11c677e1dc74fc6c54e74ab9d2135ecc82d448f16c1d25f44039c9c5f979689c",
+    "initial-capture-decline.patch": "bccb4604402286bd5cd79efc075e57d662ebe786efd0ec9e2f27f93734a7394c"
+  },
+  "host_revision": 2
 }

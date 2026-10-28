@@ -22,6 +22,20 @@ def run(*args):
     subprocess.run(list(map(str, args)), check=True)
 
 
+def require_host_capabilities(name, data, manifest):
+    if name not in ('bin/virgl_render_server', 'lib/libvirglrenderer.1.dylib'):
+        return
+    if (manifest.get('experimental_wgc_gpu_export') == 1
+            and b'PERP_WGC_EXPORT_SOCKET\0' not in data):
+        raise ValueError('Host input omits the existing Seamless export hook: ' + name)
+    # The broker lives in the library; the matching worker is pinned separately
+    # in the same release. A copied manifest alone cannot preserve this feature.
+    if (name == 'lib/libvirglrenderer.1.dylib'
+            and manifest.get('initial_capture_decline') == 1
+            and b'selected_capture_unsupported' not in data):
+        raise ValueError('Host input omits the existing unsupported-capture handling: ' + name)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--app', type=Path, required=True)
@@ -46,10 +60,7 @@ def main():
     for name, expected in release['host_inputs'].items():
         if sha(args.host / name) != expected:
             raise ValueError('Host input changed: ' + name)
-        if (manifest.get('experimental_wgc_gpu_export') == 1
-                and name in ('bin/virgl_render_server', 'lib/libvirglrenderer.1.dylib')
-                and b'PERP_WGC_EXPORT_SOCKET\0' not in (args.host / name).read_bytes()):
-            raise ValueError('Host input omits the existing Seamless export hook: ' + name)
+        require_host_capabilities(name, (args.host / name).read_bytes(), manifest)
     for name, expected in release['files'].items():
         file = args.guest / name
         if sha(file) != expected:
@@ -84,6 +95,7 @@ def main():
     manifest['files']['Notices/OpenGL/release.json'] = sha(notice / 'release.json')
     manifest['venus_version'] = 1
     manifest['opengl_release'] = release['version']
+    manifest['opengl_host_revision'] = release.get('host_revision', 1)
     manifest_path.write_text(json.dumps(manifest, indent=2) + '\n')
     guest = app / 'Contents/Resources/Guest/OpenGL'
     if guest.exists():

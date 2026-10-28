@@ -182,6 +182,8 @@ Il ciclo RAM protetto 4→2→4 GiB con dati conservati resta la qualifica prece
 
 ### GFX-004 — Risorse grafiche indisponibili e recupero incompleto
 
+- **28 ottobre,0.2.28 locale:** corretta la regressione del confezionamento Venus che ometteva initial-capture-decline pur dichiarandolo nel manifesto; renderer/server ricostruiti insieme, controllo broker PASS, nuova coppia effettiva e OpenGL/Seamless verificati nella main. Nessun nero stabile nel breve ciclo Desktop/riapertura frontend, ma causa generale non isolata e ramo unsupported non attivato dal menu osservato: voce aperta. Nessuna modifica kernel/protezioni. [Prove e limite](VERIFICATION.md#28-ottobre--ripresa-correzione-desktop-e-menu-contestuale).
+
 - **28 ottobre, segnalazione desktop nero dopo0.2.27:** osservati sia il solo sfondo assente (FS-009, ripristinato) sia frame interamente neri/parziali della vista con Windows collegato; menu con sole icone anche GFX-001. QOM failedfalse/rejected0/occupied0,223pubblicazioni e223ACK, risorse30/peak71: nessuna nuova saturazione dimostrata. Riapertura del solo frontend recupera un'immagine, poi altre transizioni nere; finale desktop completo dopo ripristino wallpaper. Causa del nero intermittente ancora non isolata e recupero non qualificato, nessun reboot/reset/driver modificato. [Evidenze e limiti](VERIFICATION.md#28-ottobre--desktop-nero-sfondo-assente-e-vista-intermittente).
 
 - **28 ottobre, regressione di confezionamento0.2.27 corretta nel caso locale:** prima coppia Venus ometteva l'hook WGC della base qualificata, cachedResources[]/resource-match-or-allocation e reconnect su Notepad. Reintegrato lo stesso wgc-export.inc e rifiuto esplicito nel confezionatore se manca. Nuovo boot normale: Notepad immagine/testo e Creality cubo in finestra Mac con frame reali PASS, cache rilasciata a0 alla chiusura. Questa causa distinta è isolata/corretta; non chiude la precedente saturazione o il recupero generale. [Evidenze positive/negative](VERIFICATION.md#28-ottobre--installazione-opengl-sulla-vm-corrente).
@@ -305,6 +307,10 @@ Il ciclo RAM protetto 4→2→4 GiB con dati conservati resta la qualifica prece
 Queste voci conservano limiti non risolti, senza richiedere di ripristinare codice, dischi o protezioni delle prove eliminate. Il percorso individuale è ripreso dalla nuova richiesta di launcher; i vecchi esperimenti kernel e IVSHMEM restano ritirati. Riprendere una prova tecnica soltanto per una necessità concreta del percorso attivo.
 
 ### GFX-001 — Flicker e cifre mancanti nelle catture WGC
+
+- **Esito0.2.28 negativo per il testo:** menu principale completo dopo il nuovo boot, ma apertura View fa sparire l'etichetta selezionata e mostra il sottomenu con sole icone, persistente nel campione successivo. La protezione host ripristinata non si attiva in questo caso e non è una correzione del contenuto Shell. Prossimo passo: prima costruzione/conservazione della superficie di quel sottomenu, senza dedurre un nuovo problema A8/Wait dalla sola immagine. [Evidenze e fallimenti](VERIFICATION.md#28-ottobre--ripresa-correzione-desktop-e-menu-contestuale).
+
+- **Ripresa correzione28 ottobre:** utente richiede risolvere menu destro/desktop. GDI1920×1280 nel guest riproduce tutte le icone ma nessuna etichetta, come la vista Mac: per questo caso il contenuto è già incompleto prima del presenter. Correzione in corso, nessuna chiusura o causalità Wait/Signal dedotta. [Primo confronto](VERIFICATION.md#28-ottobre--ripresa-correzione-desktop-e-menu-contestuale).
 
 - **28 ottobre, ulteriore rilievo nel desktop0.2.27:** menu contestuale con icone ma testo assente durante la diagnosi del nero; Settings successiva e desktop finale completi. Nessuna causa comune o correzione generale dimostrata; FS-009 corretto separatamente. [Diario](VERIFICATION.md#28-ottobre--desktop-nero-sfondo-assente-e-vista-intermittente).
 
