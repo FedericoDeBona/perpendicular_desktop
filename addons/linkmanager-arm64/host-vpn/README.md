@@ -1,6 +1,6 @@
 # IP LinkManager disponibili sul Mac
 
-Prima implementazione locale del28ottobre2026: normali socket Mac raggiungono gli IP/porte IPv4 scelti passando per Windows. TCP e UDP verificati sullo stesso indirizzo di un endpoint temporaneo Windows, senza proxy configurato nell'app Mac. La configurazione lasciata attiva riguarda **192.168.10.111/32 e 192.168.27.100/32**. Il dispositivo remoto è ancora da provare quando disponibile: non dichiarare riuscita dal solo percorso locale.
+Prima implementazione locale del28ottobre2026: normali socket Mac raggiungono gli IP/porte IPv4 scelti passando per Windows. TCP e UDP verificati sullo stesso indirizzo di un endpoint temporaneo Windows, senza proxy configurato nell'app Mac. La configurazione lasciata attiva riguarda **192.168.10.111/32, 192.168.20.112/32 e 192.168.27.100/32**. Successivamente l'utente conferma accesso remoto da VM/Mac e reconnect; GET192.168.20.112 restituisce HTTP302/199byte da entrambi. Singola risposta HTTP, senza qualifica della pagina/app completa. Qualità su192.168.10.111:5000 e resetrelay ancora da isolare (ADD-004).
 
 ## Percorso effettivo
 
@@ -19,13 +19,13 @@ Per ora gli indirizzi si impostano dal Terminale: non esiste ancora una schermat
 ```sh
 python3 addons/linkmanager-arm64/host-vpn/host_vpn.py status
 python3 addons/linkmanager-arm64/host-vpn/host_vpn.py stop
-python3 addons/linkmanager-arm64/host-vpn/host_vpn.py targets 192.168.10.111 192.168.27.100
+python3 addons/linkmanager-arm64/host-vpn/host_vpn.py targets 192.168.10.111 192.168.20.112 192.168.27.100
 python3 addons/linkmanager-arm64/host-vpn/host_vpn.py start
 ```
 
 Cambiare gli IP richiede TUN fermo: aggiorna allowlist Windows e configurazione Mac, con controllo prima dell'attivazione e copie private delle configurazioni precedenti. `start` verifica VM/UUID, ripristina i soli forwarding QEMU del relay, avvia il task Windows e chiede l'autorizzazione amministrativa macOS per il TUN. Il piccolo supervisore privilegiato esegue un singolo binario con SHA256 fissato; il socket privato dell'utente consente l'arresto. Non installa helper privilegiati permanenti. `stop` chiude TUN, ferma il relay e ritira i due forwarding QEMU; le regole firewall e i file restano per il successivo avvio.
 
-**Verifiche distinte:** supervisore QA→stop→routeTUN ritirate e successivo avvio finale riusciti; riconoscimento dei forwarding già esistenti e task start idempotente verificati. Successivamente eseguito realmente il ciclo completo stop→targets a due IP→start per aggiungere 192.168.27.100, con serializzazione PowerShell corretta e conferma delle allowlist e delle due route attive. Parser/test della logica di scoping PASS. Nessun ciclo reboot, autoavvio, reconnect remoto o rimozione completa qualificato.
+**Verifiche distinte:** supervisore QA→stop→routeTUN ritirate e successivo avvio finale riusciti; riconoscimento dei forwarding già esistenti e task start idempotente verificati. Successivamente eseguito realmente il ciclo completo stop→targets a due IP→start per aggiungere 192.168.27.100, con serializzazione PowerShell corretta e conferma delle allowlist e delle due route attive. Parser/test della logica di scoping PASS. Reconnect LinkManager successivamente verificato con la v4 nella main; reboot, autoavvio e rimozione completa non qualificati. Il terzoIP è stato attivato con check/backup/riavvio relay e reload mirato del TUN già autorizzato, senza introdurre un comando live generale. status controlla soltanto configurazione/route.
 
 ## Preparazione su un'altra macchina
 

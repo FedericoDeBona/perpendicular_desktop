@@ -183,7 +183,7 @@ Move-Item -LiteralPath "$d\server.pending.json" -Destination "$d\server.json" -F
         print(json.dumps({'supervisor_socket':(root/'tun.sock').exists(),
                           'targets':data['inbounds'][0]['route_address'],
                           'protocols':['TCP','UDP'],
-                          'remote_device_verified':False},indent=2))
+                          'status_scope':'configuration_and_routes_only'},indent=2))
         for cidr in data['inbounds'][0]['route_address']:
             subprocess.run(['/sbin/route','-n','get',cidr.split('/')[0]],check=False)
 
