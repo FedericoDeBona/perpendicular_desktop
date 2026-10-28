@@ -499,8 +499,10 @@ Queste voci conservano limiti non risolti, senza richiedere di ripristinare codi
 
 ### APP-001 — Creality / OpenGL
 
-- **Stato:** rinviato su richiesta dell’utente. Apertura in modalità software non qualifica il rendering OpenGL o l’uso completo dell’app.
-- **Prossimo passo / chiusura:** riprendere solo su priorità esplicita o necessità concreta, poi qualificare il percorso reale richiesto.
+**Esito diagnosi28 ottobre:** driver firmato invariato e SecureBoot1; D3D12 rifiutato dal backend, Vulkan ICD diretto enumera0GPU, nessun ICD OpenGL registrato. Primo gate scelto: runtime host isolato con Venus/Vulkan e driver corrente, poi Zink. Diagnosi main circoscritta FATTA, implementazione accelerazione DA FARE; clone/scena app main NON VERIFICATI. Timeout di graphics_info finale, successivo aggiornamento schermi e infine Windows spento conservati nel diario; nessuna stabilità conclusiva o causa dichiarata. [Report](reports/2026-10-28-opengl.md), [evidenze e fallimenti](VERIFICATION.md#28-ottobre--opengl-protetto-diagnosi-dei-prerequisiti).
+
+- **Stato28 ottobre:** ripresa autorizzata, indagine IN CORSO (TODO-014). Secure Boot/CI obbligatoriamente attivi, TESTSIGNING disattivato; superata qualsiasi deroga storica. Apertura software non qualifica accelerazione OpenGL.
+- **Prossimo passo / chiusura:** runtime host isolato Venus con prima GPU Vulkan enumerabile e driver firmato conservato, poi Zink e scena reale. Implementazione e nuova verifica clone/main non ancora eseguite; chiusura solo sul percorso accelerato richiesto.
 - **Evidenze:** [piano](RESTART_PLAN.md) e [prove Creality nel diario](VERIFICATION.md).
 
 ## ADD-001 — Candidata LinkManager non riconosce il TAP OpenVPN
