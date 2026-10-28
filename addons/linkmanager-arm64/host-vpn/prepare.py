@@ -47,14 +47,18 @@ def configs(key, addresses):
     cidrs=targets(addresses)
     method={'type':'shadowsocks','method':'2022-blake3-aes-256-gcm','password':key}
     server={'log':{'level':'warn','timestamp':True},
-            'inbounds':[dict(method,tag='host-in',listen='10.0.2.15',listen_port=10884)],
+            'inbounds':[dict(method,tag='host-in',listen='10.0.2.15',listen_port=10884,
+                             multiplex={'enabled':True})],
             'outbounds':[{'type':'direct','tag':'vpn','bind_interface':'LinkManager Adapter'}],
             'route':{'rules':[{'ip_cidr':cidrs,'action':'route','outbound':'vpn'},{'action':'reject'}]}}
     client={'log':{'level':'warn','timestamp':True},
             'inbounds':[{'type':'tun','tag':'vpn-tun','interface_name':'utun88',
                          'address':['198.18.88.1/30'],'mtu':1400,'auto_route':True,
                          'route_address':cidrs,'dns_mode':'disabled','stack':'gvisor'}],
-            'outbounds':[dict(method,tag='windows-vpn',server='127.0.0.1',server_port=10884)],
+            # A browser opens several flows at once. Keep one local transport
+            # connection so QEMU host forwarding is not hit by an accept burst.
+            'outbounds':[dict(method,tag='windows-vpn',server='127.0.0.1',server_port=10884,
+                              multiplex={'enabled':True,'protocol':'smux','max_connections':1})],
             'route':{'final':'windows-vpn'}}
     return server,client
 

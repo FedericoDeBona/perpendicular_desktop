@@ -2,6 +2,8 @@
 
 Prima implementazione locale del28ottobre2026: normali socket Mac raggiungono gli IP/porte IPv4 scelti passando per Windows. TCP e UDP verificati sullo stesso indirizzo di un endpoint temporaneo Windows, senza proxy configurato nell'app Mac. La configurazione lasciata attiva riguarda **192.168.10.111/32, 192.168.20.112/32 e 192.168.27.100/32**. Successivamente l'utente conferma accesso remoto da VM/Mac e reconnect; GET192.168.20.112 restituisce HTTP302/199byte da entrambi. Singola risposta HTTP, senza qualifica della pagina/app completa. Qualità su192.168.10.111:5000 e resetrelay ancora da isolare (ADD-004).
 
+**Correzione successiva delle risorse web:** raffiche di connessioni TCP sul forwarding locale producevano reset; ora Shadowsocks usa multiplex smux con max_connections1 per riusare un trasporto locale. Nuova visita Chrome192.168.27.100/login completata senza erroriJavaScript; generatore/checknativi e3controlli configurazione PASS. Causa interna del forwarding non dimostrata; timeout5000/affidabilità generale restano ADD-004. UDP non rieseguito dopo questo cambio; le prove echo iniziali restano storiche. [Riproduzione e limiti](../../../docs/VERIFICATION.md#28-ottobre--risorse-javascript-vpn-e-connessioni-parallele).
+
 ## Percorso effettivo
 
 Mac utun88 → relay cifrato loopback10884 → forwarding QEMU sulla NIC esistente → sing-box ARM64 Windows → socket vincolati a LinkManager Adapter → dispositivo. Shadowsocks2022/AES256-GCM con chiave casuale privata: nessuna password dell'utente richiesta o conservata dal relay. Non richiede altre NIC Windows, forwarding/NAT Windows o reboot.

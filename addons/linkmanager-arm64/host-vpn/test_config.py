@@ -12,6 +12,8 @@ class ConfigChecks(unittest.TestCase):
         self.assertEqual(server['route']['rules'][-1],{'action':'reject'})
         self.assertEqual(server['outbounds'][0]['bind_interface'],'LinkManager Adapter')
         self.assertEqual(client['inbounds'][0]['dns_mode'],'disabled')
+        self.assertTrue(server['inbounds'][0]['multiplex']['enabled'])
+        self.assertEqual(client['outbounds'][0]['multiplex']['max_connections'],1)
     def test_no_default_or_broad_networks(self):
         for value in ['0.0.0.0','0.0.0.0/0','192.168.10.0/24','127.0.0.1','224.0.0.1','8.8.8.8']:
             with self.assertRaises(ValueError):targets([value])
