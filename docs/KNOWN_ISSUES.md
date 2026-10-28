@@ -498,3 +498,7 @@ Queste voci conservano limiti non risolti, senza richiedere di ripristinare codi
 - **Stato:** rinviato su richiesta dell’utente. Apertura in modalità software non qualifica il rendering OpenGL o l’uso completo dell’app.
 - **Prossimo passo / chiusura:** riprendere solo su priorità esplicita o necessità concreta, poi qualificare il percorso reale richiesto.
 - **Evidenze:** [piano](RESTART_PLAN.md) e [prove Creality nel diario](VERIFICATION.md).
+
+## ADD-001 — Candidata LinkManager non riconosce il TAP OpenVPN
+
+**Stato: CORRETTO nel perimetro dell'avvio main del28ottobre.** La prima candidata ARM64 con soli HardwareID adattati falliva “Could not open or install LinkManager Adapter” anche con driver sano/servizioRunning e nome scheda corretto. Il Tray filtra anche ProductName/ProviderName: aggiunte le alternative del driver ufficiale negli slot VirtualBox/Sun di Svc/Tray/helper, preservando il pacchetto firmato e l'identità GUID/PnP. Dopo correzione HTTP locale200 e portale “LinkManager: Ready” dopo login/autorizzazione personali. **Criterio di chiusura circoscritto verificato:** client riconosce la NIC candidata e arriva a Ready senza errore adapter. Nessuna chiusura del criterio Ethernet generale TODO-024: utente rinvia il collegamento al dispositivo; rimozione/reinstallazione/reboot e VPN sull'host non qualificati. [Evidenze e fallimenti](VERIFICATION.md#28-ottobre--linkmanager-installazione-protetta-e-portale-ready).

@@ -128,6 +128,48 @@
       "operation": "procedure_pseudo_code"
     },
     {
+      "file": "tray-enumerate-pseudo.json",
+      "sha256": "330d04c302422d8a1e621096c08d1a496784e2f520b547ff6cb5abbd79d38bb6",
+      "evidence_id": "ev_f8228a139bff6425f49ca2dd32377bb6f309270276b8f3ec0de3ee361e6a5fd0",
+      "subject_sha256": "0d78ccee781d9e5b0b85ee805fb4a30f1170d6c0e7080a3de4f6f13c236e45bb",
+      "operation": "procedure_pseudo_code"
+    },
+    {
+      "file": "tray-filter-pseudo.json",
+      "sha256": "6b61fc52819b1d681cbc842b074ceddadc354e62f77c1ae4816438b0cb4b7c01",
+      "evidence_id": "ev_82af3fa920e865370ff05499571d3415775b5eb4f1ffd4e3f0eeb069932e56d1",
+      "subject_sha256": "0d78ccee781d9e5b0b85ee805fb4a30f1170d6c0e7080a3de4f6f13c236e45bb",
+      "operation": "procedure_pseudo_code"
+    },
+    {
+      "file": "tray-find-adapter-pseudo.json",
+      "sha256": "97e33fb65fecc995e7157333447d933a80bf16b3cff2e06285400dbd418aa16d",
+      "evidence_id": "ev_12be71719fec79f43f1ee9e1ee06ceb17caad7106e08291a4336cdf6834beada",
+      "subject_sha256": "0d78ccee781d9e5b0b85ee805fb4a30f1170d6c0e7080a3de4f6f13c236e45bb",
+      "operation": "procedure_pseudo_code"
+    },
+    {
+      "file": "tray-start-error-xrefs.json",
+      "sha256": "795096ca2d77b92630052704abebc38b8d75c1e22fcb357a33f794864408a44b",
+      "evidence_id": "ev_0f0eb8e9d43da19deb44adc8f1672589cea5d3083ef3543c712b97ae62bac6c4",
+      "subject_sha256": "0d78ccee781d9e5b0b85ee805fb4a30f1170d6c0e7080a3de4f6f13c236e45bb",
+      "operation": "xrefs"
+    },
+    {
+      "file": "tray-start-error.json",
+      "sha256": "5da72b3ccc42dc17b9c93ccd4628ff1ab80345294cfc3901e5fb3913dcf57881",
+      "evidence_id": "ev_7817642403a070317981728dc27c4cb4fd9f2660b3f2de30b2b64f0953782f54",
+      "subject_sha256": "0d78ccee781d9e5b0b85ee805fb4a30f1170d6c0e7080a3de4f6f13c236e45bb",
+      "operation": "search_strings"
+    },
+    {
+      "file": "tray-start-pseudo.json",
+      "sha256": "344cdb7be60a6212e319930145c5d27ca15c7b010b3144de46bfacc970ddb332",
+      "evidence_id": "ev_c12d74d6b68a2061d4e75f4a94caab3a646e7b86f406ca50894cf4984bb492fe",
+      "subject_sha256": "0d78ccee781d9e5b0b85ee805fb4a30f1170d6c0e7080a3de4f6f13c236e45bb",
+      "operation": "procedure_pseudo_code"
+    },
+    {
       "file": "tray-xrefs-0x1400e638c.json",
       "sha256": "fdb96dd4287ab8a3ac7c5049c07d7e2bf67c461bffa340e4960be899dc89a9dd",
       "evidence_id": "ev_fc1846308f266f1a3a4c7b81ec85e1263c1e6f61604775c03b1f7f577e6b5512",

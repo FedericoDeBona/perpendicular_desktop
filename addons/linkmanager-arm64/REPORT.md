@@ -1,5 +1,7 @@
 # LinkManager 11.9 su Windows ARM64 — analisi e piano operativo
 
+**Seguito main28ottobre:** driver/kernel ARM64 Running, servizio e client avviati, portale Ready dopo login dell'utente. Corretto filtro prodotto/produttore oltre HardwareID; prova remota rinviata dall'utente e nuovo requisito VPN verso Mac ancora da implementare. [Stato corrente](CANDIDATE.md), TODO-024 e [verifica main](../../docs/VERIFICATION.md#28-ottobre--linkmanager-installazione-protetta-e-portale-ready).
+
 **Aggiornamento28ottobre2026:** ripresa operativa autorizzata. Prima candidata offline con TAP9.27.0 ARM64 ufficiale e12confronti HardwareID adattati, generatore e fase installer driver-only implementati; verifiche offline PASS, Windows/clone/main NON ESEGUITI. Strategia sperimentale scelta; i paragrafi che indicano nessun codice/strategia descrivono lo stato del27ottobre. Stato e passi correnti in [CANDIDATE.md](CANDIDATE.md) e TODO-024. Preparazione senza credenziali su richiesta; portale utente gm5.gate-manager.it/lm, login successivo.
 
 Data: 27 ottobre 2026. Attività principale: [TODO-024](../../docs/TODO.md#todo-024--addon-linkmanager-su-windows-arm64). [Diario delle verifiche](../../docs/VERIFICATION.md#27-ottobre--linkmanager-arm64-analisi-rea-e-piano-addon).

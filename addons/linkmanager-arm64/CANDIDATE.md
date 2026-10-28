@@ -1,12 +1,30 @@
-# Prima candidata Ethernet ARM64 — 28 ottobre 2026
+# Candidata Ethernet ARM64 — stato main del28ottobre2026
 
-Il percorso utente è **aprire https://gm5.gate-manager.it/lm e lasciare che il portale richiami LinkManager**. La preparazione procede senza credenziali; login e connessione reale restano verifiche successive. Non occorre conoscere ora programma/dispositivo industriale per completare la preparazione locale.
+**Installata sulla main93be6687: driver TAP9.27.0 ARM64 Running, servizio LinkManagerSvc Running, client x64 emulato in esecuzione e portale “LinkManager: Ready” dopo login/autorizzazione eseguiti dall'utente.** Nessun riavvio o modifica delle protezioni. Prova di un dispositivo remoto rinviata dall'utente; Ethernet end-to-end, reconnect e nuovo boot restano NON VERIFICATI.
+
+La prima candidata, limitata ai12HardwareID, falliva con “Could not open or install LinkManager Adapter”. Nuova analisi REA del filtro0x140085400: verifica anche ProductName e ProviderName. Il preparatore ora adatta anche6slot dati delle alternative VirtualBox/Sun a TAP-Windows Adapter V9/TAP-Windows Provider V9, lasciando invariati i nomi Secomea e i controlli GUID/PnP. Il solo rename della scheda non bastava; la correzione v2 avvia il client/HTTP locale11445 con risposta200. Driver/INF/CAT invariati, nessuna istruzione eseguibile modificata.
+
+Installazione locale protetta: `C:\ProgramData\Perpendicular\LinkManagerArm64-20261028`, input/output/hash in candidate.json e stato privato in driver-state.json; prima copia user-mode conservata in before-v2. Sola scheda posseduta rinominata LinkManager Adapter. Servizio auto registrato dal proprio -install; client avviato come utente normale con task temporaneo poi eliminato. Collegamento “LinkManager ARM64” nel menu Start. Nessun autoavvio del Tray aggiunto: il servizio automatico non equivale al riavvio del client utente. Non è il setup completo Secomea USB/seriale.
+
+`driver-stage.ps1` è stato eseguito realmente in Windows PowerShell5.1 ARM64: parser/trust/installazione PASS. Apertura TAP e IOCTL GET_VERSION9.27.0, GET_MAC6byte, GET_MTU1500 PASS. Non provato SET_MEDIA_STATUS separatamente. `install-client.ps1` raccoglie la sequenza verificata di identità/nome scheda, servizio, collegamento e avvio limitato; **parser Windows PASS, intera invocazione dello script non ripetuta sulla sessione autenticata**. Nessuna disinstallazione/reinstallazione o prova clone eseguita. Registro e limiti in [VERIFICATION.md](../../docs/VERIFICATION.md#28-ottobre--linkmanager-installazione-protetta-e-portale-ready).
+
+La preparazione definitiva con script client incluso è in QA/linkmanager-20261028/candidate-v3 fuori Git; gli EXE coincidono con la v2 effettivamente avviata. Le cartelle iniziali sulla Scrivania conservano le versioni precedenti. I27record supplementari REA sono verificati dal verifier insieme ai31originari.
+
+## Accesso dal Mac alla VPN Windows
+
+Nuovo obiettivo dell'utente: raggiungere anche dal Mac lo stesso IP remoto, per esempio192.168.10.111. **Con il setup corrente non è disponibile:** QEMU attivo usa netdev user/NAT con il solo guestfwd Samba; Windows ha forwardingIPv4 disabilitato sulle due NIC. Le cartelle condivise non condividono il tunnel.
+
+Per mantenere l'IP originale serve un percorso privato Mac→Windows, route host mirata al dispositivo, inoltro/NAT Windows→TAP e gestione del ritorno. È una strategia da implementare e verificare quando sarà disponibile il dispositivo, non una capacità qualificata dal Ready. Un'alternativa circoscritta è proxy/inoltro di singole porte sulla rete esistente, con indirizzo/porta locali e limiti di protocollo. Nessuna modifica route, NAT, rete VM o Samba eseguita per questa richiesta. Evitare di deviare l'intero traffico Internet Mac; rimuovere route alla disconnessione e valutare sovrapposizioni con la LAN locale. [Rete user-mode QEMU](https://www.qemu.org/docs/master/system/devices/net.html).
+
+## Dettagli della preparazione iniziale (prima della verifica main)
+
+I paragrafi sotto conservano i vincoli e la procedura offline; le indicazioni di mancata verifica descrivono il primo incremento e sono superate, soltanto nel perimetro indicato sopra, dalle prove main.
 
 ## Cosa è implementato
 
-`prepare_candidate.py` prepara fuori dal repository tre copie x64 di LinkManager11.9 con selezione TAP adattata da `lmtap` a `tap0901`, insieme al driver OpenVPN9.27.0 ARM64 ufficiale. Il codice utente resta x64 e richiede l'emulazione Windows. Non è una conversione degli EXE ad ARM64.
+`prepare_candidate.py` prepara fuori dal repository tre copie x64 di LinkManager11.9 con selezione TAP adattata da `lmtap` a `tap0901` e identità OpenVPN accettata, insieme al driver OpenVPN9.27.0 ARM64 ufficiale. Il codice utente resta x64 e richiede l'emulazione Windows. Non è una conversione degli EXE ad ARM64.
 
-Le dodici modifiche occupano slot dati esistenti di12byte, verificati negli input originali; nessuna istruzione o sezione eseguibile cambia. Tutti gli input hanno SHA256 fissato. La directory Authenticode è azzerata e il checksum PE aggiornato: **le copie sono modificate e non più firmate Secomea**. I byte dell'overlay originale sono conservati, ma la sua firma non viene presentata come firma della candidata. Originali nel repository invariati. Nessuna patch al SYS, INF o CAT.
+Le dodici modifiche HardwareID occupano slot dati esistenti di12byte; le sei modifiche prodotto/produttore slot di24byte, verificati negli input originali; nessuna istruzione o sezione eseguibile cambia. Tutti gli input hanno SHA256 fissato. La directory Authenticode è azzerata e il checksum PE aggiornato: **le copie sono modificate e non più firmate Secomea**. I byte dell'overlay originale sono conservati, ma la sua firma non viene presentata come firma della candidata. Originali nel repository invariati. Nessuna patch al SYS, INF o CAT.
 
 `driver-stage.ps1` è la prima fase sperimentale dell'installer, limitata al driver: Inspect (predefinito, sola lettura), Install, Remove. Usa DevCon ARM64 incluso nel pacchetto ufficiale; verifica hash, trust Authenticode Windows di CAT/SYS e, prima di mutare, privilegi, Secure Boot e Code Integrity/TestSigning. Rifiuta schede TAP0901 già presenti, comprese quelle non collegate. Registra stato prima/dopo, route/DNS precedenti e l'istanza creata; Remove riguarda soltanto quella istanza. Nessun reboot automatico, modifica route/DNS, arresto servizi o esecuzione del setup LinkManager. Il pacchetto nel Driver Store è conservato dopo Remove, perciò non è ancora una disinstallazione completa. Stato e snapshot rete rimangono privati nella directory generata.
 

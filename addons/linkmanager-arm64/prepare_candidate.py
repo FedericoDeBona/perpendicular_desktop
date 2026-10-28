@@ -21,6 +21,16 @@ INPUTS = {
     'tapmgr.exe': ('a3315c2123e8ebc510d540b752ab356c6b5eeff0034c531d3454a5b0a6a0e130',
                     [0x1abfc, 0x1b0bc, 0x1b284, 0x1b534]),
 }
+# Product/provider filters found in addition to HardwareID selection.
+# Reuse the two legacy VirtualBox/Sun alternatives, preserving Secomea strings.
+IDENTITY_SLOTS = {
+    INPUTS['LinkManagerSvc.exe'][0]: (0x1c1c0, 0x1c200),
+    INPUTS['LinkManagerTray.exe'][0]: (0xe4e00, 0xe4e40),
+    INPUTS['tapmgr.exe'][0]: (0x1aa70, 0x1aab0),
+}
+IDENTITY_VALUES = [(b'VirtualBox TAP Adapter', b'TAP-Windows Adapter V9'),
+                   (b'Sun Microsystems, Inc.', b'TAP-Windows Provider V9')]
+
 DRIVER = {
     'OemVista.inf': '87a47a05eab6428efbafc7324366fe951a3b5f0693247736b2c75d7d3adda891',
     'tap0901.cat': '28821d476a4708b2e530d9952ca6b13b7af10cd8d1b6a953f72a6056727cac07',
@@ -79,6 +89,14 @@ def patch(data, expected_hash, offsets):
                 'Patch outside read-only data section')
         require(data[offset:offset+12] == b'lmtap'+b'\0'*7, 'HardwareID slot changed')
         output[offset:offset+8] = b'tap0901\0'
+    identity_ranges = []
+    for offset, (old, new) in zip(IDENTITY_SLOTS[expected_hash], IDENTITY_VALUES):
+        require(any(start <= offset and offset+24 <= end for start, end in ranges),
+                'Identity patch outside read-only data section')
+        require(data[offset:offset+24] == old+b'\0'*(24-len(old)), 'Identity slot changed')
+        require(len(new) < 24, 'Identity replacement too long')
+        output[offset:offset+24] = new+b'\0'*(24-len(new))
+        identity_ranges.extend(range(offset, offset+24))
     # Do not present the original Authenticode certificate as a valid signature
     # on modified code. Keep the overlay bytes so every other file byte is stable.
     security = optional+112+4*8
@@ -87,6 +105,7 @@ def patch(data, expected_hash, offsets):
     check_offset = optional+64
     struct.pack_into('<I', output, check_offset, checksum(output, check_offset))
     allowed = set(range(security, security+8)) | set(range(check_offset, check_offset+4))
+    allowed.update(identity_ranges)
     for offset in offsets:
         allowed.update(range(offset, offset+8))
     require(len(output) == len(data), 'PE length changed')
@@ -109,6 +128,7 @@ def build(archive, destination):
         files['user-mode-x64/'+name] = result
         patches.append({'file': name, 'input_sha256': expected,
                         'output_sha256': digest(result), 'file_offsets': offsets,
+                        'identity_file_offsets': list(IDENTITY_SLOTS[expected]),
                         'original_security_directory': security,
                         'signature': 'unsigned modified candidate; not Secomea signed'})
     with zipfile.ZipFile(archive) as zipped:
@@ -118,7 +138,8 @@ def build(archive, destination):
             if name.endswith(('.sys', '.exe')):
                 pe_headers(content, 0xaa64)
             files['driver-arm64/'+name] = content
-    files['driver-stage.ps1'] = (ROOT/'driver-stage.ps1').read_bytes()
+    for script in ['driver-stage.ps1', 'install-client.ps1']:
+        files[script] = (ROOT/script).read_bytes()
     manifest = {
         'schema': 1, 'status': 'experimental, not runtime-qualified',
         'user_mode_machine': 'x64 emulated; NOT converted to ARM64',
@@ -127,7 +148,7 @@ def build(archive, destination):
         'patches': patches,
         'files': {name: {'sha256': digest(value), 'size': len(value)}
                   for name, value in files.items()},
-        'limitations': ['No LinkManager service registration or full vendor setup',
+        'limitations': ['Vendor USB/serial/setup integration not implemented',
                         'SetupDi lifecycle from emulated processes not qualified',
                         'No Windows signature trust or driver load verification',
                         'No portal login or Ethernet traffic verification'],
@@ -155,7 +176,7 @@ def main():
     args = parser.parse_args()
     manifest = build(args.tap_archive, args.output)
     print('Prepared experimental candidate: '+str(args.output.resolve()))
-    print('12 pinned data slots patched; ARM64 driver preserved byte for byte.')
+    print('12 HardwareID and 6 product/provider slots patched; ARM64 driver preserved byte for byte.')
     print('No Windows code executed. Runtime/portal verification NOT performed.')
     return manifest
 
