@@ -207,6 +207,7 @@ final class ApplicationContent:NSView {
         chord([0x11,key])
     }
     private func chord(_ keys:[Int]){emit(["event":"chord","keys":keys]);modifiers.removeAll();virtualKeys.removeAll()}
+    @objc func closeDocument(_ sender:Any?){shortcut(0x57)}
     override func selectAll(_ sender:Any?){shortcut(0x41)}
     @objc func copy(_ sender:Any?){emit(["event":"clipboard","action":"copy"])}
     @objc func paste(_ sender:Any?){emit(["event":"clipboard","action":"paste"])}

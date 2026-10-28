@@ -746,7 +746,7 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
         let pasteboard=NSPasteboard.general,version=pasteboard.changeCount
         var request:[String:Any]=["window":id,"action":action]
         if action == "paste" {
-            guard let text=pasteboard.string(forType:.string),!text.contains("\0"),text.utf8.count<=262_144 else {
+            guard !pasteboard.canReadObject(forClasses:[NSURL.self],options:[.urlReadingFileURLsOnly:true]),let text=pasteboard.string(forType:.string),!text.contains("\0"),text.utf8.count<=262_144 else {
                 onError?("Gli appunti devono contenere testo, fino a 256 KB.");return
             }
             request["text"]=text

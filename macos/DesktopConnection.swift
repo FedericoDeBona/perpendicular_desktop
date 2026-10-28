@@ -62,6 +62,9 @@ final class DesktopConnection:@unchecked Sendable {
     func key(_ symbol:UInt32,down:Bool){
         send([4,down ? 1:0,0,0,UInt8(symbol>>24),UInt8((symbol>>16)&255),UInt8((symbol>>8)&255),UInt8(symbol&255)])
     }
+    func inputSubmitted(_ completion:@escaping @MainActor @Sendable ()->Void){
+        writes.async {Task{@MainActor in completion()}}
+    }
     func setScreens(_ screens:[DesktopScreen],reconnectMonitor:Bool=false,submitted:(@MainActor @Sendable ()->Void)?=nil){
         guard !screens.isEmpty,screens.count<=16 else{return}
         let width=screens.map{$0.x+$0.width}.max() ?? 0,height=screens.map{$0.y+$0.height}.max() ?? 0

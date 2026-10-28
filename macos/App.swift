@@ -229,7 +229,10 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
     func applicationShouldHandleReopen(_ sender:NSApplication,hasVisibleWindows flag:Bool)->Bool{showApplications();return false}
     @objc func showApplications(){launcher.makeKeyAndOrderFront(nil);NSApp.activate(ignoringOtherApps:true);NotificationCenter.default.post(name:.launcherFocusSearch,object:nil)}
     @objc func showSettings(){launcher.makeKeyAndOrderFront(nil);NSApp.activate(ignoringOtherApps:true);NotificationCenter.default.post(name:.launcherShowSettings,object:nil)}
-    @objc func closeCurrentWindow(){(NSApp.keyWindow ?? NSApp.mainWindow)?.performClose(nil)}
+    @objc func closeCurrentWindow(){
+        if NSApp.sendAction(NSSelectorFromString("closeDocument:"),to:nil,from:self){return}
+        (NSApp.keyWindow ?? NSApp.mainWindow)?.performClose(nil)
+    }
     func applicationWillTerminate(_ notification:Notification){machineStateTask?.cancel();memoryController?.stop();localControl?.stop();bridge?.command("release");machine?.closeDesktop()}
     var desktopAvailable:Bool {machine != nil}
     var canStartWindows:Bool {machine != nil && machineState == .stopped && machineOperation == nil && !restarting}
@@ -306,6 +309,7 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
     }
     private func configureMachineControllers(){
         memoryController?.stop();memoryController=nil;vmMemoryState=[:]
+        machine.desktopClipboardBridge=bridge
         machine.onDesktopSize={ [weak self] size in self?.desktopSize=size;self?.scheduleDesktopResize() }
         machine.onDesktopInput={ [weak self] in
             self?.desktopRecoveryTask?.cancel()

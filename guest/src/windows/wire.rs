@@ -223,6 +223,6 @@ pub fn read(stream: &mut TcpStream) -> Result<Value, String> {
     let mut bytes = vec![0; size];
     stream.read_exact(&mut bytes).map_err(super::error)?;
     let value:Value=serde_json::from_slice(&bytes).map_err(super::error)?;
-    if size>16384 && value["operation"]!="clipboard" {return Err("invalid command size".into());}
+    if size>16384 && value["operation"]!="clipboard" && value["operation"]!="desktop_clipboard" {return Err("invalid command size".into());}
     Ok(value)
 }

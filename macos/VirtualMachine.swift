@@ -54,6 +54,7 @@ final class VirtualMachineController {
     private var machine: Process?
     private var tpm: Process?
     var onDesktopSize:((NSSize)->Void)?
+    var desktopClipboardBridge:GuestBridge?
     var onDesktopInput:(()->Void)?
     var desktopState:[String:Any] {desktop?.state ?? ["visible":false]}
     private var desktop:DesktopWindow?
@@ -182,7 +183,7 @@ final class VirtualMachineController {
         try await start()
         if let launch=desktopLaunch() {
             if desktop == nil {desktop=try DesktopWindow(socket:launch.socket,endpoint:{[weak self] in self?.desktopLaunch()?.native},resized:{[weak self] size in self?.onDesktopSize?(size)},input:{[weak self] in self?.onDesktopInput?()})}
-            desktop?.show();return
+            desktop?.configureClipboard(desktopClipboardBridge);desktop?.show();return
         }
         let path=directory.appendingPathComponent("qemu-system-aarch64.pid")
         guard let text=try? String(contentsOf:path,encoding:.utf8),let pid=Int32(text),

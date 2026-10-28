@@ -741,6 +741,25 @@ impl Worker {
                 self.snapshot(outbox);
                 Ok(json!({}))
             }
+            "desktop_clipboard" => {
+                let foreground=unsafe {GetForegroundWindow()}.0 as usize;
+                match value["action"].as_str().unwrap_or("") {
+                    "prepare" => Ok(json!({"sequence":clipboard::sequence(),"foreground":foreground})),
+                    "write" => {
+                        clipboard::write(value["text"].as_str().ok_or("Missing clipboard text")?)?;
+                        Ok(json!({}))
+                    },
+                    "read" => {
+                        let expected=value["foreground"].as_u64().ok_or("Missing clipboard focus")? as usize;
+                        if foreground==0 || foreground!=expected {return Err("Clipboard focus changed".into());}
+                        let previous=value["sequence"].as_u64().ok_or("Missing clipboard sequence")? as u32;
+                        let text=clipboard::read_after(previous)?;
+                        if unsafe {GetForegroundWindow()}.0 as usize!=expected {return Err("Clipboard focus changed".into());}
+                        Ok(json!({"text":text}))
+                    },
+                    _ => Err("Unsupported clipboard action".into()),
+                }
+            }
             "release" => {
                 self.release();
                 Ok(json!({}))

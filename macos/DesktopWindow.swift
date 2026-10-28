@@ -6,6 +6,10 @@ private final class DesktopSurface:NSView {
     var onResize:(()->Void)?
     var onUserInput:(()->Void)?
     var connection:DesktopConnection?
+    var bridge:GuestBridge?
+    private var clipboardRequest:UUID?
+    private var clipboardBusy=false
+    private var consumed=Set<UInt16>()
     var inputScreen=DesktopScreen(id:0,x:0,y:0,width:800,height:600)
     var source=NSSize(width:800,height:600)
     private var buttons:UInt8=0
@@ -60,20 +64,103 @@ private final class DesktopSurface:NSView {
         if (0xf704...0xf70f).contains(value){return 0xffbe+(value-0xf704)}
         return 0x01000000|value
     }
-    override func keyDown(with event:NSEvent){if let value=symbol(event){keys[event.keyCode]=value;connection?.key(value,down:true);onUserInput?()}}
-    override func keyUp(with event:NSEvent){if let value=keys.removeValue(forKey:event.keyCode) ?? symbol(event){connection?.key(value,down:false)}}
-    override func flagsChanged(with event:NSEvent){
+    private func chord(_ values:[UInt32]){
+        releaseInput()
+        for value in values {connection?.key(value,down:true)}
+        for value in values.reversed(){connection?.key(value,down:false)}
+        onUserInput?()
+    }
+    @objc func closeDocument(_ sender:Any?){chord([0xffe3,0x77])}
+    override func selectAll(_ sender:Any?){chord([0xffe3,0x61])}
+    @objc func copy(_ sender:Any?){transferClipboard("copy")}
+    @objc func cut(_ sender:Any?){transferClipboard("cut")}
+    @objc func paste(_ sender:Any?){transferClipboard("paste")}
+    private func clipboardError(_ message:String){
+        guard let window else{return}
+        let alert=NSAlert();alert.messageText="Appunti";alert.informativeText=message;alert.beginSheetModal(for:window)
+    }
+    private func transferClipboard(_ action:String){
+        guard !clipboardBusy,window?.isKeyWindow == true,window?.firstResponder === self,let bridge else{return}
+        let board=NSPasteboard.general,version=board.changeCount,nonce=UUID()
+        var request:[String:Any]=["action":action == "paste" ? "write":"prepare"]
+        if action == "paste" {
+            guard !board.canReadObject(forClasses:[NSURL.self],options:[.urlReadingFileURLsOnly:true]),let text=board.string(forType:.string),!text.contains("\0"),text.utf8.count<=262_144 else{
+                clipboardError("Il trasferimento supporta testo fino a 256 KB. I file non sono ancora supportati.");return
+            }
+            request["text"]=text
+        }
+        releaseInput();clipboardRequest=nonce;clipboardBusy=true
+        bridge.command("desktop_clipboard",request,timeout:.seconds(3)){[weak self] result in
+            guard let self,self.clipboardRequest == nonce else{return}
+            guard self.window?.isKeyWindow == true else{self.clipboardBusy=false;return}
+            guard case .success(let reply)=result,let value=reply["value"] as? [String:Any] else{
+                self.clipboardBusy=false
+                if case .failure(let error)=result {self.clipboardError(error.localizedDescription)}
+                return
+            }
+            self.chord([0xffe3,action == "paste" ? 0x76:action == "cut" ? 0x78:0x63])
+            if action == "paste" {self.clipboardBusy=false;return}
+            self.connection?.inputSubmitted{[weak self] in
+                guard let self,self.clipboardRequest == nonce,self.window?.isKeyWindow == true else{return}
+                bridge.command("desktop_clipboard",["action":"read","sequence":value["sequence"] ?? 0,"foreground":value["foreground"] ?? 0],timeout:.seconds(3)){[weak self] result in
+                    guard let self,self.clipboardRequest == nonce else{return}
+                    self.clipboardBusy=false
+                    guard self.window?.isKeyWindow == true else{return}
+                    guard case .success(let reply)=result,let value=reply["value"] as? [String:Any],let text=value["text"] as? String else{
+                        if case .failure(let error)=result {self.clipboardError(error.localizedDescription)}
+                        return
+                    }
+                    guard board.changeCount == version else{self.clipboardError("Gli appunti Mac sono cambiati durante la copia; li ho conservati.");return}
+                    board.clearContents();board.setString(text,forType:.string)
+                }
+            }
+        }
+    }
+    override func performKeyEquivalent(with event:NSEvent)->Bool{
+        guard window?.isKeyWindow == true,window?.firstResponder === self,event.modifierFlags.contains(.command) else{return false}
+        if [4,46,48,49,50,43].contains(event.keyCode) || (event.keyCode == 3 && event.modifierFlags.contains(.control)){return false}
+        keyDown(with:event);return true
+    }
+    override func keyDown(with event:NSEvent){
+        guard !clipboardBusy else{return}
+        let flags=event.modifierFlags,shift:[UInt32]=flags.contains(.shift) ? [0xffe1]:[]
+        if flags.contains(.command),!flags.contains(.control),!flags.contains(.option){
+            consumed.insert(event.keyCode)
+            switch event.keyCode {
+            case 8:if !event.isARepeat {copy(nil)};return
+            case 7:if !event.isARepeat {cut(nil)};return
+            case 9:if !event.isARepeat {paste(nil)};return
+            case 12:if !event.isARepeat {chord([0xffe9,0xffc1])};return
+            case 6 where flags.contains(.shift):chord([0xffe3,0x79]);return
+            case 123:chord(shift+[0xff50]);return
+            case 124:chord(shift+[0xff57]);return
+            case 126:chord(shift+[0xffe3,0xff50]);return
+            case 125:chord(shift+[0xffe3,0xff57]);return
+            case 51:chord([0xffe1,0xff50]);chord([0xff08]);return
+            default:if let value=symbol(event){chord(shift+[0xffe3,value])};return
+            }
+        }
+        if flags.contains(.option),!flags.contains(.command),!flags.contains(.control),[51,117,123,124].contains(event.keyCode),let value=symbol(event){
+            consumed.insert(event.keyCode);chord(shift+[0xffe3,value]);return
+        }
+        synchronizeModifiers(flags)
+        if let value=symbol(event){keys[event.keyCode]=value;connection?.key(value,down:true);onUserInput?()}
+    }
+    override func keyUp(with event:NSEvent){if consumed.remove(event.keyCode) != nil{return};if let value=keys.removeValue(forKey:event.keyCode){connection?.key(value,down:false)}}
+    override func flagsChanged(with event:NSEvent){if !clipboardBusy {synchronizeModifiers(event.modifierFlags)}}
+    private func synchronizeModifiers(_ flags:NSEvent.ModifierFlags){
         var next=Set<UInt32>()
         // Match the application-window convention: Command is Control in the
         // guest. AppKit can consume Command shortcuts without tapping Windows
         // and accidentally opening Start when the console loses focus.
         for (flag,key):(NSEvent.ModifierFlags,UInt32) in [(.shift,0xffe1),(.control,0xffe3),(.option,0xffe9),(.command,0xffe3)] {
-            if event.modifierFlags.contains(flag){next.insert(key)}
+            if flags.contains(flag){next.insert(key)}
         }
         for key in modifiers.subtracting(next){connection?.key(key,down:false)}
         for key in next.subtracting(modifiers){connection?.key(key,down:true)}
         modifiers=next
     }
+    func cancelClipboard(){clipboardRequest=nil;clipboardBusy=false}
     func releaseInput(){
         for key in Set(keys.values).union(modifiers){connection?.key(key,down:false)}
         keys.removeAll();modifiers.removeAll();buttons=0
@@ -110,13 +197,14 @@ final class DesktopWindow:NSObject,NSWindowDelegate {
         window.backgroundColor = .black
         window.minSize=NSSize(width:480,height:320);window.acceptsMouseMovedEvents=true
     }
+    func configureClipboard(_ bridge:GuestBridge?){surface.bridge=bridge}
     func show(){
         visible=true;window.makeKeyAndOrderFront(nil);window.makeFirstResponder(surface)
         NSApp.activate(ignoringOtherApps:true);connect();surface.onResize?()
         if timer == nil {timer=Timer.scheduledTimer(withTimeInterval:1,repeats:true){[weak self] _ in Task{@MainActor in self?.connect()}}}
     }
     func stop(){
-        visible=false;timer?.invalidate();timer=nil;surface.releaseInput()
+        visible=false;timer?.invalidate();timer=nil;surface.cancelClipboard();surface.releaseInput()
         connectionID=nil;readerID=nil;surface.connection=nil
         desktop?.stop();desktop=nil;native?.stop();native=nil;nativeActive=false;surface.renderer.clear()
     }
@@ -156,5 +244,5 @@ final class DesktopWindow:NSObject,NSWindowDelegate {
         }
     }
     func windowWillClose(_ notification:Notification){stop()}
-    func windowDidResignKey(_ notification:Notification){surface.releaseInput()}
+    func windowDidResignKey(_ notification:Notification){surface.cancelClipboard();surface.releaseInput()}
 }
