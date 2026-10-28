@@ -131,6 +131,8 @@ Il ciclo RAM protetto 4→2→4 GiB con dati conservati resta la qualifica prece
 
 ### FS-005 — Scadenza backend durante il consenso macOS alle cartelle
 
+- **28 ottobre, nuova distribuzione locale0.2.28:** TCC richiede di nuovo il consenso Scrivania dopo cambio firma; app responsiva ma avvio fermo in opendir in attesa della risposta. Non osservata scadenza backend, criterio storico conservato; installazione Windows da riprendere dopo Consenti. [Evidenze](VERIFICATION.md#28-ottobre--pull-rebuild-0228-sulla-iot0795218c-in-attesa-del-consenso-macos).
+
 - **Stato:** corretto e verificato nell'avvio reale0.2.23 della main, nessun clone.
 - **Riproduzione:** due avvii non arrivano a QEMU: daemon Scrivania senza socket dopo5s; log TCC conferma AUTHREQ_PROMPTING DesktopFolder per Perpendicular. Attesa terminata prima della risposta al consenso.
 - **Correzione:** apertura directory dall'app su task separato prima della scadenza socket; macOS attende il consenso senza bloccare la UI, accesso negato produce errore specifico.
