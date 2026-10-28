@@ -209,6 +209,8 @@ Conservare dimensione percepita 1:1, controlli Windows sulle finestre principali
 
 ## TODO-003 — Gli stessi file Mac anche in Windows
 
+**28 ottobre — limite riferimenti esterni FS-009:** dopo il cambio Download, wallpaper conserva il vecchio percorso e il JPEG non è nel Download Mac; originale integro nel backup. Ripristino manuale main del solo sfondo FATTO con copia/hash e immagine finale verificati; nessuna modifica alle cartelle o al backup. Migrazione automatica dei riferimenti e altri collegamenti DA FARE se estesi a requisito; clone NON ESEGUITO. Prossimo passo concreto: preservare i riferimenti realmente usati prima del cambio cartella, con immagine/file finale leggibile. Non chiude GFX-004, nero intermittente distinto. [Evidenze](VERIFICATION.md#28-ottobre--desktop-nero-sfondo-assente-e-vista-intermittente).
+
 **28 ottobre — stato corrente:** passaggio a SMB0.2.25 completato/distribuito nella main; implementazione/build e clone mirato PASS, sei percorsi/byte bidirezionali/rinomina immediata/ciclo UI off-on con boot/Explorer PASS. Ritiro vecchi componenti verificato dopo boot, FS-007/008 corretti, soli sette probe eliminati e dati locali preservati. Requisito della migrazione FATTO; parità generale TODO-003 IN CORSO per semantiche ulteriori. Prossimo passo solo su requisito concreto (notifiche/locking/iCloud/altri profili), nessuna prestazione dedotta. [Diario](VERIFICATION.md#28-ottobre--migrazione-da-virtiofs-a-smbsamba).
 
 **Storico verificato del trasporto precedente:**

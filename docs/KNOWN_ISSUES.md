@@ -95,6 +95,12 @@ Il ciclo RAM protetto 4→2→4 GiB con dati conservati resta la qualifica prece
 
 ## Problemi pertinenti al desktop
 
+### FS-009 — Sfondo conserva il percorso del vecchio Download locale
+
+- **28 ottobre, correzione manuale main verificata:** wallpaper punta a un JPEG assente nel Download ora condiviso; file originale integro nel backup locale precedente. Recuperata copia byte-identica in LOCALAPPDATA\Perpendicular\Wallpapers e aggiornato il riferimento Windows; sfondo originale visibile con icone/taskbar, stessa VM4552/configurazione, nessun reboot o cambio driver/protezioni. Nessun file del backup perso o eliminato.
+- **Perimetro:** caso sfondo main CORRETTO; migrazione automatica dei riferimenti e altri file collegati NON IMPLEMENTATI/VERIFICATI, clone non eseguito. Prossimo passo se esteso: preservare i riferimenti effettivamente utilizzati prima del cambio cartella; chiusura generale solo con quel percorso qualificato. Il nero intermittente dell'intera vista resta distinto in GFX-004.
+- **Evidenze:** [diagnosi/ripristino e limiti](VERIFICATION.md#28-ottobre--desktop-nero-sfondo-assente-e-vista-intermittente).
+
 ### FS-008 — Riconnessione SMB rifiutata dopo nuovo avvio Windows
 
 - **Stato:** CORRETTO0.2.25 e verificato nella main nel task ripetuto e successivo nuovo boot a sei cartelle.
@@ -175,6 +181,8 @@ Il ciclo RAM protetto 4→2→4 GiB con dati conservati resta la qualifica prece
 - **Evidenze:** [rapporto dettagliato](reports/2026-10-25-explorer-opening.md), [diario](VERIFICATION.md#25-ottobre--analisi-apertura-explorer-nel-desktop-vm).
 
 ### GFX-004 — Risorse grafiche indisponibili e recupero incompleto
+
+- **28 ottobre, segnalazione desktop nero dopo0.2.27:** osservati sia il solo sfondo assente (FS-009, ripristinato) sia frame interamente neri/parziali della vista con Windows collegato; menu con sole icone anche GFX-001. QOM failedfalse/rejected0/occupied0,223pubblicazioni e223ACK, risorse30/peak71: nessuna nuova saturazione dimostrata. Riapertura del solo frontend recupera un'immagine, poi altre transizioni nere; finale desktop completo dopo ripristino wallpaper. Causa del nero intermittente ancora non isolata e recupero non qualificato, nessun reboot/reset/driver modificato. [Evidenze e limiti](VERIFICATION.md#28-ottobre--desktop-nero-sfondo-assente-e-vista-intermittente).
 
 - **28 ottobre, regressione di confezionamento0.2.27 corretta nel caso locale:** prima coppia Venus ometteva l'hook WGC della base qualificata, cachedResources[]/resource-match-or-allocation e reconnect su Notepad. Reintegrato lo stesso wgc-export.inc e rifiuto esplicito nel confezionatore se manca. Nuovo boot normale: Notepad immagine/testo e Creality cubo in finestra Mac con frame reali PASS, cache rilasciata a0 alla chiusura. Questa causa distinta è isolata/corretta; non chiude la precedente saturazione o il recupero generale. [Evidenze positive/negative](VERIFICATION.md#28-ottobre--installazione-opengl-sulla-vm-corrente).
 
@@ -297,6 +305,8 @@ Il ciclo RAM protetto 4→2→4 GiB con dati conservati resta la qualifica prece
 Queste voci conservano limiti non risolti, senza richiedere di ripristinare codice, dischi o protezioni delle prove eliminate. Il percorso individuale è ripreso dalla nuova richiesta di launcher; i vecchi esperimenti kernel e IVSHMEM restano ritirati. Riprendere una prova tecnica soltanto per una necessità concreta del percorso attivo.
 
 ### GFX-001 — Flicker e cifre mancanti nelle catture WGC
+
+- **28 ottobre, ulteriore rilievo nel desktop0.2.27:** menu contestuale con icone ma testo assente durante la diagnosi del nero; Settings successiva e desktop finale completi. Nessuna causa comune o correzione generale dimostrata; FS-009 corretto separatamente. [Diario](VERIFICATION.md#28-ottobre--desktop-nero-sfondo-assente-e-vista-intermittente).
 
 - **27 ottobre, main locale93be6687/0.2.16:** Start si apre realmente al clic ma mostra icone/sezioni senza numerose etichette e senza pannello completo. Nuova osservazione sul desktop diretto, non solo WGC; nessuna causa comune dimostrata o correzione applicata. Notepad osservata completa nel breve percorso. [Evidenze](VERIFICATION.md#27-ottobre--rebuild-e-guest-tools-0216-sul-mac-93be6687).
 
