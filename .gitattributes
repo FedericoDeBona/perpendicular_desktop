@@ -4,3 +4,4 @@ graphics/monitor/*.patch whitespace=-blank-at-eol
 experimental/wgc-gpu/*.patch whitespace=-blank-at-eol
 filesystem/*.patch whitespace=-blank-at-eol
 memory/qemu/*.patch whitespace=-blank-at-eol
+graphics/opengl/*.patch whitespace=-blank-at-eol,-blank-at-eof

@@ -1,6 +1,6 @@
 # Piano di lavoro — desktop Windows su Mac
 
-**28 ottobre — incremento OpenGL:** scena minima WGL GPU ARM64 nel clone protetto PASS: Zink25.1.9, shader/profondità/readback/pixel finestra ed erroriGL0. Correzioni user-mode di memoria/ordine, presentazione GDI e workaround MoltenVK dietro Venus. Kernel firmato e protezioni invariati. Prossimo gate x64/Creality; main non distribuita, funzioni Vulkan mancanti e affidabilità generale restano aperte. [Evidenze](VERIFICATION.md#28-ottobre--wgl-zink-e-requisiti-del-backend-mac).
+**28 ottobre — incremento OpenGL verificato nel clone protetto:** scene GPU ARM64/x64 e Creality7.3/cubo20mm PASS, kernel originale/SecureBoot/CI attivi e TESTSIGNINGfalse. Candidate user-mode Zink25.1.9/Venus con presentazione GDI. Rimangono map23379200byte/0xc000009a e funzioni Vulkan mancanti; nessuna conformità o affidabilità generale. Prossimo gate: isolamento mapping, registrazione multiarch/confezionamento e scena main; nessuna distribuzione ordinaria. Clone ripristinato/spento normalmente, main invariata/collegata. [Evidenze](VERIFICATION.md#28-ottobre--wgl-zink-e-requisiti-del-backend-mac).
 
 **28 ottobre — nuova priorità OpenGL (TODO-014/APP-001):** ripresa autorizzata. Secure Boot e CI attivi e TESTSIGNING disattivato sono vincoli inderogabili, prevalenti sulle deroghe storiche. Misurare prima il percorso effettivo e valutare librerie user-mode sopra il driver firmato. REA Parallels solo se necessario per una domanda concreta. Nessuna accelerazione OpenGL ancora qualificata; le menzioni di rinvio sotto sono storiche.
 
