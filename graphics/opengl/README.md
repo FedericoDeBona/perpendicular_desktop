@@ -4,6 +4,12 @@ Obiettivo: OpenGL accelerato con kernel ARM64 v0.4 originale Microsoft-signed, S
 
 **Stato corrente28 ottobre —0.2.27 installata sulla VM ordinaria:** shader/profondità/pixel finestra ARM64/x64 PASS da librerie installate; Creality7.3 ordinario dal launcher reale importa e renderizza il cubo20mm anche nella finestra Mac2177×1191. Kernel originale e Secure Boot/CI conservati, TESTSIGNINGfalse. Presentazione GDI con readback suddiviso; funzioni Vulkan mancanti e compatibilità generale ancora aperte. [Evidenze e limiti main](../../docs/VERIFICATION.md#28-ottobre--installazione-opengl-sulla-vm-corrente). I paragrafi successivi conservano le tappe precedenti nel clone.
 
+## Texture grandi0.2.31
+
+`windows-zink-bounded-upload.patch` evita un singolo mapping CPU dell’atlante RGBA4096×6854 di Creality: il fallback Zink Windows `texture_subdata` suddivide texture2D non compresse/profondità1 in fasce con obiettivo2MiB e attende la conclusione fra le fasce per riusare lo staging. Dimensione, dati, offset e stride della texture restano invariati; niente aumento risorse o capacità artificiali. Non corregge tutti i percorsi map/GetTexImage o texture compresse/array/3D.
+
+Il probe `--atlas` usa gli stessi112295936byte, li rilegge integralmente da FBO per fasce e verifica un disegno con campionamento texture/profondità.0.2.30 fallisce map/contenuto; candidata x64 e ARM64 passano, MSAA4x/resolve conservato. Creality Seamless sulla candidata torna leggibile, magenta GDI1171→0/10005. Profilo riproducibile `releases/0.2.31-darwin-arm64.json`; distribuzione versionata/firma/hash e scena cubo Seamless main verificate. Shell/Settings e prestazioni generali non qualificati. [Diario, limiti e tentativi negativi](../../docs/VERIFICATION.md#28-ottobre--texture-grandi-e-testi-magenta-opengl0231).
+
 ## Correzione multisample0.2.30
 
 Su AppleM1 il resolve4x del blitter Gallium generava OpName `sampler`, in conflitto con il tipo Metal del traduttore MoltenVK1.4.2. `zink-moltenvk-sampler-name.patch` su Mesa25.1.9 rinomina solo quel metadato in `zink_sampler`, mantenendo istruzioni e binding. Profilo `releases/0.2.30-darwin-arm64.json`, host/Venus invariati. Probe `--msaa`: fallimento prima, ARM64/x64 PASS dopo; Creality/cubo Desktop e Seamless main PASS nel perimetro della scena, ma glyph e controlli magenta in Seamless mantengono aperta la resa completa. [Diario](../../docs/VERIFICATION.md#28-ottobre--correzione-msaa-opengl0230-e-recupero-cartelle-sulla-iot0795218c).

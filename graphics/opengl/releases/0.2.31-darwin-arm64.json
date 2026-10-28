@@ -1,0 +1,47 @@
+{
+  "schema": 1,
+  "version": "0.2.31",
+  "mesa_vulkan_source": "bf536bba65454900d782fa7417bc95c1608d7483",
+  "mesa_gallium_version": "25.1.9",
+  "moltenvk_version": "1.4.2",
+  "base_native_manifest_sha256": "19b314dbddc03a840d46616b5c04ce7f8219ab1c7eed512612bbfa577ca8284f",
+  "files": {
+    "arm64/libgallium_wgl.dll": "f78c64e0237c0231757b287501302430d1db5ce5b7503beefd7c4705892824ba",
+    "arm64/opengl32.dll": "a6b067d53443c1d72886fed0d9448e7fb8bd8c3234b7f7c9c04ae2f13f1b2ea1",
+    "arm64/vulkan_virtio.dll": "265f269ea3ed3b71ca544234b762e5dd05f228c07dd5d85179de91af2316f4ac",
+    "x64/libgallium_wgl.dll": "883591663453fc73aab12bdca0648f6cd1005425beed90e523c59f75605deaf1",
+    "x64/opengl32.dll": "7e362846334b6c1b492b81ccdf02bcd0d68a9e92e51f5b020650ecc98e27e3e0",
+    "x64/vulkan_virtio.dll": "1e3c36214370f45a751a3ee2780d3aae6475a36fc3e8055d5cdfa9ddcac9e426"
+  },
+  "host_inputs": {
+    "bin/virgl_render_server": "fea6e5eadbb22e1a6782443a9deb885d0ef7f7647ccc7a237cbab93a1b5adaca",
+    "lib/libvirglrenderer.1.dylib": "de1b45938792f0db847659e54072ab52e9597ee6b211df491211c21198796ca5",
+    "lib/libMoltenVK.dylib": "aef00b13bcc808adf15b85bef9ae67393d92be7ed5dfe41cad16fa809e4a4c5f"
+  },
+  "patches": {
+    "venus-wddm2-shmem.patch": "75d021df5c17907424de6d91dfc22afa6dc0af941c7f2eff1d799acfdb8dddc1",
+    "venus-win32-blob-order.patch": "5667c80a798483ad84ac6afc13e1cea30b9bbb2095db13634955fe8e298c74aa",
+    "windows-clang-atomics.patch": "d65e99900aeb41fd3b5315c967f229f042eab319b0afd68d8c3bb0cc7a19f48c",
+    "windows-glsl-lexer.patch": "0906f134c724614556dfc810fa8dd3f8b3f8dc16c8b1bbcd5f008ca51fcac54b",
+    "windows-zink-bounded-readback.patch": "5a17243e2109348d80cc6e4eaff115ad154eabf5055b31c7652e471b8c4914c2",
+    "windows-zink-gdi-present.patch": "36a38a108b6c509b9aaf0ecd1c207bcdde2c3b2b54d4eb6bef847158e527498f",
+    "zink-moltenvk-host-depth.patch": "a54f73c1e139f122d221b633679aa0fe46bc855192a4928a325d99f3f6c93631",
+    "host-wgc-export.patch": "12ffee4cdc2f6677f20ec04f13f3bf5300c7d2db9d272be7ea453ca8c90959a1",
+    "zink-moltenvk-sampler-name.patch": "c9641b82f30a55d40cda8cde87e3c45685d56b6290c1922cfa67b870ef9dcb46",
+    "windows-zink-bounded-upload.patch": "497696578226ec162d489875fdfa6bee2dcb6cd37495dfdfc6a14daaffda3f94"
+  },
+  "renderer_inputs": {
+    "wgc-export.inc": "11c677e1dc74fc6c54e74ab9d2135ecc82d448f16c1d25f44039c9c5f979689c",
+    "initial-capture-decline.patch": "bccb4604402286bd5cd79efc075e57d662ebe786efd0ec9e2f27f93734a7394c"
+  },
+  "host_revision": 3,
+  "build_options": {
+    "guest_zlib": false,
+    "guest_zstd": false,
+    "guest_crt": "static",
+    "host_arch": "arm64",
+    "reference_gpu": "Apple M1",
+    "sdk": "10.0.26100",
+    "wdk": "10.0.26100.6584"
+  }
+}

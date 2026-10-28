@@ -1,0 +1,29 @@
+--- a/src/gallium/drivers/zink/zink_resource.c
++++ b/src/gallium/drivers/zink/zink_resource.c
+@@ -2725,6 +2725,26 @@
+       return;
+    }
+    /* fallback case for per-resource unsupported or device-level unsupported */
++#ifdef _WIN32
++   /* WDDM Venus CPU mappings can reject a full high-DPI font atlas. Keep
++    * staging transfers bounded, without changing texture size or contents.
++    * Wait between bands so the staging allocation can be reused. */
++   const unsigned row_bytes = util_format_get_stride(pres->format, box->width);
++   const unsigned max_rows = row_bytes ? MAX2(1, (2 * 1024 * 1024) / row_bytes) : 1;
++   if (pres->target == PIPE_TEXTURE_2D && box->depth == 1 &&
++       !util_format_is_compressed(pres->format) && box->height > max_rows) {
++      const unsigned src_stride = stride ? stride : row_bytes;
++      for (unsigned y = 0; y < box->height; y += max_rows) {
++         struct pipe_box band = *box;
++         band.y += y;
++         band.height = MIN2(max_rows, box->height - y);
++         u_default_texture_subdata(pctx, pres, level, usage, &band,
++                                  (const uint8_t *)data + (size_t)y * src_stride,
++                                  src_stride, layer_stride);
++         zink_fence_wait(pctx);
++      }
++   } else
++#endif
+    u_default_texture_subdata(pctx, pres, level, usage, box, data, stride, layer_stride);
+    res->subdata = false;
+ }

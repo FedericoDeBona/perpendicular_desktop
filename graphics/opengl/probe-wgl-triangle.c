@@ -1,11 +1,12 @@
 /* A bounded WGL shader/readback check. No installation or user documents.
- * Pass an explicit opengl32.dll, optionally --present or --msaa.
+ * Pass an explicit opengl32.dll, optionally --present, --msaa or --atlas.
  * MSAA resolves a four-sample target, reproducing the M1 sampler-name failure. */
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <GL/gl.h>
 #include <stdio.h>
 #include <string.h>
+#include <stdlib.h>
 
 typedef HGLRC (WINAPI *CreateContext)(HDC);
 typedef BOOL (WINAPI *MakeCurrent)(HDC,HGLRC);
@@ -42,9 +43,11 @@ static LONG WINAPI report_exception(EXCEPTION_POINTERS *exception)
 
 int main(int argc,char **argv)
 {
-    if(argc<2||argc>3||(argc==3&&strcmp(argv[2],"--present")&&strcmp(argv[2],"--msaa")))return 2;
+    if(argc<2||argc>3||(argc==3&&strcmp(argv[2],"--present")&&strcmp(argv[2],"--msaa")&&strcmp(argv[2],"--atlas")))return 2;
     const int present=argc==3&&!strcmp(argv[2],"--present");
     const int msaa=argc==3&&!strcmp(argv[2],"--msaa");
+    const int atlas=argc==3&&!strcmp(argv[2],"--atlas");
+    int atlas_ok=1;
     SetUnhandledExceptionFilter(report_exception);
     setvbuf(stdout,NULL,_IONBF,0);
     HMODULE library=LoadLibraryExA(argv[1],NULL,LOAD_WITH_ALTERED_SEARCH_PATH);
@@ -85,6 +88,37 @@ int main(int argc,char **argv)
     printf("Depth bits=%d; stencil bits=%d\n",depth_bits,stencil_bits);
     if(depth_bits<24||stencil_bits<8)goto done;
     if(!renderer||!strstr(renderer,"zink")||!strstr(renderer,"Apple")){puts("Expected Apple GPU through Zink");goto done;}
+    if(atlas){
+    GLPROC(glGenTextures,void,GLsizei,GLuint *);
+    GLPROC(glBindTexture,void,GLenum,GLuint);
+    GLPROC(glTexParameteri,void,GLenum,GLenum,GLint);
+    GLPROC(glPixelStorei,void,GLenum,GLint);
+    GLPROC(glTexImage2D,void,GLenum,GLint,GLint,GLsizei,GLsizei,GLint,GLenum,GLenum,const void *);
+    const size_t bytes=4096ull*6854*4;
+    unsigned char *input=malloc(bytes),*output=malloc(bytes);
+    if(!input||!output)goto done;
+    for(size_t n=0;n<bytes/4;n++){input[n*4]=255;input[n*4+1]=255;input[n*4+2]=255;input[n*4+3]=(unsigned char)((n/4096+n%4096)%256);}
+    GLuint tex;pglGenTextures(1,&tex);pglBindTexture(GL_TEXTURE_2D,tex);pglPixelStorei(GL_UNPACK_ALIGNMENT,1);
+    pglTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_LINEAR);pglTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_LINEAR);
+    GLint maxtex=0;pglGetIntegerv(GL_MAX_TEXTURE_SIZE,&maxtex);printf("MAX_TEXTURE_SIZE=%d; bytes=%llu\n",maxtex,(unsigned long long)bytes);
+    pglTexImage2D(GL_TEXTURE_2D,0,GL_RGBA,4096,6854,0,GL_RGBA,GL_UNSIGNED_BYTE,input);pglFinish();
+    GLenum upload_error=pglGetError();printf("Atlas upload error=0x%x\n",upload_error);
+    void (APIENTRY *gen_fbo)(GLsizei,GLuint *)=(void*)get("glGenFramebuffers");
+    void (APIENTRY *bind_fbo)(GLenum,GLuint)=(void*)get("glBindFramebuffer");
+    void (APIENTRY *attach_tex)(GLenum,GLenum,GLenum,GLuint,GLint)=(void*)get("glFramebufferTexture2D");
+    GLenum (APIENTRY *check_fbo)(GLenum)=(void*)get("glCheckFramebufferStatus");
+    if(!gen_fbo||!bind_fbo||!attach_tex||!check_fbo)goto done;
+    GLuint atlas_fbo;gen_fbo(1,&atlas_fbo);bind_fbo(0x8d40,atlas_fbo);attach_tex(0x8d40,0x8ce0,GL_TEXTURE_2D,tex,0);
+    printf("Atlas framebuffer=0x%x\n",check_fbo(0x8d40));
+    memset(output,0xcd,bytes);
+    for(unsigned row=0;row<6854;row+=128){unsigned rows=6854-row<128?6854-row:128;pglReadPixels(0,row,4096,rows,GL_RGBA,GL_UNSIGNED_BYTE,output+(size_t)row*4096*4);}
+    pglFinish();bind_fbo(0x8d40,0);
+    GLenum texture_read_error=pglGetError();size_t bad=0;while(bad<bytes&&input[bad]==output[bad])bad++;
+    printf("Atlas readback error=0x%x; equal=%s; first_difference=%llu",texture_read_error,bad==bytes?"true":"false",(unsigned long long)bad);
+    if(bad<bytes)printf("; expected=%u; actual=%u",input[bad],output[bad]);puts("");
+    atlas_ok=!upload_error&&!texture_read_error&&bad==bytes;
+    free(input);free(output);
+    }
     EXTPROC(glCreateShader,GLuint,GLenum);
     EXTPROC(glShaderSource,void,GLuint,GLsizei,const char **,const GLint *);
     EXTPROC(glCompileShader,void,GLuint);
@@ -105,7 +139,7 @@ int main(int argc,char **argv)
     EXTPROC(glBufferData,void,GLenum,ptrdiff_t,const void *,GLenum);
     if(!pglCreateShader||!pglShaderSource||!pglCompileShader||!pglGetShaderiv||!pglGetShaderInfoLog||!pglCreateProgram||!pglAttachShader||!pglLinkProgram||!pglGetProgramiv||!pglUseProgram||!pglGetAttribLocation||!pglEnableVertexAttribArray||!pglVertexAttribPointer||!pglGenBuffers||!pglBindBuffer||!pglBufferData){puts("Missing shader/VBO API");goto done;}
     if(!pglGetUniformLocation||!pglUniform4f)goto done;
-    const char *source[2]={"attribute vec3 position; void main(){gl_Position=vec4(position,1.0);}","uniform vec4 color; void main(){gl_FragColor=color;}"};
+    const char *source[2]={"attribute vec3 position; void main(){gl_Position=vec4(position,1.0);}",atlas?"uniform vec4 color; uniform sampler2D Texture; void main(){gl_FragColor=color*texture2D(Texture,vec2(0.2501220703,0.5000729501));}":"uniform vec4 color; void main(){gl_FragColor=color;}"};
     GLuint shader[2];
     for(int i=0;i<2;i++){
         shader[i]=pglCreateShader(i?0x8b30:0x8b31);pglShaderSource(shader[i],1,&source[i],NULL);pglCompileShader(shader[i]);
@@ -157,7 +191,7 @@ int main(int argc,char **argv)
         printf("Window pixels=%s; center=0x%06lx; upper corner=0x%06lx; lower=0x%06lx\n",
                success?"PASS":"FAIL",pixel,outside,lower);
     }
-    if(initial_error||shader_error||buffer_error||draw_error)success=0;
+    if(initial_error||shader_error||buffer_error||draw_error||!atlas_ok)success=0;
 done:
     if(context){current(NULL,NULL);destroy(context);}
     if(dc)ReleaseDC(window,dc);if(window)DestroyWindow(window);UnregisterClassA(wc.lpszClassName,wc.hInstance);FreeLibrary(library);
