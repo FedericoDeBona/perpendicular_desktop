@@ -139,7 +139,7 @@ Priorità 1–4 corrispondenti alla richiesta iniziale dell'utente; TODO-017/018
 | TODO-011 | Qualificare launcher e riconnessione delle singole app sulla main | DA FARE; correzioni nel clone | APP-002, WIN-001/002. |
 | TODO-012 | RAM dinamica reale con Windows protetto | FATTO nel perimetro documentato | SYS-003; ciclo Native3D 4→2→4 GiB, unplug parziale ammesso. |
 | TODO-013 | Base unica main/default e pulizia autorizzata | FATTO | App 0.2.0 + IoT principale; restano difetti grafici. |
-| TODO-014 | Creality/OpenGL | IN CORSO: prerequisiti misurati, accelerazione DA FARE | APP-001; candidato Zink/Venus con driver firmato, primo gate host isolato. |
+| TODO-014 | Creality/OpenGL | IN CORSO: host Venus PASS, clone ring Vulkan FAIL | APP-001; prossimo gate memoria user-mode WDDM2, kernel firmato conservato. |
 | TODO-015 | IVSHMEM e vecchi driver candidati | Valutazione FATTA / esperimenti RITIRATI | TRN-001, GFX-002/005; il difetto sync GFX-007 resta TODO-016. |
 | TODO-024 | Addon LinkManager su Windows ARM64 | IN CORSO: studio REA e piano documentati; implementazione DA FARE | [Dossier e attività LM](../addons/linkmanager-arm64/REPORT.md); nessuna prova clone/main o installazione. |
 
@@ -447,9 +447,13 @@ Non è una promessa di unplug completo o footprint minimo fisso. La promozione h
 
 ### TODO-014 — Creality/OpenGL
 
+**Seguito28 ottobre, autorizzazione ampliata e VM riavviata dall’utente:** main74247 collegata/readiness positiva. Candidata host privata Venus+Neptune compilata; probe MoltenVK1.4.2 identifica AppleM4 hardware e external_memory_host. Prima prova clone su overlay del checkpoint offline, senza cartelle condivise e con rete limitata al solo bridge diagnostico; driver/protezioni originali conservati. Host sperimentale compilato e gate nativi PASS; clone protetto conserva D3D11 ma Vulkan FAIL su allocate/map ring shmem. Nessuna GPU Vulkan guest/scena OpenGL qualificata né distribuzione main.
+
 **Esito diagnosi28 ottobre:** driver firmato invariato e SecureBoot1; D3D12 rifiutato dal backend, Vulkan ICD diretto enumera0GPU, nessun ICD OpenGL registrato. Primo gate scelto: runtime host isolato con Venus/Vulkan e driver corrente, poi Zink. Diagnosi main circoscritta FATTA, implementazione accelerazione DA FARE; clone/scena app main NON VERIFICATI. Timeout di graphics_info finale, successivo aggiornamento schermi e infine Windows spento conservati nel diario; nessuna stabilità conclusiva o causa dichiarata. [Report](reports/2026-10-28-opengl.md), [evidenze e fallimenti](VERIFICATION.md#28-ottobre--opengl-protetto-diagnosi-dei-prerequisiti).
 
-**28 ottobre — ripresa autorizzata, IN CORSO (APP-001).** Obiettivo: OpenGL accelerato per le app Windows mantenendo Secure Boot e Code Integrity attivi, TESTSIGNING disattivato; nessuna deroga precedente è applicabile. Prima misurare OpenGL/Direct3D12/Vulkan effettivi e confrontare librerie di compatibilità con il driver firmato corrente. REA su Parallels soltanto per una domanda concreta rimasta irrisolta. Implementazione DA FARE; verifica clone/main del nuovo percorso NON ESEGUITA. **Prossimo passo:** preparare un runtime host isolato Venus e verificare la prima GPU Vulkan col KMD firmato, prima di integrare Zink. **Criterio:** contesto/versione richiesti e scena 3D reale accelerata osservati nell'app principale protetta; apertura software o sola enumerazione non bastano.
+**28 ottobre — ripresa autorizzata, IN CORSO (APP-001).** Obiettivo: OpenGL accelerato per le app Windows mantenendo Secure Boot e Code Integrity attivi, TESTSIGNING disattivato; nessuna deroga precedente è applicabile. Prima misurare OpenGL/Direct3D12/Vulkan effettivi e confrontare librerie di compatibilità con il driver firmato corrente. REA su Parallels soltanto per una domanda concreta rimasta irrisolta. Implementazione DA FARE; verifica clone/main del nuovo percorso NON ESEGUITA. **Prossimo passo:** diagnosticare/adattare la sola libreria Vulkan user-mode al percorso memoria WDDM2 del KMD firmato; ring e prima GPU nel clone, poi Zink. Non aumentare RAM o cambiare il kernel in base al solo OUT_OF_HOST_MEMORY. **Criterio:** contesto/versione richiesti e scena 3D reale accelerata osservati nell'app principale protetta; apertura software o sola enumerazione non bastano.
+
+**Esito incremento:** [host/clone e fallimenti](VERIFICATION.md#28-ottobre--candidata-venus-host-e-blocco-ring-nel-clone-protetto). Clone spento/listener fermato; arresti normali incompleti e QMP quit limitato alla copia sacrificabile registrati. Main configurazione identica, PID cambiato durante lavoro senza causa isolata; finale collegata/readiness positiva/SecureBoot1 e D3D11 hardware PASS, senza qualifica di affidabilità generale.
 
 ### TODO-015 — Esperimenti già valutati
 

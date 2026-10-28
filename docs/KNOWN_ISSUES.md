@@ -499,6 +499,8 @@ Queste voci conservano limiti non risolti, senza richiedere di ripristinare codi
 
 ### APP-001 — Creality / OpenGL
 
+**Seguito clone protetto28 ottobre:** candidata host Venus+MoltenVK compilata; GPU AppleM4/estensioni e creazione contesto host PASS. Clone originale v0.4/SecureBoot1 conserva D3D11 hardware, ma Vulkan si collega al renderer e fallisce allocate/map ring shmem (OUT_OF_HOST_MEMORY, non prova di RAM fisica esaurita). Prossimo gate: memoria WDDM2 nella sola libreria user-mode, poi prima GPU Vulkan e Zink. Nessuna candidata distribuita o scena main qualificata, voce APERTA. [Evidenze e tentativi negativi](VERIFICATION.md#28-ottobre--candidata-venus-host-e-blocco-ring-nel-clone-protetto).
+
 **Esito diagnosi28 ottobre:** driver firmato invariato e SecureBoot1; D3D12 rifiutato dal backend, Vulkan ICD diretto enumera0GPU, nessun ICD OpenGL registrato. Primo gate scelto: runtime host isolato con Venus/Vulkan e driver corrente, poi Zink. Diagnosi main circoscritta FATTA, implementazione accelerazione DA FARE; clone/scena app main NON VERIFICATI. Timeout di graphics_info finale, successivo aggiornamento schermi e infine Windows spento conservati nel diario; nessuna stabilità conclusiva o causa dichiarata. [Report](reports/2026-10-28-opengl.md), [evidenze e fallimenti](VERIFICATION.md#28-ottobre--opengl-protetto-diagnosi-dei-prerequisiti).
 
 - **Stato28 ottobre:** ripresa autorizzata, indagine IN CORSO (TODO-014). Secure Boot/CI obbligatoriamente attivi, TESTSIGNING disattivato; superata qualsiasi deroga storica. Apertura software non qualifica accelerazione OpenGL.
