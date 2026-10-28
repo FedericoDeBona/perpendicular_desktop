@@ -6,7 +6,7 @@ Obiettivo: OpenGL accelerato con kernel ARM64 v0.4 originale Microsoft-signed, S
 
 ## Correzione multisample0.2.30
 
-Su AppleM1 il resolve4x del blitter Gallium generava OpName `sampler`, in conflitto con il tipo Metal del traduttore MoltenVK1.4.2. `zink-moltenvk-sampler-name.patch` su Mesa25.1.9 rinomina solo quel metadato in `zink_sampler`, mantenendo istruzioni e binding. Profilo `releases/0.2.30-darwin-arm64.json`, host/Venus invariati. Probe `--msaa`: fallimento prima, ARM64/x64 PASS dopo; Creality/cubo Desktop main PASS, Seamless ancora in verifica. [Diario](../../docs/VERIFICATION.md#28-ottobre--correzione-msaa-opengl0230-e-recupero-cartelle-sulla-iot0795218c).
+Su AppleM1 il resolve4x del blitter Gallium generava OpName `sampler`, in conflitto con il tipo Metal del traduttore MoltenVK1.4.2. `zink-moltenvk-sampler-name.patch` su Mesa25.1.9 rinomina solo quel metadato in `zink_sampler`, mantenendo istruzioni e binding. Profilo `releases/0.2.30-darwin-arm64.json`, host/Venus invariati. Probe `--msaa`: fallimento prima, ARM64/x64 PASS dopo; Creality/cubo Desktop e Seamless main PASS nel perimetro della scena, ma glyph e controlli magenta in Seamless mantengono aperta la resa completa. [Diario](../../docs/VERIFICATION.md#28-ottobre--correzione-msaa-opengl0230-e-recupero-cartelle-sulla-iot0795218c).
 
 ## Profilo locale AppleM1
 
