@@ -149,7 +149,7 @@ Priorità 1–4 corrispondenti alla richiesta iniziale dell'utente; TODO-017/018
 | TODO-011 | Qualificare launcher e riconnessione delle singole app sulla main | DA FARE; correzioni nel clone | APP-002, WIN-001/002. |
 | TODO-012 | RAM dinamica reale con Windows protetto | FATTO nel perimetro documentato | SYS-003; ciclo Native3D 4→2→4 GiB, unplug parziale ammesso. |
 | TODO-013 | Base unica main/default e pulizia autorizzata | FATTO | App 0.2.0 + IoT principale; restano difetti grafici. |
-| TODO-014 | Creality/OpenGL | IN CORSO:0.2.30 M1 MSAA e cubo Desktop/Seamless PASS; controlli magenta FAIL | APP-001/GFX-001; identificare texture/stato dei glyph, mantenere OpenGL. |
+| TODO-014 | Creality/OpenGL | IN CORSO:0.2.31 M1 upload grande/MSAA e cubo/font Seamless PASS | APP-001/GFX-001; qualifica Desktop e capacità ulteriori ancora aperte. |
 | TODO-015 | IVSHMEM e vecchi driver candidati | Valutazione FATTA / esperimenti RITIRATI | TRN-001, GFX-002/005; il difetto sync GFX-007 resta TODO-016. |
 | TODO-024 | Addon LinkManager su Windows ARM64 | IN CORSO: studio REA e piano documentati; implementazione DA FARE | [Dossier e attività LM](../addons/linkmanager-arm64/REPORT.md); nessuna prova clone/main o installazione. |
 
