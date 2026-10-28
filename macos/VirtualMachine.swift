@@ -435,7 +435,9 @@ final class VirtualMachineController {
         // Never inherit an experiment flag into an ordinary VM. The runtime
         // changes the primary PCI identity only for this explicit configuration.
         if native != nil {launchEnvironment?["PERP_VIRTIO_MIXED_DISPLAYS"]=mixedDisplaysEnabled ? "1":"0"}
-        if c.dynamicMemory != nil {
+        // The qualified runtime gates its small PCI window on both flags,
+        // including with fixed RAM. Memory devices still follow dynamicMemory.
+        if c.dynamicMemory != nil || native != nil {
             launchEnvironment=(launchEnvironment ?? [:]).merging(["PERP_HVF_BALLOON_RECLAIM":"1","PERP_HVF_VIRTIO_MEM":"1"]){_,new in new}
         }
         machine = try launch("qemu-system-aarch64",arguments,log:"qemu.log",executable:native?.executable,

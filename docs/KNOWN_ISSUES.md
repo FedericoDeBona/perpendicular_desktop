@@ -1,5 +1,7 @@
 # Registro dei problemi
 
+**28 ottobre —0.2.28 sulla IoT0795218c: pull, build e installazione app/Guest Tools FATTI nel perimetro della consegna.** Corretto SYS-006 (opt-in PCI con4GiB fissi); avvio main/desktop e collegamento PASS. Guest8b0c6b93… Running/hash esatto, task aggiornamento0/CD espulso, SecureBoot1/CI49157/TestSigningfalse. App canonica/build firmate e allineate, stesso QEMU41071 conservato. **Limite aperto FS-004/TODO-003:** migrazione cartelle non completata, helper fermo nella lettura Shell prima del recupero dei vecchi mount; attività sospesa fermata, servizi vecchi posseduti arrestati, nessun file utente eliminato. OpenGL dell’altro Mac non distribuito qui; runtime grafico locale conservato. Nessuna prova clone o qualifica generale. Prossimo passo per le cartelle: recuperare i percorsi dai record protetti e sbloccare la lettura Known Folder prima di riprovare una sola cartella. [Evidenze, fallimenti e limiti](VERIFICATION.md#28-ottobre--completamento-rebuild-e-guest-tools-0228-sulla-iot0795218c).
+
 **28 ottobre — INPUT-001, Cmd+W chiude il contenitore Desktop: corretto nel percorso main verificato.** La superficie Desktop mancava di performKeyEquivalent, perciò il menu Mac Chiudi riceveva Cmd+W. Ora il comando diventa Ctrl+W e il menu Chiudi passa al documento Windows. Edge Cmd+T→nuova scheda→Cmd+W→scheda rimossa con Desktop e QEMU conservati PASS; criterio circoscritto soddisfatto per questa segnalazione. Non è chiusura generale di TODO-017: Cmd+Q nella console elevata tentato senza chiusura osservata; resta da isolare. Appunti desktop Unicode Mac→Windows→Mac PASS; file e altri formati non implementati. [Evidenze e fallimenti](VERIFICATION.md#28-ottobre--utility-mac-windows-shortcut-e-appunti-desktop).
 
 **28 ottobre — migrazione SMB/Samba0.2.25: FATTO nel perimetro richiesto sulla main93be6687.** Sei cartelle selezionabili/default on nei normali percorsi Windows, senza lettere aggiuntive o copie. Implementazione/build/firma e clone mirato PASS; main lettura/append bidirezionali/Unicode/rinomina immediata e ciclo UI Immagini off→boot locale→on→boot condiviso PASS. Vecchi daemon/client/driver/WinFsp inutilizzato rimossi, nessun device filesystem o RAM condivisa, cache/build e quattro runtime inattivi ripuliti. FS-007/008 corretti nel percorso verificato. Explorer Documents/Downloads ordinari e sette soli file di prova eliminati; dati locali/backup originali preservati. Configurazione finale byte-identica,4GiB correnti conservati e RAM indipendente dalla condivisione; nessuna forzatura. Restano soltanto recupero dei vecchi stati, storico e capacità generiche inutilizzate del QEMU grafico qualificato. TODO-003 generale resta IN CORSO per notifiche/locking/iCloud/altri profili/prestazioni non qualificati; prossimo passo solo su una semantica concreta richiesta, senza benchmark estesi. [Evidenze e fallimenti](VERIFICATION.md#28-ottobre--migrazione-da-virtiofs-a-smbsamba).
@@ -124,14 +126,16 @@ Il ciclo RAM protetto 4→2→4 GiB con dati conservati resta la qualifica prece
 
 ### FS-004 — Collegamento directory a un volume non più presente
 
-- **Stato:** CORRETTO nel caso reale e nel ciclo di selezione/boot della main0.2.23; nessun clone.
+- **28 ottobre, RIAPERTO nel perimetro della migrazione SMB IoT0795218c:** task rimasto nel primo helper Desktop prima del recupero; traccia circoscritta emette solo before-known e non supera Read-Known/SHGetKnownFolderPath. Sei vecchi servizi Running senza device host; arresto del solo Desktop e poi dei sei client posseduti non completa la migrazione. Task sospeso fermato, vecchi client arrestati, file Mac/backup non eliminati. Il precedente cleanup del link morto resta verificato quando raggiunto; qui non viene raggiunto. Prossimo passo: risolvere la lettura dei percorsi con gli stati protetti esistenti e verificare una sola cartella. [Evidenze](VERIFICATION.md#28-ottobre--completamento-rebuild-e-guest-tools-0228-sulla-iot0795218c).
+
+- **Stato storico0.2.23:** CORRETTO nel caso reale e nel ciclo di selezione/boot; nessun clone. Il nuovo blocco sopra mantiene aperta la migrazione sulla IoT0795218c.
 - **Riproduzione:** dopo uscita QEMU, Downloads conserva un reparse point NTFS verso un vecchio volume GUID. Il primo helper rifiuta il link ma non ripubblica la cartella; le altre cinque sono operative.
 - **Correzione:** dopo stop del solo servizio posseduto, verificare errore dispositivo assente, tag MOUNT_POINT e destinazione volume GUID esatta tramite OPEN_REPARSE_POINT. Rimuovere solo il collegamento morto, senza attraversarne la destinazione. Rifiuto dei link estranei, backup tramite rinomina e record atomico; rollback non dichiara valido un collegamento pendente.
 - **Evidenza/criterio:** helper corretto → Download normale → lettura/modifica esatta in tutte sei PASS. Ciclo disattiva→boot→ripristino locale→riattiva→boot PASS per Immagini; sei file reali riletti identici dopo il boot finale, nessuna unità extra. Ulteriori forme di guasto non qualificate. [Diario](VERIFICATION.md#27-ottobre--cartelle-mac-selezionabili-nelle-impostazioni).
 
 ### FS-005 — Scadenza backend durante il consenso macOS alle cartelle
 
-- **28 ottobre, nuova distribuzione locale0.2.28:** TCC richiede di nuovo il consenso Scrivania dopo cambio firma; app responsiva ma avvio fermo in opendir in attesa della risposta. Non osservata scadenza backend, criterio storico conservato; installazione Windows da riprendere dopo Consenti. [Evidenze](VERIFICATION.md#28-ottobre--pull-rebuild-0228-sulla-iot0795218c-in-attesa-del-consenso-macos).
+- **28 ottobre, nuova distribuzione locale0.2.28:** consenso richiesto nuovamente dopo cambio firma; utente conferma due volte (prima build e correzione PCI). Attesa terminata e Windows avviato. Nessuna scadenza backend osservata né riduzione/aggiramento TCC. [Seguito verificato](VERIFICATION.md#28-ottobre--completamento-rebuild-e-guest-tools-0228-sulla-iot0795218c).
 
 - **Stato:** corretto e verificato nell'avvio reale0.2.23 della main, nessun clone.
 - **Riproduzione:** due avvii non arrivano a QEMU: daemon Scrivania senza socket dopo5s; log TCC conferma AUTHREQ_PROMPTING DesktopFolder per Perpendicular. Attesa terminata prima della risposta al consenso.
@@ -209,6 +213,13 @@ Il ciclo RAM protetto 4→2→4 GiB con dati conservati resta la qualifica prece
 - **Prossimo passo:** prima di distribuire un aggiornamento definire il riavvio necessario e confermare geometria/DPI effettivi prima di riabilitare input e trasformazioni condivise.
 - **Chiusura:** aggiornamento e riavvio eventualmente richiesto portano al display concordato; l’app non presenta come applicata una modalità non osservata.
 - **Evidenze:** [installazione e recupero](VERIFICATION.md#24-ottobre--gate-pronto-prima-delluso-e-frame-valido-al-resize), [avvio protetto della base corrente](VERIFICATION.md#25-ottobre--resize-con-driver-ufficiale-e-protezioni-ripristinate).
+
+### SYS-006 — Avvio Native3D con RAM fissa respinto dalla mappa PCI locale
+
+- **Stato:** CORRETTO nel perimetro locale verificato: avvio senza disco PASS e main0795218c avviata/collegata con4GiB fissi, nessun memory-device hotplug, desktop reale disponibile. Nessuna prova clone.
+- **Riproduzione28 ottobre, IoT0795218c:** dopo consenso macOS QEMU termina prima del boot: highmem-mmio-size cannot be set to a lower value than the default (512 GiB). Frontend0.2.28 richiede1GiB ma abilita i due opt-in della mappa locale solo con RAM dinamica; questa VM ha4GiB fissi.
+- **Correzione:** abilitare gli opt-in anche per Native3D a RAM fissa. Dispositivi balloon/virtio-mem restano condizionati alla configurazione dinamica, RAM/dati/protezioni invariati. Nessuna sostituzione del runtime qualificato.
+- **Criterio soddisfatto:** stesso runtime locale e configurazione fissa avviati nella main con Windows collegato, senza errore PCI; Guest Tools aggiornati Running/hash concorde. [Diario](VERIFICATION.md#28-ottobre--pull-rebuild-0228-sulla-iot0795218c-in-attesa-del-consenso-macos).
 
 ### SYS-001 — Arresto HVF durante riavvio o arresto
 
