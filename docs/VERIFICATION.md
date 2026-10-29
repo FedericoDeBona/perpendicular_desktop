@@ -4391,3 +4391,81 @@ Media Player Legacy: welcome di configurazione visibile solo nel Desktop, nessun
 **MMC0.2.51:** Computer Management:3 ed Event Viewer:4 main ready ma entrambi sulla primaria con avviso di posizionamento; non qualificati Seamless per il limite elevato. Prima sequenza CUA a più lanci interrotta da focus della nuova finestra/Ricerca assente; solo Computer Management effettivamente invocata in quella chiamata, Event Viewer poi richiesta separatamente. Component Services in verifica.
 
 Component Services0ECF…:5 main ready ma primaria(277,107,1273,894), stesso avviso elevato: FAIL destinazione. Chiusi dal Desktop con Alt+F4 solo i tre MMC di prova, nessuna impostazione applicata; prima sequenza di chiusura lascia Computer Management, ulteriore chiusura ordinaria richiesta. Il successo ISE ARM non qualifica ancora le voci x64/x86 né i tool elevati.
+
+**Limite capacità0.2.51 riprodotto:** nuovo clic Local Security Policy rifiutato con Too many application transitions are still active, pur con0 mirror. La guardia conta tutte le8 sessioni (compresi processi cached/gap dopo chiusura), non solo avvii attivi. Snapshot leggermente successivo già scende a5 sessioni, tutte activationPendingfalse/windows[]: non presentato come snapshot delle8 al momento del diniego. Candidata0.2.52 ritira soltanto bookkeeping senza superfici gestite, attivazione o richiesta pendente prima della guardia8; nessun processo o documento terminato, limite degli avvii veramente attivi conservato. Guest build PASS, frontend0.2.51 invariato riutilizzato (hash e3fa2300…), solo payload/versione confezionati e bundle rifirmato. Verifica/distribuzione candidata ancora IN CORSO.
+
+Get Started0.2.51:9 main ready/nonblocked e(-2798,140,1607,1269) su display app, chiusa senza configurazioni. Windows Tools clic ricevuto ma ancora opening/nessun mirror al primo snapshot; esito finale da registrare. Services/Task Scheduler/Performance Monitor main ready ma tutti primaria/diniego di spostamento; nessuna operazione amministrativa eseguita, chiuse solo le prove dal Desktop.
+
+
+### Copertura nominativa in corso — catalogo49voci
+
+Questa tabella registra aperture invocate e perimetri realmente osservati; PASS circoscritti alla build/caso indicati, non qualifica globale della .52. Nessuna modifica amministrativa, configurazione guidata o acquisizione avviata. Snapshot privati `coverage.jsonl`/`check-*.json`; gli esiti negativi restano sopra.
+
+<!-- mixed-mode-coverage:start -->
+| Voce launcher | Esito osservato |
+| --- | --- |
+| Calculator | .48: mirror sul display app, input cifre; non ancora riprovata dopo nuove patch. |
+| Character Map | .50: PASS nuova main pronta sul display app; .49 mismatch client/frame conservato. |
+| Click to Do | Guest .52: prima superficie AIX poi Desktop nero nel campione; Escape inviato, nessuna azione scelta. NON qualificata. |
+| Command Prompt | .48: PASS echo/input/display app; avvio ritardato .50 non associato, da riqualificare. |
+| Component Services | .51: main pronta ma primaria/diniego spostamento; chiusa solo la prova. |
+| Computer Management | .51: main pronta ma primaria/diniego spostamento; chiusa solo la prova. |
+| Control Panel | .49: PASS main pronta/display app dopo identità per finestra; prima FAIL Desktop-only. |
+| Creality Print 7.3 | Guest .52: clic ricevuto ma nessun mirror al timeout; identità/processo da correlare, nessun progetto modificato. |
+| Defragment and Optimize Drives | Guest .52: Optimize Drives main pronta ma primaria, FAIL destinazione; nessuna analisi/ottimizzazione avviata. |
+| Disk Cleanup | Guest .52: prima UI temporanea Mac poi main Disk Cleanup for Windows(C:) confermata solo Desktop, FAIL handoff; nessuna pulizia confermata. |
+| Event Viewer | .51: main pronta ma primaria/diniego spostamento; chiusa solo la prova. |
+| File Explorer | .48: PASS nuova Documents/display app; da riqualificare dopo identità per finestra. |
+| Get Started | .51: PASS main pronta/display app; chiusa senza configurazioni o accessi. |
+| Live captions | NON INVOCATA: verifica bloccata dal Desktop interamente nero dopo Click to Do; nessuna qualifica, evitare modifiche vocali/accessibilità senza vista. |
+| Local Security Policy | .51: rifiuto limite8 con0 mirror; guest .52: main creata sulla primaria ma cattura ancora non pronta negli snapshot, nessuna policy modificata. |
+| Magnifier | NON INVOCATA: verifica bloccata dal Desktop interamente nero dopo Click to Do; nessuna qualifica, evitare modifiche vocali/accessibilità senza vista. |
+| Microsoft Edge | .48: primo avvio lento, poi main pronta/display app; da riqualificare ultima build. |
+| Narrator | NON INVOCATA: verifica bloccata dal Desktop interamente nero dopo Click to Do; nessuna qualifica, evitare modifiche vocali/accessibilità senza vista. |
+| Notepad | Guest .52/frontend .51: nuova Untitled Mac creata, nessun documento aperto/modificato; stato pronto/display app negli snapshot. |
+| ODBC Data Sources (32-bit) | .48: mirror dialog pronto ma primaria, titolo 64-bit; chiusura Mac AccessDenied, chiusa da Desktop. |
+| On-Screen Keyboard | NON INVOCATA: verifica bloccata dal Desktop interamente nero dopo Click to Do; nessuna qualifica, evitare modifiche vocali/accessibilità senza vista. |
+| Paint | .48: PASS nuova finestra vuota/display app; da riqualificare dopo identità per finestra. |
+| Performance Monitor | .51: main pronta ma primaria/diniego spostamento; chiusa solo la prova. |
+| Print Management | Guest .52: main pronta ma primaria, FAIL destinazione; nessuna modifica a stampanti/code. |
+| Recovery Drive | Guest .52: apertura richiesta ma nessun mirror, icona consenso nel Desktop senza prompt sulla primaria; Escape inviato, nessun passo del wizard eseguito, NON qualificata. |
+| Registry Editor | Guest .52: nessun mirror; processo consent900 trovato ma prompt non visibile sulla primaria. Escape annulla: successiva lettura senza consent/regedit; nessun valore modificato, NON qualificata. |
+| Remote Desktop Connection | .48: mirror dialog pronto ma primaria; nessuna connessione avviata, chiusa. |
+| Resource Monitor | Guest .52: main pronta ma primaria, FAIL destinazione; nuova apertura oltre8 record precedenti consentita, bookkeeping inattivo ritirato senza terminare processi. |
+| Run | .50: dialog pronto ma primaria; owner non identificato, chiusa senza eseguire comandi. |
+| Services | .51: main pronta ma primaria/diniego spostamento; chiusa solo la prova. |
+| Settings | .50: PASS riattivazione stessa HWND conservata nascosta/cloaked2; input display visibile Mac. |
+| Sicurezza di Windows | Guest .52/frontend .51: main pronta/display app(-2798,140,1607,1269), richiamo Mac riuscito; chiusa senza cambiare protezioni. |
+| Snipping Tool | .50: PASS main pronta/display app; nessuna acquisizione, chiusa. |
+| Steps Recorder | .50: main pronta ma primaria/diniego posizionamento/chiusura Mac; nessuna registrazione, chiusa da Desktop. |
+| System Configuration | Guest .52: main pronta ma primaria, FAIL destinazione; nessuna opzione modificata/applicata. |
+| System Information | .48: mirror dialog pronto ma primaria; nessuna modifica, chiusa. |
+| Task Manager | .50: main pronta ma primaria/diniego posizionamento; chiusa dal Desktop. |
+| Task Scheduler | .51: main pronta ma primaria/diniego spostamento; chiusa solo la prova. |
+| Voice access | NON INVOCATA: verifica bloccata dal Desktop interamente nero dopo Click to Do; nessuna qualifica, evitare modifiche vocali/accessibilità senza vista. |
+| Windows Backup | Guest .52: primo mirror main pronto/display app; richiamo successivo bloccato sulla maschera immagine non pronta. FAIL richiamo, chiusura richiesta, nessun backup/accesso avviato. |
+| Windows Defender Firewall with Advanced Security | Guest .52: main creata sulla primaria con avviso di posizionamento; nessuna regola modificata. |
+| Windows Media Player Legacy | .50: welcome configurazione solo Desktop, nessun mirror/timeout; nessuna opzione accettata. |
+| Windows PowerShell | .49: PASS console ARM64 pronta/display app. |
+| Windows PowerShell (x64) | .49: nessuna finestra riconosciuta; console di prova2344 poi terminata, capacità non qualificata. |
+| Windows PowerShell (x86) | .49: PASS console pronta/display app. |
+| Windows PowerShell ISE | .50: UI temporanea poi main Desktop-only; .51 PASS startup→main Mac pronta/display app. |
+| Windows PowerShell ISE (x64) | .50: lancio/proc brevi e successore non associato, nessun main Mac qualificato. |
+| Windows PowerShell ISE (x86) | .50: UI temporanea poi principale Desktop-only; da riqualificare .51. |
+| Windows Tools | .51: timeout/nessun mirror; cartella Windows Tools con31voci confermata nel Desktop, FAIL associazione. |
+<!-- mixed-mode-coverage:end -->
+
+**Installazione0.2.52, primo tentativo NON riuscito:** consenso UAC completato oltre la durata del comando chiamante, dispatch timedOut/124; epoch ancora0ECF… e audit guest diverso dalla candidata. Non dichiarata distribuita. Ricontrollo ricevuta/task prima del nuovo tentativo, senza riavviare frontend o VM. Windows Tools ora confermata visivamente nel Desktop con31voci e nessun mirror: FAIL associazione, non app mancante.
+
+**Secondo tentativo0.2.52 interrotto:** la chiusura Desktop inviata per Windows Tools ha intercettato la console updater appena comparsa. Ricevuta resta started, task Ready/LastTaskResult3221225786 (0xC000013A), guest ancora precedente. Errore operativo riconosciuto all’utente; nessuna consegna rivendicata. Ripresa solo dell’attività con azione/argomenti confrontati esattamente; niente ulteriori gesti Desktop fino a ricevuta installed e audit.
+
+
+**Consegna0.2.52 verificata dopo ripresa:** ricevuta installed con hash atteso/effettivo99e9bf8aa1118d3fa88aa911ee379557728f49eccd1c4e188b0522fa9b202e15 e servizio Running; audit-service-0252-v3.json conferma cinque helper esatti, SecureBoot1, CodeIntegrity49157, TestSigningfalse, KMD originalecfbc7137… e task temporanei0. Frontend .51 SHAe3fa2300… riutilizzato senza ricompilazione Swift, bundle/versione .52 firmati e canonica riaperta; stesso QEMU94995, nessun reboot. Supporto setup ancora da espellere a fine audit, non dichiarato vuoto.
+
+**Capacità prima/dopo nella main:** before-prune-applications8 sessioni (tre con mirror, nessuna attivazione), nuovo Resource Monitor ammesso; after4 (tre precedenti più nuova), log ritira5 record. Confronto identità dei processi:11 precedenti nelle5 sessioni ritirate,11 ancora vivi. Il ritiro riguarda soltanto bookkeeping; finestre/pending/activation restano protetti. Nessun PASS generale per strumenti elevati: Resource Monitor pronta ma rimasta sulla primaria.
+
+**Copertura effettiva44/49, blocco osservabile:** dopo il lancio Click to Do compare brevemente AIX, poi il Desktop Mac diventa completamente nero. Esc inviato; lettura processi successiva senza AIX/consent non ripristina la vista. Ricollegamento solo frontend0.2.52 inefficace, guest e mirror msconfig ancora vivi. Status connected/appLaunchReadytrue ma desktop.nativeActivefalse; cartelle configurate3 con failedtrue dopo reconnect, quindi non dichiarate collegate. Cinque voci vocali/accessibilità non invocate (tabella), nessuna qualifica completa49/49. QOM black-desktop-qom.json: failedtrue/activefalse,51 risorse vive/peak256/rejected6;24166submitted/24165ACK/1abandoned, un frame ready pendente. Non attribuita causalità a Click to Do né nuova saturazione corrente. GFX-004 aperto; nessuna variazione driver/protezioni/risorse o riavvio VM.
+
+**Creality tardiva, causa circoscritta ancora da correggere:** processo7700 e main1377328 autenticati per percorso/creazione, owner0 (l'ipotesi owner nascosto è smentita), wxWindowNR visibile/noncloaked sul display app(-2792,140,2352,1200), senza mirror dopo timeout. Primo webview figlio creato circa37s dopo il processo; watch lancio30s terminato prima del main utilizzabile. Nessuna nuova eccezione owner o timeout implementata in .52. Windows Backup prima pronta, richiamo con maschera bloccata; Disk Cleanup prima progress poi main Desktop-only, nessuna pulizia eseguita. Esiti negativi conservati e obiettivo generale IN CORSO.
+
+**Controllo Desktop mirato:** screendump QMP della console0 restituisce1920×1280 completamente neri (black-desktop-console.ppm/png), coerenti con il fallback Mac; non è un difetto limitato alla composizione della finestra Mac. Questo non dimostra che il contenuto GDI guest sia nero. Firma canonica deep/strict e controllo payload OpenGL0.2.31/sei hash PASS dopo installazione .52. Nessun tentativo di Recovery Display (riavvia la VM).

@@ -701,6 +701,9 @@ impl Worker {
                     return Err("Close an application before opening another".into());
                 }
                 if !self.applications.contains_key(app) && self.applications.len() >= 8 {
+                    self.prune_idle_applications();
+                }
+                if !self.applications.contains_key(app) && self.applications.len() >= 8 {
                     return Err("Too many application transitions are still active".into());
                 }
                 self.activation_serial += 1;
@@ -1003,7 +1006,20 @@ impl Worker {
             .map(|w| w.target.id.clone())
     }
 
+    fn prune_idle_applications(&mut self) {
+        // A closed mirror may leave a cached/background process (including
+        // Explorer). Forget only its bookkeeping, never the process or a
+        // document. Pending activation and every managed surface remain owned.
+        let needed:HashSet<_>=self.windows.values().map(|window|window.app.clone())
+            .chain(self.pending.iter().map(|launch|launch.app.clone())).collect();
+        let before=self.applications.len();
+        self.applications.retain(|app,session|session.activation.is_some() || needed.contains(app));
+        if before!=self.applications.len() {
+            log(format!("Application idle bookkeeping retired count={}",before-self.applications.len()));
+        }
+    }
     fn remember_process(&mut self, app: &str, pid: u32, creation: u64) {
+        if !self.applications.contains_key(app) && self.applications.len() >= 8 {self.prune_idle_applications();}
         if !self.applications.contains_key(app) && self.applications.len() >= 8 { return; }
         let session = self.applications.entry(app.into()).or_insert_with(|| ApplicationSession {
             processes: Vec::new(), gap_until: None, startup_until: Instant::now(), activation: None,
