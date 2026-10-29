@@ -51,7 +51,7 @@ final class LauncherWindow:NSWindow {
     override func sendEvent(_ event:NSEvent){
         if event.type == .leftMouseDown,event.clickCount == 1 {
             let point=event.locationInWindow
-            let contentHeight=contentRect(forFrameRect:frame).height
+            let contentHeight=styleMask.contains(.fullSizeContentView) ? frame.height-35:contentRect(forFrameRect:frame).height
             // Leave traffic lights, resize edges and titlebar double-clicks native.
             if point.y>=contentHeight,point.y<frame.height-4,point.x>100,point.x<frame.width-8 {
                 let pointer=NSEvent.mouseLocation
@@ -89,6 +89,8 @@ struct Launcher:View {
     private var highlight:Color {Color.primary.opacity(scheme == .dark ? 0.075:0.055)}
     var body:some View {
         VStack(spacing:0){
+            Text("Perpendicular").font(.system(size:11,weight:.medium)).foregroundStyle(.tertiary)
+                .frame(maxWidth:.infinity).frame(height:35).allowsHitTesting(false)
             if settings {
                 HStack(spacing:12){
                     Button{showApps()}label:{Image(systemName:"arrow.left").frame(width:28,height:28)}
@@ -110,6 +112,7 @@ struct Launcher:View {
         .background(LauncherGlass())
         .overlay(alignment:.top){LinearGradient(colors:[.white.opacity(scheme == .dark ? 0.13:0.7),.clear],startPoint:.top,endPoint:.bottom).frame(height:1).allowsHitTesting(false)}
         .frame(minWidth:540,minHeight:480)
+        .ignoresSafeArea()
         .preferredColorScheme(model.launcherAppearance.scheme)
         .background(Button(""){showApps()}.keyboardShortcut("f",modifiers:.command).hidden())
         .onAppear{searchFocused=true;resetSelection()}

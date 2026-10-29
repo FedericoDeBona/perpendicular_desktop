@@ -177,9 +177,9 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
                 try? FileHandle.standardError.write(contentsOf:Data(("Local control unavailable: "+error.localizedDescription+"\n").utf8))
             }
         }catch{status=error.localizedDescription;launcherNotice="Windows non può essere avviato. "+error.localizedDescription}
-        launcher=LauncherWindow(contentRect:NSRect(x:200,y:160,width:760,height:760),styleMask:[.titled,.closable,.resizable,.miniaturizable],backing:.buffered,defer:false)
+        launcher=LauncherWindow(contentRect:NSRect(x:200,y:160,width:760,height:760),styleMask:[.titled,.closable,.resizable,.miniaturizable,.fullSizeContentView],backing:.buffered,defer:false)
         launcher.title="Perpendicular";launcher.isReleasedWhenClosed=false
-        launcher.titleVisibility = .visible
+        launcher.titleVisibility = .hidden
         launcher.titlebarAppearsTransparent=true;launcher.toolbarStyle = .unified
         launcher.isOpaque=false;launcher.backgroundColor = .clear
         launcher.appearance=launcherAppearance.native

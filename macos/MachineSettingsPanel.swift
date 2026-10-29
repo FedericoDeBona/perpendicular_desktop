@@ -80,10 +80,8 @@ struct MachineSettingsPanel:View {
                     }.toggleStyle(.switch).controlSize(.mini).accessibilityIdentifier("shared-folder-"+kind.rawValue)
                 }
             }.disabled(!model.canEditVMSettings)
-            Text(model.folderIntegrationStatus).font(.system(size:12))
-                .foregroundStyle(model.folderIntegrationFailed ? Color.orange:Color.secondary)
             if model.folderIntegrationFailed {
-                Button("Riprova collegamento"){model.prepareSharedFolders()}.disabled(!model.connected || model.folderIntegrationBusy)
+                Button("Riprova collegamento"){model.prepareSharedFolders()}.disabled(!model.connected || model.folderIntegrationBusy).help(model.folderIntegrationStatus)
             }
         }
     }

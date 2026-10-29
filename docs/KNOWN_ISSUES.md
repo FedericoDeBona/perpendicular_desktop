@@ -635,6 +635,10 @@ Queste voci conservano limiti non risolti, senza richiedere di ripristinare codi
 
 ## APP-004 — Launcher Mac salta rispetto al puntatore tra schermi
 
+**Esito ripristino estetico0.2.36:** implementazione/distribuzione e verifica visiva main completate: fascia integrata35pt come prima, nessuna banda titolo nativa separata difettosa e nessuna riga ordinaria sotto Condivisione. Drag globale0.2.35 conservato/hit area adattata al fullSize;3eventi automatici ricevuti senza movimento utile del puntatore, nessuna nuova prova cross-monitor dichiarata. La precedente conferma utente del drag resta distinta dal ripristino visivo. Clone non eseguito. [Evidenze e limiti](VERIFICATION.md#29-ottobre--ripristino-barra-integrata-e-condivisione-senza-didascalie).
+
+**Seguito estetico29 ottobre0.2.36, IN CORSO:** la0.2.35 corregge il drag ma l’utente rifiuta la barra standard diventata trasparente/difettosa. Ripristinare la fascia integrata originale senza perdere l’offset globale verificato. Rimossa anche la riga di stato ordinario sotto Condivisione su richiesta esplicita. Verifica main della candidata ancora da eseguire; non riaprire la diagnosi già conclusa del salto. [Verifica circoscritta](VERIFICATION.md#29-ottobre--ripristino-barra-integrata-e-condivisione-senza-didascalie).
+
 **Esito finale29 ottobre0.2.35 — CORRETTO nel caso main segnalato.** Terza candidata distribuita nella canonica/build firmate, utente conferma «Sì, ora resta agganciata» nel passaggio centrale→destra.282campioni drag reali nel controllo locale; finestra poi sul display integrato a373/76, dimensione540×708 conservata. Offset fisso in punti globali, senza vincoli per-screen durante il gesto. Le prime due candidate negative restano nel diario. Clone non eseguito, nessuna qualifica di ogni possibile layout/disconnessione monitor. Criterio locale soddisfatto dall’osservazione dell’utente, non dai drag automatici senza effetto. [Verifica](VERIFICATION.md#29-ottobre--launcher-swift-griglie-impostazioni-e-drag-tra-monitor).
 
 **Cronologia precedente, superata dall’esito sopra:**
