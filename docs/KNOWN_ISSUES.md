@@ -457,6 +457,8 @@ Queste voci conservano limiti non risolti, senza richiedere di ripristinare codi
 
 ### WIN-002 — Resize individuale in attesa del frame
 
+- **29 ottobre, nuova priorità utente:** ridurre le maschere Mac durante apertura/collegamento Seamless; confermata ricomparsa occasionale al primo drag e assenza nei drag successivi. Caso già registrato il26ottobre, aggiornato qui senza aprire un problema duplicato. Nessuna causa/nuova riproduzione o correzione dimostrata; obiettivo attivo, prossimo passo baseline correlata di apertura e primo/secondo drag con geometria/frame/input. [Requisito e criterio](VERIFICATION.md#29-ottobre--obiettivo-affidabilità-e-apertura-seamless).
+
 - **27 ottobre, main locale93be6687/0.2.16:** Notepad nuova534→754pixel di larghezza, frame pertinente presentato e input successivo; Cmd+Q crea dialogo706×209, prima spinner e poi presentazione2/required1, transitionfalse. Screenshot reale Save/Don’t Save/Cancel e clic Don’t Save chiudono regolarmente la sola prova, finestre/cache0. Qualifica circoscritta positiva; il precedente fallimento e il criterio generale restano aperti. [Diario](VERIFICATION.md#27-ottobre--rebuild-e-guest-tools-0216-sul-mac-93be6687).
 
 - **0.2.11:** prima immagine/visibilità della main attende collocazione iniziale confermata, spinner del launcher termina al frame pronto; timeout descritto come attesa immagine invece di dichiarare un blocco dell’app. Notepad/Explorer con frame e geometria concordi nel campione; gesti non qualificati per CUA noWindowsAvailable e cambio monitor2→1. Voce generale aperta, prossimo passo gesto reale col riscontro disponibile. [Evidenze](VERIFICATION.md#26-ottobre--seamless-e-desktop-primo-incremento-0211).
