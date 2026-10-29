@@ -1431,7 +1431,7 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
                     }
                     controller.onReady={ [weak self] in
                         guard let self else{return}
-                        if let app=self.windowApps[id] {self.finishOpening(app,appeared:true)}
+                        if role == .main,let app=self.windowApps[id] {self.finishOpening(app,appeared:true)}
                         guard let notice=self.windowNotice,notice.id==id,notice.frame else{return}
                         if self.launcherNotice==notice.message {self.launcherNotice=nil}
                         self.windowNotice=nil

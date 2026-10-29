@@ -1059,7 +1059,7 @@ impl Worker {
             && (self.windows.values().any(|w| w.app == app
                 && w.metadata["hwnd"] == metadata["hwnd"] && w.metadata["role"] == "main")
                 || (!self.windows.values().any(|w| w.metadata["hwnd"] == metadata["hwnd"])
-                    && !self.windows.values().any(|w| w.app == app && !catalogue::transient(&w.metadata))))
+                    && !self.windows.values().any(|w| w.app == app && w.target.full_frame && w.metadata["role"] == "main")))
         {
             if metadata["role"] == "dialog" {
                 // details() describes a dialog's client pixels for native
@@ -1090,7 +1090,7 @@ impl Worker {
         // Admit only the foreground surface of the exact returned instance;
         // remembering a process from an earlier request is not sufficient.
         let launching=|app:&String|self.pending.iter().any(|p|p.app==*app && p.deadline>Instant::now())
-            && !self.windows.values().any(|w|w.app==*app && !catalogue::transient(&w.metadata))
+            && !self.windows.values().any(|w|w.app==*app && w.target.full_frame && w.metadata["role"] == "main")
             && self.applications.get(app).is_some_and(|s|!s.baseline.contains(&raw)
                 || (catalogue::foreground()==raw && s.activated.is_some_and(|process|
                     self.catalogue.activated_surface(app,raw,process,&self.sid,self.session))));
@@ -1192,7 +1192,10 @@ impl Worker {
         }
         let pending = std::mem::take(&mut self.pending);
         for launch in pending {
-            if self.windows.values().any(|w| w.app == launch.app && !catalogue::transient(&w.metadata)) { continue; }
+            // Startup UI can precede the real application window (for example
+            // ISE's temporary WinForms dialog). Keep this explicit request
+            // alive for the main surface, without adopting unrelated windows.
+            if self.windows.values().any(|w| w.app == launch.app && w.target.full_frame && w.metadata["role"] == "main") { continue; }
             if Instant::now() < launch.deadline { self.pending.push(launch); }
             else {
                 let still_running = self.applications.get(&launch.app).is_some_and(|session| {
@@ -1314,9 +1317,6 @@ impl Worker {
         let Some(metadata) = catalogue::details(raw, &self.sid, self.session) else {
             return false;
         };
-        if self.applications.get(&app).is_some_and(|session|session.baseline.contains(&raw)) {
-            log(format!("Application reused activated surface app={app} hwnd={raw}"));
-        }
         let owner=metadata["owner"].as_u64().unwrap_or(0) as usize;
         // DWM also cloaks owned dialogs when their Mac parent is cloaked.
         // Admit that exact authenticated owner chain, not arbitrary hidden apps.
@@ -1364,14 +1364,14 @@ impl Worker {
             return changed;
         };
         window_control::describe_minimum(&mut metadata);
-        let first_document = !transient && !self.windows.values().any(|w| w.app == app && !catalogue::transient(&w.metadata));
+        let first_document = metadata["role"] == "main" && !self.windows.values().any(|w| w.app == app && w.target.full_frame && w.metadata["role"] == "main");
         if let Some(content) = &hosted {
             self.remember_process(&app, content.pid, content.creation);
             log(format!("Application frame identity app={app} frame={raw} hostPid={pid} child={} pid={} creation={} appId={}",
                 content.hwnd, content.pid, content.creation, content.app_id));
         }
         else { self.remember_process(&app, pid, creation); }
-        if !transient {
+        if metadata["role"] == "main" {
             if let Some(session) = self.applications.get_mut(&app) {
                 session.gap_until = None;session.startup_until=Instant::now();
             }
@@ -1396,6 +1396,12 @@ impl Worker {
             refresh_requested: AtomicBool::new(false),
             geometry: Mutex::new((0, 0, 0, 0, 0)),
         });
+        if let Some(process)=self.applications.get(&app)
+            .filter(|session|session.baseline.contains(&raw)).and_then(|session|session.activated) {
+            if self.catalogue.activated_surface(&app,raw,process,&self.sid,self.session) {
+                log(format!("Application reused activated surface app={app} hwnd={raw}"));
+            }
+        }
         let stop = Some(capture::spawn(target.clone(), outbox.clone()));
         log(format!("Application window app={app} hwnd={raw} pid={pid} creation={creation} class={} role={} owner={} style={} exStyle={}",
             metadata["class"], metadata["role"], metadata["owner"], metadata["style"], metadata["exStyle"]));
