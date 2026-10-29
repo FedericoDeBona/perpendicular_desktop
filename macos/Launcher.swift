@@ -204,10 +204,18 @@ struct Launcher:View {
             if apps.isEmpty {
                 Text(large ? "Aggiungi qui le tue app con la stella.":(title == "Recenti" ? "Qui ritrovi le app aperte di recente.":"Nessuna app trovata."))
                     .font(.system(size:12)).foregroundStyle(.secondary).padding(8)
-            }else{
-                LazyVGrid(columns:[GridItem(.adaptive(minimum:large ? 112:92,maximum:large ? 132:108),spacing:10)],alignment:.leading,spacing:10){
+            }else if large {
+                LazyVGrid(columns:[GridItem(.adaptive(minimum:112,maximum:132),spacing:10)],alignment:.leading,spacing:10){
                     ForEach(apps){app in
                         LauncherAppTile(app:app,icon:model.applicationIcons[app.id],opening:model.openingApps.contains(app.id),active:model.activeApps.contains(app.id),enabled:model.connected && model.machineOperation == nil,selected:selection==app.id,highlight:highlight,large:large,pinned:model.launcherPreferences.pinned.contains(app.id),launch:{model.launch(app)},pin:{model.togglePin(app)})
+                            .id(app.id).contextMenu{appMenu(app)}
+                            .onAppear{model.applicationBecameVisible(app)}.onDisappear{model.applicationBecameHidden(app)}
+                    }
+                }
+            }else{
+                LazyVStack(spacing:2){
+                    ForEach(apps){app in
+                        LauncherAppRow(app:app,icon:model.applicationIcons[app.id],opening:model.openingApps.contains(app.id),active:model.activeApps.contains(app.id),enabled:model.connected && model.machineOperation == nil,selected:selection==app.id,highlight:highlight,launch:{model.launch(app)},pin:{model.togglePin(app)},pinned:model.launcherPreferences.pinned.contains(app.id))
                             .id(app.id).contextMenu{appMenu(app)}
                             .onAppear{model.applicationBecameVisible(app)}.onDisappear{model.applicationBecameHidden(app)}
                     }
@@ -304,5 +312,36 @@ private struct LauncherAppTile:View {
             .background(hovered || selected ? highlight:Color.primary.opacity(0.025),in:RoundedRectangle(cornerRadius:12))
             .overlay(RoundedRectangle(cornerRadius:12).strokeBorder(Color.primary.opacity(0.045)))
             .onHover{hovered=$0}
+    }
+}
+
+@MainActor
+private struct LauncherAppRow:View {
+    let app:WindowsApplication
+    let icon:NSImage?
+    let opening:Bool
+    let active:Bool
+    let enabled:Bool
+    let selected:Bool
+    let highlight:Color
+    let launch:()->Void
+    let pin:()->Void
+    let pinned:Bool
+    @State private var hovered=false
+    var body:some View {
+        HStack(spacing:0){
+            Button(action:launch){
+                HStack(spacing:12){
+                    LauncherAppIcon(icon:icon,size:26)
+                    Text(app.name).font(.system(size:13)).lineLimit(1)
+                    Spacer(minLength:6)
+                    if opening {ProgressView().controlSize(.mini)}
+                    else if active {Circle().fill(.green).frame(width:5,height:5).help("Finestra aperta")}
+                }.padding(.leading,12).padding(.trailing,8).frame(maxWidth:.infinity,minHeight:44).contentShape(Rectangle())
+            }.buttonStyle(LauncherTileButtonStyle()).disabled(!enabled || opening).accessibilityLabel("Apri "+app.name)
+            Button(action:pin){Image(systemName:pinned ? "star.fill":"star").font(.system(size:11)).frame(width:32,height:36).contentShape(Rectangle())}
+                .buttonStyle(LauncherChromeButtonStyle()).padding(.trailing,5).help(pinned ? "Rimuovi dai preferiti":"Aggiungi ai preferiti")
+                .accessibilityLabel((pinned ? "Rimuovi dai preferiti: ":"Aggiungi ai preferiti: ")+app.name)
+        }.background(hovered || selected ? highlight:.clear,in:RoundedRectangle(cornerRadius:8)).onHover{hovered=$0}
     }
 }

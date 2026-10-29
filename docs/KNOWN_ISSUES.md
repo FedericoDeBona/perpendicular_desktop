@@ -1,5 +1,7 @@
 # Registro dei problemi
 
+**29 ottobre — richiesta launcher0.2.40:** Recenti e Altre app tornano a righe, Preferiti conservati a griglia. Segnalazione scroll rettificata dall’utente prima delle modifiche: nessuna nuova causa o correzione rivendicata. Layout distribuito/verificato nella main0.2.40; scroll0→1→0 e ultima app Windows Tools visibile. TODO-019 aggiornato, nessun nuovo difetto concorrente con APP-004; clone non eseguito. [Evidenze](VERIFICATION.md#29-ottobre--recenti-e-catalogo-di-nuovo-in-righe).
+
 **29 ottobre — Creality viola corretto sulla base locale M4/93be6687, OpenGL guest0.2.32.** Riutilizzate le patch texture bounded-upload e sampler già verificate sull'altro Mac; ricompilate ARM64/x64 sui sorgenti locali, senza trasferire il diverso host M1. Baseline atlante112295936byte FAIL in entrambe le architetture, candidata byte-identica/disegno PASS; MSAA installato ARM64/x64 PASS. Creality Desktop: testi/controlli leggibili e cubo20mm/8000mm³/12triangoli renderizzato, senza magenta nel campione. Sei DLL/registrazioni e firme app verificati; i due Vulkan e tutti29membri host invariati. SecureBoot1/CI0xc001/TestSigningfalse/kernel originale conservati. Stesso QEMU17189, nessun reboot/configurazione modificata; soli task/scena di prova chiusi. Implementazione/distribuzione e verifica main Desktop circoscritta FATTE; clone e Seamless nuovi NON ESEGUITI. Obiettivo generale IN CORSO: orologio e Shell ancora da correggere prima di qualificare Seamless. [Confronto e consegna](VERIFICATION.md#29-ottobre--correzione-creality-viola-sulla-base-m4).
 
 
