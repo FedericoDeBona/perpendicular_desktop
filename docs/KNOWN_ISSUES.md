@@ -340,6 +340,8 @@ Queste voci conservano limiti non risolti, senza richiedere di ripristinare codi
 
 ### GFX-001 — Flicker e cifre mancanti nelle catture WGC
 
+**29 ottobre — nuovo riscontro utente:** orologio in basso a destra visibile soltanto dopo hover nel Desktop. Prima osservazione main: orologio/data presenti, nessun hover sull'area eseguito; intermittenza non riprodotta né risolta. Priorità Desktop prima di Seamless, verificare aggiornamento spontaneo e riapertura. [Riscontro e criteri](VERIFICATION.md#29-ottobre--obiettivo-glitch-desktop-prima-di-seamless).
+
 **Incremento texture0.2.31 distribuito:** upload4096×6854 RGBA fallisce map/contenuto con0.2.30 pur riportando GLerror0; staging2MiB candidata rilegge112295936byte identici e Creality Seamless torna leggibile, GDI magenta1171→0/10005. Candidata main circoscritta PASS, clone non eseguito/distribuzione versionata completata; Shell/Settings non qualificati da questo esito. [Evidenze, fallimenti e prossimo passo](VERIFICATION.md#28-ottobre--texture-grandi-e-testi-magenta-opengl0231).
 
 - **Seguito0.2.30:** cubo Creality importato/renderizzato anche nella finestra Seamless2352×1200, ma testi/controlli magenta: esito grafico complessivo FAIL. Magenta1171/10005campioni già nel DC Windows, hash WGC/export coerenti nel campione, nessuna nuova saturazione. CWD e tre errori iniziali GLAD uguali nelle due istanze non isolano la causa. Prossimo passo texture/stato dei glyph nel caso Desktop sano e Seamless difettoso; menu/Settings ancora da riqualificare. Preparazione cartelle dopo reconnect completata automaticamente3collegate/failedfalse. Implementazione MSAA/main verificata, clone non eseguito; obiettivo IN CORSO. [Esiti positivi e negativi](VERIFICATION.md#28-ottobre--correzione-msaa-opengl0230-e-recupero-cartelle-sulla-iot0795218c).
@@ -558,6 +560,8 @@ Queste voci conservano limiti non risolti, senza richiedere di ripristinare codi
 - **Evidenze:** [requisiti rinviati](RESTART_PLAN.md#direzioni-e-limiti), [valutazione](VERIFICATION.md#24-ottobre--valutazione-n1-monitor-isolamento-e-gpu-per-schermo).
 
 ### APP-001 — Creality / OpenGL
+
+**29 ottobre — segnalazione locale riaperta:** interno Creality viola sulla base93be6687. Il runtime locale0.2.27 host_revision2 non include il profilo texture0.2.31 qualificato sulla IoT0795218c: il PASS dell'altra base non chiude questo caso. Riprodurre nel Desktop e confrontare il percorso texture effettivo, poi Seamless. Nessuna correzione distribuita in questo passaggio. [Riscontro e criteri](VERIFICATION.md#29-ottobre--obiettivo-glitch-desktop-prima-di-seamless).
 
 **Incremento texture0.2.31 distribuito:** upload4096×6854 RGBA fallisce map/contenuto con0.2.30 pur riportando GLerror0; staging2MiB candidata rilegge112295936byte identici e Creality Seamless torna leggibile, GDI magenta1171→0/10005. Candidata main circoscritta PASS, clone non eseguito/distribuzione versionata completata; Shell/Settings non qualificati da questo esito. [Evidenze, fallimenti e prossimo passo](VERIFICATION.md#28-ottobre--texture-grandi-e-testi-magenta-opengl0231).
 
