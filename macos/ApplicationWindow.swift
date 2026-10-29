@@ -142,6 +142,7 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
     private var maximumPixels=NSSize(width:4096,height:4096)
     private var minimumPixels=NSSize(width:160,height:100)
     private var geometryInteraction:String?
+    private var geometryMoveSource:(size:NSSize,scale:CGFloat)?
     private var geometrySerial=0
     private var geometryActive=false
     private var geometryFinishing=false
@@ -851,7 +852,7 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
         switch mode {
         case .remote:send(gesture.down)
         case .move:
-            if sharedDisplay != nil {beginSharedGeometry()}
+            if sharedDisplay != nil {beginSharedGeometry(preservingSize:true)}
             else {bridge.command("cancel_interaction",["window":id]);content.clearModifiers()}
             if gesture.clicks == 2 {gesture.mode = .discard;toggleZoom()}
         case .resize:beginResize()
@@ -989,12 +990,17 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
     private var sharedTarget:NSRect? {
         let mac=window.contentRect(forFrameRect:resizePreviewFrame ?? window.frame)
         guard let display=SharedDisplay.best(sharedDisplays,host:mac) ?? sharedDisplay else{return nil}
-        let frame=display.guestFrame(forMac:mac)
+        var frame=display.guestFrame(forMac:mac)
+        // AppKit rounds a half-point window height to a whole point. Moving
+        // that container must not turn an odd guest raster into a resize.
+        // A transfer to a different pixel scale still needs its mapped size.
+        if let move=geometryMoveSource,move.scale == display.pixelScale {frame.size=move.size}
         return NSRect(x:frame.minX.rounded(),y:frame.minY.rounded(),
                       width:max(160,frame.width.rounded()),height:max(100,frame.height.rounded()))
     }
-    private func beginSharedGeometry(){
+    private func beginSharedGeometry(preservingSize:Bool=false){
         cancelSharedGeometry()
+        if preservingSize,let sharedDisplay {geometryMoveSource=(sourceRect.size,sharedDisplay.pixelScale)}
         geometryInteraction=UUID().uuidString;geometryActive=true
         geometryNextSend=0;geometrySent=sharedTarget
         content.suspendedPointer=true;content.clearModifiers()
@@ -1114,6 +1120,7 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
         removeResizePreview()
         let hadInteraction=geometryInteraction != nil
         geometryInteraction=nil;geometryActive=false;geometryFinishing=false
+        geometryMoveSource=nil
         geometryInFlight=false;geometryPending=nil;geometrySent=nil
         geometryExpected=nil;geometryConfirmed=nil
         geometryTimer?.invalidate();geometryTimer=nil
@@ -1260,7 +1267,7 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
     func windowWillMove(_ notification:Notification){
         guard !role.transient,sharedDisplay != nil,!applyingSourceGeometry,geometryInteraction == nil,
               NSEvent.pressedMouseButtons & 1 != 0,NSApp.currentEvent?.window === window else{return}
-        beginSharedGeometry()
+        beginSharedGeometry(preservingSize:true)
         trackNativeMove(waitForMouseUp:true)
     }
     private func trackNativeMove(waitForMouseUp:Bool){
@@ -1285,7 +1292,8 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
         // macOS Window-menu moves/tiles and native drags do not pass through
         // our Windows-caption gesture. Own their geometry until guest ACK and
         // metadata agree, so an old snapshot cannot snap the window back.
-        beginSharedGeometry();trackNativeMove(waitForMouseUp:false)
+        let movingOnly=abs(actual.width-expected.width)<=0.5 && abs(actual.height-expected.height)<=0.5
+        beginSharedGeometry(preservingSize:movingOnly);trackNativeMove(waitForMouseUp:false)
     }
     private func observeNativeGeometryAfterNotification(){
         nativeGeometryObservation?.cancel()
