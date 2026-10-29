@@ -1,5 +1,8 @@
 # Registro dei problemi
 
+**29 ottobre — pull/rebuild e guest tool0.2.31 sulla93be6687: consegna verificata.** Fast-forward35c37ad→e1122df, app canonica/build firmate/allineate e guest33b91639… Running/hash esatto; helper/script cartelle aggiornati, task temporaneo0/CD vuoto. Windows collegato/pronto, QEMU17189; un boot iniziale dalla VM spenta, nessun reboot durante l'update. Configurazione byte-identica, SecureBoot1/CI0xc001/TestSigningfalse/driver originali conservati. Runtime grafico locale e OpenGL0.2.27 host_revision2 preservati, non migrati alle release dell'altra base. Implementazione/distribuzione e verifica main del solo aggiornamento FATTE; clone e nuove prove grafiche NON ESEGUITI. Glitch Settings/menu e updater automatico restano aperti; prossimo passo solo su nuova richiesta concreta. [Evidenze](VERIFICATION.md#29-ottobre--pull-rebuild-e-guest-tool-sulla93be6687).
+
+
 **28 ottobre —0.2.31 installata sulla IoT0795218c, corretto il magenta OpenGL nel caso verificato.** Isolato upload RGBA4096×6854: staging per fasce2MiB rilegge112295936byte identici, ARM64/x64 e MSAA PASS; Creality ordinaria Seamless mostra cubo20mm/12triangoli e testi leggibili, campioni magenta1171→0/10005 sulla candidata. Sei DLL/firma/registrazioni/protezioni verificate, stesso QEMU57285 e risorse conservati. **Implementazione/distribuzione e verifica main circoscritta FATTE; clone NON ESEGUITO; obiettivo generale IN CORSO.** Menu Desktop/View completo nel campione, Creality Desktop non raggiunto visivamente; Settings e artefatti D3D restano aperti. [Evidenze, fallimenti e limiti](VERIFICATION.md#28-ottobre--texture-grandi-e-testi-magenta-opengl0231).
 
 **Seguito0.2.30:** cubo Creality importato/renderizzato anche nella finestra Seamless2352×1200, ma testi/controlli magenta: esito grafico complessivo FAIL. Magenta1171/10005campioni già nel DC Windows, hash WGC/export coerenti nel campione, nessuna nuova saturazione. CWD e tre errori iniziali GLAD uguali nelle due istanze non isolano la causa. Prossimo passo texture/stato dei glyph nel caso Desktop sano e Seamless difettoso; menu/Settings ancora da riqualificare. Preparazione cartelle dopo reconnect completata automaticamente3collegate/failedfalse. Implementazione MSAA/main verificata, clone non eseguito; obiettivo IN CORSO. [Esiti positivi e negativi](VERIFICATION.md#28-ottobre--correzione-msaa-opengl0230-e-recupero-cartelle-sulla-iot0795218c).
@@ -286,6 +289,8 @@ Il ciclo RAM protetto 4→2→4 GiB con dati conservati resta la qualifica prece
 - **Evidenze:** [semplificazione RAM e accesso](VERIFICATION.md#25-ottobre--ram-semplificata-e-accesso-windows).
 
 ### SYS-005 — Aggiornamento del servizio guest interrotto dalla propria chiusura
+
+- **29 ottobre, aggiornamento richiesto sulla93be6687:** task interattivo elevato indipendente completa guest33b91639… e script cartelle, ricevuta installed/SCM Running/hash esatto, riconnessione riuscita e task0. È distribuzione manuale verificata, non correzione dell'updater automatico. [Evidenze](VERIFICATION.md#29-ottobre--pull-rebuild-e-guest-tool-sulla93be6687).
 
 **28 ottobre, utility0.2.26:** tentativo ad hoc Stop-Service→sovrascrittura del vecchio eseguibile fallito per file ancora in uso e collegamento perso. Recupero dall’installer ordinario in PowerShell amministratore del Desktop: guest5876604948d9 Running e collegato; task temporaneo assente. Non riutilizzare la sovrascrittura del binario attivo; updater automatico ancora aperto. [Evidenze](VERIFICATION.md#28-ottobre--utility-mac-windows-shortcut-e-appunti-desktop).
 
