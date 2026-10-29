@@ -1,5 +1,7 @@
 # TODO — feature e correzioni
 
+**Seguito29 ottobre — TODO-008/GFX-001 IN CORSO:** verificati anche i moduli realmente caricati dalla Shell, concordi col driver firmato previsto. Traccia circoscritta delle maschere testo/icone acquisita e strumentazione rimossa; nessuna causa o correzione tray dimostrata. Implementazione/main correttiva e clone NON ESEGUITI. Prossimo passo: isolare la risorsa/operazione che perde il contenuto, senza ripetere matrici generiche alpha/query. Criterio invariato: freccia/rete/volume/orologio stabili senza hover e pannelli utilizzabili, Desktop prima di Seamless. [Evidenze e limiti](VERIFICATION.md#seguito--componenti-shell-caricati-e-maschere-alpha).
+
 **29 ottobre — precisazione vincolante: intera area di notifica.** L'utente chiarisce che il difetto riguarda anche i pulsanti a sinistra dell'orologio: freccia delle icone nascoste, Ethernet/rete e gli altri elementi della stessa area. Il caso minimo non si conclude con il solo orologio leggibile: devono restare disegnati icone e testi senza hover, aprirsi i relativi pannelli e conservarsi al ritorno al desktop/resize. Riprodotto nella main: rete/volume inizialmente assenti, ricompaiono al clic sul gruppo mentre l'orologio sparisce; stessa area incompleta anche nel campione GDI Windows. Nessuna nuova correzione né causa comune provata. TODO-008/GFX-001 IN CORSO; priorità Desktop completo, poi regressioni Seamless e passaggi fra modalità. [Perimetro e riproduzione](VERIFICATION.md#29-ottobre--area-di-notifica-icone-rete-volume-e-orologio).
 
 
