@@ -1,5 +1,8 @@
 # TODO — feature e correzioni
 
+**29 ottobre — precisazione vincolante: intera area di notifica.** L'utente chiarisce che il difetto riguarda anche i pulsanti a sinistra dell'orologio: freccia delle icone nascoste, Ethernet/rete e gli altri elementi della stessa area. Il caso minimo non si conclude con il solo orologio leggibile: devono restare disegnati icone e testi senza hover, aprirsi i relativi pannelli e conservarsi al ritorno al desktop/resize. Riprodotto nella main: rete/volume inizialmente assenti, ricompaiono al clic sul gruppo mentre l'orologio sparisce; stessa area incompleta anche nel campione GDI Windows. Nessuna nuova correzione né causa comune provata. TODO-008/GFX-001 IN CORSO; priorità Desktop completo, poi regressioni Seamless e passaggi fra modalità. [Perimetro e riproduzione](VERIFICATION.md#29-ottobre--area-di-notifica-icone-rete-volume-e-orologio).
+
+
 **29 ottobre — regola permanente di allineamento tra macchine:** AGENTS.md impone il confronto dei fix condivisi con bundle, host effettivo e componenti Windows prima di nuova diagnosi/consegna. Patch/ricette/pin/requisiti vanno aggiornati con ogni fix binario. Requisiti OpenGL indipendenti dalla versione locale in requirements.json; build standard e copy-main-runtime rifiutano vecchie DLL anche con firma valida, controllo finale anche SKIP_RUNTIME. Vecchio0.2.27 rifiutato prima di scrivere la destinazione;0.2.32/hash6DLL e build ordinaria completa PASS. M1 0.2.31/M4 0.2.32 soddisfano gli stessi requisiti di patch; nessuna nuova installazione sull'altro Mac o aggiornamento automatico Windows dichiarato. Regola/controllo build FATTI nel perimetro verificato; obiettivo grafico resta IN CORSO per orologio/Shell e poi Seamless. [Regola e verifica della build](VERIFICATION.md#29-ottobre--regola-obbligatoria-di-allineamento-tra-macchine).
 
 
@@ -423,6 +426,8 @@ Il difetto Wait/Signal di TODO-016 condiziona l'interpretazione delle misure gue
 Queste voci derivano dal registro corrente; non sono nuove promesse di funzionalità.
 
 ### TODO-008 — Contenuto grafico e durata delle risorse
+
+**Criterio corrente29ottobre — area di notifica completa:** freccia icone nascoste, rete/Ethernet, volume e orologio visibili/aggiornati senza hover; apertura/chiusura dei pannelli non deve far scomparire gli elementi vicini. Coprire riapertura/resize Desktop, poi modalità Seamless e ritorno al Desktop con stato coerente. Il solo orologio o Creality corretta non chiudono il difetto. Riproduzione main presente, implementazione correttiva DA FARE. [Perimetro e riproduzione](VERIFICATION.md#29-ottobre--area-di-notifica-icone-rete-volume-e-orologio).
 
 **Incremento texture0.2.31 distribuito:** upload4096×6854 RGBA fallisce map/contenuto con0.2.30 pur riportando GLerror0; staging2MiB candidata rilegge112295936byte identici e Creality Seamless torna leggibile, GDI magenta1171→0/10005. Candidata main circoscritta PASS, clone non eseguito/distribuzione versionata completata; Shell/Settings non qualificati da questo esito. [Evidenze, fallimenti e prossimo passo](VERIFICATION.md#28-ottobre--texture-grandi-e-testi-magenta-opengl0231).
 
