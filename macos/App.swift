@@ -55,6 +55,9 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
     private var failedWindows:Set<String>=[]
     private var launcherEpoch=UUID()
     private var catalogueRequest=UUID()
+    private var lastCatalogueRefresh:TimeInterval=0
+    private var catalogueNotice:String?
+    private var catalogueRefreshes=0
     private var visibleIcons:Set<String>=[]
     private var iconVisibility:[String:Int]=[:]
     private var failedIcons:Set<String>=[]
@@ -179,6 +182,9 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
         }catch{status=error.localizedDescription;launcherNotice="Windows non può essere avviato. "+error.localizedDescription}
         launcher=LauncherWindow(contentRect:NSRect(x:200,y:160,width:760,height:760),styleMask:[.titled,.closable,.resizable,.miniaturizable,.fullSizeContentView],backing:.buffered,defer:false)
         launcher.title="Perpendicular";launcher.isReleasedWhenClosed=false
+        // The custom title strip has one drag owner. Native titlebar tracking
+        // must not start a second movement path through the full-size content.
+        launcher.isMovable=false
         launcher.titleVisibility = .hidden
         launcher.titlebarAppearsTransparent=true;launcher.toolbarStyle = .unified
         launcher.isOpaque=false;launcher.backgroundColor = .clear
@@ -257,11 +263,21 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
             if !failedWindows.isEmpty || windowNotice?.frame == true {
                 return .init(kind:.graphics,title:"Windows acceso · problema immagine",detail:"Una finestra non ha un’immagine disponibile. Windows non risulta spento.")
             }
+            if folderIntegrationFailed {return .init(kind:.attention,title:"Problema con le cartelle condivise",detail:folderIntegrationStatus)}
             if launcherNotice != nil {return .init(kind:.attention,title:"Windows acceso · avviso",detail:"Apri il dettaglio dell’avviso prima di riprovare l’operazione.")}
             if machine?.mixedDisplaysEnabled == true,sharedDisplays.isEmpty {
                 return .init(kind:.busy,title:"Windows acceso · preparazione app",detail:"Il collegamento è attivo; le finestre delle app non sono ancora pronte.")
             }
             return .init(kind:.connected,title:"Windows acceso · collegato",detail:"Il collegamento alle app è disponibile. Lo stato delle singole finestre può variare.")
+        }
+    }
+    var launcherStatusMessage:String? {
+        if let launcherNotice {return launcherNotice}
+        if folderIntegrationFailed {return folderIntegrationStatus}
+        let state=launcherWindowsStatus
+        switch state.kind {
+        case .connected,.off:return nil
+        case .busy,.attention,.graphics,.disconnected,.unknown:return state.title
         }
     }
     var machineStateLabel:String {
@@ -305,6 +321,7 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
                         let changed = !NSDictionary(dictionary:prior).isEqual(to:visible)
                         if changed {self.vmMemoryState=memory}
                         PipelineTrace.record("ui-state-poll","memory",["published":changed])
+                        self.refreshCatalogueIfNeeded()
                     }
                 }
                 do {try await Task.sleep(for:.seconds(2))}catch{return}
@@ -622,7 +639,7 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
                 "frameChannel":bridge?.separateFrames ?? false,
                 "windowGPU":NativeWindowFrames.shared.diagnostics,
                 "windowGPUCache":NativeWindowFrames.shared.cacheDiagnostics,
-                "launcher":["dragSamples":launcher.dragSamples,"frame":["x":launcher.frame.minX,"y":launcher.frame.minY,"width":launcher.frame.width,"height":launcher.frame.height],"screen":launcher.screen?.localizedName ?? "", "apps":apps.map{["id":$0.id,"name":$0.name,"key":$0.key,"essential":$0.essential]},"opening":Array(openingApps).sorted(),"notice":launcherNotice as Any? ?? NSNull(),"iconCacheHits":iconCacheHits,"iconFetches":iconFetches,"cachedIcons":applicationIcons.count,"recent":launcherPreferences.recent(apps).map(\.id),"favorites":launcherPreferences.sections(apps).favorites.map(\.id),"appearance":launcherAppearance.rawValue,"indicator":launcherWindowsStatus.title],
+                "launcher":["catalogueAutomaticEligible":launcher.isVisible && !launcher.isMiniaturized,"catalogueAgeSeconds":ProcessInfo.processInfo.systemUptime-lastCatalogueRefresh,"catalogueRefreshes":catalogueRefreshes,"statusMessage":launcherStatusMessage as Any? ?? NSNull(),"dragSamples":launcher.dragSamples,"dragPointer":["x":launcher.dragPointer.x,"y":launcher.dragPointer.y],"dragRequested":["x":launcher.dragRequested.x,"y":launcher.dragRequested.y],"frame":["x":launcher.frame.minX,"y":launcher.frame.minY,"width":launcher.frame.width,"height":launcher.frame.height],"screen":launcher.screen?.localizedName ?? "", "apps":apps.map{["id":$0.id,"name":$0.name,"key":$0.key,"essential":$0.essential]},"opening":Array(openingApps).sorted(),"notice":launcherNotice as Any? ?? NSNull(),"iconCacheHits":iconCacheHits,"iconFetches":iconFetches,"cachedIcons":applicationIcons.count,"recent":launcherPreferences.recent(apps).map(\.id),"favorites":launcherPreferences.sections(apps).favorites.map(\.id),"appearance":launcherAppearance.rawValue,"indicator":launcherWindowsStatus.title],
                 "desktop":machine?.desktopState ?? [:],
                 "lastCommandRTTMilliseconds":bridge?.lastRoundTripMilliseconds ?? 0,
                 "frameReceiveMilliseconds":bridge?.frameReceiveMilliseconds ?? 0,
@@ -763,18 +780,27 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
             }catch {self.status=error.localizedDescription}
         }
     }
-    func refresh(){
+    func refreshCatalogueIfNeeded(){
+        guard launcher?.isVisible == true,launcher?.isMiniaturized == false,
+              ProcessInfo.processInfo.systemUptime-lastCatalogueRefresh>=30 else{return}
+        refresh(checkDisplay:false)
+    }
+    func refresh(checkDisplay:Bool=true){
         guard connected,!catalogueLoading else{return}
-        catalogueLoading=true;launcherNotice=nil
+        lastCatalogueRefresh=ProcessInfo.processInfo.systemUptime;catalogueRefreshes+=1
+        catalogueLoading=true
+        if launcherNotice==catalogueNotice {launcherNotice=nil}
+        catalogueNotice=nil
         catalogueRequest=UUID();let request=catalogueRequest,epoch=launcherEpoch
-        readDisplay()
+        if checkDisplay {readDisplay()}
         bridge.command("catalogue"){[weak self] result in
             guard let self,self.launcherEpoch == epoch,self.catalogueRequest == request else{return}
             self.catalogueLoading=false
             switch result{
             case .success(let reply):
                 guard let values=reply["value"] as? [[String:Any]] else {
-                    self.launcherNotice="L’elenco delle app non è disponibile. Riprova con Aggiorna.";return
+                    let message="L’elenco delle app non è disponibile. Riprovo automaticamente."
+                    self.catalogueNotice=message;self.launcherNotice=message;return
                 }
                 let previousRevisions=Dictionary(uniqueKeysWithValues:self.apps.map{($0.id,$0.iconRevision)})
                 var identities:Set<String>=[]
@@ -792,7 +818,10 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
                 self.iconOrder.removeAll{!identities.contains($0)}
                 self.status="\(self.apps.count) applications"
                 self.pumpApplicationIcons()
-            case .failure(let error):self.status=error.localizedDescription;self.launcherNotice="Non riesco ad aggiornare le app. "+error.localizedDescription
+            case .failure(let error):
+                self.status=error.localizedDescription
+                let message="Non riesco ad aggiornare le app. "+error.localizedDescription
+                self.catalogueNotice=message;self.launcherNotice=message
             }
         }
     }

@@ -45,16 +45,25 @@ private struct LauncherGlass:NSViewRepresentable {
 final class LauncherWindow:NSWindow {
     private var dragOffset:NSPoint?
     private(set) var dragSamples=0
+    private(set) var dragPointer=NSPoint.zero
+    private(set) var dragRequested=NSPoint.zero
     override func constrainFrameRect(_ frameRect:NSRect,to screen:NSScreen?)->NSRect {
         dragOffset == nil ? super.constrainFrameRect(frameRect,to:screen):frameRect
     }
     override func sendEvent(_ event:NSEvent){
+        guard [.leftMouseDown,.leftMouseDragged,.leftMouseUp].contains(event.type) else {
+            super.sendEvent(event);return
+        }
+        // Freeze this event before moving the window; polling the current mouse
+        // can read a later queued sample and change the grab point.
+        let sample=WindowMouseSample(event:event,window:self)
+        if event.type == .leftMouseDown {dragOffset=nil}
         if event.type == .leftMouseDown,event.clickCount == 1 {
             let point=event.locationInWindow
             let contentHeight=styleMask.contains(.fullSizeContentView) ? frame.height-35:contentRect(forFrameRect:frame).height
             // Leave traffic lights, resize edges and titlebar double-clicks native.
             if point.y>=contentHeight,point.y<frame.height-4,point.x>100,point.x<frame.width-8 {
-                let pointer=NSEvent.mouseLocation
+                let pointer=sample.screenLocation
                 dragOffset=NSPoint(x:pointer.x-frame.minX,y:pointer.y-frame.minY)
                 makeKeyAndOrderFront(nil)
                 return
@@ -62,14 +71,38 @@ final class LauncherWindow:NSWindow {
         }
         if let offset=dragOffset {
             if event.type == .leftMouseDragged || event.type == .leftMouseUp {
-                let pointer=NSEvent.mouseLocation
-                setFrameOrigin(NSPoint(x:pointer.x-offset.x,y:pointer.y-offset.y))
+                let pointer=sample.screenLocation
+                dragPointer=pointer
+                dragRequested=NSPoint(x:pointer.x-offset.x,y:pointer.y-offset.y)
+                setFrameOrigin(dragRequested)
                 dragSamples+=1
                 if event.type == .leftMouseUp {dragOffset=nil}
                 return
             }
         }
         super.sendEvent(event)
+    }
+}
+
+private struct LauncherChromeButtonStyle:ButtonStyle {
+    var prominent=false
+    @Environment(\.isEnabled) private var enabled
+    @State private var hovered=false
+    func makeBody(configuration:Configuration)->some View {
+        configuration.label
+            .foregroundStyle(enabled && (hovered || configuration.isPressed) ? Color.primary:Color.secondary)
+            .background(Color.primary.opacity(configuration.isPressed ? 0.17:hovered ? 0.11:prominent ? 0.065:0),in:RoundedRectangle(cornerRadius:9))
+            .overlay(RoundedRectangle(cornerRadius:9).strokeBorder(Color.primary.opacity(prominent ? (hovered ? 0.2:0.12):0)))
+            .opacity(enabled ? 1:0.4)
+            .scaleEffect(configuration.isPressed ? 0.96:1)
+            .onHover{hovered=$0}
+    }
+}
+
+private struct LauncherTileButtonStyle:ButtonStyle {
+    func makeBody(configuration:Configuration)->some View {
+        configuration.label.opacity(configuration.isPressed ? 0.65:1)
+            .scaleEffect(configuration.isPressed ? 0.97:1)
     }
 }
 
@@ -94,7 +127,7 @@ struct Launcher:View {
             if settings {
                 HStack(spacing:12){
                     Button{showApps()}label:{Image(systemName:"arrow.left").frame(width:28,height:28)}
-                        .buttonStyle(.plain).help("Torna alle app").accessibilityLabel("Torna alle app")
+                        .buttonStyle(LauncherChromeButtonStyle()).help("Torna alle app").accessibilityLabel("Torna alle app")
                     Text("Impostazioni").font(.system(size:23,weight:.medium)).tracking(-0.5)
                     Spacer()
                 }.padding(.horizontal,22).padding(.vertical,14)
@@ -123,7 +156,7 @@ struct Launcher:View {
         .onReceive(NotificationCenter.default.publisher(for:.launcherShowSettings)){_ in showSettings()}
         .onExitCommand{if settings {showApps()}else if !search.isEmpty {search=""}}
     }
-    private func showApps(){settings=false;searchFocused=true}
+    private func showApps(){settings=false;searchFocused=true;model.refreshCatalogueIfNeeded()}
     private func showSettings(){settings=true;statusOpen=false;search="";searchFocused=false}
     private func resetSelection(){selection=navigation.first?.id}
     private func moveSelection(_ delta:Int){
@@ -140,9 +173,14 @@ struct Launcher:View {
                 .onKeyPress(.downArrow){moveSelection(1);return .handled}
                 .onKeyPress(.upArrow){moveSelection(-1);return .handled}
             if !search.isEmpty {
-                Button{search="";searchFocused=true}label:{Image(systemName:"xmark.circle.fill").foregroundStyle(.tertiary)}
-                    .buttonStyle(.plain).accessibilityLabel("Cancella ricerca")
+                Button{search="";searchFocused=true}label:{Image(systemName:"xmark.circle.fill").frame(width:28,height:28)}
+                    .buttonStyle(LauncherChromeButtonStyle()).accessibilityLabel("Cancella ricerca")
             }
+            Button(action:model.showWindows){
+                Image(systemName:"square.grid.2x2.fill").font(.system(size:17)).frame(width:40,height:36).contentShape(Rectangle())
+            }.buttonStyle(LauncherChromeButtonStyle(prominent:true))
+                .help("Desktop Windows").accessibilityLabel("Desktop Windows").accessibilityIdentifier("launcher-open-desktop")
+                .disabled(!model.desktopAvailable || model.machineOperation != nil)
         }.padding(.horizontal,28).padding(.top,13).padding(.bottom,25)
     }
     private var catalogue:some View {
@@ -186,19 +224,18 @@ struct Launcher:View {
             Button{statusOpen.toggle()}label:{
                 Image(systemName:model.launcherWindowsStatus.symbol).font(.system(size:13,weight:.medium))
                     .foregroundStyle(model.launcherWindowsStatus.color).frame(width:28,height:28).contentShape(Rectangle())
-            }.buttonStyle(.plain).help(model.launcherWindowsStatus.title+(model.launcherNotice.map{" · "+$0} ?? ""))
+            }.buttonStyle(LauncherChromeButtonStyle()).help(model.launcherWindowsStatus.title+(model.launcherNotice.map{" · "+$0} ?? ""))
                 .accessibilityLabel(model.launcherWindowsStatus.title).accessibilityIdentifier("launcher-windows-status")
                 .popover(isPresented:$statusOpen,arrowEdge:.bottom){statusDetails}
-            Divider().frame(height:14)
-            Button(action:model.showWindows){Label("Desktop Windows",systemImage:"macwindow").font(.system(size:11))}
-                .buttonStyle(.plain).foregroundStyle(.secondary).disabled(!model.desktopAvailable || model.machineOperation != nil)
+            if let message=model.launcherStatusMessage {
+                Button{statusOpen=true}label:{
+                    Text(message).font(.system(size:11)).lineLimit(1).truncationMode(.tail)
+                        .frame(maxWidth:.infinity,alignment:.leading).contentShape(Rectangle())
+                }.buttonStyle(LauncherChromeButtonStyle()).help(message)
+            }
             Spacer(minLength:10)
-            if model.catalogueLoading {ProgressView().controlSize(.mini)}
-            Button{model.refresh()}label:{Image(systemName:"arrow.clockwise").font(.system(size:12)).frame(width:25,height:28)}
-                .buttonStyle(.plain).foregroundStyle(.secondary).help("Aggiorna app").accessibilityLabel("Aggiorna app")
-                .disabled(!model.connected || model.catalogueLoading)
             Button{settings ? showApps():showSettings()}label:{Image(systemName:"slider.horizontal.3").font(.system(size:13)).frame(width:28,height:28)}
-                .buttonStyle(.plain).foregroundStyle(.secondary).help("Impostazioni · ⌘,").accessibilityLabel("Impostazioni")
+                .buttonStyle(LauncherChromeButtonStyle()).help("Impostazioni · ⌘,").accessibilityLabel("Impostazioni")
         }.padding(.horizontal,16).frame(height:46).background(Color.primary.opacity(0.025))
     }
     private var statusDetails:some View {
@@ -258,9 +295,9 @@ private struct LauncherAppTile:View {
                     Text(app.name).font(.system(size:large ? 12:11)).lineLimit(2).multilineTextAlignment(.center)
                         .frame(maxWidth:.infinity).frame(height:28,alignment:.top)
                 }.padding(.horizontal,7).frame(maxWidth:.infinity,maxHeight:.infinity).contentShape(RoundedRectangle(cornerRadius:12))
-            }.buttonStyle(.plain).disabled(!enabled || opening).accessibilityLabel("Apri "+app.name).help(app.name)
+            }.buttonStyle(LauncherTileButtonStyle()).disabled(!enabled || opening).accessibilityLabel("Apri "+app.name).help(app.name)
             Button(action:pin){Image(systemName:pinned ? "star.fill":"star").font(.system(size:10)).frame(width:26,height:26).contentShape(Rectangle())}
-                .buttonStyle(.plain).foregroundStyle(.secondary).opacity(hovered || pinned ? 1:0)
+                .buttonStyle(LauncherChromeButtonStyle()).opacity(hovered || pinned ? 1:0)
                 .help(pinned ? "Rimuovi dai preferiti":"Aggiungi ai preferiti")
                 .accessibilityLabel((pinned ? "Rimuovi dai preferiti: ":"Aggiungi ai preferiti: ")+app.name)
         }.aspectRatio(1,contentMode:.fit)
