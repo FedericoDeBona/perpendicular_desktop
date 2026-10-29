@@ -835,8 +835,15 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
         cancelledOpeningApps.remove(app.id);beginOpening(app)
         status="Opening \(app.name)…"
         let epoch=launcherEpoch,request=openingRequests[app.id]
+        PipelineTrace.record("app-launch-request",app.id)
         bridge.command("launch",["app":app.id]){[weak self] result in
             guard let self,self.launcherEpoch == epoch else{return}
+            if PipelineTrace.enabled {
+                switch result {
+                case .success(let reply):PipelineTrace.record("app-launch-reply",app.id,["value":reply["value"] ?? [:]])
+                case .failure:PipelineTrace.record("app-launch-failed",app.id)
+                }
+            }
             if case .success=result {
                 self.launcherPreferences.record(app.id);try? self.launcherLibrary?.save(self.launcherPreferences)
             }
@@ -874,6 +881,7 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
     private func finishOpening(_ id:String,appeared:Bool=false){
         seamlessTransferApps.remove(id)
         guard openingApps.contains(id) || openingTasks[id] != nil || (appeared && openingNoticeApp == id) else{return}
+        PipelineTrace.record(appeared ? "app-launch-ready":"app-launch-ended",id)
         openingTasks.removeValue(forKey:id)?.cancel()
         openingRequests.removeValue(forKey:id)
         if openingApps.contains(id) {openingApps.remove(id)}
@@ -1398,6 +1406,7 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
                     windowNotice=nil
                 }
                 if windows[id]==nil{
+                    PipelineTrace.record("app-window-discovered",id,["app":item["app"] ?? "","role":item["role"] ?? ""])
                     let role=WindowRole(rawValue:item["role"] as? String ?? "dialog") ?? .dialog
                     let controller=ApplicationWindow(id:id,title:title,role:role,bridge:bridge)
                     let closeEpoch=displayEpoch

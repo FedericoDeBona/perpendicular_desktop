@@ -31,6 +31,7 @@ final class PipelineTrace:@unchecked Sendable {
         trace.count+=1
         trace.previousCostMilliseconds=(ProcessInfo.processInfo.systemUptime-now)*1000
     }
+    static var enabled:Bool {shared.fd>=0}
     static func frameID(_ header:[String:Any])->String {
         "wgc:\(header["window"] ?? "?"):\(header["generation"] ?? "?"):\(header["sequence"] ?? "?")"
     }

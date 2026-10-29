@@ -446,6 +446,15 @@ unsafe fn run(target: &Target, outbox: &Outbox, stop: &AtomicBool, driver:D3D_DR
         target.progress.enabled_at_start.store(IsWindowEnabled(HWND(target.hwnd as *mut _)).as_bool(),Ordering::Relaxed);
         session.StartCapture().map_err(|e| gpu_error(&device, "StartCapture", e))?;
         target.progress.starts.fetch_add(1,Ordering::Relaxed);
+        // A static app on a reserved display may have finished painting before
+        // WGC subscribed. Request one ordinary repaint after StartCapture,
+        // without moving/focusing it or recreating an otherwise healthy pool.
+        if target.valid() {
+            let requested=RedrawWindow(Some(hwnd),None,None,RDW_INVALIDATE|RDW_ALLCHILDREN|RDW_FRAME).as_bool();
+            if let Some(description)=target.capture_device.lock().unwrap().as_mut() {
+                description["initialRedrawRequested"]=json!(requested);
+            }
+        }
         let mut restart_session=false;
         let result = (|| -> Result<(), String> {
             let mut native_gpu:Option<super::gpu::Gpu>=None;

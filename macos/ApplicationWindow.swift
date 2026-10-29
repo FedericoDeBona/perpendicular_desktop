@@ -109,6 +109,7 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
     private var inputRejected=0
     private var lastInputEvent=""
     private var lastInputError=""
+    private var lastHitTest:[String:Any]=[:]
     private var lastCloseError=""
     private var clipboardRequest:UUID?
     private var deferredInput:[WindowInput]=[]
@@ -407,9 +408,11 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
         let width=min(sourceRect.width,area.width),height=min(sourceRect.height,area.height)
         let x=area.minX+min(inset,max(0,area.width-width)),y=area.minY+min(inset,max(0,area.height-height))
         if !hasFrame {placementCaptureSize=NSSize(width:width,height:height)}
+        trace("initial_placement_requested")
         bridge.command("set_geometry",["window":id,"gesture":UUID().uuidString,"serial":1,
             "x":Int(x.rounded()),"y":Int(y.rounded()),"width":Int(width.rounded()),"height":Int(height.rounded())],timeout:.seconds(3)){[weak self] result in
                 guard let self else{return}
+                self.trace("initial_placement_replied")
                 if case .failure(let error)=result {
                     self.initialPlacementFailed=true
                     NativeWindowTrace.record("initial-placement-failed",["window":self.id,"message":error.localizedDescription])
@@ -445,6 +448,7 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
         refreshSharedDisplay()
         if let fitted=placementCaptureSize,sourceRect.width<=fitted.width+1,sourceRect.height<=fitted.height+1 {
             placementCaptureSize=nil
+            trace("initial_placement_fitted")
             if !hasFrame,bridge.windowRefreshAvailable {
                 // The first WGC run may already have stopped on the old,
                 // oversized rectangle. Retry only after metadata confirms fit.
@@ -826,6 +830,9 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
                 guard case .success(let reply)=result,let payload=reply["value"] as? [String:Any],let hit=payload["hit"] as? Int else{
                     self.cancelInput("Windows could not determine where you clicked. The pending input was not sent.");return
                 }
+                self.lastHitTest=["x":query["x"] ?? -1,"y":query["y"] ?? -1,
+                    "generation":query["generation"] ?? 0,"hit":hit,"nativeChild":payload["nativeChild"] ?? false]
+                self.trace("hit_test_resolved")
                 if hit == 2 {self.resolve(next,.move)}
                 else if hit == 9 {self.resolve(next,.zoom)}
                 else {
@@ -1138,6 +1145,7 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
          "focusPending":focusPending,
          "inputRequests":inputRequests,"inputRejected":inputRejected,
          "lastInputEvent":lastInputEvent,"lastInputError":lastInputError,
+         "lastHitTest":lastHitTest,
          "lastCloseError":lastCloseError,
          "keyWindow":window.isKeyWindow,"contentFocused":window.firstResponder === content,"inputSuspended":content.inputSuspended,
          "presentationTextBytes":presentationTextBytes,"presentationTextBuffered":presentationTextBuffered,
@@ -1159,6 +1167,11 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
          "sourceClosed":sourceClosed,"pressedMouseButtons":NSEvent.pressedMouseButtons]
     }
     private func trace(_ event:String){
+        if PipelineTrace.enabled {
+            PipelineTrace.record(event,id,["presentation":presentationState,
+                "mac":[window.frame.minX,window.frame.minY,window.frame.width,window.frame.height],
+                "guest":[sourceRect.minX,sourceRect.minY,sourceRect.width,sourceRect.height]])
+        }
         guard ProcessInfo.processInfo.environment["PERPENDICULAR_STATE_TRACE"] == "1" else{return}
         var value:[String:Any]=["type":event,"window":id,
             "uptime":ProcessInfo.processInfo.systemUptime,"mouseButtons":NSEvent.pressedMouseButtons,
