@@ -113,6 +113,8 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
     private var desktopResizeRequest:UUID?
     private var desktopAttempted=NSSize.zero
     private var restarting=false
+    private var awaitingInitialGuest=false
+    private var guestContactEstablished=false
 
     func applicationDidFinishLaunching(_ notification:Notification){
         do{
@@ -133,6 +135,7 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
             configureMachineControllers();loadVMSettings()
             bridge.onConnection={ [weak self] value in
                 guard let self else{return};self.connected=value;self.status=value ? "Windows connected":"Reconnecting to Windows…"
+                if value {self.awaitingInitialGuest=false;self.guestContactEstablished=true}
                 self.launcherEpoch=UUID();self.catalogueLoading=false;self.loadingIconID=nil;self.failedIcons=[]
                 self.focusWarnedWindows=[]
                 self.applicationStatusTask?.cancel();self.applicationStatusTask=nil;self.applicationStatusBusy=false
@@ -253,32 +256,25 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
         launcher?.appearance=value.native
     }
     var launcherWindowsStatus:LauncherWindowsStatus {
-        if let machineOperation {return .init(kind:.busy,title:machineOperation,detail:"Attendi il completamento dell’operazione.")}
-        if restarting {return .init(kind:.busy,title:"Windows in riavvio",detail:"Attendi il nuovo collegamento.")}
-        switch machineState {
-        case .stopped:return .init(kind:.off,title:"Windows spento",detail:"Accendi Windows per aprire le app.")
-        case .unreachable:return .init(kind:.unknown,title:"Stato Windows non verificabile",detail:"Non è possibile confermare se Windows è acceso o spento.")
-        case .running:
-            guard connected else{return .init(kind:.disconnected,title:"Windows acceso · scollegato",detail:"Windows è acceso, ma il collegamento alle app non è disponibile.")}
-            if !failedWindows.isEmpty || windowNotice?.frame == true {
-                return .init(kind:.graphics,title:"Windows acceso · problema immagine",detail:"Una finestra non ha un’immagine disponibile. Windows non risulta spento.")
-            }
-            if folderIntegrationFailed {return .init(kind:.attention,title:"Problema con le cartelle condivise",detail:folderIntegrationStatus)}
-            if launcherNotice != nil {return .init(kind:.attention,title:"Windows acceso · avviso",detail:"Apri il dettaglio dell’avviso prima di riprovare l’operazione.")}
-            if machine?.mixedDisplaysEnabled == true,sharedDisplays.isEmpty {
-                return .init(kind:.busy,title:"Windows acceso · preparazione app",detail:"Il collegamento è attivo; le finestre delle app non sono ancora pronte.")
-            }
-            return .init(kind:.connected,title:"Windows acceso · collegato",detail:"Il collegamento alle app è disponibile. Lo stato delle singole finestre può variare.")
-        }
+        let running:Bool?
+        switch machineState {case .stopped:running=false;case .running:running=true;case .unreachable:running=nil}
+        let warning:(title:String,detail:String)?
+        if let launcherNotice {
+            warning=(launcherNotice == catalogueNotice ? "Elenco app non disponibile":"Avviso",launcherNotice)
+        }else if folderIntegrationFailed {warning=("Cartelle non collegate",folderIntegrationStatus)}
+        else {warning=nil}
+        let imageError=(!failedWindows.isEmpty || windowNotice?.frame == true) ? (windowNotice?.message ?? "Una finestra non ha un’immagine disponibile."):nil
+        let ready=(machine?.mixedDisplaysEnabled != true || !sharedDisplays.isEmpty) && !(catalogueLoading && apps.isEmpty)
+        return .resolve(running:running,operation:machineOperation,restarting:restarting,connected:connected,
+                        awaitingGuest:awaitingInitialGuest,contactEstablished:guestContactEstablished,
+                        appsReady:ready,imageError:imageError,warning:warning)
     }
     var launcherStatusMessage:String? {
+        let state=launcherWindowsStatus
         if let launcherNotice {return launcherNotice}
         if folderIntegrationFailed {return folderIntegrationStatus}
-        let state=launcherWindowsStatus
-        switch state.kind {
-        case .connected,.off:return nil
-        case .busy,.attention,.graphics,.disconnected,.unknown:return state.title
-        }
+        if state.needsAttention {return state.detail}
+        return nil
     }
     var machineStateLabel:String {
         if let machineOperation {return machineOperation}
@@ -292,6 +288,7 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
         let changed=machineState != state
         if changed {machineState=state}
         if state == .stopped,changed {
+            awaitingInitialGuest=false;guestContactEstablished=false
             bridge?.disconnect()
             for window in Array(windows.values) {window.retire()}
             windows=[:];earlyFrames=[:];windowApps=[:]
@@ -405,7 +402,11 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
         Task{@MainActor [weak self] in
             guard let self else{return}
             defer{self.machineOperation=nil}
-            do {let machine=try await self.prepareMachineForStart();try await machine.start();try NativeWindowFrames.shared.publishEndpoint();self.acceptMachineState(await machine.observedState())}
+            do {
+                let machine=try await self.prepareMachineForStart()
+                if await machine.observedState() == .stopped {self.awaitingInitialGuest=true;self.guestContactEstablished=false}
+                try await machine.start();try NativeWindowFrames.shared.publishEndpoint();self.acceptMachineState(await machine.observedState())
+            }
             catch {self.acceptMachineState(await self.machine.observedState());self.launcherNotice="Non riesco ad avviare Windows. "+error.localizedDescription}
         }
     }

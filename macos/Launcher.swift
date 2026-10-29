@@ -13,20 +13,6 @@ enum LauncherAppearance:String,CaseIterable,Identifiable {
     var scheme:ColorScheme? {switch self {case .system:nil;case .light:.light;case .dark:.dark}}
 }
 
-struct LauncherWindowsStatus {
-    enum Kind {case off,connected,busy,attention,graphics,disconnected,unknown}
-    let kind:Kind
-    let title:String
-    let detail:String
-    var symbol:String {switch kind {
-        case .off:"circle";case .connected:"checkmark.circle.fill";case .busy:"circle.dotted"
-        case .attention,.graphics:"exclamationmark.triangle.fill";case .disconnected:"network.slash";case .unknown:"questionmark.circle"
-    }}
-    var color:Color {switch kind {
-        case .off,.unknown:.secondary;case .connected:.green;case .busy,.attention,.disconnected:.orange;case .graphics:.red
-    }}
-}
-
 /// A single native backdrop; no timers or frame-driven effects.
 @MainActor
 private struct LauncherGlass:NSViewRepresentable {
@@ -296,17 +282,24 @@ struct Launcher:View {
         Button("Chiudi finestre"){model.closeApplication(app)}.disabled(!model.activeApps.contains(app.id))
     }
     private var statusBar:some View {
-        HStack(spacing:12){
+        let state=model.launcherWindowsStatus
+        return HStack(spacing:10){
             Button{statusOpen.toggle()}label:{
-                Image(systemName:model.launcherWindowsStatus.symbol).font(.system(size:13,weight:.medium))
-                    .foregroundStyle(model.launcherWindowsStatus.color).frame(width:28,height:28).contentShape(Rectangle())
-            }.buttonStyle(LauncherChromeButtonStyle()).modifier(LauncherHandPointer()).help(model.launcherWindowsStatus.title+(model.launcherNotice.map{" · "+$0} ?? ""))
-                .accessibilityLabel(model.launcherWindowsStatus.title).accessibilityIdentifier("launcher-windows-status")
+                HStack(spacing:7){
+                    Image(systemName:state.symbol).font(.system(size:14,weight:.medium))
+                        .foregroundStyle(state.color).frame(width:19,height:20)
+                    Text(state.title).font(.system(size:12,weight:.medium))
+                    if state.working {ProgressView().controlSize(.mini).frame(width:14,height:14)}
+                }.padding(.horizontal,7).frame(height:30).contentShape(Rectangle())
+            }.buttonStyle(LauncherChromeButtonStyle()).modifier(LauncherHandPointer())
+                .help(state.detail).accessibilityLabel("Windows: "+state.title).accessibilityIdentifier("launcher-windows-status")
                 .popover(isPresented:$statusOpen,arrowEdge:.bottom){statusDetails}
             if let message=model.launcherStatusMessage {
                 Button{statusOpen=true}label:{
-                    Text(message).font(.system(size:11)).lineLimit(1).truncationMode(.tail)
-                        .frame(maxWidth:.infinity,alignment:.leading).contentShape(Rectangle())
+                    HStack(spacing:6){
+                        if !state.needsAttention {Image(systemName:"exclamationmark.triangle.fill").foregroundStyle(.orange)}
+                        Text(message).lineLimit(1).truncationMode(.tail)
+                    }.font(.system(size:11)).frame(maxWidth:.infinity,alignment:.leading).contentShape(Rectangle())
                 }.buttonStyle(LauncherChromeButtonStyle()).modifier(LauncherHandPointer()).help(message)
             }
             Spacer(minLength:10)
@@ -319,8 +312,10 @@ struct Launcher:View {
             Label(model.launcherWindowsStatus.title,systemImage:model.launcherWindowsStatus.symbol).font(.system(size:13,weight:.medium))
             Text(model.launcherWindowsStatus.detail).font(.system(size:12)).foregroundStyle(.secondary).fixedSize(horizontal:false,vertical:true)
             if let notice=model.launcherNotice {
-                Divider()
-                Text(notice).font(.system(size:12)).fixedSize(horizontal:false,vertical:true).textSelection(.enabled)
+                if notice != model.launcherWindowsStatus.detail {
+                    Divider()
+                    Text(notice).font(.system(size:12)).fixedSize(horizontal:false,vertical:true).textSelection(.enabled)
+                }
                 Button("Chiudi avviso"){model.launcherNotice=nil}.font(.system(size:12))
             }
             Divider()
