@@ -653,7 +653,8 @@ impl Worker {
                     // Windows (for example when an elevated app is in front).
                     outbox.control(json!({"type":"activate","window":window.target.id}));
                     unsafe {
-                        let _ = ShowWindow(HWND(window.target.hwnd as *mut _), SW_RESTORE);
+                        let hwnd=HWND(window.target.hwnd as *mut _);
+                        if IsIconic(hwnd).as_bool(){let _=ShowWindow(hwnd,SW_RESTORE);}
                         activate_surface(window)?;
                     }
                     return Ok(json!({"accepted":true,"existing":true}));
@@ -865,7 +866,8 @@ impl Worker {
                     "activate" => {
                         let active = self.activation_window(window)?;
                         unsafe {
-                            let _ = ShowWindow(HWND(active.target.hwnd as *mut _), SW_RESTORE);
+                            let hwnd=HWND(active.target.hwnd as *mut _);
+                            if IsIconic(hwnd).as_bool(){let _=ShowWindow(hwnd,SW_RESTORE);}
                             activate_surface(active)?;
                         }
                         if active.target.id != target.id {

@@ -95,9 +95,12 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
     private var placementCaptureSize:NSSize?
     private var initialPlacementPacket:GuestPacket?
     private var initialPlacementFailed=false
+    private var initialPlacementObservation:Task<Void,Never>?
     private var nativePlacementAttempted=false
     private var nativePlacementRecovering=false
     private var nativePlacementSkipped=""
+    private var nativePlacementError=""
+    private var nativePlacementMoves=0
     private var nativePlacementTask:Task<Void,Never>?
     private var displayPriorRaster:NSSize?
     private var rejectedTransitionPacket:GuestPacket?
@@ -354,7 +357,7 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
         finishPresentedTransition()
     }
     private func finishPresentedTransition(){
-        guard transitionActive,hasFrame,sourceRect.size == frameSize,lastPresentedID>=transitionAfterPresentation,!displayUpdating,!nativePlacementRecovering,
+        guard transitionActive,hasFrame,initialPlacementReady,sourceRect.size == frameSize,lastPresentedID>=transitionAfterPresentation,!displayUpdating,!nativePlacementRecovering,
               !geometryFinishing,expectedSize == nil,!nativeResizing else{return}
         endFrameTransition()
     }
@@ -421,6 +424,7 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
         let area=display.guestWorkArea ?? display.guestFrame
         guard current == nil || !area.insetBy(dx:-1,dy:-1).contains(sourceRect) else{return}
         initialAppPlacementRequested=true
+        initialPlacementObservation?.cancel();initialPlacementObservation=nil
         let inset=40/display.pixelScale
         let width=min(sourceRect.width,area.width),height=min(sourceRect.height,area.height)
         let x=area.minX+min(inset,max(0,area.width-width)),y=area.minY+min(inset,max(0,area.height-height))
@@ -434,6 +438,22 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
                     self.initialPlacementFailed=true
                     NativeWindowTrace.record("initial-placement-failed",["window":self.id,"message":error.localizedDescription])
                     if !self.beginNativeInitialPlacement(){self.showFailedInitialPlacement(report:true)}
+                }else {
+                    // SetWindowPos may accept an asynchronous request which
+                    // the other process never applies. Only live metadata
+                    // inside the confirmed app work area completes placement.
+                    self.initialPlacementObservation=Task{@MainActor [weak self] in
+                        guard let self else{return}
+                        defer{self.initialPlacementObservation=nil}
+                        for _ in 0..<8 {
+                            try? await Task.sleep(for:.milliseconds(150))
+                            guard !Task.isCancelled,!self.sourceClosed,!self.closing,!self.displayUpdating else{return}
+                            if self.initialPlacementReady {return}
+                        }
+                        self.initialPlacementFailed=true
+                        NativeWindowTrace.record("initial-placement-unconfirmed",["window":self.id])
+                        if !self.beginNativeInitialPlacement(){self.showFailedInitialPlacement(report:true)}
+                    }
                 }
         }
     }
@@ -473,6 +493,7 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
               activateOnFirstShow,nativePlacementContext != nil,
               onDeviceMove != nil,onDeviceFit != nil,onDeviceFocus != nil else{return false}
         nativePlacementAttempted=true;nativePlacementRecovering=true
+        nativePlacementError="";nativePlacementMoves=0
         beginFrameTransition("Posizionamento della finestra…")
         if let packet=initialPlacementPacket {initialPlacementPacket=nil;present(packet)}
         window.makeKeyAndOrderFront(nil);window.makeFirstResponder(content)
@@ -507,13 +528,14 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
                         if !fitted,let fit=self.onDeviceFit {fitted=true;try await fit(state.checkedAt+0.5)}
                     }else {
                         guard moves<state.maxMoves,let move=self.onDeviceMove else{throw CocoaError(.executableRuntimeMismatch)}
-                        moves+=1;try await move(state.checkedAt+0.5)
+                        moves+=1;self.nativePlacementMoves=moves;try await move(state.checkedAt+0.5)
                     }
                     try await Task.sleep(for:.milliseconds(160))
                 }
                 throw CocoaError(.executableRuntimeMismatch)
             }catch {
                 self.nativePlacementRecovering=false
+                self.nativePlacementError=error.localizedDescription
                 NativeWindowTrace.record("native-initial-placement-failed",["window":self.id,"message":error.localizedDescription])
                 self.showFailedInitialPlacement(report:!Task.isCancelled && self.window.isKeyWindow)
             }
@@ -715,6 +737,7 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
         if sourceClosed || !bridge.connected{return true}
         guard !closing else{return false};closing=true
         nativePlacementTask?.cancel()
+        initialPlacementObservation?.cancel()
         onCloseRequested?()
         lastCloseError=""
         let requestedAt=ProcessInfo.processInfo.systemUptime
@@ -747,6 +770,7 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
     }
     func windowWillClose(_ notification:Notification){
         nativePlacementTask?.cancel();nativePlacementTask=nil
+        initialPlacementObservation?.cancel();initialPlacementObservation=nil
         nativeGeometryObservation?.cancel();nativeGeometryObservation=nil
         transitionTimeout?.cancel();transitionTimeout=nil
         if !role.transient {cancelInput()}
@@ -1253,6 +1277,7 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
          "initialPlacementReady":initialPlacementReady,"initialPlacementFailed":initialPlacementFailed,
          "nativePlacementRecovering":nativePlacementRecovering,"nativePlacementAttempted":nativePlacementAttempted,
          "nativePlacementSkipped":nativePlacementSkipped,"nativePlacementAvailable":bridge.devicePlacementAvailable,
+         "nativePlacementError":nativePlacementError,"nativePlacementMoves":nativePlacementMoves,
          "heldInitialFramePixels":[initialPlacementPacket?.header["width"] as? Int ?? 0,
                                    initialPlacementPacket?.header["height"] as? Int ?? 0],
          "hasBeenReady":hasBeenReady,"activateOnFirstShow":activateOnFirstShow,
