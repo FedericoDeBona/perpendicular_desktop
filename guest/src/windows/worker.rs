@@ -47,6 +47,10 @@ struct Launch {
     app: String,
     deadline: Instant,
 }
+// Slow applications can create their first real surface after the launcher's
+// short progress indication has ended. Keep the explicit, identity-checked
+// request bounded independently of that indication.
+const APPLICATION_LAUNCH_WATCH: Duration = Duration::from_secs(120);
 struct ActivationResult {
     app: String,
     nonce: u64,
@@ -716,7 +720,7 @@ impl Worker {
                     let result = activation.run();
                     let _ = sender.send(ActivationResult { app: app_id, nonce, packaged, result });
                 }).map_err(error)?;
-                let until = Instant::now() + Duration::from_secs(30);
+                let until = Instant::now() + APPLICATION_LAUNCH_WATCH;
                 log(format!("Application activation started app={app} nonce={nonce}"));
                 let processes=self.applications.remove(app).map(|session|session.processes).unwrap_or_default();
                 self.applications.insert(app.into(), ApplicationSession {
@@ -1046,7 +1050,7 @@ impl Worker {
                     let has_window = self.windows.values().any(|w| w.app == result.app && !catalogue::transient(&w.metadata));
                     let session = self.applications.get_mut(&result.app).unwrap();
                     session.activated=result.packaged.then_some((pid,creation));
-                    if !has_window { session.gap_until = Some(Instant::now() + Duration::from_secs(30)); }
+                    if !has_window { session.gap_until = Some(session.startup_until.max(Instant::now() + Duration::from_secs(30))); }
                     log(format!("Application activation completed app={} nonce={} pid={pid} creation={creation} verified={}",
                         result.app, result.nonce, session.processes.iter().any(|p| p.identity.pid == pid && p.identity.creation == creation)));
                     self.next_process_scan = Instant::now();
@@ -1228,7 +1232,7 @@ impl Worker {
                     }
                 }
                 let message = if still_running {
-                    "L’app è ancora in avvio. La finestra apparirà appena disponibile; puoi aprire Windows per seguirla."
+                    "L’app è ancora in esecuzione ma non ha mostrato una finestra riconoscibile in tempo. Puoi continuare dal desktop Windows."
                 } else {
                     "L’app non ha ancora mostrato una finestra riconoscibile. Puoi continuare dal desktop Windows."
                 };

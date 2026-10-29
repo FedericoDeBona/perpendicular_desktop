@@ -827,7 +827,11 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
         }
     }
     func launch(_ app:WindowsApplication){
-        guard connected,!openingApps.contains(app.id) else{return}
+        guard connected else{return}
+        if openingRequests[app.id] != nil {
+            if !openingApps.contains(app.id) {launcherNotice="Sto ancora cercando la finestra di \(app.name). Puoi continuare a usare Desktop nel frattempo."}
+            return
+        }
         if machine?.mixedDisplaysEnabled == true,sharedDisplays.isEmpty {
             launcherNotice="Attendi che Windows completi la preparazione degli schermi.";return
         }
@@ -855,7 +859,7 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
                 self.launcherNotice="Non riesco ad aprire \(app.name). "+error.localizedDescription;self.openingNoticeApp=app.id
             case .success(let reply):
                 if let value=reply["value"] as? [String:Any],value["existing"] as? Bool == true,value["ready"] as? Bool != false,
-                   self.windows.contains(where:{self.windowApps[$0.key] == app.id && $0.value.readyForInput}) {
+                   self.windows.contains(where:{self.windowApps[$0.key] == app.id && $0.value.role == .main && $0.value.readyForInput}) {
                     self.finishOpening(app.id,appeared:true)
                 }
             }
@@ -864,18 +868,30 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
     private func beginOpening(_ app:WindowsApplication){
         // Only an explicit launcher request starts this clock. A guest window
         // gap after a Desktop transfer is not a new launch.
-        guard !openingApps.contains(app.id) else{return}
+        guard openingRequests[app.id] == nil else{return}
         let request=UUID();openingRequests[app.id]=request
         openingApps.insert(app.id);openingTasks.removeValue(forKey:app.id)?.cancel()
         let epoch=launcherEpoch
         openingTasks[app.id]=Task{@MainActor [weak self] in
             try? await Task.sleep(for:.seconds(32))
             guard !Task.isCancelled,let self,self.launcherEpoch == epoch,self.openingRequests[app.id] == request else{return}
-            if self.windows.contains(where:{self.windowApps[$0.key] == app.id && $0.value.readyForInput}) {
+            if self.windows.contains(where:{self.windowApps[$0.key] == app.id && $0.value.role == .main && $0.value.readyForInput}) {
+                self.finishOpening(app.id,appeared:true);return
+            }
+            // End the busy indication without discarding the explicit launch
+            // destination. The guest may still authenticate a slow first main
+            // window; fast launches finish and cancel this task immediately.
+            self.openingApps.remove(app.id)
+            self.launcherNotice="\(app.name) sta impiegando più tempo. Continuo a cercare la finestra; puoi usare Desktop nel frattempo.";self.openingNoticeApp=app.id;self.openingNoticeTimedOut=true
+            try? await Task.sleep(for:.seconds(90))
+            guard !Task.isCancelled,self.launcherEpoch == epoch,self.openingRequests[app.id] == request else{return}
+            if self.windows.contains(where:{self.windowApps[$0.key] == app.id && $0.value.role == .main && $0.value.readyForInput}) {
                 self.finishOpening(app.id,appeared:true);return
             }
             self.finishOpening(app.id)
-            self.launcherNotice="La finestra di \(app.name) non è ancora disponibile. Apri Desktop per continuare.";self.openingNoticeApp=app.id;self.openingNoticeTimedOut=true
+            if self.openingNoticeApp == app.id {
+                self.launcherNotice="La finestra di \(app.name) non è ancora disponibile. Apri Desktop per continuare."
+            }
         }
     }
     private func finishOpening(_ id:String,appeared:Bool=false){
@@ -917,11 +933,11 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
             if self.activeApps != active {self.activeApps=active}
             // Presentation and status travel independently. Reconcile ready
             // windows even if their ready callback preceded the launch reply.
-            for id in Array(self.openingApps) where self.windows.contains(where:{self.windowApps[$0.key] == id && $0.value.readyForInput}) {
+            for id in Array(self.openingRequests.keys) where self.windows.contains(where:{self.windowApps[$0.key] == id && $0.value.role == .main && $0.value.readyForInput}) {
                 self.finishOpening(id,appeared:true)
             }
             if self.openingNoticeTimedOut,let id=self.openingNoticeApp,
-               !self.openingApps.contains(id),
+               self.openingRequests[id] == nil,
                states[id].map({!$0.activationPending && !$0.running && $0.windows.isEmpty}) ?? true {
                 self.finishOpening(id,appeared:true)
             }
@@ -1424,7 +1440,7 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
                         }
                         try await machine.cycleApplicationFocus(notAfter:deadline)
                     }
-                    controller.activateOnFirstShow=openingApps.contains(item["app"] as? String ?? "")
+                    controller.activateOnFirstShow=openingRequests[item["app"] as? String ?? ""] != nil
                         && (machine?.desktopIsKey != true || seamlessTransferApps.contains(item["app"] as? String ?? ""))
                     controller.onError={ [weak self] message in
                         self?.status=message;self?.launcherNotice=message;self?.windowNotice=(id,message,false)
@@ -1470,12 +1486,12 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
         case "activate":
             if machine?.desktopIsKey != true,let id=value["window"] as? String {windows[id]?.activate()}
         case "seamless_transfer":
-            guard let app=value["app"] as? String,openingApps.contains(app),!cancelledOpeningApps.contains(app),
+            guard let app=value["app"] as? String,openingRequests[app] != nil,!cancelledOpeningApps.contains(app),
                   let target=value["target"] as? [String:Any] else{return}
             seamlessTransferApps.insert(app)
             recoverDesktopSingleton(app:app,target:target,seamless:true)
         case "desktop_focus":
-            guard let app=value["app"] as? String,openingApps.contains(app),!cancelledOpeningApps.contains(app) else{return}
+            guard let app=value["app"] as? String,openingRequests[app] != nil,!cancelledOpeningApps.contains(app) else{return}
             if let target=value["target"] as? [String:Any] {recoverDesktopSingleton(app:app,target:target)}
             else {finishOpening(app,appeared:true);showWindows()}
         case "launch_state":
