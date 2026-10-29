@@ -28,11 +28,16 @@ def checked_root(root):
     return root
 
 
-def control(root, command):
+def supervisor_socket(root):
     path=root/'tun.sock'
     st=path.lstat()
     if not stat.S_ISSOCK(st.st_mode) or st.st_uid != os.getuid() or stat.S_IMODE(st.st_mode)!=0o600:
         raise ValueError('Invalid private supervisor socket')
+    return path
+
+
+def control(root, command):
+    path=supervisor_socket(root)
     with socket.socket(socket.AF_UNIX) as s:
         s.settimeout(5);s.connect(str(path));s.sendall(command.encode()+b'\n')
         return s.recv(128).decode().strip()
@@ -143,7 +148,15 @@ def main():
     args=p.parse_args();root=checked_root(args.runtime)
     if args.command=='start':
         if (root/'tun.sock').exists():
-            raise ValueError('Already active; use status or stop first')
+            # A VM restart loses hot-added forwarding and stops its relay,
+            # while the Mac TUN may still be alive. Check that its owned socket
+            # is live before repairing only the existing VM side. Connecting
+            # and closing sends no supervisor command and retains the TUN.
+            with socket.socket(socket.AF_UNIX) as s:
+                s.settimeout(5);s.connect(str(supervisor_socket(root)))
+            connect_relay(root)
+            print('Existing Mac tunnel retained; VM relay and forwarding restored')
+            return
         subprocess.run([str(root/'sing-box'),'check','-c',str(root/'client-tun.json')],check=True)
         connect_relay(root)
         subprocess.run([str(root/'authorize'),str(root/'supervisor'),str(root)],check=True)
