@@ -7,115 +7,113 @@ extension Notification.Name {
 @MainActor
 struct MachineSettingsPanel:View {
     @ObservedObject var model:ApplicationModel
-    @State private var draft=MachineSettings(cpus:1,initialMemoryMiB:2048,automaticMemory:true,maximumMemoryMiB:4096,backgroundMemoryMiB:1536,reserveMemoryMiB:512)
+    @State private var page=Page.general
     @State private var advanced=false
+    private enum Page:String,CaseIterable,Identifiable {
+        case general="Generali",system="Sistema",sharing="Condivisione"
+        var id:Self {self}
+    }
     private func number(_ key:WritableKeyPath<MachineSettings,Int>)->Binding<Int>{
-        Binding(get:{draft[keyPath:key]},set:{draft[keyPath:key]=$0;model.settingsNotice=nil})
+        Binding(get:{model.vmSettings?[keyPath:key] ?? 0},set:{value in
+            guard var settings=model.vmSettings else{return}
+            settings[keyPath:key]=value;model.saveVMSettings(settings)
+        })
     }
     private func folder(_ kind:SharedFolderKind)->Binding<Bool>{
-        Binding(get:{draft.shares(kind)},set:{draft.setShared(kind,enabled:$0);model.settingsNotice=nil})
+        Binding(get:{model.vmSettings?.shares(kind) ?? false},set:{value in
+            guard var settings=model.vmSettings else{return}
+            settings.setShared(kind,enabled:value);model.saveVMSettings(settings)
+        })
     }
-    private func memory(_ value:Int)->String {
-        value%1024 == 0 ? "\(value/1024) GB":"\(value) MB"
-    }
+    private func memory(_ value:Int)->String {value%1024 == 0 ? "\(value/1024) GB":"\(value) MB"}
     private func choices(from minimum:Int,through maximum:Int,current:Int)->[Int]{
         Array(Set([1024,1536,2048,3072,4096,6144,8192,12288,16384,current].filter{minimum...maximum ~= $0})).sorted()
     }
     var body:some View {
-        ScrollView {
-            VStack(alignment:.leading,spacing:22){
-                if model.vmSettings != nil {
-                    Text("Le modifiche si applicano al prossimo avvio di Windows.")
-                        .font(.system(size:13)).foregroundStyle(.secondary)
-                    if model.settingsPending {
-                        Label("Modifiche salvate per il prossimo avvio",systemImage:"clock")
-                            .font(.system(size:13,weight:.medium)).foregroundStyle(.indigo)
+        VStack(spacing:0){
+            Picker("Sezione",selection:$page){ForEach(Page.allCases){Text($0.rawValue).tag($0)}}
+                .pickerStyle(.segmented).labelsHidden().padding(.horizontal,28).padding(.vertical,18)
+            ScrollView {
+                VStack(alignment:.leading,spacing:16){
+                    if page != .general && !model.canEditVMSettings {
+                        Label("Spegni Windows per modificare queste impostazioni.",systemImage:"lock")
+                            .font(.system(size:12)).foregroundStyle(.secondary)
                     }
-                    GroupBox {
-                        VStack(alignment:.leading,spacing:14){
-                            Text("Usa in Windows le stesse cartelle del Mac, senza copie.").font(.system(size:13)).foregroundStyle(.secondary)
-                            ForEach(SharedFolderKind.allCases){kind in
-                                Toggle(isOn:folder(kind)){Label(kind.title,systemImage:kind.icon)}
-                                    .toggleStyle(.switch).accessibilityIdentifier("shared-folder-"+kind.rawValue)
-                            }
-                            Text("Tutte attive per impostazione predefinita. Se disattivi una cartella, Windows torna ai suoi file locali; i file del Mac rimangono sul Mac.")
-                                .font(.caption).foregroundStyle(.secondary)
-                            Text(model.folderIntegrationStatus).font(.caption)
-                                .foregroundStyle(model.folderIntegrationFailed ? Color.orange:Color.secondary)
-                            if model.folderIntegrationFailed {
-                                Button("Riprova collegamento"){model.prepareSharedFolders()}
-                                    .disabled(!model.connected || model.folderIntegrationBusy)
-                            }
-                            Button("Attiva tutte le cartelle"){
-                                for kind in SharedFolderKind.allCases {draft.setShared(kind,enabled:true)}
-                                model.settingsNotice=nil
-                            }.disabled(draft.enabledSharedFolders.count == SharedFolderKind.allCases.count)
-                        }.padding(12)
-                    }label:{Label("Cartelle Mac",systemImage:"folder")}
-                    GroupBox {
-                        VStack(alignment:.leading,spacing:16){
-                            Picker("Processori",selection:number(\.cpus)){
-                                ForEach(1...MachineSettings.cpuLimit,id:\.self){Text("\($0)").tag($0)}
-                            }
-                        }.padding(12)
-                    }label:{Label("Processori",systemImage:"cpu")}
-                    GroupBox {
-                        VStack(alignment:.leading,spacing:16){
-                            Picker("RAM massima",selection:number(\.maximumMemoryMiB)){
-                                ForEach(choices(from:draft.initialMemoryMiB,through:min(MachineSettings.memoryLimitMiB,draft.initialMemoryMiB+8192),current:draft.maximumMemoryMiB),id:\.self){Text(memory($0)).tag($0)}
-                            }
-                            Text(draft.maximumMemoryMiB == draft.initialMemoryMiB ? "Windows usa una quantità fissa di RAM." : "È il limite totale della RAM di Windows, inclusa quella iniziale. Perpendicular aggiunge e restituisce memoria automaticamente.")
-                                .font(.caption).foregroundStyle(.secondary)
-                            Text("La VM usa anche memoria per grafica e servizi: il consumo complessivo sul Mac può essere superiore a questo limite.")
-                                .font(.caption).foregroundStyle(.secondary)
-                            if draft.maximumMemoryMiB == draft.initialMemoryMiB {
-                                Text("Con il massimo uguale alla RAM iniziale, la memoria rimane fissa.").font(.caption).foregroundStyle(.secondary)
-                            }
-                            Group {
-                            DisclosureGroup("Avanzate",isExpanded:$advanced){
-                                VStack(alignment:.leading,spacing:10){
-                                    Picker("RAM all’avvio",selection:number(\.initialMemoryMiB)){
-                                        ForEach(choices(from:max(1024,draft.maximumMemoryMiB-8192),through:draft.maximumMemoryMiB,current:draft.initialMemoryMiB),id:\.self){Text(memory($0)).tag($0)}
-                                    }
-                                    Text("Quantità con cui Windows si avvia prima che la gestione automatica sia disponibile.").font(.caption).foregroundStyle(.secondary)
-                                }
-                                .padding(.top,10)
-                            }
-                            }
-                        }.padding(12)
-                    }label:{Label("Memoria",systemImage:"memorychip")}
-                    if let current=model.currentVMSettings {
-                        GroupBox {
-                            VStack(spacing:12){
-                                LabeledContent("Windows",value:model.machineStateLabel)
-                                LabeledContent("RAM all’avvio",value:memory(current.initialMemoryMiB))
-                                LabeledContent("RAM massima",value:memory(current.automaticMemory ? current.maximumMemoryMiB:current.initialMemoryMiB))
-                                if model.vmMemoryState["ready"] as? Bool == true {
-                                    Divider()
-                                    if let value=model.vmMemoryState["actualMiB"] as? UInt64 {LabeledContent("RAM assegnata",value:memory(Int(value)))}
-                                    if let value=model.vmMemoryState["guestAvailableMiB"] as? UInt64 {LabeledContent("Disponibile in Windows",value:memory(Int(value)))}
-                                    if model.vmMemoryState["pending"] as? Bool == true {Text("Adattamento della memoria in corso").font(.caption).foregroundStyle(.secondary)}
-                                }else if current.automaticMemory {
-                                    Text(model.vmMemoryState["error"] as? String ?? "I valori della memoria saranno disponibili quando Windows sarà collegato.")
-                                        .font(.caption).foregroundStyle(.secondary)
-                                }
-                            }.padding(12)
-                        }label:{Label("Stato attuale",systemImage:"gauge.with.dots.needle.33percent")}
+                    switch page {
+                    case .general:general
+                    case .sharing:if model.vmSettings != nil {sharing}else{unavailable}
+                    case .system:if let settings=model.vmSettings {system(settings)}else{unavailable}
                     }
-                    if let notice=model.settingsNotice {Text(notice).font(.system(size:13)).foregroundStyle(model.settingsFailed ? Color.orange:Color.secondary).textSelection(.enabled)}
-                    HStack {
-                        Button("Ripristina valori salvati"){if let settings=model.vmSettings {draft=settings};model.settingsNotice=nil}
-                            .disabled(draft == model.vmSettings)
-                        Spacer()
-                        Button("Salva per il prossimo avvio"){model.saveVMSettings(draft)}.buttonStyle(.borderedProminent)
-                            .disabled(draft == model.vmSettings || model.machineOperation != nil)
+                    if model.settingsFailed,let notice=model.settingsNotice {
+                        Text(notice).font(.system(size:12)).foregroundStyle(.orange).textSelection(.enabled)
                     }
-                    Text("Per applicarle, spegni Windows e poi avvialo. Il salvataggio non interrompe le app aperte.")
-                        .font(.caption).foregroundStyle(.secondary)
-                }else{Text("Impostazioni della VM non disponibili.").foregroundStyle(.secondary)}
-            }.padding(.horizontal,32).padding(.bottom,32)
+                }.frame(maxWidth:620,alignment:.leading).padding(.horizontal,28).padding(.top,6).padding(.bottom,24)
+                    .frame(maxWidth:.infinity)
+            }
         }
-        .onAppear{if let settings=model.vmSettings {draft=settings}}
-        .onChange(of:model.vmSettings){_,settings in if let settings {draft=settings}}
+    }
+    private var unavailable:some View {Text("Impostazioni di Windows non disponibili.").foregroundStyle(.secondary)}
+    private func card<Content:View>(@ViewBuilder content:()->Content)->some View {
+        VStack(alignment:.leading,spacing:0,content:content)
+            .padding(16).frame(maxWidth:.infinity,alignment:.leading)
+            .background(Color.primary.opacity(0.035),in:RoundedRectangle(cornerRadius:14))
+            .overlay(RoundedRectangle(cornerRadius:14).strokeBorder(Color.primary.opacity(0.06)))
+    }
+    private var general:some View {
+        card {
+            HStack {
+                Label("Tema",systemImage:"circle.lefthalf.filled").font(.system(size:13,weight:.medium))
+                Spacer()
+                Picker("Tema",selection:Binding(get:{model.launcherAppearance},set:model.setLauncherAppearance)){
+                    ForEach(LauncherAppearance.allCases){Text($0.title).tag($0)}
+                }.labelsHidden().pickerStyle(.segmented).frame(width:240)
+            }
+        }
+    }
+    private var sharing:some View {
+        VStack(alignment:.leading,spacing:12){
+            card {
+                ForEach(Array(SharedFolderKind.allCases.enumerated()),id:\.element.id){index,kind in
+                    if index>0 {Divider().padding(.vertical,6)}
+                    Toggle(isOn:folder(kind)){
+                        Label(kind.title,systemImage:kind.icon).frame(maxWidth:.infinity,alignment:.leading)
+                    }.toggleStyle(.switch).controlSize(.mini).accessibilityIdentifier("shared-folder-"+kind.rawValue)
+                }
+            }.disabled(!model.canEditVMSettings)
+            Text(model.folderIntegrationStatus).font(.system(size:12))
+                .foregroundStyle(model.folderIntegrationFailed ? Color.orange:Color.secondary)
+            if model.folderIntegrationFailed {
+                Button("Riprova collegamento"){model.prepareSharedFolders()}.disabled(!model.connected || model.folderIntegrationBusy)
+            }
+        }
+    }
+    private func system(_ settings:MachineSettings)->some View {
+        card {
+            HStack {
+                Label("Processori",systemImage:"cpu")
+                Spacer()
+                Picker("Processori",selection:number(\.cpus)){
+                    ForEach(1...MachineSettings.cpuLimit,id:\.self){Text("\($0)").tag($0)}
+                }.labelsHidden().frame(width:110)
+            }
+            Divider().padding(.vertical,14)
+            HStack {
+                Label("RAM massima",systemImage:"memorychip")
+                Spacer()
+                Picker("RAM massima",selection:number(\.maximumMemoryMiB)){
+                    ForEach(choices(from:settings.initialMemoryMiB,through:min(MachineSettings.memoryLimitMiB,settings.initialMemoryMiB+8192),current:settings.maximumMemoryMiB),id:\.self){Text(memory($0)).tag($0)}
+                }.labelsHidden().frame(width:110)
+            }
+            Divider().padding(.vertical,14)
+            DisclosureGroup("Avanzate",isExpanded:$advanced){
+                HStack {
+                    Text("RAM all’avvio")
+                    Spacer()
+                    Picker("RAM all’avvio",selection:number(\.initialMemoryMiB)){
+                        ForEach(choices(from:max(1024,settings.maximumMemoryMiB-8192),through:settings.maximumMemoryMiB,current:settings.initialMemoryMiB),id:\.self){Text(memory($0)).tag($0)}
+                    }.labelsHidden().frame(width:110)
+                }.padding(.top,12)
+            }.font(.system(size:12))
+        }.font(.system(size:13)).disabled(!model.canEditVMSettings)
     }
 }

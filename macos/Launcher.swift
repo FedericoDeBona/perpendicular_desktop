@@ -39,6 +39,40 @@ private struct LauncherGlass:NSViewRepresentable {
     func updateNSView(_ view:NSVisualEffectView,context:Context){}
 }
 
+/// Anchor a titlebar drag in global AppKit points for its entire duration.
+/// Do not let native per-screen frame constraints replace the pointer offset.
+@MainActor
+final class LauncherWindow:NSWindow {
+    private var dragOffset:NSPoint?
+    private(set) var dragSamples=0
+    override func constrainFrameRect(_ frameRect:NSRect,to screen:NSScreen?)->NSRect {
+        dragOffset == nil ? super.constrainFrameRect(frameRect,to:screen):frameRect
+    }
+    override func sendEvent(_ event:NSEvent){
+        if event.type == .leftMouseDown,event.clickCount == 1 {
+            let point=event.locationInWindow
+            let contentHeight=contentRect(forFrameRect:frame).height
+            // Leave traffic lights, resize edges and titlebar double-clicks native.
+            if point.y>=contentHeight,point.y<frame.height-4,point.x>100,point.x<frame.width-8 {
+                let pointer=NSEvent.mouseLocation
+                dragOffset=NSPoint(x:pointer.x-frame.minX,y:pointer.y-frame.minY)
+                makeKeyAndOrderFront(nil)
+                return
+            }
+        }
+        if let offset=dragOffset {
+            if event.type == .leftMouseDragged || event.type == .leftMouseUp {
+                let pointer=NSEvent.mouseLocation
+                setFrameOrigin(NSPoint(x:pointer.x-offset.x,y:pointer.y-offset.y))
+                dragSamples+=1
+                if event.type == .leftMouseUp {dragOffset=nil}
+                return
+            }
+        }
+        super.sendEvent(event)
+    }
+}
+
 @MainActor
 struct Launcher:View {
     @ObservedObject var model:ApplicationModel
@@ -55,8 +89,6 @@ struct Launcher:View {
     private var highlight:Color {Color.primary.opacity(scheme == .dark ? 0.075:0.055)}
     var body:some View {
         VStack(spacing:0){
-            Text("Perpendicular").font(.system(size:11,weight:.medium)).foregroundStyle(.tertiary)
-                .frame(maxWidth:.infinity).frame(height:35).allowsHitTesting(false)
             if settings {
                 HStack(spacing:12){
                     Button{showApps()}label:{Image(systemName:"arrow.left").frame(width:28,height:28)}
@@ -65,13 +97,6 @@ struct Launcher:View {
                     Spacer()
                 }.padding(.horizontal,22).padding(.vertical,14)
                 Divider().opacity(0.6)
-                HStack {
-                    Label("Aspetto",systemImage:"circle.lefthalf.filled").font(.system(size:13))
-                    Spacer()
-                    Picker("Tema",selection:Binding(get:{model.launcherAppearance},set:model.setLauncherAppearance)){
-                        ForEach(LauncherAppearance.allCases){Text($0.title).tag($0)}
-                    }.pickerStyle(.segmented).frame(width:240)
-                }.padding(.horizontal,32).padding(.vertical,22)
                 MachineSettingsPanel(model:model)
             }else{
                 searchField
@@ -85,7 +110,6 @@ struct Launcher:View {
         .background(LauncherGlass())
         .overlay(alignment:.top){LinearGradient(colors:[.white.opacity(scheme == .dark ? 0.13:0.7),.clear],startPoint:.top,endPoint:.bottom).frame(height:1).allowsHitTesting(false)}
         .frame(minWidth:540,minHeight:480)
-        .ignoresSafeArea()
         .preferredColorScheme(model.launcherAppearance.scheme)
         .background(Button(""){showApps()}.keyboardShortcut("f",modifiers:.command).hidden())
         .onAppear{searchFocused=true;resetSelection()}
@@ -123,7 +147,7 @@ struct Launcher:View {
             ScrollView {
                 VStack(alignment:.leading,spacing:24){
                     if query.isEmpty {
-                        appSection("Preferiti",apps:sections.favorites,tiles:true)
+                        appSection("Preferiti",apps:sections.favorites,large:true)
                         appSection("Recenti",apps:sections.recent)
                         appSection("Altre app",apps:sections.remaining)
                     }else{appSection("Risultati",apps:results)}
@@ -133,30 +157,22 @@ struct Launcher:View {
             .onChange(of:selection){_,id in if let id {proxy.scrollTo(id,anchor:nil)}}
         }
     }
-    @ViewBuilder private func appSection(_ title:String,apps:[WindowsApplication],tiles:Bool=false)->some View {
-        VStack(alignment:.leading,spacing:9){
-            Text(title).font(.system(size:11,weight:.medium)).foregroundStyle(.secondary).padding(.horizontal,12)
+    @ViewBuilder private func appSection(_ title:String,apps:[WindowsApplication],large:Bool=false)->some View {
+        VStack(alignment:.leading,spacing:10){
+            Text(title).font(.system(size:11,weight:.medium)).foregroundStyle(.secondary).padding(.horizontal,8)
             if apps.isEmpty {
-                Text(tiles ? "Aggiungi qui le tue app con la stella.":(title == "Recenti" ? "Qui ritrovi le app aperte di recente.":"Nessuna app trovata."))
-                    .font(.system(size:12)).foregroundStyle(.secondary).padding(.horizontal,12).padding(.vertical,14)
-            }else if tiles {
-                LazyVGrid(columns:[GridItem(.adaptive(minimum:112,maximum:170),spacing:8)],alignment:.leading,spacing:8){
-                    ForEach(apps){app in favoriteTile(app).id(app.id)}
-                }
+                Text(large ? "Aggiungi qui le tue app con la stella.":(title == "Recenti" ? "Qui ritrovi le app aperte di recente.":"Nessuna app trovata."))
+                    .font(.system(size:12)).foregroundStyle(.secondary).padding(8)
             }else{
-                LazyVStack(spacing:2){ForEach(apps){app in appRow(app).id(app.id)}}
+                LazyVGrid(columns:[GridItem(.adaptive(minimum:large ? 112:92,maximum:large ? 132:108),spacing:10)],alignment:.leading,spacing:10){
+                    ForEach(apps){app in
+                        LauncherAppTile(app:app,icon:model.applicationIcons[app.id],opening:model.openingApps.contains(app.id),active:model.activeApps.contains(app.id),enabled:model.connected && model.machineOperation == nil,selected:selection==app.id,highlight:highlight,large:large,pinned:model.launcherPreferences.pinned.contains(app.id),launch:{model.launch(app)},pin:{model.togglePin(app)})
+                            .id(app.id).contextMenu{appMenu(app)}
+                            .onAppear{model.applicationBecameVisible(app)}.onDisappear{model.applicationBecameHidden(app)}
+                    }
+                }
             }
         }
-    }
-    private func favoriteTile(_ app:WindowsApplication)->some View {
-        LauncherFavoriteTile(app:app,icon:model.applicationIcons[app.id],opening:model.openingApps.contains(app.id),active:model.activeApps.contains(app.id),enabled:model.connected && model.machineOperation == nil,selected:selection==app.id,highlight:highlight,launch:{model.launch(app)},unpin:{model.togglePin(app)})
-            .contextMenu{appMenu(app)}
-            .onAppear{model.applicationBecameVisible(app)}.onDisappear{model.applicationBecameHidden(app)}
-    }
-    private func appRow(_ app:WindowsApplication)->some View {
-        LauncherAppRow(app:app,icon:model.applicationIcons[app.id],opening:model.openingApps.contains(app.id),active:model.activeApps.contains(app.id),enabled:model.connected && model.machineOperation == nil,selected:selection==app.id,highlight:highlight,launch:{model.launch(app)},pin:{model.togglePin(app)},pinned:model.launcherPreferences.pinned.contains(app.id))
-            .contextMenu{appMenu(app)}
-            .onAppear{model.applicationBecameVisible(app)}.onDisappear{model.applicationBecameHidden(app)}
     }
     @ViewBuilder private func appMenu(_ app:WindowsApplication)->some View {
         Button(model.launcherPreferences.pinned.contains(app.id) ? "Rimuovi dai preferiti":"Aggiungi ai preferiti"){model.togglePin(app)}
@@ -214,7 +230,7 @@ private struct LauncherAppIcon:View {
 }
 
 @MainActor
-private struct LauncherFavoriteTile:View {
+private struct LauncherAppTile:View {
     let app:WindowsApplication
     let icon:NSImage?
     let opening:Bool
@@ -222,55 +238,31 @@ private struct LauncherFavoriteTile:View {
     let enabled:Bool
     let selected:Bool
     let highlight:Color
+    let large:Bool
+    let pinned:Bool
     let launch:()->Void
-    let unpin:()->Void
+    let pin:()->Void
     @State private var hovered=false
     var body:some View {
         ZStack(alignment:.topTrailing){
             Button(action:launch){
-                VStack(spacing:12){
+                VStack(spacing:9){
                     ZStack(alignment:.bottomTrailing){
-                        LauncherAppIcon(icon:icon,size:40)
+                        LauncherAppIcon(icon:icon,size:large ? 38:30)
                         if opening {ProgressView().controlSize(.mini).padding(3).background(.regularMaterial,in:Circle()).offset(x:6,y:4)}
                         else if active {Circle().fill(.green).frame(width:6,height:6).offset(x:4,y:2)}
                     }
-                    Text(app.name).font(.system(size:12)).lineLimit(1).truncationMode(.tail).frame(maxWidth:.infinity)
-                }.padding(.horizontal,8).padding(.top,18).padding(.bottom,15).contentShape(RoundedRectangle(cornerRadius:11))
+                    Text(app.name).font(.system(size:large ? 12:11)).lineLimit(2).multilineTextAlignment(.center)
+                        .frame(maxWidth:.infinity).frame(height:28,alignment:.top)
+                }.padding(.horizontal,7).frame(maxWidth:.infinity,maxHeight:.infinity).contentShape(RoundedRectangle(cornerRadius:12))
             }.buttonStyle(.plain).disabled(!enabled || opening).accessibilityLabel("Apri "+app.name).help(app.name)
-            Button(action:unpin){Image(systemName:"xmark").font(.system(size:9,weight:.medium)).frame(width:25,height:25).contentShape(Rectangle())}
-                .buttonStyle(.plain).foregroundStyle(.secondary).opacity(hovered ? 1:0.2)
-                .help("Rimuovi dai preferiti").accessibilityLabel("Rimuovi dai preferiti: "+app.name)
-        }.background(hovered || selected ? highlight:.clear,in:RoundedRectangle(cornerRadius:11)).onHover{hovered=$0}
-    }
-}
-
-@MainActor
-private struct LauncherAppRow:View {
-    let app:WindowsApplication
-    let icon:NSImage?
-    let opening:Bool
-    let active:Bool
-    let enabled:Bool
-    let selected:Bool
-    let highlight:Color
-    let launch:()->Void
-    let pin:()->Void
-    let pinned:Bool
-    @State private var hovered=false
-    var body:some View {
-        HStack(spacing:0){
-            Button(action:launch){
-                HStack(spacing:12){
-                    LauncherAppIcon(icon:icon,size:26)
-                    Text(app.name).font(.system(size:13)).lineLimit(1)
-                    Spacer(minLength:6)
-                    if opening {ProgressView().controlSize(.mini)}
-                    else if active {Circle().fill(.green).frame(width:5,height:5).help("Finestra aperta")}
-                }.padding(.leading,12).padding(.trailing,8).frame(maxWidth:.infinity,minHeight:44).contentShape(Rectangle())
-            }.buttonStyle(.plain).disabled(!enabled || opening).accessibilityLabel("Apri "+app.name)
-            Button(action:pin){Image(systemName:pinned ? "star.fill":"star").font(.system(size:11)).foregroundStyle(.secondary).frame(width:32,height:36).contentShape(Rectangle())}
-                .buttonStyle(.plain).padding(.trailing,5).help(pinned ? "Rimuovi dai preferiti":"Aggiungi ai preferiti")
+            Button(action:pin){Image(systemName:pinned ? "star.fill":"star").font(.system(size:10)).frame(width:26,height:26).contentShape(Rectangle())}
+                .buttonStyle(.plain).foregroundStyle(.secondary).opacity(hovered || pinned ? 1:0)
+                .help(pinned ? "Rimuovi dai preferiti":"Aggiungi ai preferiti")
                 .accessibilityLabel((pinned ? "Rimuovi dai preferiti: ":"Aggiungi ai preferiti: ")+app.name)
-        }.background(hovered || selected ? highlight:.clear,in:RoundedRectangle(cornerRadius:8)).onHover{hovered=$0}
+        }.aspectRatio(1,contentMode:.fit)
+            .background(hovered || selected ? highlight:Color.primary.opacity(0.025),in:RoundedRectangle(cornerRadius:12))
+            .overlay(RoundedRectangle(cornerRadius:12).strokeBorder(Color.primary.opacity(0.045)))
+            .onHover{hovered=$0}
     }
 }

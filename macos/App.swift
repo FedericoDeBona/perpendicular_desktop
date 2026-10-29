@@ -66,7 +66,7 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
     private var cancelledOpeningApps:Set<String>=[]
     private var windowApps:[String:String]=[:]
     private var focusWarnedWindows:Set<String>=[]
-    private var launcher:NSWindow!
+    private var launcher:LauncherWindow!
     private var machine:VirtualMachineController!
     private var bridge:GuestBridge!
     private var memoryController:RuntimeMemoryController?
@@ -177,15 +177,19 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
                 try? FileHandle.standardError.write(contentsOf:Data(("Local control unavailable: "+error.localizedDescription+"\n").utf8))
             }
         }catch{status=error.localizedDescription;launcherNotice="Windows non può essere avviato. "+error.localizedDescription}
-        launcher=NSWindow(contentRect:NSRect(x:200,y:160,width:760,height:760),styleMask:[.titled,.closable,.resizable,.miniaturizable,.fullSizeContentView],backing:.buffered,defer:false)
+        launcher=LauncherWindow(contentRect:NSRect(x:200,y:160,width:760,height:760),styleMask:[.titled,.closable,.resizable,.miniaturizable],backing:.buffered,defer:false)
         launcher.title="Perpendicular";launcher.isReleasedWhenClosed=false
-        launcher.titleVisibility = .hidden
+        launcher.titleVisibility = .visible
         launcher.titlebarAppearsTransparent=true;launcher.toolbarStyle = .unified
         launcher.isOpaque=false;launcher.backgroundColor = .clear
         launcher.appearance=launcherAppearance.native
         launcher.minSize=NSSize(width:540,height:480)
         launcher.setFrameAutosaveName("PerpendicularLauncher")
-        launcher.contentView=NSHostingView(rootView:Launcher(model:self))
+        let launcherContent=NSHostingView(rootView:Launcher(model:self))
+        // AppKit owns the window frame. Content and screen safe-area changes
+        // must not resize/reposition it during a native cross-display drag.
+        launcherContent.sizingOptions=[]
+        launcher.contentView=launcherContent
         launcher.center();launcher.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps:true)
         let main=NSMenu();let appItem=NSMenuItem();main.addItem(appItem)
@@ -351,13 +355,21 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
             settingsFailed=true;settingsNotice=error.localizedDescription
         }
     }
+    var canEditVMSettings:Bool {machine != nil && machineState == .stopped && machineOperation == nil && !restarting}
     func saveVMSettings(_ requested:MachineSettings){
-        guard let machine,machineOperation == nil,!restarting else{return}
+        guard canEditVMSettings,let machine else{return}
         do {
             var settings=requested;settings.useAutomaticMemoryPolicy()
             try MachineSettingsStore.save(settings,in:machine.directory,machineID:machine.configuration.id,current:machine.configuration.settings,forcePending:machine.configuration.sharedFolders == nil)
             loadVMSettings();settingsFailed=false
-            settingsNotice=settingsPending ? "Impostazioni salvate. Saranno applicate al prossimo avvio di Windows.":"Modifiche in attesa annullate. Restano i valori attuali."
+            settingsNotice=nil
+            machineOperation="Aggiornamento impostazioni…"
+            Task{@MainActor [weak self] in
+                guard let self else{return}
+                defer{self.machineOperation=nil}
+                do {_ = try await self.prepareMachineForStart()}
+                catch{self.settingsFailed=true;self.settingsNotice=error.localizedDescription}
+            }
         }catch{settingsFailed=true;settingsNotice=error.localizedDescription}
     }
     private func prepareMachineForStart()async throws->VirtualMachineController {
@@ -610,7 +622,7 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
                 "frameChannel":bridge?.separateFrames ?? false,
                 "windowGPU":NativeWindowFrames.shared.diagnostics,
                 "windowGPUCache":NativeWindowFrames.shared.cacheDiagnostics,
-                "launcher":["apps":apps.map{["id":$0.id,"name":$0.name,"key":$0.key,"essential":$0.essential]},"opening":Array(openingApps).sorted(),"notice":launcherNotice as Any? ?? NSNull(),"iconCacheHits":iconCacheHits,"iconFetches":iconFetches,"cachedIcons":applicationIcons.count,"recent":launcherPreferences.recent(apps).map(\.id),"favorites":launcherPreferences.sections(apps).favorites.map(\.id),"appearance":launcherAppearance.rawValue,"indicator":launcherWindowsStatus.title],
+                "launcher":["dragSamples":launcher.dragSamples,"frame":["x":launcher.frame.minX,"y":launcher.frame.minY,"width":launcher.frame.width,"height":launcher.frame.height],"screen":launcher.screen?.localizedName ?? "", "apps":apps.map{["id":$0.id,"name":$0.name,"key":$0.key,"essential":$0.essential]},"opening":Array(openingApps).sorted(),"notice":launcherNotice as Any? ?? NSNull(),"iconCacheHits":iconCacheHits,"iconFetches":iconFetches,"cachedIcons":applicationIcons.count,"recent":launcherPreferences.recent(apps).map(\.id),"favorites":launcherPreferences.sections(apps).favorites.map(\.id),"appearance":launcherAppearance.rawValue,"indicator":launcherWindowsStatus.title],
                 "desktop":machine?.desktopState ?? [:],
                 "lastCommandRTTMilliseconds":bridge?.lastRoundTripMilliseconds ?? 0,
                 "frameReceiveMilliseconds":bridge?.frameReceiveMilliseconds ?? 0,
