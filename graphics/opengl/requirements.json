@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "required_patches": [
+    "windows-zink-bounded-readback.patch",
+    "windows-zink-bounded-upload.patch",
+    "zink-moltenvk-sampler-name.patch"
+  ]
+}

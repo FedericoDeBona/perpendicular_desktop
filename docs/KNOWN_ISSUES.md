@@ -564,6 +564,8 @@ Queste voci conservano limiti non risolti, senza richiedere di ripristinare codi
 
 ### APP-001 — Creality / OpenGL
 
+**Prevenzione29ottobre:** regola obbligatoria cross-machine in AGENTS.md e gate OpenGL nella build/copia runtime. Il vecchio pacchetto locale firmato0.2.27 viene rifiutato per bounded-upload/sampler mancanti; allineare la distribuzione prima di riaprire la diagnosi del viola. Bundle e DLL Windows vanno verificati separatamente. [Regola e verifica della build](VERIFICATION.md#29-ottobre--regola-obbligatoria-di-allineamento-tra-macchine).
+
 **29 ottobre, seguito locale:** segnalazione viola Desktop corretta e verificata con guest0.2.32 sullo stesso host0.2.27rev2; testi/cubo PASS e hash/protezioni conservati. Il riscontro di mancata distribuzione sotto descrive la base iniziale. Compatibilità generale e nuovo Seamless restano aperti. [Confronto e consegna](VERIFICATION.md#29-ottobre--correzione-creality-viola-sulla-base-m4).
 
 **29 ottobre — segnalazione locale riaperta:** interno Creality viola sulla base93be6687. Il runtime locale0.2.27 host_revision2 non include il profilo texture0.2.31 qualificato sulla IoT0795218c: il PASS dell'altra base non chiude questo caso. Riprodurre nel Desktop e confrontare il percorso texture effettivo, poi Seamless. Nessuna correzione distribuita in questo passaggio. [Riscontro e criteri](VERIFICATION.md#29-ottobre--obiettivo-glitch-desktop-prima-di-seamless).

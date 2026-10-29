@@ -21,6 +21,10 @@ def main():
     if source == target or source.is_relative_to(target) or target.is_relative_to(source):
         raise ValueError('Runtime reference and destination build must be separate app bundles')
     subprocess.run(['codesign', '--verify', '--deep', '--strict', str(source)], check=True)
+    # A valid local signature can still seal obsolete graphics libraries.
+    # Validate shared fixes before copying any member into the destination.
+    subprocess.run(['python3', str(Path(__file__).with_name('check-opengl-payload.py')),
+                    '--app', str(source)], check=True)
     native = source / 'Contents/Resources/Native3D'
     manifest = json.loads((native / 'runtime.json').read_text())
     if manifest.get('hvf_dynamic_memory_version') != 1:

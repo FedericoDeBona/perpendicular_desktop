@@ -38,6 +38,17 @@ Il diario e Git conservano la storia delle prove. Le descrizioni dei vecchi pacc
 ## Build e aggiornamento completi
 
 Eseguire `zsh scripts/build-guest.sh`, poi `zsh scripts/build-macos.sh`.
+Su ogni macchina, prima di una nuova diagnosi o consegna, allineare sorgenti,
+bundle canonico, runtime effettivo e componenti Windows alle correzioni già
+condivise: è una regola obbligatoria in [AGENTS.md](AGENTS.md). Il pull e la sola
+versione del frontend non bastano. La build standard e la copia del runtime
+rifiutano payload OpenGL privi delle patch richieste da
+`graphics/opengl/requirements.json`, verificando anche gli hash delle sei DLL.
+Il controllo finale vale anche con `SKIP_RUNTIME=1`. Se viene segnalato uno
+scarto, riusare la ricetta già documentata in
+[graphics/opengl/README.md](graphics/opengl/README.md) per il profilo compatibile,
+confezionare le librerie corrette e completarne installazione/verifica Windows.
+Il controllo della build verifica il bundle; non aggiorna automaticamente la VM.
 La build macOS conserva/verifica il runtime grafico qualificato e confeziona un
 server Samba privato con librerie e dipendenze fissate tramite SHA256 in
 `guest/samba-runtime.json`. I download ufficiali Homebrew sono estratti nella
