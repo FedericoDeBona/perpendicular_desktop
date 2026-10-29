@@ -30,7 +30,7 @@ use windows::{
             },
             WindowsAndMessaging::{
                 EnumChildWindows, EnumWindows, GA_ROOT, GW_OWNER, GWL_EXSTYLE, GWL_STYLE, GetAncestor, GetClassNameW, GetClientRect,
-                GetForegroundWindow, GetWindow, GetWindowLongPtrW, GetWindowRect, GetWindowTextW,
+                GetDlgCtrlID, GetForegroundWindow, GetWindow, GetWindowLongPtrW, GetWindowRect, GetWindowTextW,
                 GetWindowThreadProcessId, IsIconic, IsWindowVisible, WS_CAPTION,
                 WS_EX_DLGMODALFRAME, WS_EX_TOOLWINDOW, WS_POPUP, WS_THICKFRAME,
             },
@@ -120,6 +120,29 @@ unsafe extern "system" fn collect_children(hwnd: HWND, context: LPARAM) -> windo
     let children = unsafe { &mut *(context.0 as *mut Vec<usize>) };
     children.push(hwnd.0 as usize);
     (children.len() < 64).into()
+}
+
+/// A standard cancel-only progress dialog is usable startup UI, not evidence
+/// that the application's main window has arrived. Unknown or larger control
+/// trees keep the normal classification; no app names or localized text match.
+pub fn progress_dialog(raw: usize) -> bool {
+    if window_class(raw) != "#32770" { return false; }
+    let mut children = Vec::new();
+    unsafe { let _ = EnumChildWindows(Some(HWND(raw as *mut _)), Some(collect_children),
+        LPARAM((&mut children as *mut Vec<usize>) as isize)); }
+    if children.len() >= 64 { return false; }
+    let (mut progress, mut cancel) = (false, false);
+    for raw in children {
+        let hwnd=HWND(raw as *mut _);
+        if !unsafe { IsWindowVisible(hwnd).as_bool() } { continue; }
+        match window_class(raw).to_ascii_lowercase().as_str() {
+            "static" => {},
+            "msctls_progress32" => progress=true,
+            "button" if unsafe { GetDlgCtrlID(hwnd)==2 && (GetWindowLongPtrW(hwnd,GWL_STYLE) & 0xf)<=1 } => cancel=true,
+            _ => return false,
+        }
+    }
+    progress && cancel
 }
 
 /// Owned bytes only; Shell COM interfaces stay in the catalogue's apartment.

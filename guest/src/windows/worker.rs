@@ -1070,6 +1070,14 @@ impl Worker {
         if changed { self.save(); }
     }
     fn application_surface(&self, mut metadata: Value, app: &str) -> Value {
+        let raw=metadata["hwnd"].as_u64().unwrap_or(0) as usize;
+        // Startup classification is an admission decision. A managed main that
+        // later changes controls must retain its whole-window capture contract.
+        if metadata["role"] == "dialog" && metadata["owner"].as_u64() == Some(0)
+            && !self.windows.values().any(|window|window.target.hwnd==raw)
+            && catalogue::progress_dialog(raw) {
+            return metadata;
+        }
         // A frameless main window can carry WS_POPUP; a dialog-based app can
         // use #32770 as its main surface. Only an already authenticated app
         // with no other main window may promote an unowned surface, and

@@ -1385,14 +1385,14 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
             }
         case "windows":
             guard let items=value["windows"] as? [[String:Any]],items.count<=16 else{return}
-            let previousMainApps=Set(windows.compactMap{!$0.value.role.transient ? windowApps[$0.key]:nil})
+            let previousMainApps=Set(windows.compactMap{$0.value.role == .main ? windowApps[$0.key]:nil})
             let currentMainApps=Set(items.compactMap{item->String? in
-                guard let role=WindowRole(rawValue:item["role"] as? String ?? "dialog"),!role.transient else{return nil}
+                guard let role=WindowRole(rawValue:item["role"] as? String ?? "dialog"),role == .main else{return nil}
                 return item["app"] as? String
             })
             for app in previousMainApps.subtracting(currentMainApps) {
-                // Retiring the last mirror includes a Desktop transfer and a
-                // close in Windows. Neither may leave its launch spinner alive.
+                // A real main can close or transfer to Desktop. A startup
+                // dialog disappearing must leave its explicit launch alive.
                 cancelledOpeningApps.insert(app);finishOpening(app,appeared:true)
             }
             let current=Set(items.compactMap{$0["id"] as? String})
