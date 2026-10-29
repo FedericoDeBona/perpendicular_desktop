@@ -10,16 +10,18 @@ use windows::{
             Gdi::ClientToScreen,
         },
         Storage::{
-            EnhancedStorage::{PKEY_Link_Arguments, PKEY_Link_TargetParsingPath},
+            EnhancedStorage::{PKEY_AppUserModel_ID, PKEY_Link_Arguments, PKEY_Link_TargetParsingPath},
             Packaging::Appx::{GetApplicationUserModelId, GetPackagesByPackageFamily, ParseApplicationUserModelId},
         },
         System::{
             Com::{CLSCTX_LOCAL_SERVER, COINIT_APARTMENTTHREADED, CoCreateInstance, CoInitializeEx, CoTaskMemFree, CoUninitialize},
+            Com::StructuredStorage::{PropVariantClear, PropVariantToStringAlloc},
             Threading::{GetProcessId, GetProcessTimes, OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION},
         },
         UI::{
             Input::KeyboardAndMouse::IsWindowEnabled,
             Shell::{
+                PropertiesSystem::{IPropertyStore, SHGetPropertyStoreForWindow},
                 AO_NONE, ApplicationActivationManager, IApplicationActivationManager,
                 BHID_EnumItems, IEnumShellItems, ILGetSize, IShellItem, IShellItem2, SEE_MASK_IDLIST,
                 SEE_MASK_NOASYNC, SEE_MASK_NOCLOSEPROCESS, SHCreateItemFromParsingName,
@@ -90,6 +92,16 @@ fn process_app_id(raw: usize) -> Option<String> {
     unsafe {
         let handle = identity::Handle(OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, process_id(raw)).ok()?);
         handle_app_id(handle.0)
+    }
+}
+
+fn window_app_id(raw: usize) -> Option<String> {
+    unsafe {
+        let store: IPropertyStore = SHGetPropertyStoreForWindow(HWND(raw as *mut _)).ok()?;
+        let mut value = store.GetValue(&PKEY_AppUserModel_ID).ok()?;
+        let identity = PropVariantToStringAlloc(&value).ok().map(|value| text(value));
+        let _ = PropVariantClear(&mut value);
+        identity.filter(|id| !id.is_empty() && id.len() <= 32768)
     }
 }
 
@@ -310,6 +322,12 @@ impl Catalogue {
         let Some(expected) = self.identities.get(id) else {
             return false;
         };
+        // A shell process can host distinct apps (for example Control Panel
+        // and Explorer). An explicit window identity takes precedence over
+        // its process or executable, just as it does for Windows' taskbar.
+        if let Some(actual) = window_app_id(hwnd) {
+            return actual.eq_ignore_ascii_case(expected.strip_prefix("shell:AppsFolder\\").unwrap_or(expected));
+        }
         if process_app_id(hwnd).is_some_and(|actual| actual.eq_ignore_ascii_case(
             expected.strip_prefix("shell:AppsFolder\\").unwrap_or(expected))) {return true;}
         // Explorer, Edge and Task Manager can reuse an existing process without
@@ -335,6 +353,18 @@ impl Catalogue {
     }
     pub fn singleton(&self,id:&str)->bool {
         self.images.get(id).is_some_and(|image|Self::task_manager_image(image))
+    }
+
+    /// ActivateApplication identifies the instance fulfilling this request.
+    /// A reused frame must belong to that exact instance, including its
+    /// authenticated CoreWindow when Windows uses a shared FrameHost.
+    pub fn activated_surface(&self,app:&str,raw:usize,process:(u32,u64),sid:&str,session:u32)->bool {
+        if window_class(raw)=="ApplicationFrameWindow" {
+            self.hosted_content(app,raw,sid,session)
+                .is_some_and(|content|(content.pid,content.creation)==process)
+        }else{
+            identity::owner(HWND(raw as _),sid,session)==Some(process) && self.matches(app,raw)
+        }
     }
 
     pub fn hosted_content(&self, app: &str, frame: usize, sid: &str, session: u32) -> Option<HostedContent> {

@@ -50,6 +50,7 @@ struct Launch {
 struct ActivationResult {
     app: String,
     nonce: u64,
+    packaged: bool,
     result: Result<(u32, u64), String>,
 }
 struct ApplicationSession {
@@ -57,6 +58,7 @@ struct ApplicationSession {
     gap_until: Option<Instant>,
     startup_until: Instant,
     activation: Option<u64>,
+    activated: Option<(u32,u64)>,
     baseline: HashSet<usize>,
 }
 struct Worker {
@@ -706,9 +708,10 @@ impl Worker {
                 let sender = self.activation_sender.clone();
                 let app_id = app.to_string();
                 let baseline = catalogue::windows().into_iter().collect();
+                let packaged=activation.is_packaged();
                 std::thread::Builder::new().name("app-activation".into()).spawn(move || {
                     let result = activation.run();
-                    let _ = sender.send(ActivationResult { app: app_id, nonce, result });
+                    let _ = sender.send(ActivationResult { app: app_id, nonce, packaged, result });
                 }).map_err(error)?;
                 let until = Instant::now() + Duration::from_secs(30);
                 log(format!("Application activation started app={app} nonce={nonce}"));
@@ -716,6 +719,7 @@ impl Worker {
                 self.applications.insert(app.into(), ApplicationSession {
                     processes, gap_until: Some(until), startup_until: until,
                     activation: Some(nonce),
+                    activated: None,
                     baseline,
                 });
                 self.next_process_scan = Instant::now();
@@ -1003,6 +1007,7 @@ impl Worker {
         if !self.applications.contains_key(app) && self.applications.len() >= 8 { return; }
         let session = self.applications.entry(app.into()).or_insert_with(|| ApplicationSession {
             processes: Vec::new(), gap_until: None, startup_until: Instant::now(), activation: None,
+            activated: None,
             baseline:HashSet::new(),
         });
         if session.processes.len() >= 16 || session.processes.iter().any(|p| p.identity.pid == pid && p.identity.creation == creation) { return; }
@@ -1024,6 +1029,7 @@ impl Worker {
                     self.remember_process(&result.app, pid, creation);
                     let has_window = self.windows.values().any(|w| w.app == result.app && !catalogue::transient(&w.metadata));
                     let session = self.applications.get_mut(&result.app).unwrap();
+                    session.activated=result.packaged.then_some((pid,creation));
                     if !has_window { session.gap_until = Some(Instant::now() + Duration::from_secs(30)); }
                     log(format!("Application activation completed app={} nonce={} pid={pid} creation={creation} verified={}",
                         result.app, result.nonce, session.processes.iter().any(|p| p.identity.pid == pid && p.identity.creation == creation)));
@@ -1044,16 +1050,27 @@ impl Worker {
         if changed { self.save(); }
     }
     fn application_surface(&self, mut metadata: Value, app: &str) -> Value {
-        // A frameless loading/main window can carry WS_POPUP without having
-        // any owner. Only an already authenticated app may promote it, and
+        // A frameless main window can carry WS_POPUP; a dialog-based app can
+        // use #32770 as its main surface. Only an already authenticated app
+        // with no other main window may promote an unowned surface, and
         // ordinary menus and popups belonging to a document stay transient.
-        if metadata["role"] == "popup" && metadata["class"] != "#32768"
+        if (metadata["role"] == "popup" || metadata["role"] == "dialog") && metadata["class"] != "#32768"
             && metadata["owner"].as_u64() == Some(0)
             && (self.windows.values().any(|w| w.app == app
                 && w.metadata["hwnd"] == metadata["hwnd"] && w.metadata["role"] == "main")
                 || (!self.windows.values().any(|w| w.metadata["hwnd"] == metadata["hwnd"])
                     && !self.windows.values().any(|w| w.app == app && !catalogue::transient(&w.metadata))))
         {
+            if metadata["role"] == "dialog" {
+                // details() describes a dialog's client pixels for native
+                // Mac chrome. A promoted main captures its whole DWM frame;
+                // geometry and input must use that same coordinate system.
+                let raw=metadata["hwnd"].as_u64().unwrap_or(0) as usize;
+                let Some(bounds)=catalogue::frame_bounds(HWND(raw as _)) else{return metadata;};
+                metadata["x"]=json!(bounds.left);metadata["y"]=json!(bounds.top);
+                metadata["width"]=json!(bounds.right-bounds.left);
+                metadata["height"]=json!(bounds.bottom-bounds.top);
+            }
             metadata["role"] = json!("main");
         }
         metadata
@@ -1069,9 +1086,14 @@ impl Worker {
         // An app identity or shared process alone never turns a window opened
         // inside Windows into a Mac-owned window. Only admit a fresh result of
         // an explicit launcher request, or a transient of the active Mac app.
+        // Packaged activation can fulfill a new request with a retained HWND.
+        // Admit only the foreground surface of the exact returned instance;
+        // remembering a process from an earlier request is not sufficient.
         let launching=|app:&String|self.pending.iter().any(|p|p.app==*app && p.deadline>Instant::now())
             && !self.windows.values().any(|w|w.app==*app && !catalogue::transient(&w.metadata))
-            && self.applications.get(app).is_some_and(|s|!s.baseline.contains(&raw));
+            && self.applications.get(app).is_some_and(|s|!s.baseline.contains(&raw)
+                || (catalogue::foreground()==raw && s.activated.is_some_and(|process|
+                    self.catalogue.activated_surface(app,raw,process,&self.sid,self.session))));
         let transient_app=if catalogue::transient(metadata) {
             self.windows.values().find(|w|w.mac_owned && w.target.hwnd==catalogue::foreground()).map(|w|w.app.clone())
         } else {None};
@@ -1292,6 +1314,9 @@ impl Worker {
         let Some(metadata) = catalogue::details(raw, &self.sid, self.session) else {
             return false;
         };
+        if self.applications.get(&app).is_some_and(|session|session.baseline.contains(&raw)) {
+            log(format!("Application reused activated surface app={app} hwnd={raw}"));
+        }
         let owner=metadata["owner"].as_u64().unwrap_or(0) as usize;
         // DWM also cloaks owned dialogs when their Mac parent is cloaked.
         // Admit that exact authenticated owner chain, not arbitrary hidden apps.
@@ -1464,7 +1489,7 @@ impl Worker {
             let startup = value["startupUntil"].as_u64().unwrap_or(unix).saturating_sub(unix).min(30_000);
             self.applications.insert(app.into(), ApplicationSession { processes,
                 gap_until:Some(now+Duration::from_millis(gap.saturating_sub(unix).min(30_000))),
-                startup_until:now+Duration::from_millis(startup), activation: None,baseline:HashSet::new() });
+                startup_until:now+Duration::from_millis(startup), activation: None,activated:None,baseline:HashSet::new() });
         }
         for value in values.into_iter().filter(|value| value["hwnd"].as_u64().is_some()).take(4) {
             let Some(raw) = value["hwnd"].as_u64() else {
