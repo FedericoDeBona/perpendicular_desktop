@@ -453,6 +453,9 @@ Prossimo passo: nel futuro lavoro sulle finestre, breve apertura/ripresa di Expl
 
 ### TODO-012 — RAM dinamica protetta
 
+
+**29 ottobre — nuova segnalazione4GiB/8GiB, analisi IN CORSO:** main0.2.31/QEMU17189 con4GiB fissi, QMP base4294967296/plugged0/devices[] e Windows4077,75MiB: limite guest rispettato. phys_footprint8,023GiB contro regioni contabilizzate3,872GiB; differenza4,151GiB ancora da attribuire, non spiegata come normale overhead o leak. Recupero dinamico inattivo nel profilo corrente, nessuna correzione/configurazione modificata. Verifica main del limite FATTA, clone NON ESEGUITO, implementazione correttiva NON ESEGUITA. **Prossimo passo:** attribuire contabilità task/risorse fuori mappa con lettura privilegiata (comando disponibile richiede password), o confronto HVF isolato. **Criterio:** spiegazione quantitativa dell'eccesso e, se difetto, beneficio host verificato preservando dati/capacità guest. [Evidenze e tentativi](VERIFICATION.md#29-ottobre--analisi-ram-4gib-e-footprint-qemu-8gib). La qualifica storica FATTO sotto rimane circoscritta al vecchio profilo dinamico.
+
 **Configurazione attuale0.2.24:** nella IoT0795218c le sei cartelle condivise usano4GiB fissi/backing condiviso, controller dinamico inattivo. FATTO sotto conserva la qualifica storica del profilo precedente. Configurazione precedente nel backup privato; [verifica](VERIFICATION.md#27-ottobre--build-completa-e-cartelle-condivise-sulla-iot0795218c-0224).
 
 **Profilo corrente Download0.2.21:** nella VM locale93be6687 la RAM dinamica è disattivata e sostituita da4GiB fissi condivisi, su autorizzazione dell’utente. La qualifica storica sotto rimane valida per il precedente profilo privato, non descrive il comportamento attivo con virtiofs. [Evidenze](VERIFICATION.md#27-ottobre--virtiofs-e-download-mac-nella-cartella-download-windows).

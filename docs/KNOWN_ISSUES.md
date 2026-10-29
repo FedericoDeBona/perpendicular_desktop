@@ -269,6 +269,8 @@ Il ciclo RAM protetto 4→2→4 GiB con dati conservati resta la qualifica prece
 
 ### SYS-003 — RAM della VM non restituita al Mac a runtime
 
+- **29 ottobre, profilo corrente fisso e nuovo rilievo footprint:** main0.2.31/93be6687,4GiB realmente assegnati (QMP e Windows concordi), nessun balloon/hotplug attivo. phys_footprint8,023GiB, regioni contabilizzate3,872GiB: attribuzione della differenza4,151GiB APERTA; non prova di8GiB guest, leak o inevitabile costo grafico. Nessuna modifica/correzione o nuova qualifica clone. Il FATTO storico del controller sotto non vale come qualifica del profilo fisso. Prossimo passo contabilità kernel/fuori mappa: footprint --unmapped richiede root e sudo non interattivo rifiutato per password. Criterio per questa segnalazione: attribuzione quantitativa e verifica pertinente di eventuale correzione. [Misure e limiti](VERIFICATION.md#29-ottobre--analisi-ram-4gib-e-footprint-qemu-8gib).
+
 - **Secondo Mac,26 ottobre:** motore ricostruito e installato sulla VM93be6687, con i driver originali e protezioni attive. Massimo8 GiB preservato, base2 GiB e6 GiB hotplug. Memoria Windows passa da circa2 a8 GiB; poi unplug/balloon effettivi osservati e ritorno completo8 GiB/pendingfalse durante l'uso dell'app. Nessuna nuova prova estesa di integrità o promessa di footprint minimo. [Evidenze locali](VERIFICATION.md#26-ottobre--allineamento-completo-del-motore-sul-secondo-mac).
 
 - **Stato:** corretto e qualificato nella nuova IoT pulita, ora promossa a VM principale dell’app installata0.2.0 con lo stesso runtime Native3D. La prima valutazione negativa non costituiva raggiungimento dell'obiettivo e resta nel diario.
