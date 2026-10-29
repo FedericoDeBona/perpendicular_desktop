@@ -1,6 +1,6 @@
 # Backend grafico corrente
 
-Il desktop di sviluppo usa il backend DXMT nativo `3fff2d025a3f`, abbinato al runtime Wire2 identificato nel [piano](../../docs/RESTART_PLAN.md). Le patch e i preparatori di questa directory hanno basi precise; non costituiscono una build universale della combinazione attuale.
+Il backend effettivo va identificato dal `runtime.json` e dai byte della libreria nel runtime usato dal processo QEMU corrente, poi confrontato con le correzioni condivise secondo [AGENTS.md](../../AGENTS.md). Il solo bundle canonico, la versione del frontend o il vecchio riferimento `3fff2d025a3f` non identificano tutte le macchine: sulla base M4 verificata il29ottobre è caricato `0bf5a8192263…`. Le patch e i preparatori di questa directory hanno basi precise; non costituiscono una build universale della combinazione attuale. Conservare l'abbinamento Wire2 identificato nel [piano](../../docs/RESTART_PLAN.md).
 
 `named-errors.patch` aggiunge il nome dell’operazione a cinque messaggi generici, mantenendo risultato e frequenza del logger. Un messaggio nominato non dimostra da solo la causa di un difetto visivo.
 
