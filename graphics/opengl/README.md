@@ -4,6 +4,14 @@ Obiettivo: OpenGL accelerato con kernel ARM64 v0.4 originale Microsoft-signed, S
 
 **Stato corrente28 ottobre —0.2.27 installata sulla VM ordinaria:** shader/profondità/pixel finestra ARM64/x64 PASS da librerie installate; Creality7.3 ordinario dal launcher reale importa e renderizza il cubo20mm anche nella finestra Mac2177×1191. Kernel originale e Secure Boot/CI conservati, TESTSIGNINGfalse. Presentazione GDI con readback suddiviso; funzioni Vulkan mancanti e compatibilità generale ancora aperte. [Evidenze e limiti main](../../docs/VERIFICATION.md#28-ottobre--installazione-opengl-sulla-vm-corrente). I paragrafi successivi conservano le tappe precedenti nel clone.
 
+## Aggiornamento guest locale M4 0.2.32
+
+Il profilo `releases/0.2.32-darwin-arm64-m4.json` ricompila le stesse patch bounded-upload/sampler sulla base locale93be6687, conservando host0.2.27rev2 e le due DLL Vulkan. Il codice correttivo era già versionato, ma le vecchie DLL0.2.27 erano ancora nella VM e nel bundle: pull e build ordinaria riutilizzano il runtime locale, non ricompilano Mesa. Non trasferire il profilo host M1 per correggere questo scarto.
+
+`python3 scripts/package-opengl-guest-update.py --app <build-separata.app> --guest <payload-completo> --release-manifest graphics/opengl/releases/0.2.32-darwin-arm64-m4.json` valida base host e precedente payload per hash, tutti i membri host, sei librerie/architetture e patch; rifiuta una modifica Vulkan. Poi aggiorna solo il payload Guest/OpenGL. Firmare e verificare la build prima della consegna. Il bundle ordinario resta frontend0.2.31 con payload OpenGL0.2.32; il codice frontend è identico, la firma viene rigenerata. Le build successive conservano il payload aggiornato tramite copy-main-runtime.py. Il tool non aggiorna Windows né la main direttamente: nella verifica locale usato l'installer esistente Restore→installazione versionata, con precedente release/backup conservati.
+
+Confronto atlante ARM64/x64 prima FAIL/dopo PASS, MSAA installato PASS e Creality Desktop/cubo20mm/testi leggibili verificati. Nuovo Seamless non ancora verificato; orologio e Shell non corretti da questo incremento. [Evidenze e limiti](../../docs/VERIFICATION.md#29-ottobre--correzione-creality-viola-sulla-base-m4).
+
 ## Texture grandi0.2.31
 
 `windows-zink-bounded-upload.patch` evita un singolo mapping CPU dell’atlante RGBA4096×6854 di Creality: il fallback Zink Windows `texture_subdata` suddivide texture2D non compresse/profondità1 in fasce con obiettivo2MiB e attende la conclusione fra le fasce per riusare lo staging. Dimensione, dati, offset e stride della texture restano invariati; niente aumento risorse o capacità artificiali. Non corregge tutti i percorsi map/GetTexImage o texture compresse/array/3D.

@@ -1,5 +1,8 @@
 # Registro dei problemi
 
+**29 ottobre — Creality viola corretto sulla base locale M4/93be6687, OpenGL guest0.2.32.** Riutilizzate le patch texture bounded-upload e sampler già verificate sull'altro Mac; ricompilate ARM64/x64 sui sorgenti locali, senza trasferire il diverso host M1. Baseline atlante112295936byte FAIL in entrambe le architetture, candidata byte-identica/disegno PASS; MSAA installato ARM64/x64 PASS. Creality Desktop: testi/controlli leggibili e cubo20mm/8000mm³/12triangoli renderizzato, senza magenta nel campione. Sei DLL/registrazioni e firme app verificati; i due Vulkan e tutti29membri host invariati. SecureBoot1/CI0xc001/TestSigningfalse/kernel originale conservati. Stesso QEMU17189, nessun reboot/configurazione modificata; soli task/scena di prova chiusi. Implementazione/distribuzione e verifica main Desktop circoscritta FATTE; clone e Seamless nuovi NON ESEGUITI. Obiettivo generale IN CORSO: orologio e Shell ancora da correggere prima di qualificare Seamless. [Confronto e consegna](VERIFICATION.md#29-ottobre--correzione-creality-viola-sulla-base-m4).
+
+
 **29 ottobre — pull/rebuild e guest tool0.2.31 sulla93be6687: consegna verificata.** Fast-forward35c37ad→e1122df, app canonica/build firmate/allineate e guest33b91639… Running/hash esatto; helper/script cartelle aggiornati, task temporaneo0/CD vuoto. Windows collegato/pronto, QEMU17189; un boot iniziale dalla VM spenta, nessun reboot durante l'update. Configurazione byte-identica, SecureBoot1/CI0xc001/TestSigningfalse/driver originali conservati. Runtime grafico locale e OpenGL0.2.27 host_revision2 preservati, non migrati alle release dell'altra base. Implementazione/distribuzione e verifica main del solo aggiornamento FATTE; clone e nuove prove grafiche NON ESEGUITI. Glitch Settings/menu e updater automatico restano aperti; prossimo passo solo su nuova richiesta concreta. [Evidenze](VERIFICATION.md#29-ottobre--pull-rebuild-e-guest-tool-sulla93be6687).
 
 
@@ -560,6 +563,8 @@ Queste voci conservano limiti non risolti, senza richiedere di ripristinare codi
 - **Evidenze:** [requisiti rinviati](RESTART_PLAN.md#direzioni-e-limiti), [valutazione](VERIFICATION.md#24-ottobre--valutazione-n1-monitor-isolamento-e-gpu-per-schermo).
 
 ### APP-001 — Creality / OpenGL
+
+**29 ottobre, seguito locale:** segnalazione viola Desktop corretta e verificata con guest0.2.32 sullo stesso host0.2.27rev2; testi/cubo PASS e hash/protezioni conservati. Il riscontro di mancata distribuzione sotto descrive la base iniziale. Compatibilità generale e nuovo Seamless restano aperti. [Confronto e consegna](VERIFICATION.md#29-ottobre--correzione-creality-viola-sulla-base-m4).
 
 **29 ottobre — segnalazione locale riaperta:** interno Creality viola sulla base93be6687. Il runtime locale0.2.27 host_revision2 non include il profilo texture0.2.31 qualificato sulla IoT0795218c: il PASS dell'altra base non chiude questo caso. Riprodurre nel Desktop e confrontare il percorso texture effettivo, poi Seamless. Nessuna correzione distribuita in questo passaggio. [Riscontro e criteri](VERIFICATION.md#29-ottobre--obiettivo-glitch-desktop-prima-di-seamless).
 

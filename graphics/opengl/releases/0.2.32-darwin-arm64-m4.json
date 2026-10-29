@@ -1,0 +1,41 @@
+{
+  "schema": 1,
+  "version": "0.2.32",
+  "mesa_vulkan_source": "bf536bba65454900d782fa7417bc95c1608d7483",
+  "mesa_gallium_version": "25.1.9",
+  "moltenvk_version": "1.4.2",
+  "base_native_manifest_sha256": "6650aceb668dea6c69596230ee0244d93328111f5f76857db0d7add839355f0f",
+  "files": {
+    "arm64/libgallium_wgl.dll": "44b68ce3cc257493a4d7be054e32d72f0252776ce7e1d9354bfb2c2523ab74f8",
+    "arm64/opengl32.dll": "4835dfb4adeff49888530320584ac218914673c484ce3991ad5c4aad702eb645",
+    "arm64/vulkan_virtio.dll": "17fc7b5c8858407e0e79113757a1a00fa1981522cd96063193af3045b39742e4",
+    "x64/libgallium_wgl.dll": "358ded7efb995cb7ec28ac088fd4c7b126fac338f3172e80873ff4a03a035eb8",
+    "x64/opengl32.dll": "bca5f16478ed37be747d85bf007bee8fc4e76333028a4b0e29d9563cb4695ab6",
+    "x64/vulkan_virtio.dll": "5fad25ca4cf9fdf3f6ce95c39a61145eec32f8b64041e3e52bcfecf34004d52d"
+  },
+  "host_inputs": {
+    "bin/virgl_render_server": "fca23f9d8b291e265c71c0daf61f8009a94b18cd22563009570bdac40418fa58",
+    "lib/libvirglrenderer.1.dylib": "de4a4f8bcf176b0f89522b8e936a63389984aa108e075daaec7780f9579a7c29",
+    "lib/libMoltenVK.dylib": "4c45b91239e3a1d27ebca88ed321a5bdef387bea9ddf983f44416a0bcff7333e"
+  },
+  "patches": {
+    "venus-wddm2-shmem.patch": "75d021df5c17907424de6d91dfc22afa6dc0af941c7f2eff1d799acfdb8dddc1",
+    "venus-win32-blob-order.patch": "5667c80a798483ad84ac6afc13e1cea30b9bbb2095db13634955fe8e298c74aa",
+    "windows-clang-atomics.patch": "d65e99900aeb41fd3b5315c967f229f042eab319b0afd68d8c3bb0cc7a19f48c",
+    "windows-glsl-lexer.patch": "0906f134c724614556dfc810fa8dd3f8b3f8dc16c8b1bbcd5f008ca51fcac54b",
+    "windows-zink-bounded-readback.patch": "5a17243e2109348d80cc6e4eaff115ad154eabf5055b31c7652e471b8c4914c2",
+    "windows-zink-gdi-present.patch": "36a38a108b6c509b9aaf0ecd1c207bcdde2c3b2b54d4eb6bef847158e527498f",
+    "zink-moltenvk-host-depth.patch": "a54f73c1e139f122d221b633679aa0fe46bc855192a4928a325d99f3f6c93631",
+    "host-wgc-export.patch": "12ffee4cdc2f6677f20ec04f13f3bf5300c7d2db9d272be7ea453ca8c90959a1",
+    "windows-zink-bounded-upload.patch": "497696578226ec162d489875fdfa6bee2dcb6cd37495dfdfc6a14daaffda3f94",
+    "zink-moltenvk-sampler-name.patch": "c9641b82f30a55d40cda8cde87e3c45685d56b6290c1922cfa67b870ef9dcb46"
+  },
+  "renderer_inputs": {
+    "wgc-export.inc": "11c677e1dc74fc6c54e74ab9d2135ecc82d448f16c1d25f44039c9c5f979689c",
+    "initial-capture-decline.patch": "bccb4604402286bd5cd79efc075e57d662ebe786efd0ec9e2f27f93734a7394c"
+  },
+  "host_revision": 2,
+  "qualification_base": "93be6687 Apple M4; preserves OpenGL0.2.27 host_revision2/Vulkan pair; guest texture upload and sampler metadata only",
+  "guest_update_base_native_manifest_sha256": "b99766b1e2e119fa839fa87f7f67c23b480411d4995c27b7098833bd41763e14",
+  "guest_update_base_release_sha256": "1e0ac945ae8d4158b8557cd8423e33d4eff24b26b023dde7b08e1be542250459"
+}
