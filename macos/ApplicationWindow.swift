@@ -33,6 +33,14 @@ private struct ActivationStatus:Sendable {
     let focused:Bool
     let foreground:UInt64?
 }
+private struct NativePlacementStatus:Sendable {
+    let focused:Bool
+    let placed:Bool
+    let onAppMonitor:Bool
+    let foreground:UInt64?
+    let maxMoves:Int
+    let checkedAt:Double
+}
 private enum WindowInput {
     case input([String:Any])
     case leftMouse(WindowMouseSample,[String:Any])
@@ -87,6 +95,10 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
     private var placementCaptureSize:NSSize?
     private var initialPlacementPacket:GuestPacket?
     private var initialPlacementFailed=false
+    private var nativePlacementAttempted=false
+    private var nativePlacementRecovering=false
+    private var nativePlacementSkipped=""
+    private var nativePlacementTask:Task<Void,Never>?
     private var displayPriorRaster:NSSize?
     private var rejectedTransitionPacket:GuestPacket?
     private let bridge:GuestBridge
@@ -171,6 +183,9 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
     var onCloseRequested:(()->Void)?
     var onDeviceClose:((Double) async throws->Void)?
     var onDeviceFocus:((Double) async throws->Void)?
+    var onDeviceMove:((Double) async throws->Void)?
+    var onDeviceFit:((Double) async throws->Void)?
+    var nativePlacementContext:(()->String?)?
     var activateOnFirstShow=true
 
     init(id:String,title:String,role:WindowRole,bridge:GuestBridge){
@@ -228,7 +243,7 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
         beginFrameTransition("Preparazione della finestra…")
     }
     func identifyApplication(name:String,icon:NSImage?){transitionView.identify(name:name,icon:icon)}
-    var readyForInput:Bool {hasFrame && !transitionActive && !displayUpdating && initialPlacementReady}
+    var readyForInput:Bool {hasFrame && !transitionActive && !displayUpdating && initialPlacementReady && !nativePlacementRecovering}
     private var initialPlacementReady:Bool {
         guard role == .main,!sharedDisplays.isEmpty,!initialPlacementFailed else{return true}
         guard let display=SharedDisplay.best(sharedDisplays,guest:sourceRect) else{return false}
@@ -236,6 +251,8 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
     }
     func activate(){
         activateOnFirstShow=true
+        if nativePlacementRecovering{return}
+        if initialPlacementFailed,beginNativeInitialPlacement(){return}
         guard initialPlacementReady,!displayUpdating else{return}
         window.makeKeyAndOrderFront(nil);window.makeFirstResponder(content)
         requestActivation()
@@ -337,7 +354,7 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
         finishPresentedTransition()
     }
     private func finishPresentedTransition(){
-        guard transitionActive,hasFrame,sourceRect.size == frameSize,lastPresentedID>=transitionAfterPresentation,!displayUpdating,
+        guard transitionActive,hasFrame,sourceRect.size == frameSize,lastPresentedID>=transitionAfterPresentation,!displayUpdating,!nativePlacementRecovering,
               !geometryFinishing,expectedSize == nil,!nativeResizing else{return}
         endFrameTransition()
     }
@@ -416,11 +433,92 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
                 if case .failure(let error)=result {
                     self.initialPlacementFailed=true
                     NativeWindowTrace.record("initial-placement-failed",["window":self.id,"message":error.localizedDescription])
-                    if let packet=self.initialPlacementPacket {self.initialPlacementPacket=nil;self.present(packet)}
-                    if self.activateOnFirstShow {self.activate()}
-                    self.onError?("Windows non ha spostato l’app sullo schermo Mac.")
+                    if !self.beginNativeInitialPlacement(){self.showFailedInitialPlacement(report:true)}
                 }
         }
+    }
+    func prepareExplicitLaunch(){
+        if nativePlacementTask == nil {nativePlacementAttempted=false}
+        if initialPlacementFailed {_ = beginNativeInitialPlacement()}
+    }
+    private func nativePlacementState() async throws->NativePlacementStatus {
+        let checkedAt=ProcessInfo.processInfo.systemUptime
+        return try await withCheckedThrowingContinuation {continuation in
+            bridge.command("device_placement_state",["window":id],timeout:.milliseconds(400)){result in
+                switch result {
+                case .failure(let error):continuation.resume(throwing:error)
+                case .success(let reply):
+                    let value=reply["value"] as? [String:Any] ?? [:]
+                    continuation.resume(returning:NativePlacementStatus(focused:value["focused"] as? Bool == true,
+                        placed:value["placed"] as? Bool == true,onAppMonitor:value["onAppMonitor"] as? Bool == true,
+                        foreground:(value["foreground"] as? NSNumber)?.uint64Value,
+                        maxMoves:min(8,max(1,value["maxMoves"] as? Int ?? 1)),checkedAt:checkedAt))
+                }
+            }
+        }
+    }
+    private func showFailedInitialPlacement(report:Bool){
+        guard !sourceClosed,!closing else{return}
+        initialPlacementFailed=true
+        if let packet=initialPlacementPacket {initialPlacementPacket=nil;present(packet)}
+        finishPresentedTransition()
+        if report,activateOnFirstShow {activate()}
+        if report {onError?("Windows non ha spostato l’app sullo schermo Mac.")}
+    }
+    @discardableResult private func beginNativeInitialPlacement()->Bool {
+        if let reason=nativePlacementContext?(){nativePlacementSkipped=reason;return false}
+        nativePlacementSkipped=""
+        guard initialPlacementFailed,role == .main,bridge.devicePlacementAvailable,
+              !nativePlacementAttempted,!sourceClosed,!closing,!displayUpdating,!geometryActive,!nativeResizing,
+              activateOnFirstShow,nativePlacementContext != nil,
+              onDeviceMove != nil,onDeviceFit != nil,onDeviceFocus != nil else{return false}
+        nativePlacementAttempted=true;nativePlacementRecovering=true
+        beginFrameTransition("Posizionamento della finestra…")
+        if let packet=initialPlacementPacket {initialPlacementPacket=nil;present(packet)}
+        window.makeKeyAndOrderFront(nil);window.makeFirstResponder(content)
+        trace("native_initial_placement_started")
+        nativePlacementTask=Task{@MainActor [weak self] in
+            guard let self else{return}
+            defer{self.nativePlacementTask=nil}
+            do {
+                let limit=ProcessInfo.processInfo.systemUptime+4
+                var visited=Set<UInt64>(),moves=0,fitted=false
+                for _ in 0..<24 {
+                    try Task.checkCancellation()
+                    guard !self.sourceClosed,!self.closing,!self.displayUpdating,self.window.isKeyWindow,
+                          self.nativePlacementContext?() == nil,NSEvent.pressedMouseButtons == 0,
+                          ProcessInfo.processInfo.systemUptime<limit else{throw CocoaError(.userCancelled)}
+                    let state=try await self.nativePlacementState()
+                    try Task.checkCancellation()
+                    guard self.window.isKeyWindow,self.nativePlacementContext?() == nil else{throw CocoaError(.userCancelled)}
+                    if state.placed {
+                        if let display=SharedDisplay.best(self.sharedDisplays,guest:self.sourceRect),
+                           (display.guestWorkArea ?? display.guestFrame).insetBy(dx:-1,dy:-1).contains(self.sourceRect) {
+                            self.initialPlacementFailed=false;self.placementCaptureSize=nil;self.nativePlacementRecovering=false
+                            self.presentInitialPlacementPacketIfReady();self.finishPresentedTransition()
+                            if self.hasFrame,self.sourceRect.size != self.frameSize {self.requestFreshFrame(force:true)}
+                            self.trace("native_initial_placement_completed");return
+                        }
+                    }else if !state.focused {
+                        guard let foreground=state.foreground,visited.count<8,visited.insert(foreground).inserted,
+                              let cycle=self.onDeviceFocus else{throw CocoaError(.executableRuntimeMismatch)}
+                        try await cycle(state.checkedAt+0.5)
+                    }else if state.onAppMonitor {
+                        if !fitted,let fit=self.onDeviceFit {fitted=true;try await fit(state.checkedAt+0.5)}
+                    }else {
+                        guard moves<state.maxMoves,let move=self.onDeviceMove else{throw CocoaError(.executableRuntimeMismatch)}
+                        moves+=1;try await move(state.checkedAt+0.5)
+                    }
+                    try await Task.sleep(for:.milliseconds(160))
+                }
+                throw CocoaError(.executableRuntimeMismatch)
+            }catch {
+                self.nativePlacementRecovering=false
+                NativeWindowTrace.record("native-initial-placement-failed",["window":self.id,"message":error.localizedDescription])
+                self.showFailedInitialPlacement(report:!Task.isCancelled && self.window.isKeyWindow)
+            }
+        }
+        return true
     }
     private func applySizeLimits(){
         guard !role.transient else{return}
@@ -616,6 +714,7 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
     func windowShouldClose(_ sender:NSWindow)->Bool{
         if sourceClosed || !bridge.connected{return true}
         guard !closing else{return false};closing=true
+        nativePlacementTask?.cancel()
         onCloseRequested?()
         lastCloseError=""
         let requestedAt=ProcessInfo.processInfo.systemUptime
@@ -647,6 +746,7 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
         onError?("Windows non ha confermato la chiusura. Puoi riprovare.")
     }
     func windowWillClose(_ notification:Notification){
+        nativePlacementTask?.cancel();nativePlacementTask=nil
         nativeGeometryObservation?.cancel();nativeGeometryObservation=nil
         transitionTimeout?.cancel();transitionTimeout=nil
         if !role.transient {cancelInput()}
@@ -1151,6 +1251,8 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
          "presentationTextBytes":presentationTextBytes,"presentationTextBuffered":presentationTextBuffered,
          "requiredPresentationID":transitionAfterPresentation,"presentedID":lastPresentedID,
          "initialPlacementReady":initialPlacementReady,"initialPlacementFailed":initialPlacementFailed,
+         "nativePlacementRecovering":nativePlacementRecovering,"nativePlacementAttempted":nativePlacementAttempted,
+         "nativePlacementSkipped":nativePlacementSkipped,"nativePlacementAvailable":bridge.devicePlacementAvailable,
          "heldInitialFramePixels":[initialPlacementPacket?.header["width"] as? Int ?? 0,
                                    initialPlacementPacket?.header["height"] as? Int ?? 0],
          "hasBeenReady":hasBeenReady,"activateOnFirstShow":activateOnFirstShow,
@@ -1267,6 +1369,7 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
     }
     func windowDidResignKey(_ notification:Notification){
         if !role.transient {
+            nativePlacementTask?.cancel()
             cancelInput("The window lost focus before the pending input could be sent.")
             if geometryInteraction != nil {finishSharedGeometry()}
             if nativeResizing {

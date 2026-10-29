@@ -32,6 +32,16 @@ pub fn native_app_input_allowed(hwnd:HWND)->bool {
 }
 pub fn native_app_input_configured()->bool {NATIVE_APP_INPUT.load(Ordering::Acquire)}
 
+pub fn app_monitor_work_area(hwnd:HWND)->Option<RECT> {
+    if !native_app_input_configured(){return None;}
+    unsafe {
+        let monitor=MonitorFromWindow(hwnd,MONITOR_DEFAULTTONEAREST);
+        let mut info=MONITORINFO{cbSize:size_of::<MONITORINFO>() as u32,..Default::default()};
+        if !GetMonitorInfoW(monitor,&mut info).as_bool() || info.dwFlags&1!=0 {return None;}
+        APP_AREAS.get()?.lock().ok()?.iter().find(|(frame,_)|*frame==info.rcMonitor).map(|(_,work)|*work)
+    }
+}
+
 // The first confirmed app display is the initial destination for a transfer;
 // the Mac frontend can subsequently move it between its mapped displays.
 pub fn first_app_work_area()->Option<(RECT,RECT)> {

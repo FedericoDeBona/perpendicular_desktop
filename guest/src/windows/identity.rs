@@ -4,7 +4,8 @@ use windows::{
         Foundation::{CloseHandle, FILETIME, HANDLE, HLOCAL, HWND, LocalFree},
         Security::{
             Authorization::ConvertSidToStringSidW, GetTokenInformation, TOKEN_QUERY, TOKEN_USER,
-            TokenUser,
+            TokenUser, TokenIntegrityLevel, TOKEN_MANDATORY_LABEL,
+            GetSidSubAuthority, GetSidSubAuthorityCount, IsValidSid,
         },
         System::{
             RemoteDesktop::ProcessIdToSessionId,
@@ -67,6 +68,25 @@ pub fn current() -> Result<(String, u32), String> {
             return Err("interactive user session required".into());
         }
         Ok((sid(GetCurrentProcess())?, session))
+    }
+}
+
+pub fn integrity_level(pid: u32) -> Option<u32> {
+    unsafe {
+        let process=Handle(OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION,false,pid).ok()?);
+        let mut token=HANDLE::default();
+        OpenProcessToken(process.0,TOKEN_QUERY,&mut token).ok()?;
+        let token=Handle(token);
+        let mut size=0;
+        let _=GetTokenInformation(token.0,TokenIntegrityLevel,None,0,&mut size);
+        if size<size_of::<TOKEN_MANDATORY_LABEL>() as u32 || size>65536 {return None;}
+        let mut data=vec![0u64;(size as usize).div_ceil(8)];
+        GetTokenInformation(token.0,TokenIntegrityLevel,Some(data.as_mut_ptr().cast()),size,&mut size).ok()?;
+        let sid=(*data.as_ptr().cast::<TOKEN_MANDATORY_LABEL>()).Label.Sid;
+        if !IsValidSid(sid).as_bool(){return None;}
+        let count=*GetSidSubAuthorityCount(sid);
+        if count==0 {return None;}
+        Some(*GetSidSubAuthority(sid,u32::from(count-1)))
     }
 }
 

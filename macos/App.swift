@@ -837,6 +837,7 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
         }
         launcherNotice=nil;openingNoticeApp=nil;openingNoticeTimedOut=false
         cancelledOpeningApps.remove(app.id);beginOpening(app)
+        for (id,controller) in windows where windowApps[id] == app.id {controller.prepareExplicitLaunch()}
         status="Opening \(app.name)…"
         let epoch=launcherEpoch,request=openingRequests[app.id]
         PipelineTrace.record("app-launch-request",app.id)
@@ -1439,6 +1440,29 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
                             throw CocoaError(.executableRuntimeMismatch)
                         }
                         try await machine.cycleApplicationFocus(notAfter:deadline)
+                    }
+                    let placementApp=item["app"] as? String ?? ""
+                    controller.nativePlacementContext={ [weak self,weak controller] in
+                        guard let self,let controller,self.displayEpoch==closeEpoch,self.connected else{return "session"}
+                        guard NSApp.isActive else{return "inactive"}
+                        guard self.machine?.desktopIsKey != true else{return "desktop"}
+                        guard self.openingRequests[placementApp] != nil else{return "no-launch"}
+                        guard NSApp.keyWindow === self.launcher || NSApp.keyWindow === controller.window else{return "other-window"}
+                        return nil
+                    }
+                    controller.onDeviceMove={ [weak self,weak controller] deadline in
+                        try Task.checkCancellation()
+                        guard let self,let controller,self.displayEpoch==closeEpoch,self.connected,
+                              NSApp.isActive,controller.window.isKeyWindow,NSEvent.pressedMouseButtons==0,
+                              let machine=self.machine else{throw CocoaError(.userCancelled)}
+                        try await machine.moveApplicationToNextDisplay(notAfter:deadline)
+                    }
+                    controller.onDeviceFit={ [weak self,weak controller] deadline in
+                        try Task.checkCancellation()
+                        guard let self,let controller,self.displayEpoch==closeEpoch,self.connected,
+                              NSApp.isActive,controller.window.isKeyWindow,NSEvent.pressedMouseButtons==0,
+                              let machine=self.machine else{throw CocoaError(.userCancelled)}
+                        try await machine.fitDesktopApplication(notAfter:deadline)
                     }
                     controller.activateOnFirstShow=openingRequests[item["app"] as? String ?? ""] != nil
                         && (machine?.desktopIsKey != true || seamlessTransferApps.contains(item["app"] as? String ?? ""))

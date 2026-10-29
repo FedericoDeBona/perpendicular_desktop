@@ -241,7 +241,7 @@ impl Worker {
         outbox.control(
             json!({"type":"hello","protocol":1,"token":config.token,"epoch":self.epoch,
             "sid":self.sid,"session":self.session,"version":env!("CARGO_PKG_VERSION"),
-            "capabilities":{"capture":"wgc-hardware-readback-with-software-recovery","windows":4,"transients":12,"windowRoles":true,"input":true,"catalogue":true,"appIcon":true,"frameChannel":true,"windowRefresh":true,"nativeAppInput":true,"modeFocus":true,"deviceFocus":true,"gpuFramesOnly":true,"frameEncodings":[],"displayInfo":true,"displayTopology":true,"driverInfo":true,"graphicsInfo":true,"displayConfigure":true,"sharedGeometry":true,"processControl":true,"clipboard":true,"clipboardTextBytes":262144,"applicationStatus":true,"memoryStatus":true,"execute":true,"executeTimeoutSeconds":60,"executeOutputBytes":65536,"displayEvents":self.display_observer.is_some()}}),
+            "capabilities":{"capture":"wgc-hardware-readback-with-software-recovery","windows":4,"transients":12,"windowRoles":true,"input":true,"catalogue":true,"appIcon":true,"frameChannel":true,"windowRefresh":true,"nativeAppInput":true,"modeFocus":true,"deviceFocus":true,"devicePlacement":true,"gpuFramesOnly":true,"frameEncodings":[],"displayInfo":true,"displayTopology":true,"driverInfo":true,"graphicsInfo":true,"displayConfigure":true,"sharedGeometry":true,"processControl":true,"clipboard":true,"clipboardTextBytes":262144,"applicationStatus":true,"memoryStatus":true,"execute":true,"executeTimeoutSeconds":60,"executeOutputBytes":65536,"displayEvents":self.display_observer.is_some()}}),
         );
         let (sender, receiver) = mpsc::sync_channel(128);
         let state = outbox.clone();
@@ -776,7 +776,7 @@ impl Worker {
                 Ok(json!({}))
             }
             "input" | "clipboard" | "activate" | "resize" | "close" | "hit_test" | "geometry" | "set_geometry"
-            | "cancel_interaction" | "device_focus_state" => {
+            | "cancel_interaction" | "device_focus_state" | "device_placement_state" => {
                 let id = value["window"].as_str().ok_or("Missing window identity")?;
                 let window = self.windows.get(id).ok_or("Window retired")?;
                 if !window.target.valid() {
@@ -784,6 +784,39 @@ impl Worker {
                 }
                 let target = window.target.clone();
                 match value["operation"].as_str().unwrap() {
+                    "device_placement_state" => unsafe {
+                        let hwnd=HWND(target.hwnd as _);
+                        if !window.mac_owned || window.metadata["role"]!="main" || !target.full_frame
+                            || !window_control::native_app_input_configured()
+                            || !IsWindowVisible(hwnd).as_bool() || !IsWindowEnabled(hwnd).as_bool() || IsIconic(hwnd).as_bool() {
+                            return Err("This window is not available for native placement".into());
+                        }
+                        let caller=identity::integrity_level(std::process::id()).ok_or("Worker integrity unavailable")?;
+                        let level=identity::integrity_level(target.pid).ok_or("Application integrity unavailable")?;
+                        if level<=caller {return Err("Native placement is only available for a higher-integrity application".into());}
+                        let foreground=GetAncestor(GetForegroundWindow(),GA_ROOT);
+                        let mut gui=GUITHREADINFO{cbSize:size_of::<GUITHREADINFO>() as u32,..Default::default()};
+                        GetGUIThreadInfo(0,&mut gui).map_err(error)?;
+                        if foreground.is_invalid() || !gui.hwndCapture.is_invalid() || gui.flags.0&0x1e!=0 {
+                            return Err("Finish the current Windows interaction before switching apps".into());
+                        }
+                        let monitor=MonitorFromWindow(hwnd,MONITOR_DEFAULTTONEAREST);
+                        let mut info=MONITORINFO{cbSize:size_of::<MONITORINFO>() as u32,..Default::default()};
+                        if !GetMonitorInfoW(monitor,&mut info).as_bool(){return Err("Application display unavailable".into());}
+                        let work=window_control::app_monitor_work_area(hwnd);
+                        if info.dwFlags&1==0 && work.is_none(){return Err("Application is not on a configured display".into());}
+                        let bounds=catalogue::frame_bounds(hwnd).ok_or("Window geometry unavailable")?;
+                        let placed=work.is_some_and(|r|bounds.left>=r.left-1 && bounds.top>=r.top-1
+                            && bounds.right<=r.right+1 && bounds.bottom<=r.bottom+1);
+                        if !target.valid() || GetAncestor(GetForegroundWindow(),GA_ROOT)!=foreground {
+                            return Err("Window focus changed before native placement".into());
+                        }
+                        return Ok(json!({"focused":foreground==hwnd,"foreground":foreground.0 as usize,
+                            "placed":placed,"onAppMonitor":work.is_some(),
+                            "maxMoves":GetSystemMetrics(SM_CMONITORS).clamp(1,8),
+                            "callerIntegrity":caller,"targetIntegrity":level,
+                            "rect":[bounds.left,bounds.top,bounds.right,bounds.bottom]}));
+                    },
                     "device_focus_state" => unsafe {
                         let hwnd=HWND(target.hwnd as _);
                         if !window.mac_owned || catalogue::transient(&window.metadata)
