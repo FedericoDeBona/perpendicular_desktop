@@ -184,14 +184,14 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
         launcher.title="Perpendicular";launcher.isReleasedWhenClosed=false
         // The custom title strip has one drag owner. Native titlebar tracking
         // must not start a second movement path through the full-size content.
-        launcher.isMovable=false
+        launcher.isMovable=false;launcher.acceptsMouseMovedEvents=true
         launcher.titleVisibility = .hidden
         launcher.titlebarAppearsTransparent=true;launcher.toolbarStyle = .unified
         launcher.isOpaque=false;launcher.backgroundColor = .clear
         launcher.appearance=launcherAppearance.native
         launcher.minSize=NSSize(width:540,height:480)
         launcher.setFrameAutosaveName("PerpendicularLauncher")
-        let launcherContent=NSHostingView(rootView:Launcher(model:self))
+        let launcherContent=LauncherHostingView(rootView:Launcher(model:self))
         // AppKit owns the window frame. Content and screen safe-area changes
         // must not resize/reposition it during a native cross-display drag.
         launcherContent.sizingOptions=[]
@@ -639,7 +639,7 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
                 "frameChannel":bridge?.separateFrames ?? false,
                 "windowGPU":NativeWindowFrames.shared.diagnostics,
                 "windowGPUCache":NativeWindowFrames.shared.cacheDiagnostics,
-                "launcher":["catalogueAutomaticEligible":launcher.isVisible && !launcher.isMiniaturized,"catalogueAgeSeconds":ProcessInfo.processInfo.systemUptime-lastCatalogueRefresh,"catalogueRefreshes":catalogueRefreshes,"statusMessage":launcherStatusMessage as Any? ?? NSNull(),"dragSamples":launcher.dragSamples,"dragPointer":["x":launcher.dragPointer.x,"y":launcher.dragPointer.y],"dragRequested":["x":launcher.dragRequested.x,"y":launcher.dragRequested.y],"frame":["x":launcher.frame.minX,"y":launcher.frame.minY,"width":launcher.frame.width,"height":launcher.frame.height],"screen":launcher.screen?.localizedName ?? "", "apps":apps.map{["id":$0.id,"name":$0.name,"key":$0.key,"essential":$0.essential]},"opening":Array(openingApps).sorted(),"notice":launcherNotice as Any? ?? NSNull(),"iconCacheHits":iconCacheHits,"iconFetches":iconFetches,"cachedIcons":applicationIcons.count,"recent":launcherPreferences.recent(apps).map(\.id),"favorites":launcherPreferences.sections(apps).favorites.map(\.id),"appearance":launcherAppearance.rawValue,"indicator":launcherWindowsStatus.title],
+                "launcher":["cursor":launcher.cursorDiagnostics,"catalogueAutomaticEligible":launcher.isVisible && !launcher.isMiniaturized,"catalogueAgeSeconds":ProcessInfo.processInfo.systemUptime-lastCatalogueRefresh,"catalogueRefreshes":catalogueRefreshes,"statusMessage":launcherStatusMessage as Any? ?? NSNull(),"dragSamples":launcher.dragSamples,"dragPointer":["x":launcher.dragPointer.x,"y":launcher.dragPointer.y],"dragRequested":["x":launcher.dragRequested.x,"y":launcher.dragRequested.y],"frame":["x":launcher.frame.minX,"y":launcher.frame.minY,"width":launcher.frame.width,"height":launcher.frame.height],"screen":launcher.screen?.localizedName ?? "", "apps":apps.map{["id":$0.id,"name":$0.name,"key":$0.key,"essential":$0.essential]},"opening":Array(openingApps).sorted(),"notice":launcherNotice as Any? ?? NSNull(),"iconCacheHits":iconCacheHits,"iconFetches":iconFetches,"cachedIcons":applicationIcons.count,"recent":launcherPreferences.recent(apps).map(\.id),"favorites":launcherPreferences.sections(apps).favorites.map(\.id),"appearance":launcherAppearance.rawValue,"indicator":launcherWindowsStatus.title],
                 "desktop":machine?.desktopState ?? [:],
                 "lastCommandRTTMilliseconds":bridge?.lastRoundTripMilliseconds ?? 0,
                 "frameReceiveMilliseconds":bridge?.frameReceiveMilliseconds ?? 0,

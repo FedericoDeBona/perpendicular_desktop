@@ -44,6 +44,10 @@ private struct LauncherGlass:NSViewRepresentable {
 @MainActor
 final class LauncherWindow:NSWindow {
     private var dragOffset:NSPoint?
+    var cursorDiagnostics:[String:Bool] {
+        ["hoveredControl":LauncherPointerState.shared.active,"automaticCursorRects":areCursorRectsEnabled,
+         "pointingHand":NSCursor.current === NSCursor.pointingHand]
+    }
     private(set) var dragSamples=0
     private(set) var dragPointer=NSPoint.zero
     private(set) var dragRequested=NSPoint.zero
@@ -51,8 +55,15 @@ final class LauncherWindow:NSWindow {
         dragOffset == nil ? super.constrainFrameRect(frameRect,to:screen):frameRect
     }
     override func sendEvent(_ event:NSEvent){
+        // Consume cursor updates before a child responder can briefly install
+        // the arrow. Reapplying the hand after dispatch produces visible flicker.
+        if event.type == .cursorUpdate,LauncherPointerState.shared.active {
+            LauncherPointerState.shared.restore();return
+        }
         guard [.leftMouseDown,.leftMouseDragged,.leftMouseUp].contains(event.type) else {
-            super.sendEvent(event);return
+            super.sendEvent(event)
+            if event.type == .mouseMoved || event.type == .cursorUpdate {LauncherPointerState.shared.restore()}
+            return
         }
         // Freeze this event before moving the window; polling the current mouse
         // can read a later queued sample and change the grab point.
@@ -81,6 +92,63 @@ final class LauncherWindow:NSWindow {
             }
         }
         super.sendEvent(event)
+    }
+}
+
+@MainActor
+private final class LauncherPointerState {
+    static let shared=LauncherPointerState()
+    weak var host:NSView?
+    private var targets:Set<UUID>=[]
+    private weak var suspendedWindow:NSWindow?
+    var active:Bool {!targets.isEmpty}
+    func set(_ id:UUID,hovered:Bool){
+        let changed=hovered ? targets.insert(id).inserted:targets.remove(id) != nil
+        guard changed else{return}
+        if active {restore()}
+        else {
+            suspendedWindow?.enableCursorRects();suspendedWindow=nil
+            if let host {host.window?.invalidateCursorRects(for:host)}
+        }
+    }
+    func restore(){
+        guard active else{return}
+        // One cursor owner while hovering. Native cursor rectangles otherwise
+        // install the arrow before each manual hand update during mouse movement.
+        if let window=host?.window,window.areCursorRectsEnabled {
+            window.disableCursorRects();suspendedWindow=window
+        }
+        NSCursor.pointingHand.set()
+    }
+}
+
+@MainActor
+final class LauncherHostingView:NSHostingView<Launcher> {
+    override func viewDidMoveToWindow(){
+        super.viewDidMoveToWindow()
+        if window != nil {LauncherPointerState.shared.host=self}
+    }
+    override func resetCursorRects(){
+        super.resetCursorRects()
+        if LauncherPointerState.shared.active {addCursorRect(visibleRect,cursor:.pointingHand)}
+    }
+    override func cursorUpdate(with event:NSEvent){
+        if LauncherPointerState.shared.active {LauncherPointerState.shared.restore()}
+        else {super.cursorUpdate(with:event)}
+    }
+}
+
+@MainActor
+private struct LauncherHandPointer:ViewModifier {
+    @Environment(\.isEnabled) private var enabled
+    @State private var id=UUID()
+    @State private var hovered=false
+    func body(content:Content)->some View {
+        content.onHover{over in
+            hovered=over;LauncherPointerState.shared.set(id,hovered:over && enabled)
+        }
+        .onChange(of:enabled){_,value in LauncherPointerState.shared.set(id,hovered:hovered && value)}
+        .onDisappear{LauncherPointerState.shared.set(id,hovered:false)}
     }
 }
 
@@ -127,7 +195,7 @@ struct Launcher:View {
             if settings {
                 HStack(spacing:12){
                     Button{showApps()}label:{Image(systemName:"arrow.left").frame(width:28,height:28)}
-                        .buttonStyle(LauncherChromeButtonStyle()).help("Torna alle app").accessibilityLabel("Torna alle app")
+                        .buttonStyle(LauncherChromeButtonStyle()).modifier(LauncherHandPointer()).help("Torna alle app").accessibilityLabel("Torna alle app")
                     Text("Impostazioni").font(.system(size:23,weight:.medium)).tracking(-0.5)
                     Spacer()
                 }.padding(.horizontal,22).padding(.vertical,14)
@@ -174,11 +242,11 @@ struct Launcher:View {
                 .onKeyPress(.upArrow){moveSelection(-1);return .handled}
             if !search.isEmpty {
                 Button{search="";searchFocused=true}label:{Image(systemName:"xmark.circle.fill").frame(width:28,height:28)}
-                    .buttonStyle(LauncherChromeButtonStyle()).accessibilityLabel("Cancella ricerca")
+                    .buttonStyle(LauncherChromeButtonStyle()).modifier(LauncherHandPointer()).accessibilityLabel("Cancella ricerca")
             }
             Button(action:model.showWindows){
                 Image(systemName:"square.grid.2x2.fill").font(.system(size:17)).frame(width:40,height:36).contentShape(Rectangle())
-            }.buttonStyle(LauncherChromeButtonStyle(prominent:true))
+            }.buttonStyle(LauncherChromeButtonStyle(prominent:true)).modifier(LauncherHandPointer())
                 .help("Desktop Windows").accessibilityLabel("Desktop Windows").accessibilityIdentifier("launcher-open-desktop")
                 .disabled(!model.desktopAvailable || model.machineOperation != nil)
         }.padding(.horizontal,28).padding(.top,13).padding(.bottom,25)
@@ -232,18 +300,18 @@ struct Launcher:View {
             Button{statusOpen.toggle()}label:{
                 Image(systemName:model.launcherWindowsStatus.symbol).font(.system(size:13,weight:.medium))
                     .foregroundStyle(model.launcherWindowsStatus.color).frame(width:28,height:28).contentShape(Rectangle())
-            }.buttonStyle(LauncherChromeButtonStyle()).help(model.launcherWindowsStatus.title+(model.launcherNotice.map{" · "+$0} ?? ""))
+            }.buttonStyle(LauncherChromeButtonStyle()).modifier(LauncherHandPointer()).help(model.launcherWindowsStatus.title+(model.launcherNotice.map{" · "+$0} ?? ""))
                 .accessibilityLabel(model.launcherWindowsStatus.title).accessibilityIdentifier("launcher-windows-status")
                 .popover(isPresented:$statusOpen,arrowEdge:.bottom){statusDetails}
             if let message=model.launcherStatusMessage {
                 Button{statusOpen=true}label:{
                     Text(message).font(.system(size:11)).lineLimit(1).truncationMode(.tail)
                         .frame(maxWidth:.infinity,alignment:.leading).contentShape(Rectangle())
-                }.buttonStyle(LauncherChromeButtonStyle()).help(message)
+                }.buttonStyle(LauncherChromeButtonStyle()).modifier(LauncherHandPointer()).help(message)
             }
             Spacer(minLength:10)
             Button{settings ? showApps():showSettings()}label:{Image(systemName:"slider.horizontal.3").font(.system(size:13)).frame(width:28,height:28)}
-                .buttonStyle(LauncherChromeButtonStyle()).help("Impostazioni · ⌘,").accessibilityLabel("Impostazioni")
+                .buttonStyle(LauncherChromeButtonStyle()).modifier(LauncherHandPointer()).help("Impostazioni · ⌘,").accessibilityLabel("Impostazioni")
         }.padding(.horizontal,16).frame(height:46).background(Color.primary.opacity(0.025))
     }
     private var statusDetails:some View {
@@ -303,9 +371,9 @@ private struct LauncherAppTile:View {
                     Text(app.name).font(.system(size:large ? 12:11)).lineLimit(2).multilineTextAlignment(.center)
                         .frame(maxWidth:.infinity).frame(height:28,alignment:.top)
                 }.padding(.horizontal,7).frame(maxWidth:.infinity,maxHeight:.infinity).contentShape(RoundedRectangle(cornerRadius:12))
-            }.buttonStyle(LauncherTileButtonStyle()).disabled(!enabled || opening).accessibilityLabel("Apri "+app.name).help(app.name)
+            }.buttonStyle(LauncherTileButtonStyle()).modifier(LauncherHandPointer()).disabled(!enabled || opening).accessibilityLabel("Apri "+app.name).help(app.name)
             Button(action:pin){Image(systemName:pinned ? "star.fill":"star").font(.system(size:10)).frame(width:26,height:26).contentShape(Rectangle())}
-                .buttonStyle(LauncherChromeButtonStyle()).opacity(hovered || pinned ? 1:0)
+                .buttonStyle(LauncherChromeButtonStyle()).modifier(LauncherHandPointer()).opacity(hovered || pinned ? 1:0)
                 .help(pinned ? "Rimuovi dai preferiti":"Aggiungi ai preferiti")
                 .accessibilityLabel((pinned ? "Rimuovi dai preferiti: ":"Aggiungi ai preferiti: ")+app.name)
         }.aspectRatio(1,contentMode:.fit)
@@ -338,9 +406,9 @@ private struct LauncherAppRow:View {
                     if opening {ProgressView().controlSize(.mini)}
                     else if active {Circle().fill(.green).frame(width:5,height:5).help("Finestra aperta")}
                 }.padding(.leading,12).padding(.trailing,8).frame(maxWidth:.infinity,minHeight:44).contentShape(Rectangle())
-            }.buttonStyle(LauncherTileButtonStyle()).disabled(!enabled || opening).accessibilityLabel("Apri "+app.name)
+            }.buttonStyle(LauncherTileButtonStyle()).modifier(LauncherHandPointer()).disabled(!enabled || opening).accessibilityLabel("Apri "+app.name)
             Button(action:pin){Image(systemName:pinned ? "star.fill":"star").font(.system(size:11)).frame(width:32,height:36).contentShape(Rectangle())}
-                .buttonStyle(LauncherChromeButtonStyle()).padding(.trailing,5).help(pinned ? "Rimuovi dai preferiti":"Aggiungi ai preferiti")
+                .buttonStyle(LauncherChromeButtonStyle()).modifier(LauncherHandPointer()).padding(.trailing,5).help(pinned ? "Rimuovi dai preferiti":"Aggiungi ai preferiti")
                 .accessibilityLabel((pinned ? "Rimuovi dai preferiti: ":"Aggiungi ai preferiti: ")+app.name)
         }.background(hovered || selected ? highlight:.clear,in:RoundedRectangle(cornerRadius:8)).onHover{hovered=$0}
     }
