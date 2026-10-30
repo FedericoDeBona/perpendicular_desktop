@@ -277,6 +277,8 @@ Il ciclo RAM protetto 4→2→4 GiB con dati conservati resta la qualifica prece
 
 ### SYS-001 — Arresto HVF durante riavvio o arresto
 
+- **30 ottobre, aggiornamento frontend Rete — osservazione distinta ricorrente:** Quit e Quit and Keep Windows terminano anche QEMU; log segnale15 da pid609/loginwindow, come nel campione27ottobre. Successive riaperture ordinarie riuscite, ma nessuna continuità della sessione rivendicata e nessuna assertion HVF attribuita a questo episodio. Non risolto nel lavoro Rete; nessun comando force-stop eseguito. [Evidenze](VERIFICATION.md#30-ottobre--impostazioni-rete-e-ripresa-del-tunnel0259).
+
 - **29 ottobre, durante diagnosi tray:** QEMU17189 SIGABRT/assertion hvf_vcpu_exec,hvf.c2227 alle11:38:09locale, confermata dal rapporto macOS. Causa del ramo non isolata, nessuna attribuzione automatica alla grafica o strumentazione. Recupero con boot ordinario28833 riuscito, stessa configurazione/runtime/protezioni; non è correzione dell'arresto. [Evidenze e recupero](VERIFICATION.md#seguito--pixel-delle-maschere-ritagli-e-buffer-di-presentazione).
 
 - **27 ottobre0.2.23, osservazione distinta:** QEMU35991 termina su segnale15 da pid609/loginwindow durante aggiornamento frontend, senza richiesta di arresto VM da questa attività; causa non isolata. Non classificato come assertion HVF o arresto ordinario. Due successivi shutdown Windows senza /f completano realmente QEMU42927 e43391 e permettono il ciclo delle cartelle; non chiudono l’affidabilità generale. [Evidenze](VERIFICATION.md#27-ottobre--cartelle-mac-selezionabili-nelle-impostazioni).
@@ -700,6 +702,8 @@ Queste voci conservano limiti non risolti, senza richiedere di ripristinare codi
 
 
 ## ADD-005 — Relay VPN non ripristinato dopo nuovo avvio della VM
+
+- **30 ottobre0.2.59 — CORRETTO nel caso main con TUN già acceso:** nuova QEMU78347 dopo aggiornamento, app ripristina automaticamente due soli hostfwd loopback e taskWindows/listenerTCP+UDP al collegamento guest, dopo la preparazione cartelle. Nessun start CLI, nuova autorizzazioneMac o Connect remoto. Schermata Rete distingue la VPNWindowsDisconnected dal tunnel locale pronto. Installazione/riparazione UI e modifica IP main verificate, quattro IP finali conservati; clone/nuova autorizzazione TUN spento NON ESEGUITI. Criterio circoscritto della ripresa dopo boot soddisfatto; accesso dispositivo/affidabilità ADD-004 rimangono distinti. [Evidenze e tentativi negativi](VERIFICATION.md#30-ottobre--impostazioni-rete-e-ripresa-del-tunnel0259). Le precedenti note “autoavvio aperto” descrivono le versioni precedenti.
 
 - **30 ottobre, dopo riavvio utente — ripristino main riuscito:** TUNMac/quattro route ancora vivi, nuova QEMU72494 senza forwarding e taskWindowsReady. LinkManagerWindowsUp e route10/20 già presenti: non disconnessa nel campione corrente. Riusato start condiviso, conservati Mac/chiavi/lista e ripristinati due hostfwd+relay2628. GET Mac10.111:80 HTTP302/199byte e:5000 HTTP200/46822byte completati, senza login o modifica dispositivo. Ripristino main FATTO, autoavvio ancora APERTO; nessuna correzione automatica distribuita. [Evidenze](VERIFICATION.md#30-ottobre--ripristino-dopo-riavvio-e-accesso-a10111).
 

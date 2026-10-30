@@ -10,7 +10,7 @@ struct MachineSettingsPanel:View {
     @State private var page=Page.general
     @State private var advanced=false
     private enum Page:String,CaseIterable,Identifiable {
-        case general="Generali",system="Sistema",sharing="Condivisione"
+        case general="Generali",system="Sistema",sharing="Condivisione",network="Rete"
         var id:Self {self}
     }
     private func number(_ key:WritableKeyPath<MachineSettings,Int>)->Binding<Int>{
@@ -35,12 +35,13 @@ struct MachineSettingsPanel:View {
                 .pickerStyle(.segmented).labelsHidden().padding(.horizontal,28).padding(.vertical,18)
             ScrollView {
                 VStack(alignment:.leading,spacing:16){
-                    if page != .general && !model.canEditVMSettings {
+                    if (page == .system || page == .sharing) && !model.canEditVMSettings {
                         Label("Spegni Windows per modificare queste impostazioni.",systemImage:"lock")
                             .font(.system(size:12)).foregroundStyle(.secondary)
                     }
                     switch page {
                     case .general:general
+                    case .network:NetworkSettingsPanel(network:model.network)
                     case .sharing:if model.vmSettings != nil {sharing}else{unavailable}
                     case .system:if let settings=model.vmSettings {system(settings)}else{unavailable}
                     }

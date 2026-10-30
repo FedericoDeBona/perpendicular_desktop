@@ -1,5 +1,5 @@
 // Temporary privileged supervisor for one pinned sing-box process.
-// The private socket accepts only 'stop'; no persistent privileged installation.
+// The private socket accepts 'stop' and 'reload'; no persistent privileged installation.
 #include <CommonCrypto/CommonDigest.h>
 #include <sys/socket.h>
 #include <sys/un.h>
@@ -25,6 +25,7 @@ static int verify(const char *path) {
 }
 int main(int argc,char **argv) {
     if(geteuid()!=0||argc!=2)return 2;
+    signal(SIGPIPE,SIG_IGN);
     char root[PATH_MAX],binary[PATH_MAX],config[PATH_MAX],log[PATH_MAX],sock[PATH_MAX];
     if(!realpath(argv[1],root))return 2;
     struct stat st;if(lstat(root,&st)||!S_ISDIR(st.st_mode)||st.st_uid==0||(st.st_mode&077)!=0)return 2;

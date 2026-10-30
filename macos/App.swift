@@ -73,6 +73,7 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
     private var machine:VirtualMachineController!
     private var bridge:GuestBridge!
     private var memoryController:RuntimeMemoryController?
+    let network=NetworkSettings()
     private let folderIntegration=SharedFolderIntegration()
     @Published private(set) var folderIntegrationStatus="Le cartelle saranno preparate quando Windows sarà collegato."
     @Published private(set) var folderIntegrationBusy=false
@@ -144,6 +145,7 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
                 self.openingTasks=[:];self.openingRequests=[:];self.openingApps=[];self.cancelledOpeningApps=[]
                 if !value {
                     self.folderIntegration.cancel()
+                    self.network.connectionChanged(false)
                     self.folderIntegrationStatus="Le cartelle saranno preparate quando Windows sarà collegato."
                     self.folderIntegrationFailed=false;self.folderIntegrationBusy=false
                     self.mixedDisplayConfiguring=false
@@ -246,7 +248,7 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
         if NSApp.sendAction(NSSelectorFromString("closeDocument:"),to:nil,from:self){return}
         (NSApp.keyWindow ?? NSApp.mainWindow)?.performClose(nil)
     }
-    func applicationWillTerminate(_ notification:Notification){machineStateTask?.cancel();memoryController?.stop();localControl?.stop();bridge?.command("release");machine?.closeDesktop()}
+    func applicationWillTerminate(_ notification:Notification){network.stop();machineStateTask?.cancel();memoryController?.stop();localControl?.stop();bridge?.command("release");machine?.closeDesktop()}
     var desktopAvailable:Bool {machine != nil}
     var canStartWindows:Bool {machine != nil && machineState == .stopped && machineOperation == nil && !restarting}
     var canStopWindows:Bool {machine != nil && machineState.pid != nil && machineOperation == nil && !restarting}
@@ -326,6 +328,7 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
         }
     }
     private func configureMachineControllers(){
+        network.configure(machine:machine,bridge:bridge,guestBusy:{[weak self] in self?.folderIntegrationBusy ?? true})
         memoryController?.stop();memoryController=nil;vmMemoryState=[:]
         machine.desktopClipboardBridge=bridge
         machine.onDesktopSize={ [weak self] size in self?.desktopSize=size;self?.scheduleDesktopResize() }
@@ -338,6 +341,7 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
                 guard let self,NSApp.isActive,!NSApp.isHidden else{return false}
                 return self.machine?.desktopState["visible"] as? Bool == true || self.windows.values.contains{$0.window.isVisible}
             }
+            network.connectionChanged(guestCapabilities["execute"] == true)
             memoryController?.guestReady=guestCapabilities["memoryStatus"] == true
             memoryController?.start()
         }
@@ -1355,6 +1359,7 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
             invalidateDisplay("Checking Windows display…")
             let capabilities=value["capabilities"] as? [String:Any] ?? [:]
             guestCapabilities=Dictionary(uniqueKeysWithValues:["nativeAppInput","modeFocus","memoryStatus","execute","displayInfo","displayTopology","driverInfo","graphicsInfo","sharedGeometry","appIcon","applicationStatus","processControl","clipboard"].map{($0,capabilities[$0] as? Bool == true)})
+            network.connectionChanged(guestCapabilities["execute"] == true)
             memoryController?.guestReady=guestCapabilities["memoryStatus"] == true
             prepareSharedFolders()
             startApplicationStatusUpdates()
