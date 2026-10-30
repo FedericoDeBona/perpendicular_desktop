@@ -33,6 +33,7 @@ final class WindowRenderer {
     private var shared:GuestFrameSurface?
     private var nativeCache=false
     private let opaque:Bool
+    private let fillBounds:Bool
     private var pixels=Data()
     private var pixelStride=0
     private var size=NSSize.zero
@@ -87,8 +88,8 @@ final class WindowRenderer {
         metalResources=resources
         return resources
     }
-    init(opaque:Bool=false) throws {
-        self.opaque=opaque
+    init(opaque:Bool=false,fillBounds:Bool=false) throws {
+        self.opaque=opaque;self.fillBounds=fillBounds
         let resources=try Self.resources()
         guard let queue=resources.device.makeCommandQueue() else {throw CocoaError(.featureUnsupported)}
         device=resources.device;pipeline=resources.pipeline;self.queue=queue
@@ -221,7 +222,7 @@ final class WindowRenderer {
         pass.colorAttachments[0].clearColor=MTLClearColorMake(0,0,0,0)
         guard let encoder=command.makeRenderCommandEncoder(descriptor:pass) else{return}
         let fit=min(drawableSize.width/size.width,drawableSize.height/size.height)
-        var scale=SIMD2<Float>(Float(size.width*fit/drawableSize.width),Float(size.height*fit/drawableSize.height))
+        var scale=fillBounds ? SIMD2<Float>(1,1):SIMD2<Float>(Float(size.width*fit/drawableSize.width),Float(size.height*fit/drawableSize.height))
         encoder.setRenderPipelineState(pipeline)
         encoder.setVertexBytes(&scale,length:MemoryLayout<SIMD2<Float>>.size,index:0)
         encoder.setFragmentTexture(sampledTexture,index:0)

@@ -35,11 +35,12 @@ private final class DesktopSurface:NSView {
         super.updateTrackingAreas()
     }
     private func mouse(_ event:NSEvent){
-        guard source.width>0,source.height>0 else{return}
+        guard source.width>0,source.height>0,bounds.width>0,bounds.height>0 else{return}
         window?.makeFirstResponder(self)
-        let local=convert(event.locationInWindow,from:nil),fit=min(bounds.width/source.width,bounds.height/source.height)
-        let origin=NSPoint(x:(bounds.width-source.width*fit)/2,y:(bounds.height-source.height*fit)/2)
-        let x=max(0,min(1,(local.x-origin.x)/(source.width*fit))),y=max(0,min(1,(local.y-origin.y)/(source.height*fit)))
+        // Desktop presentation fills the view on both axes. Input must use
+        // that same transform, including the taskbar and all four corners.
+        let local=convert(event.locationInWindow,from:nil)
+        let x=max(0,min(1,local.x/bounds.width)),y=max(0,min(1,local.y/bounds.height))
         cursor=NSPoint(x:inputScreen.x+Int((x*Double(inputScreen.width-1)).rounded()),y:inputScreen.y+Int((y*Double(inputScreen.height-1)).rounded()))
         connection?.pointer(x:Int(cursor.x),y:Int(cursor.y),buttons:buttons)
     }
@@ -184,7 +185,7 @@ final class DesktopWindow:NSObject,NSWindowDelegate {
 
     var state:[String:Any] {["visible":visible,"fullScreen":window.styleMask.contains(.fullScreen),"viewWidth":Int(surface.bounds.width),"viewHeight":Int(surface.bounds.height),"backingScale":window.backingScaleFactor,"nativeActive":nativeActive,"width":Int(surface.source.width),"height":Int(surface.source.height)]}
     init(socket:String,endpoint:@escaping ()->NativeDisplayEndpoint?,resized:@escaping (NSSize)->Void = {_ in},input:@escaping ()->Void = {})throws{
-        self.socket=socket;self.endpoint=endpoint;surface=DesktopSurface(renderer:try WindowRenderer(opaque:true))
+        self.socket=socket;self.endpoint=endpoint;surface=DesktopSurface(renderer:try WindowRenderer(opaque:true,fillBounds:true))
         window=NSWindow(contentRect:NSRect(x:140,y:120,width:960,height:640),styleMask:[.titled,.closable,.miniaturizable,.resizable],backing:.buffered,defer:false)
         super.init()
         surface.onUserInput=input
