@@ -1,0 +1,16 @@
+--- a/target/arm/hvf/hvf.c
++++ b/target/arm/hvf/hvf.c
+@@ -1612,6 +1612,13 @@
+     }
+ 
+     switch (reg) {
++    case SYSREG(3, 0, 5, 3, 0): /* ERRIDR_EL1 */
++        /* Match minimal_ras_reginfo: no emulated error records. */
++        if (arm_current_el(env) < 1) {
++            break;
++        }
++        *val = 0;
++        return 0;
+     case SYSREG_CNTPCT_EL0:
+         *val = qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL) /
+               gt_cntfrq_period_ns(arm_cpu);
