@@ -4664,3 +4664,18 @@ Ricetta targets sostituisce l'intera lista con i quattro IP: serverWindows e cli
 **Esito distinto:** implementazione condivisa invariata; distribuzione/verifica main configurazione FATTE; clone e accesso dispositivo NON ESEGUITI. Per usare i dispositivi occorre la connessioneLinkManagerWindows; prossimo criterio funzionale è una reale operazione richiesta nei due percorsi quando collegata. ADD-005 resta aperto per ripristinoautomatico e socket residuo non gestito automaticamente; stato attivo non equivale a collegamento all'impianto.
 
 Evidenze private PerpendicularRestart/QA/vpn-targets-20261030: before-client-tun.json/before-connection.json, stale-tun.sock, guest-before.json/guest-after.json/relay-pins.json, mac-after.txt, forwarding.txt e default-before.txt/default-after.txt. File con chiavi e stato runtime fuori Git; documentazione aggiornata e nessun rebuildapp richiesto.
+
+
+## 30 ottobre — ripristino dopo riavvio e accesso a10.111
+
+Utente segnala impossibile raggiungere192.168.10.111 dal Mac dopo aver riavviato la macchina. Riletti registri/piano/TODO; riusata la ricetta condivisa di ADD-005, nessuna nuova diagnosi del relay già conclusa. Stato iniziale: TUNMac72044/72045 vivo, quattro route/32 utun88 e allowlist conservate; nuova QEMU72494, nessun hostfwd10884. Windows invece LinkManagerAdapterUp/ifIndex7 con route192.168.10.0/24 e192.168.20.0/24 via10.127.128.129; taskPerpendicularHostVPNReady/processo assente. Quindi VPNWindows operativa nel campione e segmento di inoltro locale non ripreso.
+
+Eseguito host_vpn.py start già versionato: conservati TUN/route/chiavi/lista4IP, ripristinati esattamente due forwardingTCP/UDP127.0.0.1:10884→10.0.2.15:10884 e avviato il taskWindows. Nessuna nuova autorizzazioneMac, reboot, connessioneLinkManager, driver o modifica default route. Ripristino idempotente del segmento locale, non implementazione dell'autoavvio.
+
+Audit finale: UUIDQEMU93be6687 confermata, due soli hostfwd di proprietà; taskWindowsRunning/relay2628/LinkManagerUp, quattro CIDRWindows identici al clientMac. BinarioMac pin6546126c… verificato dal wrapper; binarioWindowsfa52dcb7… uguale al pin preparatore1.14.4.
+
+**Verifica end-to-end Mac→dispositivo, circoscritta a GET HTTP:** socket normale curl --noproxy '*' verso192.168.10.111 porta80: HTTP302/199byte/0,084809s; porta5000: HTTP200/46822byte/0,115288s, trasferimenti completati exit0 con timeout8s. Nessun login, POST, cambiamento impianto o verifica delle operazioni applicative/JavaScript; gli altri tre target e UDP remoto non riprovati. La riuscita corrente non chiude i timeout/reset storici ADD-004 né prova affidabilità generale.
+
+**Esito:** ripristino/distribuzione locale e verifica main del GET a10.111 FATTI; implementazione condivisa invariata, clone NON ESEGUITO. ADD-005 resta aperto per la ripresa automatica dopo riavvio. Il precedente avviso VPNDisconnected è superato dall'audit correnteUp: nessun bisogno di riconnetterla per questa riparazione. Prossimo passo generale: riconciliazione al collegamento guest se TUN già vivo, poi nuova verifica dopo boot con configurazione invariata/senza Connect remoto automatico. Nessun nuovo meccanismo di autoavvio consegnato in questo turno.
+
+Evidenze private PerpendicularRestart/QA/vpn-resume-20261030: forward-before.txt/forward-after.txt, guest-before.json/guest-after.json e http-probes.json (metadati dei risultati curl effettivi nel turno, nessun corpo della pagina conservato). Nessuna chiave/stato privato in Git.
