@@ -1237,14 +1237,33 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
             guard !Task.isCancelled,let self,self.desktopResizeRequest == nil,self.desktopReadRequest == nil,self.connected,
                   let epoch=self.displayEpoch,self.machine?.desktopState["visible"] as? Bool == true else{return}
             let desired=self.desktopSize
-            // Preserve the user's window. Publish its exact Retina raster to
-            // the driver's custom mode rather than selecting a standard mode.
+            // Preserve the user's window and bound the requested backing size.
+            // Native3D selects a mode already advertised by Windows below.
             let scale=min(1,4096/desired.width,4096/desired.height,sqrt(8_388_608/(desired.width*desired.height)))
-            let mode=NSSize(width:max(640,(desired.width*scale).rounded()),height:max(480,(desired.height*scale).rounded()))
+            var mode=NSSize(width:max(640,(desired.width*scale).rounded()),height:max(480,(desired.height*scale).rounded()))
+            if self.machine?.nativeGraphicsEnabled == true {
+                // The signed primary driver caches its mode list. Publishing
+                // an arbitrary raster requires unplugging it, which also moves
+                // Windows' other displays. Select an advertised mode instead.
+                guard let primary=self.launcherDisplays.first(where:{$0["primary"] as? Bool == true}),
+                      let modes=primary["modes"] as? [[String:Any]] else{return}
+                let available=modes.compactMap { value -> NSSize? in
+                    guard let w=value["width"] as? Int,let h=value["height"] as? Int,
+                          (640...4096).contains(w),(480...4096).contains(h),w*h<=8_388_608 else{return nil}
+                    return NSSize(width:w,height:h)
+                }
+                let target=mode
+                func distance(_ size:NSSize)->Double {
+                    let x=log(size.width/target.width),y=log(size.height/target.height)
+                    return abs(x)+abs(y)+2*abs(x-y)
+                }
+                guard let supported=available.min(by:{distance($0)<distance($1)}) else{return}
+                mode=supported
+            }
             guard mode != self.desktopConfirmed,mode != self.desktopAttempted else{return}
             self.desktopAttempted=mode
             let request=UUID();self.desktopResizeRequest=request
-            self.machine?.requestDesktopResolution(mode)
+            if self.machine?.nativeGraphicsEnabled != true {self.machine?.requestDesktopResolution(mode)}
             // The driver's resolution event and application are asynchronous.
             // Keep one transaction pending and verify actual Windows geometry.
             var checks=0
