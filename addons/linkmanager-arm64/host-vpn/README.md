@@ -1,6 +1,6 @@
 # IP LinkManager disponibili sul Mac
 
-Prima implementazione locale del28ottobre2026: normali socket Mac raggiungono gli IP/porte IPv4 scelti passando per Windows. TCP e UDP verificati sullo stesso indirizzo di un endpoint temporaneo Windows, senza proxy configurato nell'app Mac. La configurazione lasciata attiva riguarda **192.168.10.111/32, 192.168.20.112/32 e 192.168.27.100/32**. Successivamente l'utente conferma accesso remoto da VM/Mac e reconnect; GET192.168.20.112 restituisce HTTP302/199byte da entrambi. Singola risposta HTTP, senza qualifica della pagina/app completa. Qualità su192.168.10.111:5000 e resetrelay ancora da isolare (ADD-004).
+Prima implementazione locale del28ottobre2026: normali socket Mac raggiungono gli IP/porte IPv4 scelti passando per Windows. TCP e UDP verificati sullo stesso indirizzo di un endpoint temporaneo Windows, senza proxy configurato nell'app Mac. Configurazione aggiornata su richiesta il30ottobre: **192.168.10.111/32, 192.168.10.112/32, 192.168.20.111/32 e 192.168.20.112/32**. Il precedente192.168.27.100 non fa più parte della lista. Route Mac e allowlist Windows concordi, relayTCP/UDP attivo; LinkManager Windows risulta disconnesso nell’audit, quindi accesso remoto non verificato in questo aggiornamento. Successivamente l'utente conferma accesso remoto da VM/Mac e reconnect; GET192.168.20.112 restituisce HTTP302/199byte da entrambi. Singola risposta HTTP, senza qualifica della pagina/app completa. Qualità su192.168.10.111:5000 e resetrelay ancora da isolare (ADD-004).
 
 **Correzione successiva delle risorse web:** raffiche di connessioni TCP sul forwarding locale producevano reset; ora Shadowsocks usa multiplex smux con max_connections1 per riusare un trasporto locale. Nuova visita Chrome192.168.27.100/login completata senza erroriJavaScript; generatore/checknativi e3controlli configurazione PASS. Causa interna del forwarding non dimostrata; timeout5000/affidabilità generale restano ADD-004. UDP non rieseguito dopo questo cambio; le prove echo iniziali restano storiche. [Riproduzione e limiti](../../../docs/VERIFICATION.md#28-ottobre--risorse-javascript-vpn-e-connessioni-parallele).
 
@@ -21,7 +21,7 @@ Per ora gli indirizzi si impostano dal Terminale: non esiste ancora una schermat
 ```sh
 python3 addons/linkmanager-arm64/host-vpn/host_vpn.py status
 python3 addons/linkmanager-arm64/host-vpn/host_vpn.py stop
-python3 addons/linkmanager-arm64/host-vpn/host_vpn.py targets 192.168.10.111 192.168.20.112 192.168.27.100
+python3 addons/linkmanager-arm64/host-vpn/host_vpn.py targets 192.168.10.111 192.168.10.112 192.168.20.111 192.168.20.112
 python3 addons/linkmanager-arm64/host-vpn/host_vpn.py start
 ```
 

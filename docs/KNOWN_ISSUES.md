@@ -699,6 +699,8 @@ Queste voci conservano limiti non risolti, senza richiedere di ripristinare codi
 
 ## ADD-005 — Relay VPN non ripristinato dopo nuovo avvio della VM
 
+- **30 ottobre — ripristino manuale e lista quattro IP verificati:** app/VM inizialmente spente, TUN assente con tun.sock residuo/ConnectionRefused. Socket validato600/utente/inode e conservato nella QA, non interpretato come tunnel vivo. Avvio ordinario e ricetta targets→start riusciti: quattro routeMac e allowlistWindows concordi, relayRunning e forwardingTCP/UDP presenti. Il ripristino automatico non è implementato da questo passaggio. LinkManagerWindows Disconnected, quindi nessuna prova remota; prossimo passo Connect utente e operazione reale. [Evidenze](VERIFICATION.md#30-ottobre--inoltro-vpn-ripristinato-e-quattro-ip).
+
 - **Stato: PARZIALMENTE CORRETTO29ottobre; autoavvio APERTO.** Mac mantiene TUN/route3IP, ma i forwarding QEMU inseriti a caldo sono assenti nella nuova istanza e il task Windows senza trigger è Ready/nessun listener. Rilevato sulla17189 dopo il boot iniziale del rebuild richiesto; distinta causa dai resetHTTP ADD-004.
 - **Correzione e verifica main:** ripristinati solo inoltri loopbackTCP/UDP e relayWindows9352; start ora riconcilia quel segmento anche con TUN già vivo dopo controlli socket/UUID. Ripetizione reale conserva processi, route e due soli forwarding. Nessuna nuova prova remota o clone, nessun Connect LinkManager.
 - **Limite distinto:**27.100 non ha attualmente route VPN in Windows, mentre10.111 e20.112 usano LinkManager; il ripristino locale non rende disponibile una rete assente nella VPN.
