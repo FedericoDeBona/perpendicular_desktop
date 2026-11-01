@@ -31,3 +31,21 @@ Baseline reale:311/1584frame persi (~19,6%). Forzare il solo raster GPU (`enable
 Per riprendere: prima un frame reale decodificato attraverso una minima integrazione UMD/host compatibile con Secure Boot/CI, poi collegamento al browser e breve confronto stesso codec/contenuto/risoluzione. Non annunciare accelerazione perché compare un GUID o perché si abilita un flag. I precedenti esperimenti di pacing e sincronizzazione respinti restano tali; gli artefatti scroll richiedono evidenza distinta.
 
 [Evidenze, tentativi falliti e limiti](../../docs/VERIFICATION.md#1-novembre--desktop-mode-edge-e-youtube4k), [PERF-002](../../docs/KNOWN_ISSUES.md#perf-002--frame-persi-nei-video-4k-in-desktop-mode).
+
+## Primo frame VP9 host, prima del ponte Windows
+
+Il M1 effettivo supporta VP9 hardware **dopo** la chiamata per processo a `VTRegisterSupplementalVideoDecoderIfAvailable`. La query prima della registrazione restituisceva false; non usarla come prova di impossibilità. Il prototipo `scripts/probe-native-video.swift` richiede hardware, decodifica il primo keyframe di un IVF profile0/8bit/4:2:0 fino a4096×2160, verifica NV12 e crea le due texture Metal. È un controllo di fattibilità, non un decoder Windows installabile. Non espone profili fittizi né cambia runtime/app.
+
+Con FFmpeg già installato e Xcode, scegliere una directory privata nuova per tutti gli output (non sovrascrivere file):
+
+```sh
+video_qa_dir="$(mktemp -d "${TMPDIR%/}/perpendicular-video.XXXXXX")"
+ffmpeg -hide_banner -loglevel error -f lavfi -i 'testsrc2=size=3840x2160:rate=60' -frames:v 1 -c:v libvpx-vp9 -deadline realtime -cpu-used 8 -f ivf "$video_qa_dir/frame.ivf"
+xcrun swiftc -O -warnings-as-errors scripts/probe-native-video.swift -o "$video_qa_dir/probe"
+"$video_qa_dir/probe" "$video_qa_dir/frame.ivf"
+ffmpeg -hide_banner -loglevel error -i "$video_qa_dir/frame.ivf" -frames:v 1 -pix_fmt nv12 -f hash -hash sha256 -
+```
+
+Confrontare il digest del riferimento con `nv12SHA256`, non solo l'exit code. Verifica locale1novembre: hardwaretrue,3840×2160,2plane Metal,12.441.600byte; hash esatti. Il primo decode+wait10,11ms esclude setup e non misura FPS sostenuti. Vedere il diario per fallimento iniziale-12906 senza registrazione e limiti.
+
+Il lavoro successivo deve preservare la coppia Wire2 e le patch già distribuite, aggiungere supporto reale NV12/plane, decoder e gestione vita/completamento nel backend appropriato. La presenza dei messaggi video nel protocollo non implementa queste capacità. Nessuna accelerazione YouTube è ancora distribuita e Creality3D resta la seconda priorità richiesta.
