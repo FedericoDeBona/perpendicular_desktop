@@ -1,0 +1,49 @@
+{
+  "schema": 1,
+  "status": "experimental build only; main kernel/UMD not replaced; Windows video path not qualified",
+  "mesa": {
+    "revision": "bf536bba65454900d782fa7417bc95c1608d7483",
+    "url": "https://codeload.github.com/osy/virtio-win-mesa/tar.gz/bf536bba65454900d782fa7417bc95c1608d7483",
+    "sha256": "f3863c3720f8e0b74bc648f703803656984d9fcee6615ad0e9f8c01365abc1b1"
+  },
+  "wdk": {
+    "package": "Microsoft.Windows.WDK.ARM64",
+    "version": "10.0.26100.6584",
+    "include_version": "10.0.26100.0",
+    "url": "https://api.nuget.org/v3-flatcontainer/microsoft.windows.wdk.arm64/10.0.26100.6584/microsoft.windows.wdk.arm64.10.0.26100.6584.nupkg",
+    "sha256": "e705b2a63eab891def8f98087666f93e8f21da8e3b5def81a624b83fef5bdae9"
+  },
+  "llvm_resource_compiler": {
+    "version": "15.0.7-arm64-apple-darwin22.0",
+    "url": "https://github.com/llvm/llvm-project/releases/download/llvmorg-15.0.7/clang%2Bllvm-15.0.7-arm64-apple-darwin22.0.tar.xz",
+    "sha256": "867c6afd41158c132ef05a8f1ddaecf476a26b91c85def8e124414f9a9ba188d"
+  },
+  "mesa_patch_sha256": "a01871e94482d30cc8b9294d682f3757e3e0f6b567a095152acc4fba267d17d0",
+  "resource_header_sha256": "ad2f6d652779f29a8d63860333cb0007456c00fd020c2574d9118421a67a95cd",
+  "compiler_version": "Apple clang version 21.0.0 (clang-2100.4.1.1)",
+  "sdk_files": {
+    "lld-link": "be0baf1c8913d528772846c3775cc8e4fb8e585a0b8d5d7290c6bb0984ddc64f",
+    "llvm-lib": "7a5a766d9903b45c85c992d6589d8d306f84cc42848692aabf2c8f3e0e5625b9",
+    "xwin/sdk/include/um/d3d11.h": "65964c91b641d5fc93d68796183318a9ebe493e41502f61fc26fbbf34e9d3ead",
+    "xwin/sdk/include/um/d3d11_4.h": "25179b6474ecadbaa6edd7ce4ff14e9f698a2d66e42c8c50d153d7609b898e0e",
+    "xwin/crt/include/vcruntime.h": "a2fe9117dc2640e243f91fa94e1d05fc35083218c2a67a446db9e34cece779b5",
+    "xwin/sdk/lib/um/aarch64/dxguid.lib": "49b2074d923abdb2e2926cff997425fdccca89d0d93fe69920cf7bfb45fbe58f",
+    "xwin/crt/lib/aarch64/libcmt.lib": "12cfa5fce12fed27cba37bf1a1f9492666ced59e48d86f7c1fb925851b8cc481",
+    "xwin/sdk/lib/ucrt/aarch64/libucrt.lib": "f60c89358c029b3b0cddbff15be0c6b1878e26a3917842e96c11314fb1e684d5"
+  },
+  "python_packages": {
+    "mako": "1.3.12",
+    "meson": "1.9.1"
+  },
+  "candidate_file_version": "0.4.0.1",
+  "requirements": {
+    "architecture": "aarch64-windows-msvc",
+    "native_video_resource_version": 1,
+    "native_vp9_profile": 0,
+    "native_surface": "NV12",
+    "original_kernel": true,
+    "secure_boot": true,
+    "test_signing": false,
+    "qualification_required": "isolated Windows frame and protected driver loading, then browser, before main promotion"
+  }
+}

@@ -1,0 +1,84 @@
+--- a/src/d3d11/d3d11_video.cpp
++++ b/src/d3d11/d3d11_video.cpp
+@@ -2,6 +2,7 @@
+ // SPDX-License-Identifier: LGPL-2.1-or-later
+ #include "d3d11_video.hpp"
+ #include "d3d11_video_vt.hpp"
++#include "video-resource-submit.h"
+ #include "d3d11_device_child.hpp"
+ #include "com/com_private_data.hpp"
+ #include <array>
+@@ -435,6 +436,73 @@
+     }
+     return S_OK;
+   }
++  // DDI video buffers are ordinary D3D resources. Neptune already transports
++  // these resources and DecoderExtension blobs; no host address crosses the wire.
++  HRESULT STDMETHODCALLTYPE DecoderExtension(ID3D11VideoDecoder *d,
++      const D3D11_VIDEO_DECODER_EXTENSION *extension) override {
++    auto decoder = checked(d);
++    if (!decoder || !extension) return E_INVALIDARG;
++    if (extension->pPrivateOutputData || extension->PrivateOutputDataSize) return E_NOTIMPL;
++    if (extension->Function == PERP_VIDEO_RESOURCE_QUERY || extension->Function == PERP_VIDEO_RESOURCE_FINISH) {
++      if (extension->PrivateInputDataSize || extension->pPrivateInputData || extension->ResourceCount)
++        return E_INVALIDARG;
++      return extension->Function == PERP_VIDEO_RESOURCE_QUERY ? S_OK : DecoderEndFrame(d);
++    }
++    if (extension->Function != PERP_VIDEO_RESOURCE_SUBMIT) return E_NOTIMPL;
++    if (!extension->pPrivateInputData || extension->PrivateInputDataSize < sizeof(perp_video_resource_header))
++      return E_INVALIDARG;
++    perp_video_resource_header header;
++    std::memcpy(&header, extension->pPrivateInputData, sizeof(header));
++    if (header.version != PERP_VIDEO_RESOURCE_VERSION || !header.count || header.count > PERP_VIDEO_MAX_BUFFERS ||
++        extension->ResourceCount != header.count || !extension->ppResourceList ||
++        extension->PrivateInputDataSize != sizeof(header) + header.count * sizeof(perp_video_resource_buffer))
++      return E_INVALIDARG;
++    std::lock_guard<std::mutex> lock(decoder->mutex);
++    if (decoder->active_context != context_ || !decoder->submitted.empty()) return E_INVALIDARG;
++    for (auto &buffer : decoder->buffers) if (buffer.mapped) return E_INVALIDARG;
++    std::array<Com<ID3D11Buffer>, PERP_VIDEO_MAX_BUFFERS> sources;
++    std::array<perp_video_resource_buffer, PERP_VIDEO_MAX_BUFFERS> entries;
++    unsigned types = 0;
++    int bitstream = -1;
++    for (unsigned i = 0; i < header.count; ++i) {
++      std::memcpy(&entries[i], static_cast<const uint8_t *>(extension->pPrivateInputData) + sizeof(header) +
++                  i * sizeof(perp_video_resource_buffer), sizeof(perp_video_resource_buffer));
++      auto &entry = entries[i];
++      int type = Decoder::bufferIndex(static_cast<D3D11_VIDEO_DECODER_BUFFER_TYPE>(entry.type));
++      if (type < 0 || (types & (1u << type)) || entry.resource_index >= header.count || !entry.size ||
++          entry.size > (type ? PERP_VIDEO_MAX_METADATA : PERP_VIDEO_MAX_BITSTREAM)) return E_INVALIDARG;
++      types |= 1u << type;
++      auto resource = extension->ppResourceList[entry.resource_index];
++      if (!resource || FAILED(resource->QueryInterface(__uuidof(ID3D11Buffer),
++                                      reinterpret_cast<void **>(&sources[i])))) return E_INVALIDARG;
++      Com<ID3D11Device> owner; sources[i]->GetDevice(&owner);
++      if (owner.ptr() != device_) return E_INVALIDARG;
++      D3D11_BUFFER_DESC desc = {}; sources[i]->GetDesc(&desc);
++      if (entry.offset > desc.ByteWidth || entry.size > desc.ByteWidth - entry.offset) return E_INVALIDARG;
++      if (!type) bitstream = i;
++    }
++    // VP9 picture parameters are already carried in its compressed stream.
++    // Metadata-only submits may precede the bitstream submit for a frame.
++    if (bitstream < 0) return S_OK;
++    auto &entry = entries[bitstream];
++    try {
++      D3D11_BUFFER_DESC desc = {};
++      desc.ByteWidth = entry.size; desc.Usage = D3D11_USAGE_STAGING; desc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
++      Com<ID3D11Buffer> staging;
++      HRESULT hr = device_->CreateBuffer(&desc, nullptr, &staging);
++      if (FAILED(hr)) return hr;
++      std::vector<uint8_t> bytes(entry.size);
++      D3D11_BOX box = {entry.offset, 0, 0, entry.offset + entry.size, 1, 1};
++      context_->CopySubresourceRegion(staging.ptr(), 0, 0, 0, 0, sources[bitstream].ptr(), 0, &box);
++      D3D11_MAPPED_SUBRESOURCE mapped = {};
++      hr = context_->Map(staging.ptr(), 0, D3D11_MAP_READ, 0, &mapped);
++      if (FAILED(hr)) return hr;
++      std::memcpy(bytes.data(), mapped.pData, entry.size);
++      context_->Unmap(staging.ptr(), 0);
++      decoder->submitted.swap(bytes);
++      return S_OK;
++    } catch (const std::bad_alloc &) { return E_OUTOFMEMORY; }
++  }
+   HRESULT STDMETHODCALLTYPE DecoderEndFrame(ID3D11VideoDecoder *d) override {
+     auto decoder = checked(d);
+     if (!decoder) return E_INVALIDARG;

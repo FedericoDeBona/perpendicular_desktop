@@ -1,6 +1,7 @@
 // Real D3D11 video buffer submission -> VP9 hardware -> NV12 -> readback.
 // Compare a short IVF stream with an independently decoded tight NV12 file.
 #include <d3d11_4.h>
+#include "../graphics/backend/video-resource-submit.h"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -15,7 +16,8 @@ static uint32_t little(const uint8_t *p, unsigned n) {
   uint32_t v = 0; for (unsigned i = 0; i < n; ++i) v |= uint32_t(p[i]) << (i * 8); return v;
 }
 int main(int argc, char **argv) {
-  if (argc != 3) { std::fprintf(stderr, "Usage: check-video stream.ivf reference.nv12\n"); return 2; }
+  bool resources = argc == 4 && !std::strcmp(argv[3], "--resources");
+  if (argc != 3 && !resources) { std::fprintf(stderr, "Usage: check-video stream.ivf reference.nv12 [--resources]\n"); return 2; }
   FILE *input = std::fopen(argv[1], "rb"), *reference = std::fopen(argv[2], "rb");
   if (!input || !reference) return 2;
   uint8_t header[32];
@@ -68,6 +70,11 @@ int main(int argc, char **argv) {
   check(video->CreateVideoDecoderOutputView(texture, &vd, &view), "decoder view");
   td.Usage = D3D11_USAGE_STAGING; td.BindFlags = 0; td.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
   check(device->CreateTexture2D(&td, nullptr, &staging), "staging");
+  if (resources) {
+    D3D11_VIDEO_DECODER_EXTENSION query = {};
+    query.Function = PERP_VIDEO_RESOURCE_QUERY;
+    check(vc->DecoderExtension(decoder, &query), "resource transport version");
+  }
   std::vector<uint8_t> expected(size_t(width) * height * 3 / 2), bytes;
   auto started = std::chrono::steady_clock::now();
   unsigned frames = 0;
@@ -81,6 +88,40 @@ int main(int argc, char **argv) {
     if (std::fread(bytes.data(), 1, size, input) != size ||
         std::fread(expected.data(), 1, expected.size(), reference) != expected.size()) return 2;
     check(vc->DecoderBeginFrame(decoder, view, 0, nullptr), "begin frame");
+    if (resources) {
+      D3D11_BUFFER_DESC inputDesc = {};
+      inputDesc.ByteWidth = size + 16;
+      inputDesc.Usage = D3D11_USAGE_STAGING; inputDesc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
+      ID3D11Buffer *inputBuffer = nullptr;
+      check(device->CreateBuffer(&inputDesc, nullptr, &inputBuffer), "compressed resource");
+      D3D11_MAPPED_SUBRESOURCE write = {};
+      check(context->Map(inputBuffer, 0, D3D11_MAP_WRITE, 0, &write), "compressed resource map");
+      std::memset(write.pData, 0, 16);
+      std::memcpy((uint8_t *)write.pData + 16, bytes.data(), size);
+      context->Unmap(inputBuffer, 0);
+      struct {
+        perp_video_resource_header header;
+        perp_video_resource_buffer buffer;
+      } packet = {{PERP_VIDEO_RESOURCE_VERSION, 1}, {D3D11_VIDEO_DECODER_BUFFER_BITSTREAM, 0, 16, size}};
+      ID3D11Resource *list[] = {inputBuffer};
+      D3D11_VIDEO_DECODER_EXTENSION extension = {};
+      extension.Function = PERP_VIDEO_RESOURCE_SUBMIT;
+      extension.pPrivateInputData = &packet; extension.PrivateInputDataSize = sizeof(packet);
+      extension.ResourceCount = 1; extension.ppResourceList = list;
+      if (!frames) {
+        packet.header.version = PERP_VIDEO_RESOURCE_VERSION + 1;
+        if (vc->DecoderExtension(decoder, &extension) != E_INVALIDARG) return 3;
+        packet.header.version = PERP_VIDEO_RESOURCE_VERSION;
+        packet.buffer.offset = inputDesc.ByteWidth;
+        if (vc->DecoderExtension(decoder, &extension) != E_INVALIDARG) return 3;
+        packet.buffer.offset = 16;
+      }
+      check(vc->DecoderExtension(decoder, &extension), "resource submit");
+      inputBuffer->Release();
+      D3D11_VIDEO_DECODER_EXTENSION finish = {};
+      finish.Function = PERP_VIDEO_RESOURCE_FINISH;
+      check(vc->DecoderExtension(decoder, &finish), "resource finish");
+    } else {
     UINT capacity = 0; void *buffer = nullptr;
     check(vc->GetDecoderBuffer(decoder, D3D11_VIDEO_DECODER_BUFFER_BITSTREAM, &capacity, &buffer), "buffer");
     if (size > capacity || !buffer) return 3;
@@ -96,6 +137,7 @@ int main(int argc, char **argv) {
     submit.BufferType = D3D11_VIDEO_DECODER_BUFFER_BITSTREAM; submit.DataSize = size;
     check(vc->SubmitDecoderBuffers(decoder, 1, &submit), "submit");
     check(vc->DecoderEndFrame(decoder), "end frame");
+    }
     context->CopyResource(staging, texture);
     D3D11_MAPPED_SUBRESOURCE mapped = {};
     check(context->Map(staging, 0, D3D11_MAP_READ, 0, &mapped), "decoded readback");
@@ -109,7 +151,7 @@ int main(int argc, char **argv) {
   }
   if (!frames || std::fgetc(reference) != EOF) return 2;
   double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - started).count();
-  std::printf("D3D11 VP9 hardware %ux%u: %u frames pixel-identical; decode/upload/readback %.3f ms total\n", width,height,frames,ms);
+  std::printf("D3D11 VP9 hardware %ux%u (%s): %u frames pixel-identical; decode/upload/readback %.3f ms total\n", width,height,resources ? "resource submit" : "decoder buffer",frames,ms);
   staging->Release(); view->Release(); texture->Release(); decoder->Release();
   vc->Release(); video->Release(); context->Release(); device->Release();
   std::fclose(reference); std::fclose(input);

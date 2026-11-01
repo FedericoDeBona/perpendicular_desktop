@@ -1,0 +1,784 @@
+--- a/src/virtio/neptune/triton/meson.build
++++ b/src/virtio/neptune/triton/meson.build
+@@ -12,6 +12,7 @@
+   'tritonPipeline12.c',
+   'tritonPresent12.c',
+   'tritonResource.c',
++  'tritonVideo.c',
+   'tritonView.c',
+   'tritonState.c',
+   'tritonShader.c',
+--- a/src/virtio/neptune/triton/triton.h
++++ b/src/virtio/neptune/triton/triton.h
+@@ -71,6 +71,8 @@
+     /* pDev1/pCtx1 come from the Neptune factory. pDev3/pCtx3 are QI'd in
+      * tritonCreateDevice and may be NULL when the host stack does not
+      * expose them; the WDDM 2.0 handlers fall back to the 11.1 forms. */
++    ID3D11VideoDevice              *pVideoDev;
++    ID3D11VideoContext             *pVideoCtx;
+     ID3D11Device1                  *pDev1;
+     ID3D11Device3                  *pDev3;
+     ID3D11DeviceContext1           *pCtx1;
+@@ -456,6 +458,12 @@
+ /* Fill r's present companion, if any (tritonResource.c). */
+ void tritonResourceSyncPresentCompanion(PTRITON_DEVICE pD, PTRITON_RESOURCE r);
+ 
++
++void tritonInstallVideoFuncs(PTRITON_DEVICE, const D3D10DDIARG_CREATEDEVICE *);
++void tritonDestroyVideo(PTRITON_DEVICE);
++
++BOOL tritonVideoFormatSupported(PTRITON_DEVICE, DXGI_FORMAT);
++
+ #ifdef __cplusplus
+ } /* extern "C" */
+ #endif
+--- a/src/virtio/neptune/triton/tritonDDI.c
++++ b/src/virtio/neptune/triton/tritonDDI.c
+@@ -730,6 +730,7 @@
+         DeleteCriticalSection(&p->kmCtxLock);
+         p->presentLockInit = FALSE;
+     }
++    tritonDestroyVideo(p);
+     if (p->pCtx3) { ID3D11DeviceContext3_Release(p->pCtx3); p->pCtx3 = NULL; }
+     if (p->pCtx1) { ID3D11DeviceContext1_Release(p->pCtx1); p->pCtx1 = NULL; }
+     if (p->pDev3) { ID3D11Device3_Release(p->pDev3);        p->pDev3 = NULL; }
+@@ -894,6 +895,7 @@
+     /* Wire DXGI runtime callbacks once the D3D11 device is up; this also
+      * records pfnPresentCb from the DXGI base callbacks. */
+     tritonInstallDXGIFuncs(p, pArgs);
++    tritonInstallVideoFuncs(p, pArgs);
+ 
+     /* Present-path locks; what each covers is documented on presentLock /
+      * kmCtxLock in triton.h.  Created only on the success path: a failed
+--- a/src/virtio/neptune/triton/tritonQuery.c
++++ b/src/virtio/neptune/triton/tritonQuery.c
+@@ -515,6 +515,8 @@
+     else if (!tritonHostAnswered(fs2Hr))
+         answered = FALSE;
+     *pOut = tritonTranslateFormatSupport(s1, s2);
++    if (Format == DXGI_FORMAT_NV12 && tritonVideoFormatSupported(pD, Format))
++        *pOut |= D3D11_1DDI_FORMAT_SUPPORT_DECODER_OUTPUT;
+ 
+     /* A typeless parent reports what its family can do: the host answers for
+      * the typeless format itself carry no target or multisample capability
+--- /dev/null
++++ b/src/virtio/neptune/triton/tritonVideo.c
+@@ -0,0 +1,483 @@
++/* SPDX-License-Identifier: MIT
++ * VP9 profile-0 decoding through the paired native video backend.
++ * Compressed buffers remain D3D resources across the existing Neptune wire.
++ */
++#include "triton.h"
++#include "video-resource-submit.h"
++#include "tritonVideoStubs.h"
++
++typedef struct { ID3D11VideoDecoder *object; } TRITON_VIDEO_DECODER;
++typedef struct { ID3D11VideoDecoderOutputView *object; } TRITON_VIDEO_OUTPUT;
++_Static_assert(sizeof(D3D11_VIDEO_DECODER_DESC) == sizeof(D3D11_1DDI_VIDEO_DECODER_DESC), "decoder desc ABI");
++_Static_assert(sizeof(D3D11_VIDEO_DECODER_CONFIG) == sizeof(D3D11_1DDI_VIDEO_DECODER_CONFIG), "decoder config ABI");
++
++static PTRITON_DEVICE videoDevice(D3D10DDI_HDEVICE h) { return h.pDrvPrivate; }
++static ID3D11VideoDecoder *videoDecoder(D3D11_1DDI_HDECODE h) {
++    return h.pDrvPrivate ? ((TRITON_VIDEO_DECODER *)h.pDrvPrivate)->object : NULL;
++}
++static HRESULT videoCommand(PTRITON_DEVICE p, ID3D11VideoDecoder *d, UINT f,
++    void *input, UINT size, ID3D11Resource **resources, UINT count) {
++    if (!p || !p->pVideoCtx || !d) return E_INVALIDARG;
++    D3D11_VIDEO_DECODER_EXTENSION e = {0};
++    e.Function = f; e.pPrivateInputData = input; e.PrivateInputDataSize = size;
++    e.ResourceCount = count; e.ppResourceList = resources;
++    return ID3D11VideoContext_DecoderExtension(p->pVideoCtx, d, &e);
++}
++static BOOL videoDesc(PTRITON_DEVICE p, const D3D11_1DDI_VIDEO_DECODER_DESC *desc) {
++    UINT count = 0; D3D11_VIDEO_DECODER_DESC native;
++    if (!p || !p->pVideoDev || !desc) return FALSE;
++    memcpy(&native, desc, sizeof(native));
++    return SUCCEEDED(ID3D11VideoDevice_GetVideoDecoderConfigCount(p->pVideoDev, &native, &count)) && count;
++}
++static VOID APIENTRY videoProfileCount(D3D10DDI_HDEVICE h, UINT *count) {
++    PTRITON_DEVICE p = videoDevice(h);
++    if (count) *count = p && p->pVideoDev ? ID3D11VideoDevice_GetVideoDecoderProfileCount(p->pVideoDev) : 0;
++}
++static VOID APIENTRY videoProfile(D3D10DDI_HDEVICE h, UINT i, GUID *out) {
++    PTRITON_DEVICE p = videoDevice(h); if (!out) return; memset(out, 0, sizeof(*out));
++    if (p && p->pVideoDev) ID3D11VideoDevice_GetVideoDecoderProfile(p->pVideoDev, i, out);
++}
++static VOID APIENTRY videoFormat(D3D10DDI_HDEVICE h, const GUID *profile, DXGI_FORMAT fmt, BOOL *out) {
++    PTRITON_DEVICE p = videoDevice(h); if (!out) return; *out = FALSE;
++    if (p && p->pVideoDev && profile) ID3D11VideoDevice_CheckVideoDecoderFormat(p->pVideoDev, profile, fmt, out);
++}
++static VOID APIENTRY videoConfigCount(D3D10DDI_HDEVICE h, const D3D11_1DDI_VIDEO_DECODER_DESC *desc, UINT *out) {
++    PTRITON_DEVICE p = videoDevice(h); D3D11_VIDEO_DECODER_DESC native;
++    if (!out) return; *out = 0; if (!p || !p->pVideoDev || !desc) return;
++    memcpy(&native, desc, sizeof(native)); ID3D11VideoDevice_GetVideoDecoderConfigCount(p->pVideoDev, &native, out);
++}
++static VOID APIENTRY videoConfig(D3D10DDI_HDEVICE h, const D3D11_1DDI_VIDEO_DECODER_DESC *desc, UINT i, D3D11_1DDI_VIDEO_DECODER_CONFIG *out) {
++    PTRITON_DEVICE p = videoDevice(h); D3D11_VIDEO_DECODER_DESC native; D3D11_VIDEO_DECODER_CONFIG config = {0};
++    if (!out) return; memset(out, 0, sizeof(*out)); if (!p || !p->pVideoDev || !desc) return;
++    memcpy(&native, desc, sizeof(native));
++    if (SUCCEEDED(ID3D11VideoDevice_GetVideoDecoderConfig(p->pVideoDev, &native, i, &config))) memcpy(out, &config, sizeof(config));
++}
++static VOID APIENTRY videoBufferCount(D3D10DDI_HDEVICE h, const D3D11_1DDI_VIDEO_DECODER_DESC *desc, UINT *out) {
++    if (out) *out = videoDesc(videoDevice(h), desc) ? 3 : 0;
++}
++static VOID APIENTRY videoBufferInfo(D3D10DDI_HDEVICE h, const D3D11_1DDI_VIDEO_DECODER_DESC *desc, UINT i, D3D11_1DDI_VIDEO_DECODER_BUFFER_INFO *out) {
++    static const D3D11_1DDI_VIDEO_DECODER_BUFFER_TYPE types[3] = {
++        D3D11_1DDI_VIDEO_DECODER_BUFFER_PICTURE_PARAMETERS, D3D11_1DDI_VIDEO_DECODER_BUFFER_SLICE_CONTROL, D3D11_1DDI_VIDEO_DECODER_BUFFER_BITSTREAM };
++    if (!out) return; memset(out, 0, sizeof(*out)); if (i >= 3 || !videoDesc(videoDevice(h), desc)) return;
++    out->Type = types[i]; out->Size = i == 2 ? PERP_VIDEO_MAX_BITSTREAM : PERP_VIDEO_MAX_METADATA;
++    out->Usage = D3D11_1DDI_VIDEO_USAGE_OPTIMAL_SPEED;
++}
++static SIZE_T APIENTRY videoDecoderSize(D3D10DDI_HDEVICE h, const D3D11_1DDIARG_CREATEVIDEODECODER *args) {
++    return sizeof(TRITON_VIDEO_DECODER);
++}
++static HRESULT APIENTRY videoCreateDecoder(D3D10DDI_HDEVICE h, const D3D11_1DDIARG_CREATEVIDEODECODER *args, D3D11_1DDI_HDECODE object, D3D11_1DDI_HRTDECODE runtime) {
++    PTRITON_DEVICE p = videoDevice(h); D3D11_VIDEO_DECODER_DESC desc; D3D11_VIDEO_DECODER_CONFIG config;
++    if (!p || !p->pVideoDev || !args || !object.pDrvPrivate) return E_INVALIDARG;
++    TRITON_VIDEO_DECODER *out = object.pDrvPrivate; out->object = NULL;
++    memcpy(&desc, &args->Desc, sizeof(desc)); memcpy(&config, &args->Config, sizeof(config));
++    HRESULT hr = ID3D11VideoDevice_CreateVideoDecoder(p->pVideoDev, &desc, &config, &out->object);
++    if (SUCCEEDED(hr)) hr = videoCommand(p, out->object, PERP_VIDEO_RESOURCE_QUERY, NULL, 0, NULL, 0);
++    if (FAILED(hr) && out->object) { ID3D11VideoDecoder_Release(out->object); out->object = NULL; }
++    return hr;
++}
++static VOID APIENTRY videoDestroyDecoder(D3D10DDI_HDEVICE h, D3D11_1DDI_HDECODE object) {
++    TRITON_VIDEO_DECODER *p = object.pDrvPrivate; if (p && p->object) { ID3D11VideoDecoder_Release(p->object); p->object = NULL; }
++}
++static SIZE_T APIENTRY videoOutputSize(D3D10DDI_HDEVICE h, const D3D11_1DDIARG_CREATEVIDEODECODEROUTPUTVIEW *args) { return sizeof(TRITON_VIDEO_OUTPUT); }
++static HRESULT APIENTRY videoCreateOutput(D3D10DDI_HDEVICE h, const D3D11_1DDIARG_CREATEVIDEODECODEROUTPUTVIEW *args, D3D11_1DDI_HVIDEODECODEROUTPUTVIEW object, D3D11_1DDI_HRTVIDEODECODEROUTPUTVIEW runtime) {
++    PTRITON_DEVICE p = videoDevice(h); if (!object.pDrvPrivate) return E_INVALIDARG;
++    TRITON_VIDEO_OUTPUT *out = object.pDrvPrivate; out->object = NULL;
++    if (!p || !p->pVideoDev || !args || !args->hDrvResource.pDrvPrivate || args->MipSlice || args->ArraySize != 1) return E_INVALIDARG;
++    PTRITON_RESOURCE r = args->hDrvResource.pDrvPrivate;
++    if (!r->pResource || r->Format != DXGI_FORMAT_NV12 || args->FirstArraySlice >= r->ArraySize) return E_INVALIDARG;
++    D3D11_VIDEO_DECODER_OUTPUT_VIEW_DESC desc = {0}; desc.DecodeProfile = args->DecodeProfile;
++    desc.ViewDimension = D3D11_VDOV_DIMENSION_TEXTURE2D; desc.Texture2D.ArraySlice = args->FirstArraySlice;
++    return ID3D11VideoDevice_CreateVideoDecoderOutputView(p->pVideoDev, r->pResource, &desc, &out->object);
++}
++static VOID APIENTRY videoDestroyOutput(D3D10DDI_HDEVICE h, D3D11_1DDI_HVIDEODECODEROUTPUTVIEW object) {
++    TRITON_VIDEO_OUTPUT *p = object.pDrvPrivate; if (p && p->object) { ID3D11VideoDecoderOutputView_Release(p->object); p->object = NULL; }
++}
++static HRESULT APIENTRY videoBegin(D3D10DDI_HDEVICE h, D3D11_1DDI_HDECODE object, const D3D11_1DDIARG_VIDEODECODERBEGINFRAME *args) {
++    PTRITON_DEVICE p = videoDevice(h); ID3D11VideoDecoder *decoder = videoDecoder(object);
++    if (!p || !p->pVideoCtx || !decoder || !args || args->pContentKey || args->ContentKeySize || !args->hOutputView.pDrvPrivate) return E_INVALIDARG;
++    TRITON_VIDEO_OUTPUT *out = args->hOutputView.pDrvPrivate; if (!out->object) return E_INVALIDARG;
++    return ID3D11VideoContext_DecoderBeginFrame(p->pVideoCtx, decoder, out->object, 0, NULL);
++}
++static VOID APIENTRY videoEnd(D3D10DDI_HDEVICE h, D3D11_1DDI_HDECODE object) {
++    PTRITON_DEVICE p = videoDevice(h);
++    HRESULT hr = videoCommand(p, videoDecoder(object), PERP_VIDEO_RESOURCE_FINISH, NULL, 0, NULL, 0);
++    if (FAILED(hr) && p) tritonSetError(p, hr);
++}
++static BOOL videoBufferType(D3D11_1DDI_VIDEO_DECODER_BUFFER_TYPE type, UINT *out) {
++    switch (type) {
++    case D3D11_1DDI_VIDEO_DECODER_BUFFER_PICTURE_PARAMETERS: *out = D3D11_VIDEO_DECODER_BUFFER_PICTURE_PARAMETERS; return TRUE;
++    case D3D11_1DDI_VIDEO_DECODER_BUFFER_SLICE_CONTROL: *out = D3D11_VIDEO_DECODER_BUFFER_SLICE_CONTROL; return TRUE;
++    case D3D11_1DDI_VIDEO_DECODER_BUFFER_BITSTREAM: *out = D3D11_VIDEO_DECODER_BUFFER_BITSTREAM; return TRUE;
++    default: return FALSE;
++    }
++}
++static HRESULT videoSubmit(PTRITON_DEVICE p, ID3D11VideoDecoder *decoder, UINT count, const D3D11_1DDI_VIDEO_DECODER_BUFFER_DESC *buffers) {
++    struct { struct perp_video_resource_header header; struct perp_video_resource_buffer entries[PERP_VIDEO_MAX_BUFFERS]; } packet = {0};
++    ID3D11Resource *resources[PERP_VIDEO_MAX_BUFFERS] = {0};
++    if (!p || !decoder || !buffers || !count || count > PERP_VIDEO_MAX_BUFFERS) return E_INVALIDARG;
++    packet.header.version = PERP_VIDEO_RESOURCE_VERSION; packet.header.count = count;
++    for (UINT i = 0; i < count; i++) {
++        const D3D11_1DDI_VIDEO_DECODER_BUFFER_DESC *b = &buffers[i];
++        PTRITON_RESOURCE r = b->hResource.pDrvPrivate;
++        if (!r || !r->pResource || b->pIV || b->IVSize || b->PartialEncryption || !videoBufferType(b->BufferType, &packet.entries[i].type)) return E_INVALIDARG;
++        packet.entries[i].resource_index = i; packet.entries[i].offset = b->DataOffset; packet.entries[i].size = b->DataSize;
++        resources[i] = r->pResource;
++    }
++    return videoCommand(p, decoder, PERP_VIDEO_RESOURCE_SUBMIT, &packet,
++        sizeof(packet.header) + count * sizeof(packet.entries[0]), resources, count);
++}
++static HRESULT APIENTRY videoSubmitBuffers(D3D10DDI_HDEVICE h, D3D11_1DDI_HDECODE d, UINT count, const D3D11_1DDI_VIDEO_DECODER_BUFFER_DESC *buffers) {
++    return videoSubmit(videoDevice(h), videoDecoder(d), count, buffers);
++}
++static HRESULT APIENTRY videoSubmitBuffers1(D3D10DDI_HDEVICE h, D3D11_1DDI_HDECODE d, UINT count, const D3DWDDM2_0DDI_VIDEO_DECODER_BUFFER_DESC1 *buffers) {
++    D3D11_1DDI_VIDEO_DECODER_BUFFER_DESC legacy[PERP_VIDEO_MAX_BUFFERS] = {0};
++    if (!buffers || !count || count > PERP_VIDEO_MAX_BUFFERS) return E_INVALIDARG;
++    for (UINT i = 0; i < count; i++) {
++        if (buffers[i].pIV || buffers[i].IVSize || buffers[i].pSubSampleMappingBlock || buffers[i].SubSampleMappingCount) return E_INVALIDARG;
++        legacy[i].hResource = buffers[i].hResource; legacy[i].BufferType = buffers[i].BufferType;
++        legacy[i].DataOffset = buffers[i].DataOffset; legacy[i].DataSize = buffers[i].DataSize;
++    }
++    return videoSubmit(videoDevice(h), videoDecoder(d), count, legacy);
++}
++static VOID APIENTRY videoCapabilities(D3D10DDI_HDEVICE h, D3DWDDM2_0DDI_VIDEO_CAPABILITY_QUERY type, UINT size, VOID *data) {
++    if (!data) return;
++    if (type == D3DWDDM2_0DDI_VIDEO_CAPABILITY_QUERY_DECODER_CAPS && size == sizeof(D3DWDDM2_0DDI_VIDEO_CAPABILITY_DECODER_CAPS)) {
++        D3DWDDM2_0DDI_VIDEO_CAPABILITY_DECODER_CAPS *caps = data;
++        D3D11_1DDI_VIDEO_DECODER_DESC desc = {caps->DecodeProfile, caps->SampleWidth, caps->SampleHeight, DXGI_FORMAT_NV12};
++        caps->Caps = !caps->pCryptoType && videoDesc(videoDevice(h), &desc) ? 0 : D3DWDDM2_0DDI_VIDEO_DECODER_CAP_UNSUPPORTED;
++    } else if (type == D3DWDDM2_0DDI_VIDEO_CAPABILITY_QUERY_DECODER_DOWNSAMPLING && size == sizeof(D3DWDDM2_0DDI_VIDEO_CAPABILITY_DECODER_DOWNSAMPLING)) {
++        D3DWDDM2_0DDI_VIDEO_CAPABILITY_DECODER_DOWNSAMPLING *caps = data; caps->Supported = caps->RealTime = FALSE;
++    } else if (type == D3DWDDM2_0DDI_VIDEO_CAPABILITY_QUERY_DECODER_DOWNSAMPLE_OUTPUT_FORMAT && size == sizeof(D3DWDDM2_0DDI_VIDEO_CAPABILITY_DECODER_DOWNSAMPLE_OUTPUT_FORMAT)) {
++        ((D3DWDDM2_0DDI_VIDEO_CAPABILITY_DECODER_DOWNSAMPLE_OUTPUT_FORMAT *)data)->Supported = FALSE;
++    }
++}
++
++static void videoFill_D3D11_1DDI_VIDEODEVICEFUNCS(D3D11_1DDI_VIDEODEVICEFUNCS *p) {
++    memset(p, 0, sizeof(*p));
++    p->pfnGetVideoDecoderProfileCount = videoProfileCount;
++    p->pfnGetVideoDecoderProfile = videoProfile;
++    p->pfnCheckVideoDecoderFormat = videoFormat;
++    p->pfnGetVideoDecoderConfigCount = videoConfigCount;
++    p->pfnGetVideoDecoderConfig = videoConfig;
++    p->pfnGetVideoDecoderBufferTypeCount = videoBufferCount;
++    p->pfnGetVideoDecoderBufferInfo = videoBufferInfo;
++    p->pfnCalcPrivateVideoDecoderSize = videoDecoderSize;
++    p->pfnCreateVideoDecoder = videoCreateDecoder;
++    p->pfnDestroyVideoDecoder = videoDestroyDecoder;
++    p->pfnVideoDecoderExtension = videoStub_PFND3D11_1DDI_VIDEODECODEREXTENSION;
++    p->pfnVideoDecoderBeginFrame = videoBegin;
++    p->pfnVideoDecoderEndFrame = videoEnd;
++    p->pfnVideoDecoderSubmitBuffers = videoSubmitBuffers;
++    p->pfnCalcPrivateVideoProcessorEnumSize = videoStub_PFND3D11_1DDI_CALCPRIVATEVIDEOPROCESSORENUMSIZE;
++    p->pfnCreateVideoProcessorEnum = videoStub_PFND3D11_1DDI_CREATEVIDEOPROCESSORENUM;
++    p->pfnDestroyVideoProcessorEnum = videoStub_PFND3D11_1DDI_DESTROYVIDEOPROCESSORENUM;
++    p->pfnCheckVideoProcessorFormat = videoStub_PFND3D11_1DDI_CHECKVIDEOPROCESSORFORMAT;
++    p->pfnGetVideoProcessorCaps = videoStub_PFND3D11_1DDI_GETVIDEOPROCESSORCAPS;
++    p->pfnGetVideoProcessorRateConversionCaps = videoStub_PFND3D11_1DDI_GETVIDEOPROCESSORRATECONVERSIONCAPS;
++    p->pfnGetVideoProcessorCustomRate = videoStub_PFND3D11_1DDI_GETVIDEOPROCESSORCUSTOMRATE;
++    p->pfnGetVideoProcessorFilterRange = videoStub_PFND3D11_1DDI_GETVIDEOPROCESSORFILTERRANGE;
++    p->pfnCalcPrivateVideoProcessorSize = videoStub_PFND3D11_1DDI_CALCPRIVATEVIDEOPROCESSORSIZE;
++    p->pfnCreateVideoProcessor = videoStub_PFND3D11_1DDI_CREATEVIDEOPROCESSOR;
++    p->pfnDestroyVideoProcessor = videoStub_PFND3D11_1DDI_DESTROYVIDEOPROCESSOR;
++    p->pfnVideoProcessorSetOutputTargetRect = videoStub_PFND3D11_1DDI_VIDEOPROCESSORSETOUTPUTTARGETRECT;
++    p->pfnVideoProcessorSetOutputBackgroundColor = videoStub_PFND3D11_1DDI_VIDEOPROCESSORSETOUTPUTBACKGROUNDCOLOR;
++    p->pfnVideoProcessorSetOutputColorSpace = videoStub_PFND3D11_1DDI_VIDEOPROCESSORSETOUTPUTCOLORSPACE;
++    p->pfnVideoProcessorSetOutputAlphaFillMode = videoStub_PFND3D11_1DDI_VIDEOPROCESSORSETOUTPUTALPHAFILLMODE;
++    p->pfnVideoProcessorSetOutputConstriction = videoStub_PFND3D11_1DDI_VIDEOPROCESSORSETOUTPUTCONSTRICTION;
++    p->pfnVideoProcessorSetOutputStereoMode = videoStub_PFND3D11_1DDI_VIDEOPROCESSORSETOUTPUTSTEREOMODE;
++    p->pfnVideoProcessorSetOutputExtension = videoStub_PFND3D11_1DDI_VIDEOPROCESSORSETOUTPUTEXTENSION;
++    p->pfnVideoProcessorGetOutputExtension = videoStub_PFND3D11_1DDI_VIDEOPROCESSORGETOUTPUTEXTENSION;
++    p->pfnVideoProcessorSetStreamFrameFormat = videoStub_PFND3D11_1DDI_VIDEOPROCESSORSETSTREAMFRAMEFORMAT;
++    p->pfnVideoProcessorSetStreamColorSpace = videoStub_PFND3D11_1DDI_VIDEOPROCESSORSETSTREAMCOLORSPACE;
++    p->pfnVideoProcessorSetStreamOutputRate = videoStub_PFND3D11_1DDI_VIDEOPROCESSORSETSTREAMOUTPUTRATE;
++    p->pfnVideoProcessorSetStreamSourceRect = videoStub_PFND3D11_1DDI_VIDEOPROCESSORSETSTREAMSOURCERECT;
++    p->pfnVideoProcessorSetStreamDestRect = videoStub_PFND3D11_1DDI_VIDEOPROCESSORSETSTREAMDESTRECT;
++    p->pfnVideoProcessorSetStreamAlpha = videoStub_PFND3D11_1DDI_VIDEOPROCESSORSETSTREAMALPHA;
++    p->pfnVideoProcessorSetStreamPalette = videoStub_PFND3D11_1DDI_VIDEOPROCESSORSETSTREAMPALETTE;
++    p->pfnVideoProcessorSetStreamPixelAspectRatio = videoStub_PFND3D11_1DDI_VIDEOPROCESSORSETSTREAMPIXELASPECTRATIO;
++    p->pfnVideoProcessorSetStreamLumaKey = videoStub_PFND3D11_1DDI_VIDEOPROCESSORSETSTREAMLUMAKEY;
++    p->pfnVideoProcessorSetStreamStereoFormat = videoStub_PFND3D11_1DDI_VIDEOPROCESSORSETSTREAMSTEREOFORMAT;
++    p->pfnVideoProcessorSetStreamAutoProcessingMode = videoStub_PFND3D11_1DDI_VIDEOPROCESSORSETSTREAMAUTOPROCESSINGMODE;
++    p->pfnVideoProcessorSetStreamFilter = videoStub_PFND3D11_1DDI_VIDEOPROCESSORSETSTREAMFILTER;
++    p->pfnVideoProcessorSetStreamExtension = videoStub_PFND3D11_1DDI_VIDEOPROCESSORSETSTREAMEXTENSION;
++    p->pfnVideoProcessorGetStreamExtension = videoStub_PFND3D11_1DDI_VIDEOPROCESSORGETSTREAMEXTENSION;
++    p->pfnVideoProcessorBlt = videoStub_PFND3D11_1DDI_VIDEOPROCESSORBLT;
++    p->pfnCalcPrivateVideoDecoderOutputViewSize = videoOutputSize;
++    p->pfnCreateVideoDecoderOutputView = videoCreateOutput;
++    p->pfnDestroyVideoDecoderOutputView = videoDestroyOutput;
++    p->pfnCalcPrivateVideoProcessorInputViewSize = videoStub_PFND3D11_1DDI_CALCPRIVATEVIDEOPROCESSORINPUTVIEWSIZE;
++    p->pfnCreateVideoProcessorInputView = videoStub_PFND3D11_1DDI_CREATEVIDEOPROCESSORINPUTVIEW;
++    p->pfnDestroyVideoProcessorInputView = videoStub_PFND3D11_1DDI_DESTROYVIDEOPROCESSORINPUTVIEW;
++    p->pfnCalcPrivateVideoProcessorOutputViewSize = videoStub_PFND3D11_1DDI_CALCPRIVATEVIDEOPROCESSOROUTPUTVIEWSIZE;
++    p->pfnCreateVideoProcessorOutputView = videoStub_PFND3D11_1DDI_CREATEVIDEOPROCESSOROUTPUTVIEW;
++    p->pfnDestroyVideoProcessorOutputView = videoStub_PFND3D11_1DDI_DESTROYVIDEOPROCESSOROUTPUTVIEW;
++    p->pfnVideoProcessorInputViewReadAfterWriteHazard = videoStub_PFND3D11_1DDI_VIDEOPROCESSORINPUTVIEWREADAFTERWRITEHAZARD;
++    p->pfnGetContentProtectionCaps = videoStub_PFND3D11_1DDI_GETCONTENTPROTECTIONCAPS;
++    p->pfnGetCryptoKeyExchangeType = videoStub_PFND3D11_1DDI_GETCRYPTOKEYEXCHANGETYPE;
++    p->pfnCalcPrivateCryptoSessionSize = videoStub_PFND3D11_1DDI_CALCPRIVATECRYPTOSESSIONSIZE;
++    p->pfnCreateCryptoSession = videoStub_PFND3D11_1DDI_CREATECRYPTOSESSION;
++    p->pfnDestroyCryptoSession = videoStub_PFND3D11_1DDI_DESTROYCRYPTOSESSION;
++    p->pfnGetCertificateSize = videoStub_PFND3D11_1DDI_GETCERTIFICATESIZE;
++    p->pfnGetCertificate = videoStub_PFND3D11_1DDI_GETCERTIFICATE;
++    p->pfnNegotiateCryptoSessionKeyExchange = videoStub_PFND3D11_1DDI_NEGOTIATECRYPTOSESSIONKEYESCHANGE;
++    p->pfnEncryptionBlt = videoStub_PFND3D11_1DDI_ENCRYPTIONBLT;
++    p->pfnDecryptionBlt = videoStub_PFND3D11_1DDI_DECRYPTIONBLT;
++    p->pfnStartSessionKeyRefresh = videoStub_PFND3D11_1DDI_STARTSESSIONKEYREFRESH;
++    p->pfnFinishSessionKeyRefresh = videoStub_PFND3D11_1DDI_FINISHSESSIONKEYREFRESH;
++    p->pfnGetEncryptionBltKey = videoStub_PFND3D11_1DDI_GETENCRYPTIONBLTKEY;
++    p->pfnCalcPrivateAuthenticatedChannelSize = videoStub_PFND3D11_1DDI_CALCPRIVATEAUTHENTICATEDCHANNELSIZE;
++    p->pfnCreateAuthenticatedChannel = videoStub_PFND3D11_1DDI_CREATEAUTHENTICATEDCHANNEL;
++    p->pfnDestroyAuthenticatedChannel = videoStub_PFND3D11_1DDI_DESTROYAUTHENTICATEDCHANNEL;
++    p->pfnNegotiateAuthenticatedChannelKeyExchange = videoStub_PFND3D11_1DDI_NEGOTIATEAUTHENTICATEDCHANNELKEYEXCHANGE;
++    p->pfnQueryAuthenticatedChannel = videoStub_PFND3D11_1DDI_QUERYAUTHENTICATEDCHANNEL;
++    p->pfnConfigureAuthenticatedChannel = videoStub_PFND3D11_1DDI_CONFIGUREAUTHENTICATEDCHANNEL;
++    p->pfnVideoDecoderGetHandle = videoStub_PFND3D11_1DDI_VIDEODECODERGETHANDLE;
++    p->pfnCryptoSessionGetHandle = videoStub_PFND3D11_1DDI_CRYPTOSESSIONGETHANDLE;
++    p->pfnVideoProcessorSetStreamRotation = videoStub_PFND3D11_1DDI_VIDEOPROCESSORSETSTREAMROTATION;
++    p->pfnGetCaptureHandle = videoStub_PFND3D11_1DDI_GETCAPTUREHANDLE;
++}
++
++static void videoFill_D3DWDDM2_0DDI_VIDEODEVICEFUNCS(D3DWDDM2_0DDI_VIDEODEVICEFUNCS *p) {
++    memset(p, 0, sizeof(*p));
++    p->pfnGetVideoDecoderProfileCount = videoProfileCount;
++    p->pfnGetVideoDecoderProfile = videoProfile;
++    p->pfnCheckVideoDecoderFormat = videoFormat;
++    p->pfnGetVideoDecoderConfigCount = videoConfigCount;
++    p->pfnGetVideoDecoderConfig = videoConfig;
++    p->pfnGetVideoDecoderBufferTypeCount = videoBufferCount;
++    p->pfnGetVideoDecoderBufferInfo = videoBufferInfo;
++    p->pfnCalcPrivateVideoDecoderSize = videoDecoderSize;
++    p->pfnCreateVideoDecoder = videoCreateDecoder;
++    p->pfnDestroyVideoDecoder = videoDestroyDecoder;
++    p->pfnVideoDecoderExtension = videoStub_PFND3D11_1DDI_VIDEODECODEREXTENSION;
++    p->pfnVideoDecoderBeginFrame = videoBegin;
++    p->pfnVideoDecoderEndFrame = videoEnd;
++    p->pfnVideoDecoderSubmitBuffers = videoSubmitBuffers;
++    p->pfnCalcPrivateVideoProcessorEnumSize = videoStub_PFND3D11_1DDI_CALCPRIVATEVIDEOPROCESSORENUMSIZE;
++    p->pfnCreateVideoProcessorEnum = videoStub_PFND3D11_1DDI_CREATEVIDEOPROCESSORENUM;
++    p->pfnDestroyVideoProcessorEnum = videoStub_PFND3D11_1DDI_DESTROYVIDEOPROCESSORENUM;
++    p->pfnCheckVideoProcessorFormat = videoStub_PFND3D11_1DDI_CHECKVIDEOPROCESSORFORMAT;
++    p->pfnGetVideoProcessorCaps = videoStub_PFND3D11_1DDI_GETVIDEOPROCESSORCAPS;
++    p->pfnGetVideoProcessorRateConversionCaps = videoStub_PFND3D11_1DDI_GETVIDEOPROCESSORRATECONVERSIONCAPS;
++    p->pfnGetVideoProcessorCustomRate = videoStub_PFND3D11_1DDI_GETVIDEOPROCESSORCUSTOMRATE;
++    p->pfnGetVideoProcessorFilterRange = videoStub_PFND3D11_1DDI_GETVIDEOPROCESSORFILTERRANGE;
++    p->pfnCalcPrivateVideoProcessorSize = videoStub_PFND3D11_1DDI_CALCPRIVATEVIDEOPROCESSORSIZE;
++    p->pfnCreateVideoProcessor = videoStub_PFND3D11_1DDI_CREATEVIDEOPROCESSOR;
++    p->pfnDestroyVideoProcessor = videoStub_PFND3D11_1DDI_DESTROYVIDEOPROCESSOR;
++    p->pfnVideoProcessorSetOutputTargetRect = videoStub_PFND3D11_1DDI_VIDEOPROCESSORSETOUTPUTTARGETRECT;
++    p->pfnVideoProcessorSetOutputBackgroundColor = videoStub_PFND3D11_1DDI_VIDEOPROCESSORSETOUTPUTBACKGROUNDCOLOR;
++    p->pfnVideoProcessorSetOutputColorSpace = videoStub_PFND3D11_1DDI_VIDEOPROCESSORSETOUTPUTCOLORSPACE;
++    p->pfnVideoProcessorSetOutputAlphaFillMode = videoStub_PFND3D11_1DDI_VIDEOPROCESSORSETOUTPUTALPHAFILLMODE;
++    p->pfnVideoProcessorSetOutputConstriction = videoStub_PFND3D11_1DDI_VIDEOPROCESSORSETOUTPUTCONSTRICTION;
++    p->pfnVideoProcessorSetOutputStereoMode = videoStub_PFND3D11_1DDI_VIDEOPROCESSORSETOUTPUTSTEREOMODE;
++    p->pfnVideoProcessorSetOutputExtension = videoStub_PFND3D11_1DDI_VIDEOPROCESSORSETOUTPUTEXTENSION;
++    p->pfnVideoProcessorGetOutputExtension = videoStub_PFND3D11_1DDI_VIDEOPROCESSORGETOUTPUTEXTENSION;
++    p->pfnVideoProcessorSetStreamFrameFormat = videoStub_PFND3D11_1DDI_VIDEOPROCESSORSETSTREAMFRAMEFORMAT;
++    p->pfnVideoProcessorSetStreamColorSpace = videoStub_PFND3D11_1DDI_VIDEOPROCESSORSETSTREAMCOLORSPACE;
++    p->pfnVideoProcessorSetStreamOutputRate = videoStub_PFND3D11_1DDI_VIDEOPROCESSORSETSTREAMOUTPUTRATE;
++    p->pfnVideoProcessorSetStreamSourceRect = videoStub_PFND3D11_1DDI_VIDEOPROCESSORSETSTREAMSOURCERECT;
++    p->pfnVideoProcessorSetStreamDestRect = videoStub_PFND3D11_1DDI_VIDEOPROCESSORSETSTREAMDESTRECT;
++    p->pfnVideoProcessorSetStreamAlpha = videoStub_PFND3D11_1DDI_VIDEOPROCESSORSETSTREAMALPHA;
++    p->pfnVideoProcessorSetStreamPalette = videoStub_PFND3D11_1DDI_VIDEOPROCESSORSETSTREAMPALETTE;
++    p->pfnVideoProcessorSetStreamPixelAspectRatio = videoStub_PFND3D11_1DDI_VIDEOPROCESSORSETSTREAMPIXELASPECTRATIO;
++    p->pfnVideoProcessorSetStreamLumaKey = videoStub_PFND3D11_1DDI_VIDEOPROCESSORSETSTREAMLUMAKEY;
++    p->pfnVideoProcessorSetStreamStereoFormat = videoStub_PFND3D11_1DDI_VIDEOPROCESSORSETSTREAMSTEREOFORMAT;
++    p->pfnVideoProcessorSetStreamAutoProcessingMode = videoStub_PFND3D11_1DDI_VIDEOPROCESSORSETSTREAMAUTOPROCESSINGMODE;
++    p->pfnVideoProcessorSetStreamFilter = videoStub_PFND3D11_1DDI_VIDEOPROCESSORSETSTREAMFILTER;
++    p->pfnVideoProcessorSetStreamExtension = videoStub_PFND3D11_1DDI_VIDEOPROCESSORSETSTREAMEXTENSION;
++    p->pfnVideoProcessorGetStreamExtension = videoStub_PFND3D11_1DDI_VIDEOPROCESSORGETSTREAMEXTENSION;
++    p->pfnVideoProcessorBlt = videoStub_PFND3D11_1DDI_VIDEOPROCESSORBLT;
++    p->pfnCalcPrivateVideoDecoderOutputViewSize = videoOutputSize;
++    p->pfnCreateVideoDecoderOutputView = videoCreateOutput;
++    p->pfnDestroyVideoDecoderOutputView = videoDestroyOutput;
++    p->pfnCalcPrivateVideoProcessorInputViewSize = videoStub_PFND3D11_1DDI_CALCPRIVATEVIDEOPROCESSORINPUTVIEWSIZE;
++    p->pfnCreateVideoProcessorInputView = videoStub_PFND3D11_1DDI_CREATEVIDEOPROCESSORINPUTVIEW;
++    p->pfnDestroyVideoProcessorInputView = videoStub_PFND3D11_1DDI_DESTROYVIDEOPROCESSORINPUTVIEW;
++    p->pfnCalcPrivateVideoProcessorOutputViewSize = videoStub_PFND3D11_1DDI_CALCPRIVATEVIDEOPROCESSOROUTPUTVIEWSIZE;
++    p->pfnCreateVideoProcessorOutputView = videoStub_PFND3D11_1DDI_CREATEVIDEOPROCESSOROUTPUTVIEW;
++    p->pfnDestroyVideoProcessorOutputView = videoStub_PFND3D11_1DDI_DESTROYVIDEOPROCESSOROUTPUTVIEW;
++    p->pfnVideoProcessorInputViewReadAfterWriteHazard = videoStub_PFND3D11_1DDI_VIDEOPROCESSORINPUTVIEWREADAFTERWRITEHAZARD;
++    p->pfnGetContentProtectionCaps = videoStub_PFND3D11_1DDI_GETCONTENTPROTECTIONCAPS;
++    p->pfnGetCryptoKeyExchangeType = videoStub_PFND3D11_1DDI_GETCRYPTOKEYEXCHANGETYPE;
++    p->pfnCalcPrivateCryptoSessionSize = videoStub_PFND3D11_1DDI_CALCPRIVATECRYPTOSESSIONSIZE;
++    p->pfnCreateCryptoSession = videoStub_PFND3D11_1DDI_CREATECRYPTOSESSION;
++    p->pfnDestroyCryptoSession = videoStub_PFND3D11_1DDI_DESTROYCRYPTOSESSION;
++    p->pfnGetCertificateSize = videoStub_PFND3D11_1DDI_GETCERTIFICATESIZE;
++    p->pfnGetCertificate = videoStub_PFND3D11_1DDI_GETCERTIFICATE;
++    p->pfnNegotiateCryptoSessionKeyExchange = videoStub_PFND3D11_1DDI_NEGOTIATECRYPTOSESSIONKEYESCHANGE;
++    p->pfnEncryptionBlt = videoStub_PFND3D11_1DDI_ENCRYPTIONBLT;
++    p->pfnDecryptionBlt = videoStub_PFND3D11_1DDI_DECRYPTIONBLT;
++    p->pfnStartSessionKeyRefresh = videoStub_PFND3D11_1DDI_STARTSESSIONKEYREFRESH;
++    p->pfnFinishSessionKeyRefresh = videoStub_PFND3D11_1DDI_FINISHSESSIONKEYREFRESH;
++    p->pfnGetEncryptionBltKey = videoStub_PFND3D11_1DDI_GETENCRYPTIONBLTKEY;
++    p->pfnCalcPrivateAuthenticatedChannelSize = videoStub_PFND3D11_1DDI_CALCPRIVATEAUTHENTICATEDCHANNELSIZE;
++    p->pfnCreateAuthenticatedChannel = videoStub_PFND3D11_1DDI_CREATEAUTHENTICATEDCHANNEL;
++    p->pfnDestroyAuthenticatedChannel = videoStub_PFND3D11_1DDI_DESTROYAUTHENTICATEDCHANNEL;
++    p->pfnNegotiateAuthenticatedChannelKeyExchange = videoStub_PFND3D11_1DDI_NEGOTIATEAUTHENTICATEDCHANNELKEYEXCHANGE;
++    p->pfnQueryAuthenticatedChannel = videoStub_PFND3D11_1DDI_QUERYAUTHENTICATEDCHANNEL;
++    p->pfnConfigureAuthenticatedChannel = videoStub_PFND3D11_1DDI_CONFIGUREAUTHENTICATEDCHANNEL;
++    p->pfnVideoDecoderGetHandle = videoStub_PFND3D11_1DDI_VIDEODECODERGETHANDLE;
++    p->pfnCryptoSessionGetHandle = videoStub_PFND3D11_1DDI_CRYPTOSESSIONGETHANDLE;
++    p->pfnVideoProcessorSetStreamRotation = videoStub_PFND3D11_1DDI_VIDEOPROCESSORSETSTREAMROTATION;
++    p->pfnGetCaptureHandle = videoStub_PFND3D11_1DDI_GETCAPTUREHANDLE;
++    p->pfnGetDataForNewHardwareKey = videoStub_PFND3DWDDM2_0DDI_GETDATAFORNEWHARDWAREKEY;
++    p->pfnCheckCryptoSessionStatus = videoStub_PFND3DWDDM2_0DDI_CHECKCRYPTOSESSIONSTATUS;
++    p->pfnVideoDecoderSubmitBuffers1 = videoSubmitBuffers1;
++    p->pfnQueryVideoCapabilities = videoCapabilities;
++    p->pfnCheckVideoProcessorFormatConversion = videoStub_PFND3DWDDM2_0DDI_CHECKVIDEOPROCESSORFORMATCONVERSION;
++    p->pfnVideoDecoderEnableDownsampling = videoStub_PFND3DWDDM2_0DDI_VIDEODECODERENABLEDOWNSAMPLING;
++    p->pfnVideoDecoderUpdateDownsampling = videoStub_PFND3DWDDM2_0DDI_VIDEODECODERUPDATEDOWNSAMPLING;
++    p->pfnVideoProcessorSetStreamMirror = videoStub_PFND3DWDDM2_0DDI_VIDEOPROCESSORSETSTREAMMIRROR;
++    p->pfnVideoProcessorSetOutputColorSpace1 = videoStub_PFND3DWDDM2_0DDI_VIDEOPROCESSORSETOUTPUTCOLORSPACE1;
++    p->pfnVideoProcessorSetStreamColorSpace1 = videoStub_PFND3DWDDM2_0DDI_VIDEOPROCESSORSETSTREAMCOLORSPACE1;
++    p->pfnVideoProcessorSetOutputShaderUsage = videoStub_PFND3DWDDM2_0DDI_VIDEOPROCESSORSETOUTPUTSHADERUSAGE;
++    p->pfnVideoProcessorGetBehaviorHints = videoStub_PFND3DWDDM2_0DDI_VIDEOPROCESSORGETBEHAVIORHINTS;
++    p->pfnGetCryptoSessionPrivateDataSize = videoStub_PFND3DWDDM2_0DDI_GETCRYPTOSESSIONPRIVATEDATASIZE;
++}
++
++static void videoFill_D3DWDDM2_1DDI_VIDEODEVICEFUNCS(D3DWDDM2_1DDI_VIDEODEVICEFUNCS *p) {
++    memset(p, 0, sizeof(*p));
++    p->pfnGetVideoDecoderProfileCount = videoProfileCount;
++    p->pfnGetVideoDecoderProfile = videoProfile;
++    p->pfnCheckVideoDecoderFormat = videoFormat;
++    p->pfnGetVideoDecoderConfigCount = videoConfigCount;
++    p->pfnGetVideoDecoderConfig = videoConfig;
++    p->pfnGetVideoDecoderBufferTypeCount = videoBufferCount;
++    p->pfnGetVideoDecoderBufferInfo = videoBufferInfo;
++    p->pfnCalcPrivateVideoDecoderSize = videoDecoderSize;
++    p->pfnCreateVideoDecoder = videoCreateDecoder;
++    p->pfnDestroyVideoDecoder = videoDestroyDecoder;
++    p->pfnVideoDecoderExtension = videoStub_PFND3D11_1DDI_VIDEODECODEREXTENSION;
++    p->pfnVideoDecoderBeginFrame = videoBegin;
++    p->pfnVideoDecoderEndFrame = videoEnd;
++    p->pfnVideoDecoderSubmitBuffers = videoSubmitBuffers;
++    p->pfnCalcPrivateVideoProcessorEnumSize = videoStub_PFND3D11_1DDI_CALCPRIVATEVIDEOPROCESSORENUMSIZE;
++    p->pfnCreateVideoProcessorEnum = videoStub_PFND3D11_1DDI_CREATEVIDEOPROCESSORENUM;
++    p->pfnDestroyVideoProcessorEnum = videoStub_PFND3D11_1DDI_DESTROYVIDEOPROCESSORENUM;
++    p->pfnCheckVideoProcessorFormat = videoStub_PFND3D11_1DDI_CHECKVIDEOPROCESSORFORMAT;
++    p->pfnGetVideoProcessorCaps = videoStub_PFND3D11_1DDI_GETVIDEOPROCESSORCAPS;
++    p->pfnGetVideoProcessorRateConversionCaps = videoStub_PFND3D11_1DDI_GETVIDEOPROCESSORRATECONVERSIONCAPS;
++    p->pfnGetVideoProcessorCustomRate = videoStub_PFND3D11_1DDI_GETVIDEOPROCESSORCUSTOMRATE;
++    p->pfnGetVideoProcessorFilterRange = videoStub_PFND3D11_1DDI_GETVIDEOPROCESSORFILTERRANGE;
++    p->pfnCalcPrivateVideoProcessorSize = videoStub_PFND3D11_1DDI_CALCPRIVATEVIDEOPROCESSORSIZE;
++    p->pfnCreateVideoProcessor = videoStub_PFND3D11_1DDI_CREATEVIDEOPROCESSOR;
++    p->pfnDestroyVideoProcessor = videoStub_PFND3D11_1DDI_DESTROYVIDEOPROCESSOR;
++    p->pfnVideoProcessorSetOutputTargetRect = videoStub_PFND3D11_1DDI_VIDEOPROCESSORSETOUTPUTTARGETRECT;
++    p->pfnVideoProcessorSetOutputBackgroundColor = videoStub_PFND3D11_1DDI_VIDEOPROCESSORSETOUTPUTBACKGROUNDCOLOR;
++    p->pfnVideoProcessorSetOutputColorSpace = videoStub_PFND3D11_1DDI_VIDEOPROCESSORSETOUTPUTCOLORSPACE;
++    p->pfnVideoProcessorSetOutputAlphaFillMode = videoStub_PFND3D11_1DDI_VIDEOPROCESSORSETOUTPUTALPHAFILLMODE;
++    p->pfnVideoProcessorSetOutputConstriction = videoStub_PFND3D11_1DDI_VIDEOPROCESSORSETOUTPUTCONSTRICTION;
++    p->pfnVideoProcessorSetOutputStereoMode = videoStub_PFND3D11_1DDI_VIDEOPROCESSORSETOUTPUTSTEREOMODE;
++    p->pfnVideoProcessorSetOutputExtension = videoStub_PFND3D11_1DDI_VIDEOPROCESSORSETOUTPUTEXTENSION;
++    p->pfnVideoProcessorGetOutputExtension = videoStub_PFND3D11_1DDI_VIDEOPROCESSORGETOUTPUTEXTENSION;
++    p->pfnVideoProcessorSetStreamFrameFormat = videoStub_PFND3D11_1DDI_VIDEOPROCESSORSETSTREAMFRAMEFORMAT;
++    p->pfnVideoProcessorSetStreamColorSpace = videoStub_PFND3D11_1DDI_VIDEOPROCESSORSETSTREAMCOLORSPACE;
++    p->pfnVideoProcessorSetStreamOutputRate = videoStub_PFND3D11_1DDI_VIDEOPROCESSORSETSTREAMOUTPUTRATE;
++    p->pfnVideoProcessorSetStreamSourceRect = videoStub_PFND3D11_1DDI_VIDEOPROCESSORSETSTREAMSOURCERECT;
++    p->pfnVideoProcessorSetStreamDestRect = videoStub_PFND3D11_1DDI_VIDEOPROCESSORSETSTREAMDESTRECT;
++    p->pfnVideoProcessorSetStreamAlpha = videoStub_PFND3D11_1DDI_VIDEOPROCESSORSETSTREAMALPHA;
++    p->pfnVideoProcessorSetStreamPalette = videoStub_PFND3D11_1DDI_VIDEOPROCESSORSETSTREAMPALETTE;
++    p->pfnVideoProcessorSetStreamPixelAspectRatio = videoStub_PFND3D11_1DDI_VIDEOPROCESSORSETSTREAMPIXELASPECTRATIO;
++    p->pfnVideoProcessorSetStreamLumaKey = videoStub_PFND3D11_1DDI_VIDEOPROCESSORSETSTREAMLUMAKEY;
++    p->pfnVideoProcessorSetStreamStereoFormat = videoStub_PFND3D11_1DDI_VIDEOPROCESSORSETSTREAMSTEREOFORMAT;
++    p->pfnVideoProcessorSetStreamAutoProcessingMode = videoStub_PFND3D11_1DDI_VIDEOPROCESSORSETSTREAMAUTOPROCESSINGMODE;
++    p->pfnVideoProcessorSetStreamFilter = videoStub_PFND3D11_1DDI_VIDEOPROCESSORSETSTREAMFILTER;
++    p->pfnVideoProcessorSetStreamExtension = videoStub_PFND3D11_1DDI_VIDEOPROCESSORSETSTREAMEXTENSION;
++    p->pfnVideoProcessorGetStreamExtension = videoStub_PFND3D11_1DDI_VIDEOPROCESSORGETSTREAMEXTENSION;
++    p->pfnVideoProcessorBlt = videoStub_PFND3D11_1DDI_VIDEOPROCESSORBLT;
++    p->pfnCalcPrivateVideoDecoderOutputViewSize = videoOutputSize;
++    p->pfnCreateVideoDecoderOutputView = videoCreateOutput;
++    p->pfnDestroyVideoDecoderOutputView = videoDestroyOutput;
++    p->pfnCalcPrivateVideoProcessorInputViewSize = videoStub_PFND3D11_1DDI_CALCPRIVATEVIDEOPROCESSORINPUTVIEWSIZE;
++    p->pfnCreateVideoProcessorInputView = videoStub_PFND3D11_1DDI_CREATEVIDEOPROCESSORINPUTVIEW;
++    p->pfnDestroyVideoProcessorInputView = videoStub_PFND3D11_1DDI_DESTROYVIDEOPROCESSORINPUTVIEW;
++    p->pfnCalcPrivateVideoProcessorOutputViewSize = videoStub_PFND3D11_1DDI_CALCPRIVATEVIDEOPROCESSOROUTPUTVIEWSIZE;
++    p->pfnCreateVideoProcessorOutputView = videoStub_PFND3D11_1DDI_CREATEVIDEOPROCESSOROUTPUTVIEW;
++    p->pfnDestroyVideoProcessorOutputView = videoStub_PFND3D11_1DDI_DESTROYVIDEOPROCESSOROUTPUTVIEW;
++    p->pfnVideoProcessorInputViewReadAfterWriteHazard = videoStub_PFND3D11_1DDI_VIDEOPROCESSORINPUTVIEWREADAFTERWRITEHAZARD;
++    p->pfnGetContentProtectionCaps = videoStub_PFND3D11_1DDI_GETCONTENTPROTECTIONCAPS;
++    p->pfnGetCryptoKeyExchangeType = videoStub_PFND3D11_1DDI_GETCRYPTOKEYEXCHANGETYPE;
++    p->pfnCalcPrivateCryptoSessionSize = videoStub_PFND3D11_1DDI_CALCPRIVATECRYPTOSESSIONSIZE;
++    p->pfnCreateCryptoSession = videoStub_PFND3D11_1DDI_CREATECRYPTOSESSION;
++    p->pfnDestroyCryptoSession = videoStub_PFND3D11_1DDI_DESTROYCRYPTOSESSION;
++    p->pfnGetCertificateSize = videoStub_PFND3D11_1DDI_GETCERTIFICATESIZE;
++    p->pfnGetCertificate = videoStub_PFND3D11_1DDI_GETCERTIFICATE;
++    p->pfnNegotiateCryptoSessionKeyExchange = videoStub_PFND3D11_1DDI_NEGOTIATECRYPTOSESSIONKEYESCHANGE;
++    p->pfnEncryptionBlt = videoStub_PFND3D11_1DDI_ENCRYPTIONBLT;
++    p->pfnDecryptionBlt = videoStub_PFND3D11_1DDI_DECRYPTIONBLT;
++    p->pfnStartSessionKeyRefresh = videoStub_PFND3D11_1DDI_STARTSESSIONKEYREFRESH;
++    p->pfnFinishSessionKeyRefresh = videoStub_PFND3D11_1DDI_FINISHSESSIONKEYREFRESH;
++    p->pfnGetEncryptionBltKey = videoStub_PFND3D11_1DDI_GETENCRYPTIONBLTKEY;
++    p->pfnCalcPrivateAuthenticatedChannelSize = videoStub_PFND3D11_1DDI_CALCPRIVATEAUTHENTICATEDCHANNELSIZE;
++    p->pfnCreateAuthenticatedChannel = videoStub_PFND3D11_1DDI_CREATEAUTHENTICATEDCHANNEL;
++    p->pfnDestroyAuthenticatedChannel = videoStub_PFND3D11_1DDI_DESTROYAUTHENTICATEDCHANNEL;
++    p->pfnNegotiateAuthenticatedChannelKeyExchange = videoStub_PFND3D11_1DDI_NEGOTIATEAUTHENTICATEDCHANNELKEYEXCHANGE;
++    p->pfnQueryAuthenticatedChannel = videoStub_PFND3D11_1DDI_QUERYAUTHENTICATEDCHANNEL;
++    p->pfnConfigureAuthenticatedChannel = videoStub_PFND3D11_1DDI_CONFIGUREAUTHENTICATEDCHANNEL;
++    p->pfnVideoDecoderGetHandle = videoStub_PFND3D11_1DDI_VIDEODECODERGETHANDLE;
++    p->pfnCryptoSessionGetHandle = videoStub_PFND3D11_1DDI_CRYPTOSESSIONGETHANDLE;
++    p->pfnVideoProcessorSetStreamRotation = videoStub_PFND3D11_1DDI_VIDEOPROCESSORSETSTREAMROTATION;
++    p->pfnGetCaptureHandle = videoStub_PFND3D11_1DDI_GETCAPTUREHANDLE;
++    p->pfnGetDataForNewHardwareKey = videoStub_PFND3DWDDM2_0DDI_GETDATAFORNEWHARDWAREKEY;
++    p->pfnCheckCryptoSessionStatus = videoStub_PFND3DWDDM2_0DDI_CHECKCRYPTOSESSIONSTATUS;
++    p->pfnVideoDecoderSubmitBuffers1 = videoSubmitBuffers1;
++    p->pfnQueryVideoCapabilities = videoCapabilities;
++    p->pfnCheckVideoProcessorFormatConversion = videoStub_PFND3DWDDM2_0DDI_CHECKVIDEOPROCESSORFORMATCONVERSION;
++    p->pfnVideoDecoderEnableDownsampling = videoStub_PFND3DWDDM2_0DDI_VIDEODECODERENABLEDOWNSAMPLING;
++    p->pfnVideoDecoderUpdateDownsampling = videoStub_PFND3DWDDM2_0DDI_VIDEODECODERUPDATEDOWNSAMPLING;
++    p->pfnVideoProcessorSetStreamMirror = videoStub_PFND3DWDDM2_0DDI_VIDEOPROCESSORSETSTREAMMIRROR;
++    p->pfnVideoProcessorSetOutputColorSpace1 = videoStub_PFND3DWDDM2_0DDI_VIDEOPROCESSORSETOUTPUTCOLORSPACE1;
++    p->pfnVideoProcessorSetStreamColorSpace1 = videoStub_PFND3DWDDM2_0DDI_VIDEOPROCESSORSETSTREAMCOLORSPACE1;
++    p->pfnVideoProcessorSetOutputShaderUsage = videoStub_PFND3DWDDM2_0DDI_VIDEOPROCESSORSETOUTPUTSHADERUSAGE;
++    p->pfnVideoProcessorGetBehaviorHints = videoStub_PFND3DWDDM2_0DDI_VIDEOPROCESSORGETBEHAVIORHINTS;
++    p->pfnGetCryptoSessionPrivateDataSize = videoStub_PFND3DWDDM2_0DDI_GETCRYPTOSESSIONPRIVATEDATASIZE;
++    p->pfnVideoProcessorSetOutputHDRMetaData = videoStub_PFND3DWDDM2_1DDI_VIDEOPROCESSORSETOUTPUTHDRMETADATA;
++    p->pfnVideoProcessorSetStreamHDRMetaData = videoStub_PFND3DWDDM2_1DDI_VIDEOPROCESSORSETSTREAMHDRMETADATA;
++}
++
++static HRESULT APIENTRY videoRetrieve(D3D10DDI_HDEVICE h, UINT32 id, SIZE_T inputSize, void *input, SIZE_T outputSize, void *output) {
++    PTRITON_DEVICE p = videoDevice(h);
++    if (!p || !p->pVideoDev || !p->pVideoCtx) return E_NOINTERFACE;
++    if (!input || !output || outputSize != sizeof(D3D11_1DDI_VIDEO_OUTPUT)) return E_INVALIDARG;
++    memset(output, 0, outputSize);
++    switch (id) {
++    case D3D11_1DDI_VIDEO_FUNCTIONS: {
++        if (inputSize != sizeof(D3D11_1DDI_VIDEO_INPUT)) return E_INVALIDARG;
++        D3D11_1DDI_VIDEO_INPUT *args = input; if (!args->p11VideoDeviceFuncs) return E_INVALIDARG;
++        videoFill_D3D11_1DDI_VIDEODEVICEFUNCS(args->p11VideoDeviceFuncs); return S_OK;
++    }
++    case D3DWDDM2_0DDI_VIDEO_FUNCTIONS: {
++        if (inputSize != sizeof(D3DWDDM2_0DDI_VIDEO_INPUT)) return E_INVALIDARG;
++        D3DWDDM2_0DDI_VIDEO_INPUT *args = input; if (!args->pWDDM2_0VideoDeviceFuncs) return E_INVALIDARG;
++        videoFill_D3DWDDM2_0DDI_VIDEODEVICEFUNCS(args->pWDDM2_0VideoDeviceFuncs); return S_OK;
++    }
++    case D3DWDDM2_1DDI_VIDEO_FUNCTIONS: {
++        if (inputSize != sizeof(D3DWDDM2_1DDI_VIDEO_INPUT)) return E_INVALIDARG;
++        D3DWDDM2_1DDI_VIDEO_INPUT *args = input; if (!args->pWDDM2_1VideoDeviceFuncs) return E_INVALIDARG;
++        videoFill_D3DWDDM2_1DDI_VIDEODEVICEFUNCS(args->pWDDM2_1VideoDeviceFuncs); return S_OK;
++    }
++    default: return E_NOINTERFACE;
++    }
++}
++void tritonInstallVideoFuncs(PTRITON_DEVICE p, const D3D10DDIARG_CREATEDEVICE *args) {
++    if (!args->ppfnRetrieveSubObject) return;
++    HRESULT hr = ID3D11Device1_QueryInterface(p->pDev1, &IID_ID3D11VideoDevice, (void **)&p->pVideoDev);
++    if (SUCCEEDED(hr)) hr = ID3D11DeviceContext1_QueryInterface(p->pCtx1, &IID_ID3D11VideoContext, (void **)&p->pVideoCtx);
++    if (FAILED(hr)) { tritonDestroyVideo(p); return; }
++    *args->ppfnRetrieveSubObject = videoRetrieve;
++}
++void tritonDestroyVideo(PTRITON_DEVICE p) {
++    if (p->pVideoCtx) { ID3D11VideoContext_Release(p->pVideoCtx); p->pVideoCtx = NULL; }
++    if (p->pVideoDev) { ID3D11VideoDevice_Release(p->pVideoDev); p->pVideoDev = NULL; }
++}
++
++BOOL tritonVideoFormatSupported(PTRITON_DEVICE p, DXGI_FORMAT fmt) {
++    if (!p || !p->pVideoDev) return FALSE;
++    UINT count = ID3D11VideoDevice_GetVideoDecoderProfileCount(p->pVideoDev);
++    for (UINT i = 0; i < count; i++) {
++        GUID profile; BOOL supported = FALSE;
++        if (SUCCEEDED(ID3D11VideoDevice_GetVideoDecoderProfile(p->pVideoDev, i, &profile)) &&
++            SUCCEEDED(ID3D11VideoDevice_CheckVideoDecoderFormat(p->pVideoDev, &profile, fmt, &supported)) && supported) return TRUE;
++    }
++    return FALSE;
++}
+--- /dev/null
++++ b/src/virtio/neptune/triton/tritonVideoStubs.h
+@@ -0,0 +1,232 @@
++/* Required DDI slots for unsupported processing/protection. No such objects are created.
++ * SPDX-License-Identifier: MIT
++ */
++static SIZE_T APIENTRY videoStub_PFND3D11_1DDI_CALCPRIVATEAUTHENTICATEDCHANNELSIZE(D3D10DDI_HDEVICE a0, CONST D3D11_1DDIARG_CREATEAUTHENTICATEDCHANNEL* a1) {
++    return 0;
++}
++static SIZE_T APIENTRY videoStub_PFND3D11_1DDI_CALCPRIVATECRYPTOSESSIONSIZE(D3D10DDI_HDEVICE a0, CONST D3D11_1DDIARG_CREATECRYPTOSESSION* a1) {
++    return 0;
++}
++static SIZE_T APIENTRY videoStub_PFND3D11_1DDI_CALCPRIVATEVIDEODECODEROUTPUTVIEWSIZE(D3D10DDI_HDEVICE a0, CONST D3D11_1DDIARG_CREATEVIDEODECODEROUTPUTVIEW* a1) {
++    return 0;
++}
++static SIZE_T APIENTRY videoStub_PFND3D11_1DDI_CALCPRIVATEVIDEODECODERSIZE(D3D10DDI_HDEVICE a0, CONST D3D11_1DDIARG_CREATEVIDEODECODER* a1) {
++    return 0;
++}
++static SIZE_T APIENTRY videoStub_PFND3D11_1DDI_CALCPRIVATEVIDEOPROCESSORENUMSIZE(D3D10DDI_HDEVICE a0, CONST D3D11_1DDIARG_CREATEVIDEOPROCESSORENUM* a1) {
++    return 0;
++}
++static SIZE_T APIENTRY videoStub_PFND3D11_1DDI_CALCPRIVATEVIDEOPROCESSORINPUTVIEWSIZE(D3D10DDI_HDEVICE a0, CONST D3D11_1DDIARG_CREATEVIDEOPROCESSORINPUTVIEW* a1) {
++    return 0;
++}
++static SIZE_T APIENTRY videoStub_PFND3D11_1DDI_CALCPRIVATEVIDEOPROCESSOROUTPUTVIEWSIZE(D3D10DDI_HDEVICE a0, CONST D3D11_1DDIARG_CREATEVIDEOPROCESSOROUTPUTVIEW* a1) {
++    return 0;
++}
++static SIZE_T APIENTRY videoStub_PFND3D11_1DDI_CALCPRIVATEVIDEOPROCESSORSIZE(D3D10DDI_HDEVICE a0, CONST D3D11_1DDIARG_CREATEVIDEOPROCESSOR* a1) {
++    return 0;
++}
++static VOID APIENTRY videoStub_PFND3D11_1DDI_CHECKVIDEODECODERFORMAT(D3D10DDI_HDEVICE a0, CONST GUID* a1, DXGI_FORMAT a2, BOOL* a3) {
++}
++static VOID APIENTRY videoStub_PFND3D11_1DDI_CHECKVIDEOPROCESSORFORMAT(D3D10DDI_HDEVICE a0, D3D11_1DDI_HVIDEOPROCESSORENUM a1, DXGI_FORMAT a2, UINT* a3) {
++}
++static HRESULT APIENTRY videoStub_PFND3D11_1DDI_CONFIGUREAUTHENTICATEDCHANNEL(D3D10DDI_HDEVICE a0, D3D11_1DDI_HAUTHCHANNEL a1, UINT a2, CONST VOID* a3, D3D11_1DDI_AUTHENTICATED_CONFIGURE_OUTPUT* a4) {
++    return E_NOTIMPL;
++}
++static HRESULT APIENTRY videoStub_PFND3D11_1DDI_CREATEAUTHENTICATEDCHANNEL(D3D10DDI_HDEVICE a0, D3D11_1DDIARG_CREATEAUTHENTICATEDCHANNEL* a1, D3D11_1DDI_HAUTHCHANNEL a2, D3D11_1DDI_HRTAUTHCHANNEL a3) {
++    return E_NOTIMPL;
++}
++static HRESULT APIENTRY videoStub_PFND3D11_1DDI_CREATECRYPTOSESSION(D3D10DDI_HDEVICE a0, CONST D3D11_1DDIARG_CREATECRYPTOSESSION* a1, D3D11_1DDI_HCRYPTOSESSION a2, D3D11_1DDI_HRTCRYPTOSESSION a3) {
++    return E_NOTIMPL;
++}
++static HRESULT APIENTRY videoStub_PFND3D11_1DDI_CREATEVIDEODECODER(D3D10DDI_HDEVICE a0, CONST D3D11_1DDIARG_CREATEVIDEODECODER* a1, D3D11_1DDI_HDECODE a2, D3D11_1DDI_HRTDECODE a3) {
++    return E_NOTIMPL;
++}
++static HRESULT APIENTRY videoStub_PFND3D11_1DDI_CREATEVIDEODECODEROUTPUTVIEW(D3D10DDI_HDEVICE a0, CONST D3D11_1DDIARG_CREATEVIDEODECODEROUTPUTVIEW* a1, D3D11_1DDI_HVIDEODECODEROUTPUTVIEW a2, D3D11_1DDI_HRTVIDEODECODEROUTPUTVIEW a3) {
++    return E_NOTIMPL;
++}
++static HRESULT APIENTRY videoStub_PFND3D11_1DDI_CREATEVIDEOPROCESSOR(D3D10DDI_HDEVICE a0, CONST D3D11_1DDIARG_CREATEVIDEOPROCESSOR* a1, D3D11_1DDI_HVIDEOPROCESSOR a2, D3D11_1DDI_HRTVIDEOPROCESSOR a3) {
++    return E_NOTIMPL;
++}
++static HRESULT APIENTRY videoStub_PFND3D11_1DDI_CREATEVIDEOPROCESSORENUM(D3D10DDI_HDEVICE a0, CONST D3D11_1DDIARG_CREATEVIDEOPROCESSORENUM* a1, D3D11_1DDI_HVIDEOPROCESSORENUM a2, D3D11_1DDI_HRTVIDEOPROCESSORENUM a3) {
++    return E_NOTIMPL;
++}
++static HRESULT APIENTRY videoStub_PFND3D11_1DDI_CREATEVIDEOPROCESSORINPUTVIEW(D3D10DDI_HDEVICE a0, CONST D3D11_1DDIARG_CREATEVIDEOPROCESSORINPUTVIEW* a1, D3D11_1DDI_HVIDEOPROCESSORINPUTVIEW a2, D3D11_1DDI_HRTVIDEOPROCESSORINPUTVIEW a3) {
++    return E_NOTIMPL;
++}
++static HRESULT APIENTRY videoStub_PFND3D11_1DDI_CREATEVIDEOPROCESSOROUTPUTVIEW(D3D10DDI_HDEVICE a0, CONST D3D11_1DDIARG_CREATEVIDEOPROCESSOROUTPUTVIEW* a1, D3D11_1DDI_HVIDEOPROCESSOROUTPUTVIEW a2, D3D11_1DDI_HRTVIDEOPROCESSOROUTPUTVIEW a3) {
++    return E_NOTIMPL;
++}
++static HRESULT APIENTRY videoStub_PFND3D11_1DDI_CRYPTOSESSIONGETHANDLE(D3D10DDI_HDEVICE a0, D3D11_1DDI_HCRYPTOSESSION a1, HANDLE* a2) {
++    return E_NOTIMPL;
++}
++static VOID APIENTRY videoStub_PFND3D11_1DDI_DECRYPTIONBLT(D3D10DDI_HDEVICE a0, D3D11_1DDI_HCRYPTOSESSION a1, D3D10DDI_HRESOURCE a2, D3D10DDI_HRESOURCE a3, CONST D3D11_1DDI_ENCRYPTED_BLOCK_INFO* a4, UINT a5, CONST VOID* a6, UINT a7, CONST VOID* a8) {
++}
++static VOID APIENTRY videoStub_PFND3D11_1DDI_DESTROYAUTHENTICATEDCHANNEL(D3D10DDI_HDEVICE a0, D3D11_1DDI_HAUTHCHANNEL a1) {
++}
++static VOID APIENTRY videoStub_PFND3D11_1DDI_DESTROYCRYPTOSESSION(D3D10DDI_HDEVICE a0, D3D11_1DDI_HCRYPTOSESSION a1) {
++}
++static VOID APIENTRY videoStub_PFND3D11_1DDI_DESTROYVIDEODECODER(D3D10DDI_HDEVICE a0, D3D11_1DDI_HDECODE a1) {
++}
++static VOID APIENTRY videoStub_PFND3D11_1DDI_DESTROYVIDEODECODEROUTPUTVIEW(D3D10DDI_HDEVICE a0, D3D11_1DDI_HVIDEODECODEROUTPUTVIEW a1) {
++}
++static VOID APIENTRY videoStub_PFND3D11_1DDI_DESTROYVIDEOPROCESSOR(D3D10DDI_HDEVICE a0, D3D11_1DDI_HVIDEOPROCESSOR a1) {
++}
++static VOID APIENTRY videoStub_PFND3D11_1DDI_DESTROYVIDEOPROCESSORENUM(D3D10DDI_HDEVICE a0, D3D11_1DDI_HVIDEOPROCESSORENUM a1) {
++}
++static VOID APIENTRY videoStub_PFND3D11_1DDI_DESTROYVIDEOPROCESSORINPUTVIEW(D3D10DDI_HDEVICE a0, D3D11_1DDI_HVIDEOPROCESSORINPUTVIEW a1) {
++}
++static VOID APIENTRY videoStub_PFND3D11_1DDI_DESTROYVIDEOPROCESSOROUTPUTVIEW(D3D10DDI_HDEVICE a0, D3D11_1DDI_HVIDEOPROCESSOROUTPUTVIEW a1) {
++}
++static VOID APIENTRY videoStub_PFND3D11_1DDI_ENCRYPTIONBLT(D3D10DDI_HDEVICE a0, D3D11_1DDI_HCRYPTOSESSION a1, D3D10DDI_HRESOURCE a2, D3D10DDI_HRESOURCE a3, UINT a4, CONST VOID* a5) {
++}
++static VOID APIENTRY videoStub_PFND3D11_1DDI_FINISHSESSIONKEYREFRESH(D3D10DDI_HDEVICE a0, D3D11_1DDI_HCRYPTOSESSION a1) {
++}
++static VOID APIENTRY videoStub_PFND3D11_1DDI_GETCAPTUREHANDLE(D3D10DDI_HDEVICE a0, D3D11_1DDI_GETCAPTUREHANDLEDATA* a1) {
++}
++static VOID APIENTRY videoStub_PFND3D11_1DDI_GETCERTIFICATE(D3D10DDI_HDEVICE a0, CONST D3D11_1DDI_CERTIFICATE_INFO* a1, UINT a2, BYTE* a3) {
++}
++static VOID APIENTRY videoStub_PFND3D11_1DDI_GETCERTIFICATESIZE(D3D10DDI_HDEVICE a0, CONST D3D11_1DDI_CERTIFICATE_INFO* a1, UINT* a2) {
++}
++static HRESULT APIENTRY videoStub_PFND3D11_1DDI_GETCONTENTPROTECTIONCAPS(D3D10DDI_HDEVICE a0, CONST GUID* a1, CONST GUID* a2, D3D11_1DDI_VIDEO_CONTENT_PROTECTION_CAPS* a3) {
++    return E_NOTIMPL;
++}
++static HRESULT APIENTRY videoStub_PFND3D11_1DDI_GETCRYPTOKEYEXCHANGETYPE(D3D10DDI_HDEVICE a0, CONST GUID* a1, CONST GUID* a2, UINT a3, GUID* a4) {
++    return E_NOTIMPL;
++}
++static VOID APIENTRY videoStub_PFND3D11_1DDI_GETENCRYPTIONBLTKEY(D3D10DDI_HDEVICE a0, D3D11_1DDI_HCRYPTOSESSION a1, UINT a2, VOID* a3) {
++}
++static VOID APIENTRY videoStub_PFND3D11_1DDI_GETVIDEODECODERBUFFERINFO(D3D10DDI_HDEVICE a0, CONST D3D11_1DDI_VIDEO_DECODER_DESC* a1, UINT a2, D3D11_1DDI_VIDEO_DECODER_BUFFER_INFO* a3) {
++}
++static VOID APIENTRY videoStub_PFND3D11_1DDI_GETVIDEODECODERBUFFERTYPECOUNT(D3D10DDI_HDEVICE a0, CONST D3D11_1DDI_VIDEO_DECODER_DESC* a1, UINT * a2) {
++}
++static VOID APIENTRY videoStub_PFND3D11_1DDI_GETVIDEODECODERCONFIG(D3D10DDI_HDEVICE a0, CONST D3D11_1DDI_VIDEO_DECODER_DESC* a1, UINT a2, D3D11_1DDI_VIDEO_DECODER_CONFIG* a3) {
++}
++static VOID APIENTRY videoStub_PFND3D11_1DDI_GETVIDEODECODERCONFIGCOUNT(D3D10DDI_HDEVICE a0, CONST D3D11_1DDI_VIDEO_DECODER_DESC* a1, UINT* a2) {
++}
++static VOID APIENTRY videoStub_PFND3D11_1DDI_GETVIDEODECODERPROFILE(D3D10DDI_HDEVICE a0, UINT a1, GUID* a2) {
++}
++static VOID APIENTRY videoStub_PFND3D11_1DDI_GETVIDEODECODERPROFILECOUNT(D3D10DDI_HDEVICE a0, UINT* a1) {
++}
++static VOID APIENTRY videoStub_PFND3D11_1DDI_GETVIDEOPROCESSORCAPS(D3D10DDI_HDEVICE a0, D3D11_1DDI_HVIDEOPROCESSORENUM a1, D3D11_1DDI_VIDEO_PROCESSOR_CAPS* a2) {
++}
++static VOID APIENTRY videoStub_PFND3D11_1DDI_GETVIDEOPROCESSORCUSTOMRATE(D3D10DDI_HDEVICE a0, D3D11_1DDI_HVIDEOPROCESSORENUM a1, UINT a2, UINT a3, D3D11_1DDI_VIDEO_PROCESSOR_CUSTOM_RATE* a4) {
++}
++static VOID APIENTRY videoStub_PFND3D11_1DDI_GETVIDEOPROCESSORFILTERRANGE(D3D10DDI_HDEVICE a0, D3D11_1DDI_HVIDEOPROCESSORENUM a1, D3D11_1DDI_VIDEO_PROCESSOR_FILTER a2, D3D11_1DDI_VIDEO_PROCESSOR_FILTER_RANGE* a3) {
++}
++static VOID APIENTRY videoStub_PFND3D11_1DDI_GETVIDEOPROCESSORRATECONVERSIONCAPS(D3D10DDI_HDEVICE a0, D3D11_1DDI_HVIDEOPROCESSORENUM a1, UINT a2, D3D11_1DDI_VIDEO_PROCESSOR_RATE_CONVERSION_CAPS* a3) {
++}
++static HRESULT APIENTRY videoStub_PFND3D11_1DDI_NEGOTIATEAUTHENTICATEDCHANNELKEYEXCHANGE(D3D10DDI_HDEVICE a0, D3D11_1DDI_HAUTHCHANNEL a1, UINT a2, VOID* a3) {
++    return E_NOTIMPL;
++}
++static HRESULT APIENTRY videoStub_PFND3D11_1DDI_NEGOTIATECRYPTOSESSIONKEYESCHANGE(D3D10DDI_HDEVICE a0, D3D11_1DDI_HCRYPTOSESSION a1, UINT a2, BYTE* a3) {
++    return E_NOTIMPL;
++}
++static HRESULT APIENTRY videoStub_PFND3D11_1DDI_QUERYAUTHENTICATEDCHANNEL(D3D10DDI_HDEVICE a0, D3D11_1DDI_HAUTHCHANNEL a1, UINT a2, CONST VOID* a3, UINT a4, VOID* a5) {
++    return E_NOTIMPL;
++}
++static VOID APIENTRY videoStub_PFND3D11_1DDI_STARTSESSIONKEYREFRESH(D3D10DDI_HDEVICE a0, D3D11_1DDI_HCRYPTOSESSION a1, UINT a2, VOID* a3) {
++}
++static HRESULT APIENTRY videoStub_PFND3D11_1DDI_VIDEODECODERBEGINFRAME(D3D10DDI_HDEVICE a0, D3D11_1DDI_HDECODE a1, CONST D3D11_1DDIARG_VIDEODECODERBEGINFRAME* a2) {
++    return E_NOTIMPL;
++}
++static VOID APIENTRY videoStub_PFND3D11_1DDI_VIDEODECODERENDFRAME(D3D10DDI_HDEVICE a0, D3D11_1DDI_HDECODE a1) {
++}
++static HRESULT APIENTRY videoStub_PFND3D11_1DDI_VIDEODECODEREXTENSION(D3D10DDI_HDEVICE a0, D3D11_1DDI_HDECODE a1, CONST D3D11_1DDIARG_VIDEODECODEREXTENSION* a2) {
++    return E_NOTIMPL;
++}
++static HRESULT APIENTRY videoStub_PFND3D11_1DDI_VIDEODECODERGETHANDLE(D3D10DDI_HDEVICE a0, D3D11_1DDI_HDECODE a1, HANDLE* a2) {
++    return E_NOTIMPL;
++}
++static HRESULT APIENTRY videoStub_PFND3D11_1DDI_VIDEODECODERSUBMITBUFFERS(D3D10DDI_HDEVICE a0, D3D11_1DDI_HDECODE a1, UINT a2, CONST D3D11_1DDI_VIDEO_DECODER_BUFFER_DESC* a3) {
++    return E_NOTIMPL;
++}
++static HRESULT APIENTRY videoStub_PFND3D11_1DDI_VIDEOPROCESSORBLT(D3D10DDI_HDEVICE a0, D3D11_1DDI_HVIDEOPROCESSOR a1, D3D11_1DDI_HVIDEOPROCESSOROUTPUTVIEW a2, UINT a3, UINT a4, CONST D3D11_1DDI_VIDEO_PROCESSOR_STREAM* a5) {
++    return E_NOTIMPL;
++}
++static HRESULT APIENTRY videoStub_PFND3D11_1DDI_VIDEOPROCESSORGETOUTPUTEXTENSION(D3D10DDI_HDEVICE a0, D3D11_1DDI_HVIDEOPROCESSOR a1, CONST GUID* a2, UINT a3, void* a4) {
++    return E_NOTIMPL;
++}
++static HRESULT APIENTRY videoStub_PFND3D11_1DDI_VIDEOPROCESSORGETSTREAMEXTENSION(D3D10DDI_HDEVICE a0, D3D11_1DDI_HVIDEOPROCESSOR a1, UINT a2, CONST GUID* a3, UINT a4, void* a5) {
++    return E_NOTIMPL;
++}
++static VOID APIENTRY videoStub_PFND3D11_1DDI_VIDEOPROCESSORINPUTVIEWREADAFTERWRITEHAZARD(D3D10DDI_HDEVICE a0, D3D11_1DDI_HVIDEOPROCESSORINPUTVIEW a1, D3D10DDI_HRESOURCE a2) {
++}
++static VOID APIENTRY videoStub_PFND3D11_1DDI_VIDEOPROCESSORSETOUTPUTALPHAFILLMODE(D3D10DDI_HDEVICE a0, D3D11_1DDI_HVIDEOPROCESSOR a1, D3D11_1DDI_VIDEO_PROCESSOR_ALPHA_FILL_MODE a2, UINT a3) {
++}
++static VOID APIENTRY videoStub_PFND3D11_1DDI_VIDEOPROCESSORSETOUTPUTBACKGROUNDCOLOR(D3D10DDI_HDEVICE a0, D3D11_1DDI_HVIDEOPROCESSOR a1, BOOL a2, CONST D3D11_1DDI_VIDEO_COLOR* a3) {
++}
++static VOID APIENTRY videoStub_PFND3D11_1DDI_VIDEOPROCESSORSETOUTPUTCOLORSPACE(D3D10DDI_HDEVICE a0, D3D11_1DDI_HVIDEOPROCESSOR a1, CONST D3D11_1DDI_VIDEO_PROCESSOR_COLOR_SPACE* a2) {
++}
++static VOID APIENTRY videoStub_PFND3D11_1DDI_VIDEOPROCESSORSETOUTPUTCONSTRICTION(D3D10DDI_HDEVICE a0, D3D11_1DDI_HVIDEOPROCESSOR a1, BOOL a2, SIZE a3) {
++}
++static HRESULT APIENTRY videoStub_PFND3D11_1DDI_VIDEOPROCESSORSETOUTPUTEXTENSION(D3D10DDI_HDEVICE a0, D3D11_1DDI_HVIDEOPROCESSOR a1, CONST GUID* a2, UINT a3, void* a4) {
++    return E_NOTIMPL;
++}
++static VOID APIENTRY videoStub_PFND3D11_1DDI_VIDEOPROCESSORSETOUTPUTSTEREOMODE(D3D10DDI_HDEVICE a0, D3D11_1DDI_HVIDEOPROCESSOR a1, BOOL a2) {
++}
++static VOID APIENTRY videoStub_PFND3D11_1DDI_VIDEOPROCESSORSETOUTPUTTARGETRECT(D3D10DDI_HDEVICE a0, D3D11_1DDI_HVIDEOPROCESSOR a1, BOOL a2, CONST RECT* a3) {
++}
++static VOID APIENTRY videoStub_PFND3D11_1DDI_VIDEOPROCESSORSETSTREAMALPHA(D3D10DDI_HDEVICE a0, D3D11_1DDI_HVIDEOPROCESSOR a1, UINT a2, BOOL a3, FLOAT a4) {
++}
++static VOID APIENTRY videoStub_PFND3D11_1DDI_VIDEOPROCESSORSETSTREAMAUTOPROCESSINGMODE(D3D10DDI_HDEVICE a0, D3D11_1DDI_HVIDEOPROCESSOR a1, UINT a2, BOOL a3) {
++}
++static VOID APIENTRY videoStub_PFND3D11_1DDI_VIDEOPROCESSORSETSTREAMCOLORSPACE(D3D10DDI_HDEVICE a0, D3D11_1DDI_HVIDEOPROCESSOR a1, UINT a2, CONST D3D11_1DDI_VIDEO_PROCESSOR_COLOR_SPACE* a3) {
++}
++static VOID APIENTRY videoStub_PFND3D11_1DDI_VIDEOPROCESSORSETSTREAMDESTRECT(D3D10DDI_HDEVICE a0, D3D11_1DDI_HVIDEOPROCESSOR a1, UINT a2, BOOL a3, CONST RECT* a4) {
++}
++static HRESULT APIENTRY videoStub_PFND3D11_1DDI_VIDEOPROCESSORSETSTREAMEXTENSION(D3D10DDI_HDEVICE a0, D3D11_1DDI_HVIDEOPROCESSOR a1, UINT a2, CONST GUID* a3, UINT a4, void* a5) {
++    return E_NOTIMPL;
++}
++static VOID APIENTRY videoStub_PFND3D11_1DDI_VIDEOPROCESSORSETSTREAMFILTER(D3D10DDI_HDEVICE a0, D3D11_1DDI_HVIDEOPROCESSOR a1, UINT a2, D3D11_1DDI_VIDEO_PROCESSOR_FILTER a3, BOOL a4, int a5) {
++}
++static VOID APIENTRY videoStub_PFND3D11_1DDI_VIDEOPROCESSORSETSTREAMFRAMEFORMAT(D3D10DDI_HDEVICE a0, D3D11_1DDI_HVIDEOPROCESSOR a1, UINT a2, D3D11_1DDI_VIDEO_FRAME_FORMAT a3) {
++}
++static VOID APIENTRY videoStub_PFND3D11_1DDI_VIDEOPROCESSORSETSTREAMLUMAKEY(D3D10DDI_HDEVICE a0, D3D11_1DDI_HVIDEOPROCESSOR a1, UINT a2, BOOL a3, FLOAT a4, FLOAT a5) {
++}
++static VOID APIENTRY videoStub_PFND3D11_1DDI_VIDEOPROCESSORSETSTREAMOUTPUTRATE(D3D10DDI_HDEVICE a0, D3D11_1DDI_HVIDEOPROCESSOR a1, UINT a2, D3D11_1DDI_VIDEO_PROCESSOR_OUTPUT_RATE a3, BOOL a4, CONST DXGI_RATIONAL* a5) {
++}
++static VOID APIENTRY videoStub_PFND3D11_1DDI_VIDEOPROCESSORSETSTREAMPALETTE(D3D10DDI_HDEVICE a0, D3D11_1DDI_HVIDEOPROCESSOR a1, UINT a2, UINT a3, CONST UINT* a4) {
++}
++static VOID APIENTRY videoStub_PFND3D11_1DDI_VIDEOPROCESSORSETSTREAMPIXELASPECTRATIO(D3D10DDI_HDEVICE a0, D3D11_1DDI_HVIDEOPROCESSOR a1, UINT a2, BOOL a3, CONST DXGI_RATIONAL* a4, CONST DXGI_RATIONAL* a5) {
++}
++static VOID APIENTRY videoStub_PFND3D11_1DDI_VIDEOPROCESSORSETSTREAMROTATION(D3D10DDI_HDEVICE a0, D3D11_1DDI_HVIDEOPROCESSOR a1, UINT a2, BOOL a3, D3D11_1DDI_VIDEO_PROCESSOR_ROTATION a4) {
++}
++static VOID APIENTRY videoStub_PFND3D11_1DDI_VIDEOPROCESSORSETSTREAMSOURCERECT(D3D10DDI_HDEVICE a0, D3D11_1DDI_HVIDEOPROCESSOR a1, UINT a2, BOOL a3, CONST RECT* a4) {
++}
++static VOID APIENTRY videoStub_PFND3D11_1DDI_VIDEOPROCESSORSETSTREAMSTEREOFORMAT(D3D10DDI_HDEVICE a0, D3D11_1DDI_HVIDEOPROCESSOR a1, UINT a2, BOOL a3, D3D11_1DDI_VIDEO_PROCESSOR_STEREO_FORMAT a4, BOOL a5, BOOL a6, D3D11_1DDI_VIDEO_PROCESSOR_STEREO_FLIP_MODE a7, int a8) {
++}
++static void APIENTRY videoStub_PFND3DWDDM2_0DDI_CHECKCRYPTOSESSIONSTATUS(D3D10DDI_HDEVICE a0, D3D11_1DDI_HCRYPTOSESSION a1, D3DWDDM2_0DDI_CRYPTO_SESSION_STATUS* a2) {
++}
++static VOID APIENTRY videoStub_PFND3DWDDM2_0DDI_CHECKVIDEOPROCESSORFORMATCONVERSION(D3D10DDI_HDEVICE a0, D3D11_1DDI_HVIDEOPROCESSORENUM a1, D3DWDDM2_0DDI_CHECK_VIDEO_PROCESSOR_FORMAT_CONVERSION* a2) {
++}
++static void APIENTRY videoStub_PFND3DWDDM2_0DDI_GETCRYPTOSESSIONPRIVATEDATASIZE(D3D10DDI_HDEVICE a0, CONST GUID* a1, CONST GUID* a2, CONST GUID* a3, UINT* a4, UINT* a5) {
++}
++static HRESULT APIENTRY videoStub_PFND3DWDDM2_0DDI_GETDATAFORNEWHARDWAREKEY(D3D10DDI_HDEVICE a0, D3D11_1DDI_HCRYPTOSESSION a1, UINT a2, const void* a3, UINT64* a4) {
++    return E_NOTIMPL;
++}
++static VOID APIENTRY videoStub_PFND3DWDDM2_0DDI_QUERYVIDEOCAPABILITIES(D3D10DDI_HDEVICE a0, D3DWDDM2_0DDI_VIDEO_CAPABILITY_QUERY a1, UINT a2, VOID* a3) {
++}
++static HRESULT APIENTRY videoStub_PFND3DWDDM2_0DDI_VIDEODECODERENABLEDOWNSAMPLING(D3D10DDI_HDEVICE a0, D3D11_1DDI_HDECODE a1, D3DDDI_COLOR_SPACE_TYPE a2, CONST D3D11_1DDI_VIDEO_DECODER_DESC* a3, D3DDDI_COLOR_SPACE_TYPE a4, UINT a5) {
++    return E_NOTIMPL;
++}
++static HRESULT APIENTRY videoStub_PFND3DWDDM2_0DDI_VIDEODECODERSUBMITBUFFERS1(D3D10DDI_HDEVICE a0, D3D11_1DDI_HDECODE a1, UINT a2, CONST D3DWDDM2_0DDI_VIDEO_DECODER_BUFFER_DESC1* a3) {
++    return E_NOTIMPL;
++}
++static HRESULT APIENTRY videoStub_PFND3DWDDM2_0DDI_VIDEODECODERUPDATEDOWNSAMPLING(D3D10DDI_HDEVICE a0, D3D11_1DDI_HDECODE a1, CONST D3D11_1DDI_VIDEO_DECODER_DESC* a2, D3DDDI_COLOR_SPACE_TYPE a3) {
++    return E_NOTIMPL;
++}
++static HRESULT APIENTRY videoStub_PFND3DWDDM2_0DDI_VIDEOPROCESSORGETBEHAVIORHINTS(D3D10DDI_HDEVICE a0, D3D11_1DDI_HVIDEOPROCESSOR a1, UINT a2, UINT a3, DXGI_FORMAT a4, UINT a5, const D3DWDDM2_0DDI_VIDEO_PROCESSOR_STREAM_BEHAVIOR_HINT * a6, UINT* a7) {
++    return E_NOTIMPL;
++}
++static VOID APIENTRY videoStub_PFND3DWDDM2_0DDI_VIDEOPROCESSORSETOUTPUTCOLORSPACE1(D3D10DDI_HDEVICE a0, D3D11_1DDI_HVIDEOPROCESSOR a1, D3DDDI_COLOR_SPACE_TYPE a2) {
++}
++static VOID APIENTRY videoStub_PFND3DWDDM2_0DDI_VIDEOPROCESSORSETOUTPUTSHADERUSAGE(D3D10DDI_HDEVICE a0, D3D11_1DDI_HVIDEOPROCESSOR a1, BOOL a2) {
++}
++static VOID APIENTRY videoStub_PFND3DWDDM2_0DDI_VIDEOPROCESSORSETSTREAMCOLORSPACE1(D3D10DDI_HDEVICE a0, D3D11_1DDI_HVIDEOPROCESSOR a1, UINT a2, D3DDDI_COLOR_SPACE_TYPE a3) {
++}
++static VOID APIENTRY videoStub_PFND3DWDDM2_0DDI_VIDEOPROCESSORSETSTREAMMIRROR(D3D10DDI_HDEVICE a0, D3D11_1DDI_HVIDEOPROCESSOR a1, UINT a2, BOOL a3, BOOL a4, BOOL a5) {
++}
++static VOID APIENTRY videoStub_PFND3DWDDM2_1DDI_VIDEOPROCESSORSETOUTPUTHDRMETADATA(D3D10DDI_HDEVICE a0, D3D11_1DDI_HVIDEOPROCESSOR a1, D3DDDI_HDR_METADATA_TYPE a2, UINT a3, CONST VOID* a4) {
++}
++static VOID APIENTRY videoStub_PFND3DWDDM2_1DDI_VIDEOPROCESSORSETSTREAMHDRMETADATA(D3D10DDI_HDEVICE a0, D3D11_1DDI_HVIDEOPROCESSOR a1, UINT a2, D3DDDI_HDR_METADATA_TYPE a3, UINT a4, CONST VOID* a5) {
++}

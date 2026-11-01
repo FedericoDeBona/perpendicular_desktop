@@ -73,10 +73,13 @@ def main():
         if digest(path) != pins[name]['sha256']:
             raise ValueError('Archive differs from the pinned input: ' + name)
     patches = [REPO / 'graphics/backend' / name for name in
-               ('shared-initialization.patch', 'nv12-native.patch', 'vp9-video-device.patch')]
-    for patch, key in zip(patches, ('shared_initialization_patch_sha256', 'nv12_patch_sha256', 'vp9_video_patch_sha256')):
+               ('shared-initialization.patch', 'nv12-native.patch', 'vp9-video-device.patch', 'video-resource-submit.patch')]
+    for patch, key in zip(patches, ('shared_initialization_patch_sha256', 'nv12_patch_sha256', 'vp9_video_patch_sha256', 'resource_submit_patch_sha256')):
         if digest(patch) != pins[key]:
             raise ValueError('Patch differs from the pinned input: ' + patch.name)
+    header = REPO / 'graphics/backend/video-resource-submit.h'
+    if digest(header) != pins['resource_submit_header_sha256']:
+        raise ValueError('Resource submission ABI differs from the pinned input')
     meson, ninja = args.meson.resolve(strict=True), args.ninja.resolve(strict=True)
     env = dict(os.environ)
     env['PATH'] = str(ninja.parent) + os.pathsep + env.get('PATH', '')
@@ -97,6 +100,7 @@ def main():
         run(['git', 'apply', patch], cwd=source)
         if index == 0 and digest(source / 'src/d3d11/d3d11_texture_device.cpp') != pins['shared_initialization_source_sha256']:
             raise ValueError('The existing shared-initialization fix was not reconstructed')
+    shutil.copyfile(header, source / 'src/d3d11/video-resource-submit.h')
     run([meson, 'setup', build, source, '-Dnative_llvm_path=' + str(llvm),
          '-Dbuildtype=release', '-Doptimization=3', '-Db_lto=false', '-Denable_tests=false'])
     run([ninja, '-C', build, '-j1', 'src/dxmt-native/libdxmt-native.dylib'])

@@ -18,6 +18,8 @@
   "shared_initialization_patch_sha256": "fd16333b1bf057abd985b01d8ffd8c29bb5ec07c06cddb4e94f680893c939827",
   "shared_initialization_source_sha256": "51d09b022faeb49e1ebc39c3e02f473ee6641589b5e42b2686f3465dc994dac1",
   "nv12_patch_sha256": "920c19e67ec26c0224713764720f1deb9fc4306ba82bd73b1f55c951532462e1",
-  "status": "private-native-D3D11-VP9-only; Neptune decoder-buffer transport and Windows/browser qualification absent",
-  "vp9_video_patch_sha256": "faa55e0876949d365c350fbb78628be73353b47474b78ce31c1a55567eb351f1"
+  "status": "private native resource submission qualified; Windows DDI bridge and browser qualification in progress; not deployed",
+  "vp9_video_patch_sha256": "faa55e0876949d365c350fbb78628be73353b47474b78ce31c1a55567eb351f1",
+  "resource_submit_patch_sha256": "4a2b310dbb0d9ea8a3e609add6996991437f0f57a10c9d047de9106951ec1657",
+  "resource_submit_header_sha256": "ad2f6d652779f29a8d63860333cb0007456c00fd020c2574d9118421a67a95cd"
 }

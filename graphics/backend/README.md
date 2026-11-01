@@ -16,7 +16,7 @@ Le vecchie istruzioni di cattura, i comandi di build legati a profili storici e 
 
 `nv12-native.patch` è il prerequisite per il decoder VP9: due texture Metal per un'immagine NV12, SRV di piano e trasferimenti coerenti. Deriva dalla [proposta di hadykachmarv-coder](https://github.com/3Shain/dxmt/issues/229), [gist](https://gist.github.com/hadykachmarv-coder/b8a3074182aa755f6bedde534481855e) revisione `822a74043048972717460b51688e23f739bebc1a`, adattata al nostro pin e alle sue firme/gestione BC. Le modifiche ereditano la licenza dei sorgenti DXMT (LGPL2.1-or-later); attribuzione e fallimenti conservati nel diario. La parte swapchain desktop della proposta non è inclusa.
 
-La build ordinaria continua a usare il backend qualificato. La candidata include ora `vp9-video-device.patch`: VideoDevice/Context nativi e decodifica hardware VP9 profile0 verso NV12, verificati sotto. Mancano ancora trasporto dei buffer nel driver Windows e condivisione NV12 fra processi. Non cambiare la main né promuovere le capacità del browser in base al solo PASS nativo. I pin della ricetta sono in [video-inputs.json](video-inputs.json), non sostituiscono quelli del runtime di produzione.
+La build ordinaria continua a usare il backend qualificato. La candidata include ora `vp9-video-device.patch`: VideoDevice/Context nativi e decodifica hardware VP9 profile0 verso NV12, verificati sotto. Il ponte DDI Windows è ora compilato, con buffer trasportati come risorse attraverso DecoderExtension; la verifica Windows e la condivisione NV12 fra processi restano aperte. Non cambiare la main né promuovere le capacità del browser in base al solo PASS nativo. I pin della ricetta sono in [video-inputs.json](video-inputs.json), non sostituiscono quelli del runtime di produzione.
 
 Per ricompilare su un Mac ARM64, scaricare i tre archivi dagli URL esatti dell'input e conservarli fuori Git. Servono Xcode con il componente Metal Toolchain (`xcodebuild -downloadComponent MetalToolchain` se assente), Python3.9+, Meson e Ninja. La ricetta verifica tutti gli hash prima di scrivere, ricostruisce la correzione shared-initialization esistente e rifiuta output preesistente o nel repository:
 
@@ -38,7 +38,7 @@ La libreria grezza è in `new-nv12-build/build/src/dxmt-native/libdxmt-native.dy
 
 ## Decoder VP9 attraverso le API D3D11 native
 
-`vp9-video-device.patch` si applica dopo shared-initialization e NV12; la ricetta ora richiede tutte e tre le patch con hash esatti. Aggiunge le interfacce video al device/context immediato nativo, un decoder profile0/8bit/4:2:0 e una sessione VideoToolbox che **richiede hardware** e ne controlla la proprietà effettiva. Nessun processore video, contenuto cifrato o fallback software viene dichiarato supportato. Device/context conservano l'identità IUnknown e le superfici/decoder hanno riferimenti espliciti e controlli di dimensione/ownership. Deferred context non espone VideoContext.
+`vp9-video-device.patch` si applica dopo shared-initialization e NV12; la ricetta richiede le tre patch iniziali e video-resource-submit.patch, con ABI e hash esatti. Aggiunge le interfacce video al device/context immediato nativo, un decoder profile0/8bit/4:2:0 e una sessione VideoToolbox che **richiede hardware** e ne controlla la proprietà effettiva. Nessun processore video, contenuto cifrato o fallback software viene dichiarato supportato. Device/context conservano l'identità IUnknown e le superfici/decoder hanno riferimenti espliciti e controlli di dimensione/ownership. Deferred context non espone VideoContext.
 
 Il primo passaggio dati è funzionale: VideoToolbox→copia NV12 sul Mac→UpdateSubresource verso i due piani GPU. Non è un percorso senza copie né una qualifica di60FPS. Gli stub COM di video processing/protezione non sono capacità offerte e la creazione dei relativi oggetti fallisce esplicitamente.
 
@@ -60,6 +60,23 @@ c++ -std=c++20 -fms-extensions -Wno-extern-c-compat -Wno-ignored-attributes \
 
 Atteso:3frame pixel-identici, inclusi due frame interdipendenti dopo il keyframe. Il controllo verifica anche identità COM e rifiuto del descrittore fuori buffer. Il tempo totale include tre readback/verifiche, non è una misura FPS browser. Conservare anche i controlli NV12 e BGRA condivisa già descritti.
 
-**Limite Windows individuato nel sorgente del protocollo abbinato:** in `f510a6e4…`, GetDecoderBuffer e ReleaseDecoderBuffer restituiscono E_NOTIMPL senza usare il trasporto; non basta la presenza di altri messaggi video. Occorre completare la consegna dei byte guest→host con limiti/negoziazione e coppia UMD/runtime coerente, poi una prova reale Windows con kernel originale, Secure Boot/CI e OpenGL conservati. Non riattivare le vecchie candidate fence o trasferire binari di un altro Mac. Nessun nuovo UMD o runtime video è distribuito nella main da questa verifica nativa.
+## Collegamento DDI sperimentale Windows
 
-[Evidenze, tentativi e limite](../../docs/VERIFICATION.md#1-novembre--decoder-vp9-hardware-attraverso-api-d3d11-native).
+Gli stub COM GetDecoderBuffer/ReleaseDecoderBuffer restano presenti nel protocollo abbinato, ma WDDM gestisce i buffer come risorse D3D. `video-resource-submit.patch` usa l'esistente DecoderExtension per input senza puntatori e risorse per ID; l'ABI comune è `video-resource-submit.h`. Negoziazione1, massimo3 buffer,16MiB bitstream/64KiB metadata, offset/size/ownership e frame attivo obbligatori. Il controllo nativo precedente accetta anche `--resources`: verifica Map/Unmap, offset nonzero, rifiuto versione/range e tre frame pixel-identici. Non è un test del trasporto Windows.
+
+`video-ddi.patch` aggiunge al Mesa/Neptune pin bf536bba le tabelle video DDI11.1/2.0/2.1 e il collegamento alle API host. Non include vecchie modifiche fence/presentazione. La UMD ARM64 si ricostruisce separatamente con pin in `video-umd-inputs.json`. Input esterni al repository: archivio Mesa, pacchetto WDK Microsoft ARM64, archivio LLVM15 e directory SDK/XWin con strumenti/librerie indicati nel manifest. Xcode21 e un ambiente Python con Meson1.9.1/Mako1.3.12 sono richiesti; il controllo rifiuta input differenti, senza modificarli.
+
+```sh
+python3 scripts/rebuild-video-umd.py \
+  --mesa-archive /private/path/mesa-bf536b.tar.gz \
+  --wdk-archive /private/path/wdk.nupkg \
+  --llvm-archive /private/path/llvm-15.0.7-arm64.tar.xz \
+  --windows-sdk /private/tools/windows-sdk \
+  --meson /private/venv/bin/meson \
+  --ninja /private/venv/bin/ninja \
+  --output /private/path/new-video-umd
+```
+
+Output `build/src/virtio/neptune/triton/neptune_umd.dll`, file version sperimentale0.4.0.1 e ricevuta. `--prepare-only` ricostruisce sorgenti/configurazione senza dichiarare una build. Non crea un package installabile, non cambia KMD/DriverStore/registro/protezioni. La DLL non è firmata Microsoft. LoadLibrary in un processo Windows è riuscito; D3D11CreateDevice tramite driver software fallisce8007007f: non usare quel percorso come qualifica della UMD registrata.
+
+La canonica continua sul runtime qualificato precedente. Prossima verifica: copia Windows isolata con normale registrazione UMD e kernel originale/protezioni conservate, tre frame corretti usando il normale percorso GetDecoderBuffer/SubmitDecoderBuffers (senza `--resources` nell'app Windows), poi browser reale. Non allentare i gate di produzione né promuovere questi soli risultati. [Verifica e limiti](../../docs/VERIFICATION.md#1-novembre--buffer-video-come-risorse-e-prima-umd-ddi).
