@@ -1,0 +1,728 @@
+--- a/src/d3d11/d3d11_device.cpp
++++ b/src/d3d11/d3d11_device.cpp
+@@ -9,6 +9,11 @@
+ #include "d3d11_context.hpp"
+ #include "d3d11_context_state.hpp"
+ #include "d3d11_device.hpp"
++#ifndef _WIN32
++#include "d3d11_video.hpp"
++#include <mutex>
++#endif
++
+ #include "dxmt_nv12.hpp"
+ #include "d3d11_pipeline_cache.hpp"
+ #include "d3d11_private.h"
+@@ -1271,6 +1276,15 @@
+ 
+     if (riid == kRenderdocUUID || riid == kPixUUID || riid == kGpaUUID)
+       return E_NOINTERFACE;
++#ifndef _WIN32
++    if (riid == __uuidof(ID3D11VideoDevice)) {
++      std::lock_guard<std::mutex> lock(video_mutex_);
++      if (!video_device_) video_device_ = CreateNativeVideoDevice(&d3d11_device_);
++      if (!video_device_) return E_NOINTERFACE;
++      *ppvObject = ref(video_device_.get());
++      return S_OK;
++    }
++#endif
+ 
+     if (logQueryInterfaceError(__uuidof(IMTLDXGIDevice), riid)) {
+       WARN("D3D11Device: Unknown interface query ", str::format(riid));
+@@ -1375,6 +1389,10 @@
+   std::unique_ptr<Device> device;
+   CommandQueue &cmd_queue_;
+   MTLD3D11DeviceImpl d3d11_device_;
++#ifndef _WIN32
++  std::unique_ptr<NativeVideoDevice> video_device_;
++  std::mutex video_mutex_;
++#endif
+ };
+ 
+ Com<IMTLDXGIDevice> CreateD3D11Device(std::unique_ptr<Device> &&device,
+--- /dev/null
++++ b/src/d3d11/d3d11_video.cpp
+@@ -0,0 +1,461 @@
++// Native D3D11 video decode prototype; no video processor or protected content.
++// SPDX-License-Identifier: LGPL-2.1-or-later
++#include "d3d11_video.hpp"
++#include "d3d11_video_vt.hpp"
++#include "d3d11_device_child.hpp"
++#include "com/com_private_data.hpp"
++#include <array>
++#include <mutex>
++#include <cstring>
++
++namespace dxmt {
++namespace {
++constexpr GUID VP9Profile0 = {0x463707f8,0xa1d0,0x4585,{0x87,0x6d,0x83,0xaa,0x6d,0x60,0xb8,0x9e}};
++constexpr GUID NoEncrypt = {0x1b81bed0,0xa0c7,0x11d3,{0xb9,0x84,0x00,0xc0,0x4f,0x2e,0x73,0xc5}};
++bool validDesc(const D3D11_VIDEO_DECODER_DESC *d) {
++  return d && d->Guid == VP9Profile0 && d->OutputFormat == DXGI_FORMAT_NV12 &&
++      d->SampleWidth && d->SampleHeight && !(d->SampleWidth & 1) && !(d->SampleHeight & 1) &&
++      d->SampleWidth <= 4096 && d->SampleHeight <= 2160;
++}
++D3D11_VIDEO_DECODER_CONFIG decoderConfig() {
++  D3D11_VIDEO_DECODER_CONFIG c = {};
++  c.guidConfigBitstreamEncryption = c.guidConfigMBcontrolEncryption = c.guidConfigResidDiffEncryption = NoEncrypt;
++  c.ConfigBitstreamRaw = 1;
++  c.ConfigMinRenderTargetBuffCount = 8;
++  return c;
++}
++class UnsupportedDevice : public NativeVideoDevice {
++public:
++  HRESULT STDMETHODCALLTYPE CreateVideoProcessor(ID3D11VideoProcessorEnumerator *pEnum, UINT RateConversionIndex, ID3D11VideoProcessor **ppVideoProcessor) override {
++    if (ppVideoProcessor) *ppVideoProcessor = {};
++    return E_NOTIMPL;
++  }
++  HRESULT STDMETHODCALLTYPE CreateAuthenticatedChannel(D3D11_AUTHENTICATED_CHANNEL_TYPE ChannelType, ID3D11AuthenticatedChannel **ppAuthenticatedChannel) override {
++    if (ppAuthenticatedChannel) *ppAuthenticatedChannel = {};
++    return E_NOTIMPL;
++  }
++  HRESULT STDMETHODCALLTYPE CreateCryptoSession(const GUID *pCryptoType, const GUID *pDecoderProfile, const GUID *pKeyExchangeType, ID3D11CryptoSession **ppCryptoSession) override {
++    if (ppCryptoSession) *ppCryptoSession = {};
++    return E_NOTIMPL;
++  }
++  HRESULT STDMETHODCALLTYPE CreateVideoProcessorInputView(ID3D11Resource *pResource, ID3D11VideoProcessorEnumerator *pEnum, const D3D11_VIDEO_PROCESSOR_INPUT_VIEW_DESC *pDesc, ID3D11VideoProcessorInputView **ppVPIView) override {
++    if (ppVPIView) *ppVPIView = {};
++    return E_NOTIMPL;
++  }
++  HRESULT STDMETHODCALLTYPE CreateVideoProcessorOutputView(ID3D11Resource *pResource, ID3D11VideoProcessorEnumerator *pEnum, const D3D11_VIDEO_PROCESSOR_OUTPUT_VIEW_DESC *pDesc, ID3D11VideoProcessorOutputView **ppVPOView) override {
++    if (ppVPOView) *ppVPOView = {};
++    return E_NOTIMPL;
++  }
++  HRESULT STDMETHODCALLTYPE CreateVideoProcessorEnumerator(const D3D11_VIDEO_PROCESSOR_CONTENT_DESC *pDesc, ID3D11VideoProcessorEnumerator **ppEnum) override {
++    if (ppEnum) *ppEnum = {};
++    return E_NOTIMPL;
++  }
++  HRESULT STDMETHODCALLTYPE GetContentProtectionCaps(const GUID *pCryptoType, const GUID *pDecoderProfile, D3D11_VIDEO_CONTENT_PROTECTION_CAPS *pCaps) override {
++    if (pCaps) *pCaps = {};
++    return E_NOTIMPL;
++  }
++  HRESULT STDMETHODCALLTYPE CheckCryptoKeyExchange(const GUID *pCryptoType, const GUID *pDecoderProfile, UINT Index, GUID *pKeyExchangeType) override {
++    if (pKeyExchangeType) *pKeyExchangeType = {};
++    return E_NOTIMPL;
++  }
++};
++class UnsupportedContext : public NativeVideoContext {
++public:
++  HRESULT STDMETHODCALLTYPE DecoderExtension(ID3D11VideoDecoder *decoder, const D3D11_VIDEO_DECODER_EXTENSION *extension) override {
++    return E_NOTIMPL;
++  }
++  void STDMETHODCALLTYPE VideoProcessorSetOutputTargetRect(ID3D11VideoProcessor *processor, WINBOOL enable, const RECT *rect) override {
++  }
++  void STDMETHODCALLTYPE VideoProcessorSetOutputBackgroundColor(ID3D11VideoProcessor *processor, WINBOOL y_cb_cr, const D3D11_VIDEO_COLOR *color) override {
++  }
++  void STDMETHODCALLTYPE VideoProcessorSetOutputColorSpace(ID3D11VideoProcessor *processor, const D3D11_VIDEO_PROCESSOR_COLOR_SPACE *color_space) override {
++  }
++  void STDMETHODCALLTYPE VideoProcessorSetOutputAlphaFillMode(ID3D11VideoProcessor *processor, D3D11_VIDEO_PROCESSOR_ALPHA_FILL_MODE alpha_fill_mode, UINT stream_idx) override {
++  }
++  void STDMETHODCALLTYPE VideoProcessorSetOutputConstriction(ID3D11VideoProcessor *processor, WINBOOL enable, SIZE size) override {
++  }
++  void STDMETHODCALLTYPE VideoProcessorSetOutputStereoMode(ID3D11VideoProcessor *processor, WINBOOL enable) override {
++  }
++  HRESULT STDMETHODCALLTYPE VideoProcessorSetOutputExtension(ID3D11VideoProcessor *processor, const GUID *guid, UINT data_size, void *data) override {
++    return E_NOTIMPL;
++  }
++  void STDMETHODCALLTYPE VideoProcessorGetOutputTargetRect(ID3D11VideoProcessor *processor, WINBOOL *enabled, RECT *rect) override {
++    if (enabled) *enabled = {};
++    if (rect) *rect = {};
++  }
++  void STDMETHODCALLTYPE VideoProcessorGetOutputBackgroundColor(ID3D11VideoProcessor *processor, WINBOOL *y_cb_cr, D3D11_VIDEO_COLOR *color) override {
++    if (y_cb_cr) *y_cb_cr = {};
++    if (color) *color = {};
++  }
++  void STDMETHODCALLTYPE VideoProcessorGetOutputColorSpace(ID3D11VideoProcessor *processor, D3D11_VIDEO_PROCESSOR_COLOR_SPACE *color_space) override {
++    if (color_space) *color_space = {};
++  }
++  void STDMETHODCALLTYPE VideoProcessorGetOutputAlphaFillMode(ID3D11VideoProcessor *processor, D3D11_VIDEO_PROCESSOR_ALPHA_FILL_MODE *alpha_fill_mode, UINT *stream_idx) override {
++    if (alpha_fill_mode) *alpha_fill_mode = {};
++    if (stream_idx) *stream_idx = {};
++  }
++  void STDMETHODCALLTYPE VideoProcessorGetOutputConstriction(ID3D11VideoProcessor *processor, WINBOOL *enabled, SIZE *size) override {
++    if (enabled) *enabled = {};
++    if (size) *size = {};
++  }
++  void STDMETHODCALLTYPE VideoProcessorGetOutputStereoMode(ID3D11VideoProcessor *processor, WINBOOL *enabled) override {
++    if (enabled) *enabled = {};
++  }
++  HRESULT STDMETHODCALLTYPE VideoProcessorGetOutputExtension(ID3D11VideoProcessor *processor, const GUID *guid, UINT data_size, void *data) override {
++    return E_NOTIMPL;
++  }
++  void STDMETHODCALLTYPE VideoProcessorSetStreamFrameFormat(ID3D11VideoProcessor *processor, UINT stream_idx, D3D11_VIDEO_FRAME_FORMAT format) override {
++  }
++  void STDMETHODCALLTYPE VideoProcessorSetStreamColorSpace(ID3D11VideoProcessor *processor, UINT stream_idx, const D3D11_VIDEO_PROCESSOR_COLOR_SPACE *color_space) override {
++  }
++  void STDMETHODCALLTYPE VideoProcessorSetStreamOutputRate(ID3D11VideoProcessor *processor, UINT stream_idx, D3D11_VIDEO_PROCESSOR_OUTPUT_RATE rate, WINBOOL repeat, const DXGI_RATIONAL *custom_rate) override {
++  }
++  void STDMETHODCALLTYPE VideoProcessorSetStreamSourceRect(ID3D11VideoProcessor *processor, UINT stream_idx, WINBOOL enable, const RECT *rect) override {
++  }
++  void STDMETHODCALLTYPE VideoProcessorSetStreamDestRect(ID3D11VideoProcessor *processor, UINT stream_idx, WINBOOL enable, const RECT *rect) override {
++  }
++  void STDMETHODCALLTYPE VideoProcessorSetStreamAlpha(ID3D11VideoProcessor *processor, UINT stream_idx, WINBOOL enable, float alpha) override {
++  }
++  void STDMETHODCALLTYPE VideoProcessorSetStreamPalette(ID3D11VideoProcessor *processor, UINT stream_idx, UINT entry_count, const UINT *entries) override {
++  }
++  void STDMETHODCALLTYPE VideoProcessorSetStreamPixelAspectRatio(ID3D11VideoProcessor *processor, UINT stream_idx, WINBOOL enable, const DXGI_RATIONAL *src_aspect_ratio, const DXGI_RATIONAL *dst_aspect_ratio) override {
++  }
++  void STDMETHODCALLTYPE VideoProcessorSetStreamLumaKey(ID3D11VideoProcessor *processor, UINT stream_idx, WINBOOL enable, float lower, float upper) override {
++  }
++  void STDMETHODCALLTYPE VideoProcessorSetStreamStereoFormat(ID3D11VideoProcessor *processor, UINT stream_idx, WINBOOL enable, D3D11_VIDEO_PROCESSOR_STEREO_FORMAT format, WINBOOL left_view_frame0, WINBOOL base_view_frame0, D3D11_VIDEO_PROCESSOR_STEREO_FLIP_MODE flip_mode, int mono_offset) override {
++  }
++  void STDMETHODCALLTYPE VideoProcessorSetStreamAutoProcessingMode(ID3D11VideoProcessor *processor, UINT stream_idx, WINBOOL enable) override {
++  }
++  void STDMETHODCALLTYPE VideoProcessorSetStreamFilter(ID3D11VideoProcessor *processor, UINT stream_idx, D3D11_VIDEO_PROCESSOR_FILTER filter, WINBOOL enable, int level) override {
++  }
++  HRESULT STDMETHODCALLTYPE VideoProcessorSetStreamExtension(ID3D11VideoProcessor *processor, UINT stream_idx, const GUID *guid, UINT data_size, void *data) override {
++    return E_NOTIMPL;
++  }
++  void STDMETHODCALLTYPE VideoProcessorGetStreamFrameFormat(ID3D11VideoProcessor *processor, UINT stream_idx, D3D11_VIDEO_FRAME_FORMAT *format) override {
++    if (format) *format = {};
++  }
++  void STDMETHODCALLTYPE VideoProcessorGetStreamColorSpace(ID3D11VideoProcessor *processor, UINT stream_idx, D3D11_VIDEO_PROCESSOR_COLOR_SPACE *color_space) override {
++    if (color_space) *color_space = {};
++  }
++  void STDMETHODCALLTYPE VideoProcessorGetStreamOutputRate(ID3D11VideoProcessor *processor, UINT stream_idx, D3D11_VIDEO_PROCESSOR_OUTPUT_RATE *rate, WINBOOL *repeat, DXGI_RATIONAL *custom_rate) override {
++    if (rate) *rate = {};
++    if (repeat) *repeat = {};
++    if (custom_rate) *custom_rate = {};
++  }
++  void STDMETHODCALLTYPE VideoProcessorGetStreamSourceRect(ID3D11VideoProcessor *processor, UINT stream_idx, WINBOOL *enabled, RECT *rect) override {
++    if (enabled) *enabled = {};
++    if (rect) *rect = {};
++  }
++  void STDMETHODCALLTYPE VideoProcessorGetStreamDestRect(ID3D11VideoProcessor *processor, UINT stream_idx, WINBOOL *enabled, RECT *rect) override {
++    if (enabled) *enabled = {};
++    if (rect) *rect = {};
++  }
++  void STDMETHODCALLTYPE VideoProcessorGetStreamAlpha(ID3D11VideoProcessor *processor, UINT stream_idx, WINBOOL *enabled, float *alpha) override {
++    if (enabled) *enabled = {};
++    if (alpha) *alpha = {};
++  }
++  void STDMETHODCALLTYPE VideoProcessorGetStreamPalette(ID3D11VideoProcessor *processor, UINT stream_idx, UINT entry_count, UINT *entries) override {
++    if (entries) *entries = {};
++  }
++  void STDMETHODCALLTYPE VideoProcessorGetStreamPixelAspectRatio(ID3D11VideoProcessor *processor, UINT stream_idx, WINBOOL *enabled, DXGI_RATIONAL *src_aspect_ratio, DXGI_RATIONAL *dst_aspect_ratio) override {
++    if (enabled) *enabled = {};
++    if (src_aspect_ratio) *src_aspect_ratio = {};
++    if (dst_aspect_ratio) *dst_aspect_ratio = {};
++  }
++  void STDMETHODCALLTYPE VideoProcessorGetStreamLumaKey(ID3D11VideoProcessor *processor, UINT stream_idx, WINBOOL *enabled, float *lower, float *upper) override {
++    if (enabled) *enabled = {};
++    if (lower) *lower = {};
++    if (upper) *upper = {};
++  }
++  void STDMETHODCALLTYPE VideoProcessorGetStreamStereoFormat(ID3D11VideoProcessor *processor, UINT stream_idx, WINBOOL *enabled, D3D11_VIDEO_PROCESSOR_STEREO_FORMAT *format, WINBOOL *left_view_frame0, WINBOOL *base_view_frame0, D3D11_VIDEO_PROCESSOR_STEREO_FLIP_MODE *flip_mode, int *mono_offset) override {
++    if (enabled) *enabled = {};
++    if (format) *format = {};
++    if (left_view_frame0) *left_view_frame0 = {};
++    if (base_view_frame0) *base_view_frame0 = {};
++    if (flip_mode) *flip_mode = {};
++    if (mono_offset) *mono_offset = {};
++  }
++  void STDMETHODCALLTYPE VideoProcessorGetStreamAutoProcessingMode(ID3D11VideoProcessor *processor, UINT stream_idx, WINBOOL *enabled) override {
++    if (enabled) *enabled = {};
++  }
++  void STDMETHODCALLTYPE VideoProcessorGetStreamFilter(ID3D11VideoProcessor *processor, UINT stream_idx, D3D11_VIDEO_PROCESSOR_FILTER filter, WINBOOL *enabled, int *level) override {
++    if (enabled) *enabled = {};
++    if (level) *level = {};
++  }
++  HRESULT STDMETHODCALLTYPE VideoProcessorGetStreamExtension(ID3D11VideoProcessor *processor, UINT stream_idx, const GUID *guid, UINT data_size, void *data) override {
++    return E_NOTIMPL;
++  }
++  HRESULT STDMETHODCALLTYPE VideoProcessorBlt(ID3D11VideoProcessor *processor, ID3D11VideoProcessorOutputView *view, UINT frame_idx, UINT stream_count, const D3D11_VIDEO_PROCESSOR_STREAM *streams) override {
++    return E_NOTIMPL;
++  }
++  HRESULT STDMETHODCALLTYPE NegotiateCryptoSessionKeyExchange(ID3D11CryptoSession *session, UINT data_size, void *data) override {
++    return E_NOTIMPL;
++  }
++  void STDMETHODCALLTYPE EncryptionBlt(ID3D11CryptoSession *session, ID3D11Texture2D *src_surface, ID3D11Texture2D *dst_surface, UINT iv_size, void *iv) override {
++  }
++  void STDMETHODCALLTYPE DecryptionBlt(ID3D11CryptoSession *session, ID3D11Texture2D *src_surface, ID3D11Texture2D *dst_surface, D3D11_ENCRYPTED_BLOCK_INFO *block_info, UINT key_size, const void *key, UINT iv_size, void *iv) override {
++    if (block_info) *block_info = {};
++  }
++  void STDMETHODCALLTYPE StartSessionKeyRefresh(ID3D11CryptoSession *session, UINT random_number_size, void *random_number) override {
++  }
++  void STDMETHODCALLTYPE FinishSessionKeyRefresh(ID3D11CryptoSession *session) override {
++  }
++  HRESULT STDMETHODCALLTYPE GetEncryptionBltKey(ID3D11CryptoSession *session, UINT key_size, void *key) override {
++    return E_NOTIMPL;
++  }
++  HRESULT STDMETHODCALLTYPE NegotiateAuthenticatedChannelKeyExchange(ID3D11AuthenticatedChannel *channel, UINT data_size, void *data) override {
++    return E_NOTIMPL;
++  }
++  HRESULT STDMETHODCALLTYPE QueryAuthenticatedChannel(ID3D11AuthenticatedChannel *channel, UINT input_size, const void *input, UINT output_size, void *output) override {
++    return E_NOTIMPL;
++  }
++  HRESULT STDMETHODCALLTYPE ConfigureAuthenticatedChannel(ID3D11AuthenticatedChannel *channel, UINT input_size, const void *input, D3D11_AUTHENTICATED_CONFIGURE_OUTPUT *output) override {
++    if (output) *output = {};
++    return E_NOTIMPL;
++  }
++  void STDMETHODCALLTYPE VideoProcessorSetStreamRotation(ID3D11VideoProcessor *processor, UINT stream_idx, WINBOOL enable, D3D11_VIDEO_PROCESSOR_ROTATION rotation) override {
++  }
++  void STDMETHODCALLTYPE VideoProcessorGetStreamRotation(ID3D11VideoProcessor *processor, UINT stream_idx, WINBOOL *enable, D3D11_VIDEO_PROCESSOR_ROTATION *rotation) override {
++    if (enable) *enable = {};
++    if (rotation) *rotation = {};
++  }
++};
++class DecoderView final : public MTLD3D11DeviceChild<ID3D11VideoDecoderOutputView> {
++  Com<ID3D11Device> owner_;
++  Com<ID3D11Texture2D> texture_;
++  D3D11_VIDEO_DECODER_OUTPUT_VIEW_DESC desc_;
++public:
++  DecoderView(MTLD3D11Device *dev, ID3D11Texture2D *texture, const D3D11_VIDEO_DECODER_OUTPUT_VIEW_DESC &desc)
++    : MTLD3D11DeviceChild(dev), owner_(dev), texture_(texture), desc_(desc) {}
++  HRESULT STDMETHODCALLTYPE QueryInterface(REFIID id, void **out) override {
++    if (!out) return E_POINTER;
++    *out = nullptr;
++    if (id == __uuidof(IUnknown) || id == __uuidof(ID3D11DeviceChild) ||
++        id == __uuidof(ID3D11View) || id == __uuidof(ID3D11VideoDecoderOutputView)) {
++      *out = ref(this); return S_OK;
++    }
++    return E_NOINTERFACE;
++  }
++  void STDMETHODCALLTYPE GetResource(ID3D11Resource **out) override { if (out) *out = ref(texture_.ptr()); }
++  void STDMETHODCALLTYPE GetDesc(D3D11_VIDEO_DECODER_OUTPUT_VIEW_DESC *out) override { if (out) *out = desc_; }
++  MTLD3D11Device *device() const { return m_parent; }
++  ID3D11Texture2D *texture() const { return texture_.ptr(); }
++  UINT slice() const { return desc_.Texture2D.ArraySlice; }
++};
++class Decoder final : public MTLD3D11DeviceChild<ID3D11VideoDecoder> {
++  Com<ID3D11Device> owner_;
++public:
++  struct Buffer { std::vector<uint8_t> bytes; bool mapped = false; };
++  std::array<Buffer, 3> buffers;
++  std::mutex mutex;
++  NativeVP9Session session;
++  D3D11_VIDEO_DECODER_DESC desc;
++  D3D11_VIDEO_DECODER_CONFIG config;
++  Com<DecoderView> view;
++  ID3D11DeviceContext *active_context = nullptr; // borrowed only during a frame
++  std::vector<uint8_t> submitted, pixels;
++  Decoder(MTLD3D11Device *dev, const D3D11_VIDEO_DECODER_DESC &d, const D3D11_VIDEO_DECODER_CONFIG &c)
++    : MTLD3D11DeviceChild(dev), owner_(dev), session(d.SampleWidth, d.SampleHeight), desc(d), config(c) {}
++  HRESULT STDMETHODCALLTYPE QueryInterface(REFIID id, void **out) override {
++    if (!out) return E_POINTER;
++    *out = nullptr;
++    if (id == __uuidof(IUnknown) || id == __uuidof(ID3D11DeviceChild) || id == __uuidof(ID3D11VideoDecoder)) {
++      *out = ref(this); return S_OK;
++    }
++    return E_NOINTERFACE;
++  }
++  HRESULT STDMETHODCALLTYPE GetCreationParameters(D3D11_VIDEO_DECODER_DESC *d, D3D11_VIDEO_DECODER_CONFIG *c) override {
++    if (!d || !c) return E_POINTER;
++    *d = desc; *c = config; return S_OK;
++  }
++  HRESULT STDMETHODCALLTYPE GetDriverHandle(HANDLE *out) override { if (out) *out = nullptr; return E_NOTIMPL; }
++  MTLD3D11Device *device() const { return m_parent; }
++  static int bufferIndex(D3D11_VIDEO_DECODER_BUFFER_TYPE t) {
++    switch (t) {
++      case D3D11_VIDEO_DECODER_BUFFER_BITSTREAM: return 0;
++      case D3D11_VIDEO_DECODER_BUFFER_PICTURE_PARAMETERS: return 1;
++      case D3D11_VIDEO_DECODER_BUFFER_SLICE_CONTROL: return 2;
++      default: return -1;
++    }
++  }
++};
++class VideoDevice final : public UnsupportedDevice {
++  MTLD3D11Device *device_;
++  ComPrivateData private_;
++public:
++  explicit VideoDevice(MTLD3D11Device *dev) : device_(dev) {}
++  ULONG STDMETHODCALLTYPE AddRef() override { return device_->AddRef(); }
++  ULONG STDMETHODCALLTYPE Release() override { return device_->Release(); }
++  HRESULT STDMETHODCALLTYPE QueryInterface(REFIID id, void **out) override {
++    if (!out) return E_POINTER;
++    if (id == __uuidof(ID3D11VideoDevice)) { *out = ref(this); return S_OK; }
++    return device_->QueryInterface(id, out);
++  }
++  HRESULT STDMETHODCALLTYPE SetPrivateData(REFGUID id, UINT size, const void *data) override {
++    return private_.setData(id, size, data);
++  }
++  HRESULT STDMETHODCALLTYPE SetPrivateDataInterface(REFGUID id, const IUnknown *value) override {
++    return private_.setInterface(id, value);
++  }
++  UINT STDMETHODCALLTYPE GetVideoDecoderProfileCount() override { return 1; }
++  HRESULT STDMETHODCALLTYPE GetVideoDecoderProfile(UINT index, GUID *profile) override {
++    if (!profile) return E_POINTER;
++    *profile = {};
++    if (index) return E_INVALIDARG;
++    *profile = VP9Profile0; return S_OK;
++  }
++  HRESULT STDMETHODCALLTYPE CheckVideoDecoderFormat(const GUID *profile, DXGI_FORMAT format, WINBOOL *supported) override {
++    if (!profile || !supported) return E_POINTER;
++    *supported = *profile == VP9Profile0 && format == DXGI_FORMAT_NV12;
++    return S_OK;
++  }
++  HRESULT STDMETHODCALLTYPE GetVideoDecoderConfigCount(const D3D11_VIDEO_DECODER_DESC *desc, UINT *count) override {
++    if (!count) return E_POINTER;
++    *count = 0;
++    if (!validDesc(desc)) return E_INVALIDARG;
++    *count = 1; return S_OK;
++  }
++  HRESULT STDMETHODCALLTYPE GetVideoDecoderConfig(const D3D11_VIDEO_DECODER_DESC *desc, UINT index,
++                                                 D3D11_VIDEO_DECODER_CONFIG *config) override {
++    if (!config) return E_POINTER;
++    *config = {};
++    if (!validDesc(desc) || index) return E_INVALIDARG;
++    *config = decoderConfig(); return S_OK;
++  }
++  HRESULT STDMETHODCALLTYPE CreateVideoDecoder(const D3D11_VIDEO_DECODER_DESC *desc,
++      const D3D11_VIDEO_DECODER_CONFIG *config, ID3D11VideoDecoder **out) override {
++    if (!out) return E_POINTER;
++    *out = nullptr;
++    auto expected = decoderConfig();
++    if (!validDesc(desc) || !config || std::memcmp(config, &expected, sizeof(expected))) return E_INVALIDARG;
++    try {
++      auto decoder = std::make_unique<Decoder>(device_, *desc, *config);
++      if (!decoder->session.ready()) return E_FAIL;
++      *out = ref(decoder.release()); return S_OK;
++    } catch (const std::bad_alloc &) { return E_OUTOFMEMORY; }
++  }
++  HRESULT STDMETHODCALLTYPE CreateVideoDecoderOutputView(ID3D11Resource *resource,
++      const D3D11_VIDEO_DECODER_OUTPUT_VIEW_DESC *desc, ID3D11VideoDecoderOutputView **out) override {
++    if (!out) return E_POINTER;
++    *out = nullptr;
++    if (!resource || !desc || desc->DecodeProfile != VP9Profile0 || desc->ViewDimension != D3D11_VDOV_DIMENSION_TEXTURE2D)
++      return E_INVALIDARG;
++    Com<ID3D11Texture2D> texture;
++    if (FAILED(resource->QueryInterface(__uuidof(ID3D11Texture2D), reinterpret_cast<void **>(&texture)))) return E_INVALIDARG;
++    Com<ID3D11Device> owner; texture->GetDevice(&owner);
++    if (owner.ptr() != device_) return E_INVALIDARG;
++    D3D11_TEXTURE2D_DESC td = {}; texture->GetDesc(&td);
++    if (td.Format != DXGI_FORMAT_NV12 || td.MipLevels != 1 || td.SampleDesc.Count != 1 ||
++        td.Usage != D3D11_USAGE_DEFAULT || !(td.BindFlags & D3D11_BIND_DECODER) || desc->Texture2D.ArraySlice >= td.ArraySize)
++      return E_INVALIDARG;
++    try { *out = ref(new DecoderView(device_, texture.ptr(), *desc)); return S_OK; }
++    catch (const std::bad_alloc &) { return E_OUTOFMEMORY; }
++  }
++};
++class VideoContext final : public UnsupportedContext {
++  MTLD3D11Device *device_;
++  ID3D11DeviceContext *context_;
++  Decoder *checked(ID3D11VideoDecoder *d) {
++    auto decoder = dynamic_cast<Decoder *>(d);
++    return decoder && decoder->device() == device_ ? decoder : nullptr;
++  }
++public:
++  VideoContext(MTLD3D11Device *dev, ID3D11DeviceContext *ctx) : device_(dev), context_(ctx) {}
++  ULONG STDMETHODCALLTYPE AddRef() override { return context_->AddRef(); }
++  ULONG STDMETHODCALLTYPE Release() override { return context_->Release(); }
++  HRESULT STDMETHODCALLTYPE QueryInterface(REFIID id, void **out) override {
++    if (!out) return E_POINTER;
++    if (id == __uuidof(ID3D11VideoContext)) { *out = ref(this); return S_OK; }
++    return context_->QueryInterface(id, out);
++  }
++  void STDMETHODCALLTYPE GetDevice(ID3D11Device **out) override { context_->GetDevice(out); }
++  HRESULT STDMETHODCALLTYPE GetPrivateData(REFGUID id, UINT *size, void *data) override { return context_->GetPrivateData(id,size,data); }
++  HRESULT STDMETHODCALLTYPE SetPrivateData(REFGUID id, UINT size, const void *data) override { return context_->SetPrivateData(id,size,data); }
++  HRESULT STDMETHODCALLTYPE SetPrivateDataInterface(REFGUID id, const IUnknown *value) override { return context_->SetPrivateDataInterface(id,value); }
++  HRESULT STDMETHODCALLTYPE DecoderBeginFrame(ID3D11VideoDecoder *d, ID3D11VideoDecoderOutputView *v,
++                                              UINT key_size, const void *key) override {
++    auto decoder = checked(d); auto view = dynamic_cast<DecoderView *>(v);
++    if (!decoder || !view || view->device() != device_) return E_INVALIDARG;
++    if (key_size || key) return E_NOTIMPL;
++    std::lock_guard<std::mutex> lock(decoder->mutex);
++    if (decoder->active_context) return DXGI_ERROR_WAS_STILL_DRAWING;
++    D3D11_TEXTURE2D_DESC td = {}; view->texture()->GetDesc(&td);
++    if (td.Width != decoder->desc.SampleWidth || td.Height != decoder->desc.SampleHeight) return E_INVALIDARG;
++    decoder->view = view; decoder->active_context = context_; decoder->submitted.clear();
++    for (auto &b : decoder->buffers) b.mapped = false;
++    return S_OK;
++  }
++  HRESULT STDMETHODCALLTYPE GetDecoderBuffer(ID3D11VideoDecoder *d, D3D11_VIDEO_DECODER_BUFFER_TYPE type,
++                                             UINT *size, void **out) override {
++    if (!size || !out) return E_POINTER;
++    *size = 0; *out = nullptr;
++    auto decoder = checked(d); int index = Decoder::bufferIndex(type);
++    if (!decoder || index < 0) return E_INVALIDARG;
++    std::lock_guard<std::mutex> lock(decoder->mutex);
++    if (decoder->active_context != context_) return E_INVALIDARG;
++    auto &buffer = decoder->buffers[index];
++    if (buffer.mapped) return DXGI_ERROR_WAS_STILL_DRAWING;
++    try { buffer.bytes.resize(index ? 64 * 1024 : 16 * 1024 * 1024); }
++    catch (const std::bad_alloc &) { return E_OUTOFMEMORY; }
++    buffer.mapped = true; *size = buffer.bytes.size(); *out = buffer.bytes.data(); return S_OK;
++  }
++  HRESULT STDMETHODCALLTYPE ReleaseDecoderBuffer(ID3D11VideoDecoder *d, D3D11_VIDEO_DECODER_BUFFER_TYPE type) override {
++    auto decoder = checked(d); int index = Decoder::bufferIndex(type);
++    if (!decoder || index < 0) return E_INVALIDARG;
++    std::lock_guard<std::mutex> lock(decoder->mutex);
++    if (decoder->active_context != context_ || !decoder->buffers[index].mapped) return E_INVALIDARG;
++    decoder->buffers[index].mapped = false; return S_OK;
++  }
++  HRESULT STDMETHODCALLTYPE SubmitDecoderBuffers(ID3D11VideoDecoder *d, UINT count,
++                                                  const D3D11_VIDEO_DECODER_BUFFER_DESC *descs) override {
++    auto decoder = checked(d);
++    if (!decoder || !count || count > 3 || !descs) return E_INVALIDARG;
++    std::lock_guard<std::mutex> lock(decoder->mutex);
++    if (decoder->active_context != context_) return E_INVALIDARG;
++    const D3D11_VIDEO_DECODER_BUFFER_DESC *bitstream = nullptr;
++    for (UINT i = 0; i < count; ++i) {
++      auto &desc = descs[i]; int index = Decoder::bufferIndex(desc.BufferType);
++      if (index < 0 || desc.BufferIndex || desc.ReservedBits) return E_INVALIDARG;
++      if (desc.pIV || desc.IVSize || desc.PartialEncryption || desc.EncryptedBlockInfo.NumEncryptedBytesAtBeginning ||
++          desc.EncryptedBlockInfo.NumBytesInSkipPattern || desc.EncryptedBlockInfo.NumBytesInEncryptPattern)
++        return E_NOTIMPL;
++      auto &buffer = decoder->buffers[index];
++      if (buffer.mapped || desc.DataOffset > buffer.bytes.size() || desc.DataSize > buffer.bytes.size() - desc.DataOffset)
++        return E_INVALIDARG;
++      if (!index) {
++        if (bitstream || !decoder->submitted.empty() || !desc.DataSize) return E_INVALIDARG;
++        bitstream = &desc;
++      }
++    }
++    if (bitstream) {
++      auto &buffer = decoder->buffers[0].bytes;
++      try { decoder->submitted.assign(buffer.begin() + bitstream->DataOffset,
++                                       buffer.begin() + bitstream->DataOffset + bitstream->DataSize); }
++      catch (const std::bad_alloc &) { return E_OUTOFMEMORY; }
++    }
++    return S_OK;
++  }
++  HRESULT STDMETHODCALLTYPE DecoderEndFrame(ID3D11VideoDecoder *d) override {
++    auto decoder = checked(d);
++    if (!decoder) return E_INVALIDARG;
++    std::lock_guard<std::mutex> lock(decoder->mutex);
++    if (decoder->active_context != context_) return E_INVALIDARG;
++    auto view = std::move(decoder->view); decoder->active_context = nullptr;
++    for (auto &buffer : decoder->buffers) if (buffer.mapped) return E_INVALIDARG;
++    if (!view || decoder->submitted.empty()) return E_INVALIDARG;
++    try {
++      if (!decoder->session.decode(decoder->submitted.data(), decoder->submitted.size(), decoder->pixels)) return E_FAIL;
++      context_->UpdateSubresource(view->texture(), view->slice(), nullptr, decoder->pixels.data(), decoder->desc.SampleWidth, 0);
++    } catch (const std::bad_alloc &) { return E_OUTOFMEMORY; }
++    return S_OK;
++  }
++};
++} // namespace
++std::unique_ptr<NativeVideoDevice> CreateNativeVideoDevice(MTLD3D11Device *device) {
++  return NativeVP9HardwareAvailable() ? std::make_unique<VideoDevice>(device) : nullptr;
++}
++std::unique_ptr<NativeVideoContext> CreateNativeVideoContext(MTLD3D11Device *device, ID3D11DeviceContext *context) {
++  if (context->GetType() != D3D11_DEVICE_CONTEXT_IMMEDIATE || !NativeVP9HardwareAvailable()) return nullptr;
++  return std::make_unique<VideoContext>(device,context);
++}
++} // namespace dxmt
+--- /dev/null
++++ b/src/d3d11/d3d11_video_vt.cpp
+@@ -0,0 +1,116 @@
++// Native VP9 profile-0 session. Kept separate from the Windows COM headers.
++// SPDX-License-Identifier: LGPL-2.1-or-later
++#include "d3d11_video_vt.hpp"
++#include <VideoToolbox/VideoToolbox.h>
++#include <CoreMedia/CoreMedia.h>
++#include <CoreVideo/CoreVideo.h>
++#include <cstring>
++#include <mutex>
++
++namespace dxmt {
++bool NativeVP9HardwareAvailable() {
++  static std::once_flag once;
++  std::call_once(once, [] { VTRegisterSupplementalVideoDecoderIfAvailable(kCMVideoCodecType_VP9); });
++  return VTIsHardwareDecodeSupported(kCMVideoCodecType_VP9);
++}
++struct NativeVP9Session::Impl {
++  unsigned width, height;
++  CMVideoFormatDescriptionRef format = nullptr;
++  VTDecompressionSessionRef session = nullptr;
++  CVPixelBufferRef output = nullptr;
++  OSStatus output_status = noErr;
++  bool hardware = false;
++  Impl(unsigned w, unsigned h) : width(w), height(h) {
++    if (!NativeVP9HardwareAvailable()) return;
++    uint8_t config[] = {1,0,0,0,0,0,0x82,2,2,2,0,0};
++    CFDataRef data = CFDataCreate(kCFAllocatorDefault, config, sizeof(config));
++    const void *atom_keys[] = {CFSTR("vpcC")}, *atom_values[] = {data};
++    auto atoms = CFDictionaryCreate(kCFAllocatorDefault, atom_keys, atom_values, 1,
++        &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
++    const void *ext_keys[] = {kCMFormatDescriptionExtension_SampleDescriptionExtensionAtoms}, *ext_values[] = {atoms};
++    auto extensions = CFDictionaryCreate(kCFAllocatorDefault, ext_keys, ext_values, 1,
++        &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
++    auto status = CMVideoFormatDescriptionCreate(kCFAllocatorDefault, kCMVideoCodecType_VP9,
++        width, height, extensions, &format);
++    CFRelease(extensions); CFRelease(atoms); CFRelease(data);
++    if (status != noErr) return;
++    const void *spec_keys[] = {kVTVideoDecoderSpecification_RequireHardwareAcceleratedVideoDecoder};
++    const void *spec_values[] = {kCFBooleanTrue};
++    auto spec = CFDictionaryCreate(kCFAllocatorDefault, spec_keys, spec_values, 1,
++        &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
++    int pixel_format = kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange;
++    auto number = CFNumberCreate(kCFAllocatorDefault, kCFNumberIntType, &pixel_format);
++    auto surface = CFDictionaryCreate(kCFAllocatorDefault, nullptr, nullptr, 0,
++        &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
++    const void *attr_keys[] = {kCVPixelBufferPixelFormatTypeKey, kCVPixelBufferMetalCompatibilityKey,
++                              kCVPixelBufferIOSurfacePropertiesKey};
++    const void *attr_values[] = {number, kCFBooleanTrue, surface};
++    auto attrs = CFDictionaryCreate(kCFAllocatorDefault, attr_keys, attr_values, 3,
++        &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
++    VTDecompressionOutputCallbackRecord callback = {
++      [](void *opaque, void *, OSStatus result, VTDecodeInfoFlags, CVImageBufferRef image, CMTime, CMTime) {
++        auto self = static_cast<Impl *>(opaque);
++        self->output_status = result;
++        if (self->output) CFRelease(self->output);
++        self->output = image ? CVPixelBufferRetain(image) : nullptr;
++      }, this
++    };
++    status = VTDecompressionSessionCreate(kCFAllocatorDefault, format, spec, attrs, &callback, &session);
++    CFRelease(attrs); CFRelease(surface); CFRelease(number); CFRelease(spec);
++    if (status != noErr || !session) return;
++    CFTypeRef accelerated = nullptr;
++    status = VTSessionCopyProperty(session, kVTDecompressionPropertyKey_UsingHardwareAcceleratedVideoDecoder,
++                                  kCFAllocatorDefault, &accelerated);
++    hardware = status == noErr && accelerated && CFEqual(accelerated, kCFBooleanTrue);
++    if (accelerated) CFRelease(accelerated);
++  }
++  ~Impl() {
++    if (session) { VTDecompressionSessionInvalidate(session); CFRelease(session); }
++    if (output) CFRelease(output);
++    if (format) CFRelease(format);
++  }
++};
++NativeVP9Session::NativeVP9Session(unsigned w, unsigned h) : impl_(new Impl(w,h)) {}
++NativeVP9Session::~NativeVP9Session() = default;
++bool NativeVP9Session::ready() const { return impl_->session && impl_->hardware; }
++bool NativeVP9Session::decode(const uint8_t *bytes, size_t size, std::vector<uint8_t> &nv12) {
++  if (!ready() || !bytes || !size || size > 16 * 1024 * 1024 || (bytes[0] & 0xf0) != 0x80) return false;
++  auto &s = *impl_;
++  if (s.output) { CFRelease(s.output); s.output = nullptr; }
++  s.output_status = noErr;
++  CMBlockBufferRef block = nullptr;
++  auto status = CMBlockBufferCreateWithMemoryBlock(kCFAllocatorDefault, nullptr, size,
++      kCFAllocatorDefault, nullptr, 0, size, 0, &block);
++  if (status != noErr) return false;
++  status = CMBlockBufferReplaceDataBytes(bytes, block, 0, size);
++  CMSampleBufferRef sample = nullptr;
++  if (status == noErr) status = CMSampleBufferCreateReady(kCFAllocatorDefault, block, s.format,
++      1, 0, nullptr, 1, &size, &sample);
++  if (status == noErr) status = VTDecompressionSessionDecodeFrame(s.session, sample, 0, nullptr, nullptr);
++  // The callback's image is retained until the next decode/destruction.
++  auto wait_status = VTDecompressionSessionWaitForAsynchronousFrames(s.session);
++  if (sample) CFRelease(sample);
++  CFRelease(block);
++  if (status != noErr || wait_status != noErr || s.output_status != noErr || !s.output) return false;
++  auto image = s.output;
++  if (CVPixelBufferGetWidth(image) != s.width || CVPixelBufferGetHeight(image) != s.height ||
++      CVPixelBufferGetPixelFormatType(image) != kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange ||
++      CVPixelBufferGetPlaneCount(image) != 2) return false;
++  nv12.resize(size_t(s.width) * s.height * 3 / 2);
++  if (CVPixelBufferLockBaseAddress(image, kCVPixelBufferLock_ReadOnly) != kCVReturnSuccess) return false;
++  size_t offset = 0;
++  bool valid = true;
++  for (unsigned plane = 0; plane < 2; ++plane) {
++    auto base = static_cast<const uint8_t *>(CVPixelBufferGetBaseAddressOfPlane(image, plane));
++    auto rows = plane ? s.height / 2 : s.height;
++    auto pitch = CVPixelBufferGetBytesPerRowOfPlane(image, plane);
++    if (!base || pitch < s.width || CVPixelBufferGetHeightOfPlane(image, plane) != rows) { valid = false; break; }
++    for (unsigned row = 0; row < rows; ++row) {
++      std::memcpy(nv12.data() + offset, base + row * pitch, s.width);
++      offset += s.width;
++    }
++  }
++  CVPixelBufferUnlockBaseAddress(image, kCVPixelBufferLock_ReadOnly);
++  return valid;
++}
++}
+--- a/src/d3d11/d3d11_context_impl.cpp
++++ b/src/d3d11/d3d11_context_impl.cpp
+@@ -29,6 +29,11 @@
+ #include "d3d11_private.h"
+ #include "d3d11_context_state.hpp"
+ #include "d3d11_device.hpp"
++#ifndef _WIN32
++#include "d3d11_video.hpp"
++#include <mutex>
++#endif
++
+ #include "d3d11_pipeline.hpp"
+ #include "d3d11_query.hpp"
+ #include "dxmt_bc_emulation.hpp"
+@@ -688,6 +693,16 @@
+       return S_OK;
+     }
+ 
++#ifndef _WIN32
++    if (riid == __uuidof(ID3D11VideoContext)) {
++      std::lock_guard<std::mutex> lock(video_mutex_);
++      if (!video_context_) video_context_ = CreateNativeVideoContext(device, this);
++      if (!video_context_) return E_NOINTERFACE;
++      *ppvObject = ref(video_context_.get());
++      return S_OK;
++    }
++#endif
++
+     if (riid == __uuidof(ID3DUserDefinedAnnotation)) {
+       *ppvObject = ref(&annotation_);
+       return S_OK;
+@@ -5574,6 +5589,10 @@
+ 
+ protected:
+   MTLD3D11Device *device;
++#ifndef _WIN32
++  std::unique_ptr<NativeVideoContext> video_context_;
++  std::mutex video_mutex_;
++#endif
+   CommandBufferState cmdbuf_state = CommandBufferState::Idle;
+   CommandBufferState previous_render_pipeline_state = CommandBufferState::Idle;
+   ContextInternalState &ctx_state;
+--- a/src/d3d11/meson.build
++++ b/src/d3d11/meson.build
+@@ -29,6 +29,10 @@
+   'd3d11_multithread.cpp',
+   'd3d11_fence.cpp',
+ ]
++
++if not dxmt_crossbuild
++  d3d11_src += ['d3d11_video.cpp', 'd3d11_video_vt.cpp']
++endif
+ 
+ d3d10_src = [
+   '../d3d10/d3d10_buffer.cpp',
+--- /dev/null
++++ b/src/d3d11/d3d11_video_vt.hpp
+@@ -0,0 +1,17 @@
++#pragma once
++#include <cstdint>
++#include <cstddef>
++#include <memory>
++#include <vector>
++namespace dxmt {
++bool NativeVP9HardwareAvailable();
++class NativeVP9Session {
++  struct Impl;
++  std::unique_ptr<Impl> impl_;
++public:
++  NativeVP9Session(unsigned width, unsigned height);
++  ~NativeVP9Session();
++  bool ready() const;
++  bool decode(const uint8_t *bytes, size_t size, std::vector<uint8_t> &nv12);
++};
++}
+--- /dev/null
++++ b/src/d3d11/d3d11_video.hpp
+@@ -0,0 +1,15 @@
++#pragma once
++#include "d3d11_device.hpp"
++#include <memory>
++namespace dxmt {
++class NativeVideoDevice : public ID3D11VideoDevice {
++public:
++  virtual ~NativeVideoDevice() = default;
++};
++class NativeVideoContext : public ID3D11VideoContext {
++public:
++  virtual ~NativeVideoContext() = default;
++};
++std::unique_ptr<NativeVideoDevice> CreateNativeVideoDevice(MTLD3D11Device *device);
++std::unique_ptr<NativeVideoContext> CreateNativeVideoContext(MTLD3D11Device *device, ID3D11DeviceContext *context);
++}
+--- a/src/dxmt-native/meson.build
++++ b/src/dxmt-native/meson.build
+@@ -36,7 +36,7 @@
+   link_whole          : dxmt_native_whole,
+   dependencies        : dxmt_native_deps,
+   include_directories : [ dxmt_include_path ],
+-  link_args           : [ '-Wl,-exported_symbols_list,' + join_paths(meson.current_build_dir(), 'dxmt-native.exports') ],
++  link_args           : [ '-framework', 'VideoToolbox', '-framework', 'CoreMedia', '-framework', 'CoreVideo', '-Wl,-exported_symbols_list,' + join_paths(meson.current_build_dir(), 'dxmt-native.exports') ],
+   link_depends        : [ dxmt_native_exports ],
+   install             : true,
+ )

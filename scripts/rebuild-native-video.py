@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build the private NV12 video prerequisite from pinned source archives.
+"""Build the private NV12 and native D3D11 VP9 prerequisites from pinned source archives.
 
 Does not install, sign, package a runtime, or touch an app/Windows/VM.
 """
@@ -73,8 +73,8 @@ def main():
         if digest(path) != pins[name]['sha256']:
             raise ValueError('Archive differs from the pinned input: ' + name)
     patches = [REPO / 'graphics/backend' / name for name in
-               ('shared-initialization.patch', 'nv12-native.patch')]
-    for patch, key in zip(patches, ('shared_initialization_patch_sha256', 'nv12_patch_sha256')):
+               ('shared-initialization.patch', 'nv12-native.patch', 'vp9-video-device.patch')]
+    for patch, key in zip(patches, ('shared_initialization_patch_sha256', 'nv12_patch_sha256', 'vp9_video_patch_sha256')):
         if digest(patch) != pins[key]:
             raise ValueError('Patch differs from the pinned input: ' + patch.name)
     meson, ninja = args.meson.resolve(strict=True), args.ninja.resolve(strict=True)
@@ -102,7 +102,7 @@ def main():
     run([ninja, '-C', build, '-j1', 'src/dxmt-native/libdxmt-native.dylib'])
     library = build / 'src/dxmt-native/libdxmt-native.dylib'
     receipt = {'inputs': pins, 'commands': commands, 'backend_sha256': digest(library),
-               'qualification': 'build-only; run NativeVideoTextureChecks and NativeSharedTextureChecks'}
+               'qualification': 'build-only; run NativeVideoDecodeChecks, NativeVideoTextureChecks and NativeSharedTextureChecks'}
     (output / 'build-receipt.json').write_text(json.dumps(receipt, indent=2) + '\n')
     print(library)
 
