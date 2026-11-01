@@ -63,12 +63,13 @@
       * the typeless format itself carry no target or multisample capability
 --- /dev/null
 +++ b/src/virtio/neptune/triton/tritonVideo.c
-@@ -0,0 +1,483 @@
+@@ -0,0 +1,491 @@
 +/* SPDX-License-Identifier: MIT
 + * VP9 profile-0 decoding through the paired native video backend.
 + * Compressed buffers remain D3D resources across the existing Neptune wire.
 + */
 +#include "triton.h"
++#include "npt_common.h"
 +#include "video-resource-submit.h"
 +#include "tritonVideoStubs.h"
 +
@@ -126,18 +127,25 @@
 +        D3D11_1DDI_VIDEO_DECODER_BUFFER_PICTURE_PARAMETERS, D3D11_1DDI_VIDEO_DECODER_BUFFER_SLICE_CONTROL, D3D11_1DDI_VIDEO_DECODER_BUFFER_BITSTREAM };
 +    if (!out) return; memset(out, 0, sizeof(*out)); if (i >= 3 || !videoDesc(videoDevice(h), desc)) return;
 +    out->Type = types[i]; out->Size = i == 2 ? PERP_VIDEO_MAX_BITSTREAM : PERP_VIDEO_MAX_METADATA;
-+    out->Usage = D3D11_1DDI_VIDEO_USAGE_OPTIMAL_SPEED;
++    out->Usage = D3D11_1DDI_VIDEO_USAGE_OPTIMAL_QUALITY;
++    npt_log("video: buffer info index=%u type=%u size=%u usage=%u", i, (unsigned)out->Type, out->Size, out->Usage);
 +}
 +static SIZE_T APIENTRY videoDecoderSize(D3D10DDI_HDEVICE h, const D3D11_1DDIARG_CREATEVIDEODECODER *args) {
++    npt_log("video: decoder private size=%u", (unsigned)sizeof(TRITON_VIDEO_DECODER));
 +    return sizeof(TRITON_VIDEO_DECODER);
 +}
 +static HRESULT APIENTRY videoCreateDecoder(D3D10DDI_HDEVICE h, const D3D11_1DDIARG_CREATEVIDEODECODER *args, D3D11_1DDI_HDECODE object, D3D11_1DDI_HRTDECODE runtime) {
 +    PTRITON_DEVICE p = videoDevice(h); D3D11_VIDEO_DECODER_DESC desc; D3D11_VIDEO_DECODER_CONFIG config;
 +    if (!p || !p->pVideoDev || !args || !object.pDrvPrivate) return E_INVALIDARG;
++    npt_log("video: create decoder callback %ux%u raw=%u min-targets=%u", args->Desc.SampleWidth, args->Desc.SampleHeight, args->Config.ConfigBitstreamRaw, args->Config.ConfigMinRenderTargetBuffCount);
 +    TRITON_VIDEO_DECODER *out = object.pDrvPrivate; out->object = NULL;
 +    memcpy(&desc, &args->Desc, sizeof(desc)); memcpy(&config, &args->Config, sizeof(config));
 +    HRESULT hr = ID3D11VideoDevice_CreateVideoDecoder(p->pVideoDev, &desc, &config, &out->object);
-+    if (SUCCEEDED(hr)) hr = videoCommand(p, out->object, PERP_VIDEO_RESOURCE_QUERY, NULL, 0, NULL, 0);
++    npt_log("video: native decoder create hr=%08x object=%s", (unsigned)hr, out->object ? "yes" : "no");
++    if (SUCCEEDED(hr)) {
++        hr = videoCommand(p, out->object, PERP_VIDEO_RESOURCE_QUERY, NULL, 0, NULL, 0);
++        npt_log("video: resource query hr=%08x", (unsigned)hr);
++    }
 +    if (FAILED(hr) && out->object) { ID3D11VideoDecoder_Release(out->object); out->object = NULL; }
 +    return hr;
 +}
@@ -782,3 +790,27 @@
 +}
 +static VOID APIENTRY videoStub_PFND3DWDDM2_1DDI_VIDEOPROCESSORSETSTREAMHDRMETADATA(D3D10DDI_HDEVICE a0, D3D11_1DDI_HVIDEOPROCESSOR a1, UINT a2, D3DDDI_HDR_METADATA_TYPE a3, UINT a4, CONST VOID* a5) {
 +}
+--- a/src/virtio/neptune/triton/neptune_umd.rc
++++ b/src/virtio/neptune/triton/neptune_umd.rc
+@@ -18,7 +18,7 @@
+  FILEVERSION VER_COMMA
+  PRODUCTVERSION VER_COMMA
+  FILEFLAGSMASK 0x3fL
+- FILEFLAGS 0x0L
++ FILEFLAGS 0x8L
+  FILEOS VOS_NT_WINDOWS32
+  FILETYPE VFT_DRV
+  FILESUBTYPE VFT2_DRV_DISPLAY
+@@ -27,9 +27,10 @@
+     {
+         BLOCK "040904b0"
+         {
+-            VALUE "CompanyName", "Turing Software LLC"
+-            VALUE "FileDescription", "Neptune Direct3D User Mode Driver"
++            VALUE "CompanyName", "Perpendicular experimental build; upstream Turing Software LLC"
++            VALUE "FileDescription", "Experimental Neptune video UMD - Perpendicular"
+             VALUE "FileVersion", NPT_RC_STR(VER)
++            VALUE "PrivateBuild", "Perpendicular video-resource-v3"
+             VALUE "InternalName", "neptune_umd"
+             VALUE "OriginalFilename", "neptune_umd.dll"
+             VALUE "ProductName", "Neptune"

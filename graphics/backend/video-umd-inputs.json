@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "status": "experimental build only; main kernel/UMD not replaced; Windows video path not qualified",
+  "status": "isolated Windows VP9 hardware 3-frame pixel check PASS with usage 2; browser/main unqualified; user paused",
   "mesa": {
     "revision": "bf536bba65454900d782fa7417bc95c1608d7483",
     "url": "https://codeload.github.com/osy/virtio-win-mesa/tar.gz/bf536bba65454900d782fa7417bc95c1608d7483",
@@ -18,7 +18,7 @@
     "url": "https://github.com/llvm/llvm-project/releases/download/llvmorg-15.0.7/clang%2Bllvm-15.0.7-arm64-apple-darwin22.0.tar.xz",
     "sha256": "867c6afd41158c132ef05a8f1ddaecf476a26b91c85def8e124414f9a9ba188d"
   },
-  "mesa_patch_sha256": "a01871e94482d30cc8b9294d682f3757e3e0f6b567a095152acc4fba267d17d0",
+  "mesa_patch_sha256": "d6c0a4fa363c4e73d3388f1ba854b70b004069518efba7b8974abfd2234c01e7",
   "resource_header_sha256": "ad2f6d652779f29a8d63860333cb0007456c00fd020c2574d9118421a67a95cd",
   "compiler_version": "Apple clang version 21.0.0 (clang-2100.4.1.1)",
   "sdk_files": {
@@ -35,7 +35,7 @@
     "mako": "1.3.12",
     "meson": "1.9.1"
   },
-  "candidate_file_version": "0.4.0.1",
+  "candidate_file_version": "100.6.101.58000",
   "requirements": {
     "architecture": "aarch64-windows-msvc",
     "native_video_resource_version": 1,
@@ -44,6 +44,10 @@
     "original_kernel": true,
     "secure_boot": true,
     "test_signing": false,
-    "qualification_required": "isolated Windows frame and protected driver loading, then browser, before main promotion"
-  }
+    "qualification_required": "isolated Windows frame and protected driver loading, then browser, before main promotion",
+    "original_kernel_sha256": "cfbc713754c7f0dcae4803017af3a0ebfc781d37fd57604f8ee8f2cfdad306c4",
+    "file_version_matches_original_kernel": true,
+    "video_decoder_buffer_usage": 2
+  },
+  "candidate_revision": "Perpendicular video-resource-v3"
 }

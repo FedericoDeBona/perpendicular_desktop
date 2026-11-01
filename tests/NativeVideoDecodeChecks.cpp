@@ -28,8 +28,21 @@ int main(int argc, char **argv) {
   ID3D11Device *device = nullptr;
   ID3D11DeviceContext *context = nullptr;
   D3D_FEATURE_LEVEL level = D3D_FEATURE_LEVEL_11_0;
-  check(D3D11CreateDevice(nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr, 0, &level, 1,
-      D3D11_SDK_VERSION, &device, nullptr, &context), "device");
+  UINT flags = 0;
+#if defined(_WIN32) && !defined(__APPLE__)
+  flags = D3D11_CREATE_DEVICE_VIDEO_SUPPORT;
+#endif
+  HRESULT created = D3D11CreateDevice(nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr, flags, &level, 1,
+      D3D11_SDK_VERSION, &device, nullptr, &context);
+#if defined(_WIN32) && !defined(__APPLE__)
+  // Registry settings alone do not prove which UMD the runtime loaded.
+  for (auto name : {L"neptune_umd.dll", L"neptune_umd_arm64.dll"}) {
+    wchar_t path[1024]; HMODULE module = GetModuleHandleW(name);
+    if (module && GetModuleFileNameW(module, path, 1024))
+      std::printf("Loaded Windows UMD: %ls\n", path);
+  }
+#endif
+  check(created, "device");
   ID3D11VideoDevice *video = nullptr;
   ID3D11VideoContext *vc = nullptr;
   check(device->QueryInterface(__uuidof(ID3D11VideoDevice), (void **)&video), "VideoDevice");
