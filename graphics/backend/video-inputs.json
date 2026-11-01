@@ -1,0 +1,22 @@
+{
+  "schema": 1,
+  "dxmt": {
+    "revision": "917b721c0f915c6524b416169fdce4427a39524f",
+    "url": "https://codeload.github.com/utmapp/dxmt/tar.gz/917b721c0f915c6524b416169fdce4427a39524f",
+    "sha256": "9110c0beb928a5c6e11e4b77dd68c48aae02bb854452c0c7fb1fd96dad438000"
+  },
+  "headers": {
+    "revision": "9df86f2341616ef1888ae59919feaa6d4fad693d",
+    "url": "https://codeload.github.com/misyltoad/mingw-directx-headers/tar.gz/9df86f2341616ef1888ae59919feaa6d4fad693d",
+    "sha256": "9c1b8bbfd2d6c758fac4d93c2808a46bc1eee429fe656b4f21b29e02615aa8aa"
+  },
+  "llvm": {
+    "version": "15.0.7-arm64-apple-darwin22.0",
+    "url": "https://github.com/llvm/llvm-project/releases/download/llvmorg-15.0.7/clang%2Bllvm-15.0.7-arm64-apple-darwin22.0.tar.xz",
+    "sha256": "867c6afd41158c132ef05a8f1ddaecf476a26b91c85def8e124414f9a9ba188d"
+  },
+  "shared_initialization_patch_sha256": "fd16333b1bf057abd985b01d8ffd8c29bb5ec07c06cddb4e94f680893c939827",
+  "shared_initialization_source_sha256": "51d09b022faeb49e1ebc39c3e02f473ee6641589b5e42b2686f3465dc994dac1",
+  "nv12_patch_sha256": "920c19e67ec26c0224713764720f1deb9fc4306ba82bd73b1f55c951532462e1",
+  "status": "private-native-prerequisite-only; no Windows video decode or production qualification"
+}
