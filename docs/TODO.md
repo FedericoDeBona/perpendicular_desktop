@@ -1,5 +1,7 @@
 # TODO — feature e correzioni
 
+**2 novembre — esecuzione file nelle cartelle condivise CORRETTA nel caso verificato (FS-010).** Policy generale distribuita in canonica eQA: fileMac leggibili senza bitx ora apribili per esecuzioneWindows. Tre exportREAD|EXECUTE PASS e file non leggibili ancora negati; avvio reale di programmaMicrosoft daDownloads condivisa PASS. LOK intatto/0664, nessun chmod; build/firma/main riuscite. TODO-003 generale eFS-004 restano aperti, video/Creality in pausa. [Evidenze](VERIFICATION.md#2-novembre--permesso-di-esecuzione-windows-sulle-cartelle-smb).
+
 **2 novembre — prova conclusa, lavoro IN PAUSA su richiesta.** Ultimo incremento14373aa pubblicato, riferimento ripristinato e verificato nella QA; nessuna build o prova pendente. Il riuso staging non mostra vantaggio4K e resta sperimentale. Video/Creality e distribuzione della correzione video nella main NON completati. Alla ripresa: esaminare trasferimento del bitstream e attesa decoder prima del take, senza ripetere riuso/pacing esclusi. [Punto di arresto](VERIFICATION.md#2-novembre--chiusura-della-prova-e-pausa).
 
 **2 novembre — staging bitstream: pixel PASS, guadagno NON SUPERATO.** Patch/ricetta opzionale e472file ricostruiti,3frame4K nativi/Windows corretti. Confronto stesso video/codec/geometria senza trace: base233/1522drop15,31%, candidata246/1535drop16,03%, estremi approssimati; nessun beneficio qualificato. DefaultCPUv12/UMDv14 ripristinato nella QA: boot/desktop/runtime29/29/servizio/GL/protezioni PASS. Main/Creality aperti; prossima scelta deve affrontare attesa decode/input prima del take, senza ripetere gli esperimenti esclusi. [Evidenze](VERIFICATION.md#2-novembre--riuso-bounded-dello-staging-bitstream).
@@ -354,6 +356,8 @@ Conservare dimensione percepita 1:1, controlli Windows sulle finestre principali
 **Fatto quando:** breve percorso reale sulla main con spostamento, resize, click su bordi/controlli e apertura di dialogo corretti, poi trasferimento fra scale diverse appena disponibili due uscite. Nessuna modalità segnalata pronta prima di conferma Windows e frame pertinente. Evidenze collegate alle singole voci WIN/GFX.
 
 ## TODO-003 — Gli stessi file Mac anche in Windows
+
+**2 novembre — requisito eseguibili condivisi:** FS-010 corretto e verificato nella main: file leggibili senza bitPOSIXx, policy generata per tutti gli export presenti/futuri e installata anche nella QA. Tre cartelleREAD|EXECUTE/negazionelettura PASS, whoamiMicrosoft dalla share exit0; LOK utente non eseguito né modificato. TODO-003 resta IN CORSO perFS-004 e altri criteri; nessuna chiusura generale della condivisione. [Evidenze](VERIFICATION.md#2-novembre--permesso-di-esecuzione-windows-sulle-cartelle-smb).
 
 **1 novembre, recupero locale main M1:** errore logon-session dopo riapertura, Riprova negativo; reinstallati gli stessi componenti conformi con ricetta esistente, poi3cartelle collegate/failedfalse e task0. Nessun nuovo fix condiviso né chiusura generale FS-004. [Evidenze](VERIFICATION.md#1-novembre--desktop-mode-edge-e-youtube4k).
 

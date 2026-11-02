@@ -1,5 +1,7 @@
 # Registro dei problemi
 
+**2 novembre — esecuzione file nelle cartelle condivise CORRETTA nel caso verificato (FS-010).** Policy generale distribuita in canonica eQA: fileMac leggibili senza bitx ora apribili per esecuzioneWindows. Tre exportREAD|EXECUTE PASS e file non leggibili ancora negati; avvio reale di programmaMicrosoft daDownloads condivisa PASS. LOK intatto/0664, nessun chmod; build/firma/main riuscite. TODO-003 generale eFS-004 restano aperti, video/Creality in pausa. [Evidenze](VERIFICATION.md#2-novembre--permesso-di-esecuzione-windows-sulle-cartelle-smb).
+
 **2 novembre — prova conclusa, lavoro IN PAUSA su richiesta.** Ultimo incremento14373aa pubblicato, riferimento ripristinato e verificato nella QA; nessuna build o prova pendente. Il riuso staging non mostra vantaggio4K e resta sperimentale. Video/Creality e distribuzione della correzione video nella main NON completati. Alla ripresa: esaminare trasferimento del bitstream e attesa decoder prima del take, senza ripetere riuso/pacing esclusi. [Punto di arresto](VERIFICATION.md#2-novembre--chiusura-della-prova-e-pausa).
 
 **2 novembre — staging bitstream: pixel PASS, guadagno NON SUPERATO.** Patch/ricetta opzionale e472file ricostruiti,3frame4K nativi/Windows corretti. Confronto stesso video/codec/geometria senza trace: base233/1522drop15,31%, candidata246/1535drop16,03%, estremi approssimati; nessun beneficio qualificato. DefaultCPUv12/UMDv14 ripristinato nella QA: boot/desktop/runtime29/29/servizio/GL/protezioni PASS. Main/Creality aperti; prossima scelta deve affrontare attesa decode/input prima del take, senza ripetere gli esperimenti esclusi. [Evidenze](VERIFICATION.md#2-novembre--riuso-bounded-dello-staging-bitstream).
@@ -190,6 +192,13 @@ Il ciclo RAM protetto 4→2→4 GiB con dati conservati resta la qualifica prece
 - Conservare fallimenti nel diario e dati privati fuori Git. Non ripetere test senza modifiche pertinenti o nuove evidenze.
 
 ## Problemi pertinenti al desktop
+
+### FS-010 — Eseguibili Windows leggibili rifiutati dalle cartelle SMB
+
+- **Stato:** CORRETTO nel perimetro verificato main2novembre; accessoSMBexecute e avvio daWindows riusciti, senza cambiare il modoMac0664 del fileutente.
+- **Perimetro:** tutti gli export autenticati delle cartelle personali. File/policyWindows da distinguere da errore esecuzione nel Finder; nessun chmod ricorsivo.
+- **Correzione distribuita e verificata:** policy SMB `acl allow execute always = yes` per ogni export, conservando autenticazione/lettura/loopback/SMB3cifrato e modiMac. Non disabilitare SmartScreen/Defender/CodeIntegrity.
+- **Chiusura:** apertura FILE_EXECUTE negata prima e consentita dopo su file senza x, lettura ancora soggetta ai permessi; configurazione generata dalla build distribuita e avvio reale di un innocuo.exe dalla share in Windows. [Evidenze](VERIFICATION.md#2-novembre--permesso-di-esecuzione-windows-sulle-cartelle-smb).
 
 ### FS-009 — Sfondo conserva il percorso del vecchio Download locale
 

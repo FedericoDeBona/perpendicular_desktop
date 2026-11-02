@@ -72,7 +72,10 @@ enum SambaServer {
             try folder.validate(createIfMissing:true)
             try await Task.detached {try folder.requestAccess()}.value
             guard !folder.hostPath.contains("%"),!folder.hostPath.contains("\r") else {throw MachineSettings.failure("Il percorso della cartella \(folder.kind.title) non è supportato.")}
-            config += "[\(folder.kind.windowsName)]\npath = \(folder.hostPath)\nread only = no\nvalid users = \(value.username)\nbrowseable = yes\nfollow symlinks = no\n\n"
+            // Windows images need SMB execute access even when a readable Mac
+            // file has no POSIX x bit. Scope this to the authenticated exports;
+            // keep Mac modes, read access and the private server unchanged.
+            config += "[\(folder.kind.windowsName)]\npath = \(folder.hostPath)\nread only = no\nvalid users = \(value.username)\nbrowseable = yes\nfollow symlinks = no\nacl allow execute always = yes\n\n"
         }
         let configFile=root.appendingPathComponent("smb.conf"),data=Data(config.utf8)
         let changed=(try? Data(contentsOf:configFile)) != data
