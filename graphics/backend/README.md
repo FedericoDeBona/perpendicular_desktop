@@ -178,3 +178,32 @@ modifica ai limiti o agli HRESULT. Il collector esistente decodifica i messaggi
 UTF16 senza manifest. Un marker della DLL effettivamente caricata è necessario
 prima di interpretare una traccia vuota. Questo è un passo diagnostico, non
 una correzione dell'allocazione Map o una qualifica della fluidità.
+
+
+## Pool condiviso Windows v14
+
+Il caso Edge M1 v13 registra RES_INFO16MiB→C000009A prima di Map→reset,
+anche quando la richiesta del pool è soltanto64KiB. La patch
+`compact-shmem-fallback.patch` conserva il batching ordinario; se la creazione
+fallisce, su Windows prova una sola volta la minima potenza di2 sufficiente
+alla richiesta (almeno4KiB). Se fallisce anche questa, mantiene il vecchio
+pool e restituisce il fallimento originale. Non aumenta la finestra BAR,
+non cambia sincronizzazioni, HRESULT o protezioni e non risolve la mancanza
+di spazio per richieste grandi. Marker ETW di recupero limitato al budget
+esistente; nessun messaggio per frame ordinario.
+
+La ricetta applica e verifica il pin della quarta patch dopo la v13.
+`tests/NativeShmemPoolChecks.c` include direttamente il sorgente ricostruito
+con un renderer che rifiuta le allocazioni: copre batching, retry compatto,
+riferimenti/offset conservati sul fallimento e richieste grandi senza retry
+inutile. Compilarlo con `PERP_SHMEM_POOL_SOURCE` impostato al percorso assoluto
+di `src/virtio/neptune/npt_shmem_pool.c` della ricetta. Questa verifica isolata
+non dimostra la stabilità Windows o FPS; entrambe richiedono la prova reale.
+
+M1 Windows: moduli effettivi v14/tre frame array4K PASS,19recuperi da16MiB
+rifiutati a64KiB riusciti nella traccia. Due brevi tratti Edge2160p60 fissi
+senza crash (~5,84% e4,79%drop); confronto completo e stabilità ancora aperti,
+nessuna promozione main. I grandi slot opzionali possono ancora non crescere:
+il ring usa gli slot esistenti e attende i fence. La modifica non garantisce
+allocazioni grandi né elimina tutte le attese; evitare i retry opzionali
+ripetuti dopo un rifiuto è il prossimo passo circoscritto.

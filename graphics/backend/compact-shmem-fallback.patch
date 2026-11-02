@@ -1,0 +1,39 @@
+--- a/src/virtio/neptune/npt_shmem_pool.c
++++ b/src/virtio/neptune/npt_shmem_pool.c
+@@ -45,6 +45,25 @@
+ 
+    struct npt_renderer_shmem *shmem =
+       npt_renderer_shmem_create(renderer, alloc_size);
++#if defined(_WIN32)
++   /* RES_INFO needs a contiguous KMD-owned CPU window.  A pool-sized
++    * request can fail even when the caller's much smaller region fits.
++    * Preserve the ordinary batching size, but retry once at the smallest
++    * power of two that covers this request before failing the Map.  Never
++    * discard the existing pool or its callers' references on failure. */
++   if (!shmem && size < alloc_size) {
++      size_t compact_size = 4096;
++      while (compact_size < size)
++         compact_size <<= 1;
++      if (compact_size < alloc_size) {
++         shmem = npt_renderer_shmem_create(renderer, compact_size);
++         if (shmem) {
++            NPT_ALLOC_TRACE("compact pool fallback", compact_size, 0, alloc_size);
++            alloc_size = compact_size;
++         }
++      }
++   }
++#endif
+    if (!shmem) {
+       NPT_ALLOC_TRACE("shmem pool create", alloc_size, 0x8007000eu, size);
+       npt_log("shmem pool: failed to allocate %zu bytes", alloc_size);
+--- a/src/virtio/neptune/triton/neptune_umd.rc
++++ b/src/virtio/neptune/triton/neptune_umd.rc
+@@ -30,7 +30,7 @@
+             VALUE "CompanyName", "Perpendicular experimental build; upstream Turing Software LLC"
+             VALUE "FileDescription", "Experimental Neptune video UMD - Perpendicular"
+             VALUE "FileVersion", NPT_RC_STR(VER)
+-            VALUE "PrivateBuild", "Perpendicular video-resource-v13"
++            VALUE "PrivateBuild", "Perpendicular video-resource-v14"
+             VALUE "InternalName", "neptune_umd"
+             VALUE "OriginalFilename", "neptune_umd.dll"
+             VALUE "ProductName", "Neptune"

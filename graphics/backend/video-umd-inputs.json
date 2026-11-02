@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "status": "v13 bounded Map allocation metadata: build/source reconstruction, loaded Windows UMD, three array4K pixel frames and ETW CreateDevice marker PASS on M1; Map fault reproduction pending; same HRESULTs and limits",
+  "status": "v14 compact shmem fallback: build/428-source recipe, allocator ownership/failure checks, loaded Windows 3 array4K frames and 19 real64KiB recoveries PASS on M1; two short fixed4K Edge stretches without crash, full comparison/stability/main still open",
   "mesa": {
     "revision": "bf536bba65454900d782fa7417bc95c1608d7483",
     "url": "https://codeload.github.com/osy/virtio-win-mesa/tar.gz/bf536bba65454900d782fa7417bc95c1608d7483",
@@ -51,7 +51,7 @@
     "video_decoder_buffer_usage": 2,
     "native_video_processor_version": 1
   },
-  "candidate_revision": "Perpendicular video-resource-v13",
+  "candidate_revision": "Perpendicular video-resource-v14",
   "toolchain_profiles": {
     "m4-clang-2100.3.34.2-llvm15": {
       "status": "build candidate; Windows qualification required before deployment",
@@ -66,5 +66,6 @@
     }
   },
   "processor_patch_sha256": "9dcd37703840c5ea07a32eb51fa3be19a9a81f1812f5500bb10df7d61bce1945",
-  "map_allocation_trace_patch_sha256": "782638c63cb1ffb965b1747d77dc048df5709222e72f9fcd084c90b01406cf24"
+  "map_allocation_trace_patch_sha256": "782638c63cb1ffb965b1747d77dc048df5709222e72f9fcd084c90b01406cf24",
+  "compact_shmem_patch_sha256": "132b5a55e512637f364e0adea8029fd05c88738232f317f149b8d8e43e3f61f7"
 }
