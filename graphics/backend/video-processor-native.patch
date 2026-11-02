@@ -1,0 +1,358 @@
+--- a/src/d3d11/d3d11_video.cpp
++++ b/src/d3d11/d3d11_video.cpp
+@@ -1,10 +1,14 @@
+-// Native D3D11 video decode prototype; no video processor or protected content.
++// Native VP9 decode and narrow progressive SDR video processing; no protected content.
+ // SPDX-License-Identifier: LGPL-2.1-or-later
+ #include "d3d11_video.hpp"
+ #include "d3d11_video_vt.hpp"
+ #include "video-resource-submit.h"
+ #include "d3d11_device_child.hpp"
+ #include "com/com_private_data.hpp"
++#include "d3d11_resource.hpp"
++#include "d3d11_video_processor_metal.hpp"
++#include <algorithm>
++#include <cmath>
+ #include <array>
+ #include <mutex>
+ #include <cstring>
+@@ -25,6 +29,7 @@
+   c.ConfigMinRenderTargetBuffCount = 8;
+   return c;
+ }
++#include "d3d11_video_processor.inc"
+ class UnsupportedDevice : public NativeVideoDevice {
+ public:
+   HRESULT STDMETHODCALLTYPE CreateVideoProcessor(ID3D11VideoProcessorEnumerator *pEnum, UINT RateConversionIndex, ID3D11VideoProcessor **ppVideoProcessor) override {
+@@ -285,6 +290,44 @@
+   ComPrivateData private_;
+ public:
+   explicit VideoDevice(MTLD3D11Device *dev) : device_(dev) {}
++  HRESULT STDMETHODCALLTYPE CreateVideoProcessorEnumerator(const D3D11_VIDEO_PROCESSOR_CONTENT_DESC *desc,ID3D11VideoProcessorEnumerator **out)override{
++    if(!out)return E_POINTER;*out=nullptr;
++    if(!desc||!desc->InputWidth||!desc->InputHeight||!desc->OutputWidth||!desc->OutputHeight||
++       desc->InputWidth>16384||desc->InputHeight>16384||desc->OutputWidth>16384||desc->OutputHeight>16384||unsigned(desc->Usage)>2)return E_INVALIDARG;
++    if(desc->InputFrameFormat!=D3D11_VIDEO_FRAME_FORMAT_PROGRESSIVE)return E_NOTIMPL;
++    try{*out=ref(new ProcessorEnum(device_,*desc));return S_OK;}catch(const std::bad_alloc&){return E_OUTOFMEMORY;}
++  }
++  HRESULT STDMETHODCALLTYPE CreateVideoProcessor(ID3D11VideoProcessorEnumerator *e,UINT index,ID3D11VideoProcessor **out)override{
++    if(!out)return E_POINTER;*out=nullptr;auto enumeration=dynamic_cast<ProcessorEnum*>(e);
++    if(!enumeration||enumeration->device()!=device_||index)return E_INVALIDARG;
++    try{auto p=std::make_unique<Processor>(device_,enumeration);if(!p->renderer)return E_FAIL;*out=ref(p.release());return S_OK;}catch(const std::bad_alloc&){return E_OUTOFMEMORY;}
++  }
++  HRESULT STDMETHODCALLTYPE CreateVideoProcessorInputView(ID3D11Resource *resource,ID3D11VideoProcessorEnumerator *e,
++      const D3D11_VIDEO_PROCESSOR_INPUT_VIEW_DESC *desc,ID3D11VideoProcessorInputView **out)override{
++    if(!out)return E_POINTER;*out=nullptr;auto enumeration=dynamic_cast<ProcessorEnum*>(e);
++    if(!resource||!enumeration||enumeration->device()!=device_||!desc||desc->FourCC||desc->ViewDimension!=D3D11_VPIV_DIMENSION_TEXTURE2D||desc->Texture2D.MipSlice)return E_INVALIDARG;
++    Com<ID3D11Texture2D> texture;Com<ID3D11Device> owner;
++    if(FAILED(resource->QueryInterface(__uuidof(ID3D11Texture2D),reinterpret_cast<void**>(&texture))))return E_INVALIDARG;
++    texture->GetDevice(&owner);if(owner.ptr()!=device_)return E_INVALIDARG;
++    D3D11_TEXTURE2D_DESC td;texture->GetDesc(&td);
++    if((td.Format!=DXGI_FORMAT_NV12&&!rgbFormat(td.Format))||td.Usage!=D3D11_USAGE_DEFAULT||td.SampleDesc.Count!=1||td.MipLevels!=1||desc->Texture2D.ArraySlice>=td.ArraySize)return E_INVALIDARG;
++    try{*out=ref(new ProcessorInput(device_,texture.ptr(),*desc,desc->Texture2D.ArraySlice));return S_OK;}catch(const std::bad_alloc&){return E_OUTOFMEMORY;}
++  }
++  HRESULT STDMETHODCALLTYPE CreateVideoProcessorOutputView(ID3D11Resource *resource,ID3D11VideoProcessorEnumerator *e,
++      const D3D11_VIDEO_PROCESSOR_OUTPUT_VIEW_DESC *desc,ID3D11VideoProcessorOutputView **out)override{
++    if(!out)return E_POINTER;*out=nullptr;auto enumeration=dynamic_cast<ProcessorEnum*>(e);
++    if(!resource||!enumeration||enumeration->device()!=device_||!desc)return E_INVALIDARG;
++    UINT slice=0;
++    if(desc->ViewDimension==D3D11_VPOV_DIMENSION_TEXTURE2D){if(desc->Texture2D.MipSlice)return E_INVALIDARG;}
++    else if(desc->ViewDimension==D3D11_VPOV_DIMENSION_TEXTURE2DARRAY){if(desc->Texture2DArray.MipSlice||desc->Texture2DArray.ArraySize!=1)return E_INVALIDARG;slice=desc->Texture2DArray.FirstArraySlice;}
++    else return E_INVALIDARG;
++    Com<ID3D11Texture2D> texture;Com<ID3D11Device> owner;
++    if(FAILED(resource->QueryInterface(__uuidof(ID3D11Texture2D),reinterpret_cast<void**>(&texture))))return E_INVALIDARG;
++    texture->GetDevice(&owner);if(owner.ptr()!=device_)return E_INVALIDARG;
++    D3D11_TEXTURE2D_DESC td;texture->GetDesc(&td);
++    if(!rgbFormat(td.Format)||td.Usage!=D3D11_USAGE_DEFAULT||td.SampleDesc.Count!=1||td.MipLevels!=1||slice>=td.ArraySize||!(td.BindFlags&D3D11_BIND_RENDER_TARGET))return E_INVALIDARG;
++    try{*out=ref(new ProcessorOutput(device_,texture.ptr(),*desc,slice));return S_OK;}catch(const std::bad_alloc&){return E_OUTOFMEMORY;}
++  }
+   ULONG STDMETHODCALLTYPE AddRef() override { return device_->AddRef(); }
+   ULONG STDMETHODCALLTYPE Release() override { return device_->Release(); }
+   HRESULT STDMETHODCALLTYPE QueryInterface(REFIID id, void **out) override {
+@@ -373,6 +416,69 @@
+   HRESULT STDMETHODCALLTYPE GetPrivateData(REFGUID id, UINT *size, void *data) override { return context_->GetPrivateData(id,size,data); }
+   HRESULT STDMETHODCALLTYPE SetPrivateData(REFGUID id, UINT size, const void *data) override { return context_->SetPrivateData(id,size,data); }
+   HRESULT STDMETHODCALLTYPE SetPrivateDataInterface(REFGUID id, const IUnknown *value) override { return context_->SetPrivateDataInterface(id,value); }
++  template<class F> void changeProcessor(ID3D11VideoProcessor *p,F &&fn){auto proc=processorFor(device_,p);if(!proc)return;std::lock_guard<std::mutex> lock(proc->mutex);fn(*proc);}
++  HRESULT STDMETHODCALLTYPE VideoProcessorBlt(ID3D11VideoProcessor *p,ID3D11VideoProcessorOutputView *v,UINT,UINT count,const D3D11_VIDEO_PROCESSOR_STREAM *streams)override{
++    auto proc=processorFor(device_,p);auto output=dynamic_cast<ProcessorOutput*>(v);
++    if(!proc||!output||output->device()!=device_||count!=1||!streams||!streams[0].Enable)return E_INVALIDARG;
++    const auto &stream=streams[0];auto input=dynamic_cast<ProcessorInput*>(stream.pInputSurface);
++    if(!input||input->device()!=device_||input->texture.ptr()==output->texture.ptr())return E_INVALIDARG;
++    if(stream.OutputIndex||stream.InputFrameOrField||stream.PastFrames||stream.FutureFrames||stream.ppPastSurfaces||stream.ppFutureSurfaces||stream.pInputSurfaceRight||stream.ppPastSurfacesRight||stream.ppFutureSurfacesRight)return E_NOTIMPL;
++    std::lock_guard<std::mutex> lock(proc->mutex);
++    if(proc->unsupported||proc->background_yuv||proc->input_color.Reserved||proc->output_color.Reserved||proc->input_color.YCbCr_xvYCC||proc->output_color.YCbCr_xvYCC||proc->input_color.Nominal_Range>2||proc->output_color.Nominal_Range>2||proc->alpha_mode==D3D11_VIDEO_PROCESSOR_ALPHA_FILL_MODE_DESTINATION)return E_NOTIMPL;
++    D3D11_TEXTURE2D_DESC in,out;input->texture->GetDesc(&in);output->texture->GetDesc(&out);
++    RECT source=proc->has_source?proc->source:RECT{0,0,LONG(in.Width),LONG(in.Height)};
++    RECT dest=proc->has_destination?proc->destination:RECT{0,0,LONG(out.Width),LONG(out.Height)};
++    RECT target=proc->has_target?proc->target:RECT{0,0,LONG(out.Width),LONG(out.Height)};
++    if(!validRect(source,in.Width,in.Height)||!validRect(target,out.Width,out.Height)||
++      dest.right<=dest.left||dest.bottom<=dest.top||dest.left < -16384||dest.top < -16384||dest.right>32768||dest.bottom>32768||!std::isfinite(proc->alpha)||proc->alpha<0||proc->alpha>1)return E_INVALIDARG;
++    auto a=GetTexture(input->texture.ptr());auto b=GetTexture(output->texture.ptr());if(!a||!b||!a->current()||!b->current())return E_INVALIDARG;
++    NativeVideoProcessArgs args={};
++    const std::array<LONG,4> s={source.left,source.top,source.right,source.bottom},d={dest.left,dest.top,dest.right,dest.bottom};
++    for(unsigned i=0;i<4;i++){args.source[i]=float(s[i]);args.destination[i]=float(d[i]);}
++    args.target[0]=target.left;args.target[1]=target.top;args.target[2]=target.right;args.target[3]=target.bottom;
++    args.background[0]=proc->background.RGBA.R;args.background[1]=proc->background.RGBA.G;args.background[2]=proc->background.RGBA.B;args.background[3]=proc->background.RGBA.A;
++    bool limited=proc->input_color.Nominal_Range!=D3D11_VIDEO_PROCESSOR_NOMINAL_RANGE_0_255;
++    args.y_offset=limited?16.f/255.f:0;args.y_scale=limited?255.f/219.f:1;args.uv_scale=limited?255.f/224.f:1;
++    args.matrix709=proc->input_color.YCbCr_Matrix;args.rgb_input_limited=proc->input_color.RGB_Range;args.rgb_output_limited=proc->output_color.RGB_Range;
++    for(float c:args.background)if(!std::isfinite(c))return E_INVALIDARG;
++    args.stream_alpha=proc->alpha_enabled?proc->alpha:1;
++    args.alpha_mode=proc->alpha_mode==D3D11_VIDEO_PROCESSOR_ALPHA_FILL_MODE_OPAQUE?0:proc->alpha_mode==D3D11_VIDEO_PROCESSOR_ALPHA_FILL_MODE_BACKGROUND?1:2;
++    args.input_nv12=in.Format==DXGI_FORMAT_NV12;args.input_slice=input->slice;args.output_slice=output->slice;
++    // Serialize this separate Metal pass with the existing D3D command queue.
++    // It is deliberately synchronous until shared-event integration is qualified.
++    device_->GetImmediateContextPrivate()->WaitUntilGPUIdle();
++    return NativeVideoProcessorRender(proc->renderer,a->current()->texture().handle,
++      args.input_nv12?a->current()->texture(1).handle:0,b->current()->texture().handle,&args);
++  }
++  void STDMETHODCALLTYPE VideoProcessorSetOutputTargetRect(ID3D11VideoProcessor *p,WINBOOL enable,const RECT *rect)override{changeProcessor(p,[&](Processor &s){s.has_target=enable&&rect;if(rect)s.target=*rect;if(enable&&!rect)s.unsupported|=0x80000000u;});}
++  void STDMETHODCALLTYPE VideoProcessorGetOutputTargetRect(ID3D11VideoProcessor *p,WINBOOL *enable,RECT *rect)override{changeProcessor(p,[&](Processor &s){if(enable)*enable=s.has_target;if(rect)*rect=s.target;});}
++  void STDMETHODCALLTYPE VideoProcessorSetStreamSourceRect(ID3D11VideoProcessor *p,UINT index,WINBOOL enable,const RECT *rect)override{if(index)return;changeProcessor(p,[&](Processor &s){s.has_source=enable&&rect;if(rect)s.source=*rect;if(enable&&!rect)s.unsupported|=0x80000000u;});}
++  void STDMETHODCALLTYPE VideoProcessorGetStreamSourceRect(ID3D11VideoProcessor *p,UINT index,WINBOOL *enable,RECT *rect)override{if(index)return;changeProcessor(p,[&](Processor &s){if(enable)*enable=s.has_source;if(rect)*rect=s.source;});}
++  void STDMETHODCALLTYPE VideoProcessorSetStreamDestRect(ID3D11VideoProcessor *p,UINT index,WINBOOL enable,const RECT *rect)override{if(index)return;changeProcessor(p,[&](Processor &s){s.has_destination=enable&&rect;if(rect)s.destination=*rect;if(enable&&!rect)s.unsupported|=0x80000000u;});}
++  void STDMETHODCALLTYPE VideoProcessorGetStreamDestRect(ID3D11VideoProcessor *p,UINT index,WINBOOL *enable,RECT *rect)override{if(index)return;changeProcessor(p,[&](Processor &s){if(enable)*enable=s.has_destination;if(rect)*rect=s.destination;});}
++  void STDMETHODCALLTYPE VideoProcessorSetOutputColorSpace(ID3D11VideoProcessor *p,const D3D11_VIDEO_PROCESSOR_COLOR_SPACE *value)override{changeProcessor(p,[&](Processor &s){if(value)s.output_color=*value;else s.unsupported|=0x80000000u;});}
++  void STDMETHODCALLTYPE VideoProcessorGetOutputColorSpace(ID3D11VideoProcessor *p,D3D11_VIDEO_PROCESSOR_COLOR_SPACE *value)override{changeProcessor(p,[&](Processor &s){if(value)*value=s.output_color;});}
++  void STDMETHODCALLTYPE VideoProcessorSetStreamColorSpace(ID3D11VideoProcessor *p,UINT index,const D3D11_VIDEO_PROCESSOR_COLOR_SPACE *value)override{if(index)return;changeProcessor(p,[&](Processor &s){if(value)s.input_color=*value;else s.unsupported|=0x80000000u;});}
++  void STDMETHODCALLTYPE VideoProcessorGetStreamColorSpace(ID3D11VideoProcessor *p,UINT index,D3D11_VIDEO_PROCESSOR_COLOR_SPACE *value)override{if(index)return;changeProcessor(p,[&](Processor &s){if(value)*value=s.input_color;});}
++  void STDMETHODCALLTYPE VideoProcessorSetOutputBackgroundColor(ID3D11VideoProcessor *p,WINBOOL yuv,const D3D11_VIDEO_COLOR *color)override{changeProcessor(p,[&](Processor&s){s.background_yuv=yuv;if(color)s.background=*color;else s.unsupported|=0x80000000u;});}
++  void STDMETHODCALLTYPE VideoProcessorGetOutputBackgroundColor(ID3D11VideoProcessor *p,WINBOOL *yuv,D3D11_VIDEO_COLOR *color)override{changeProcessor(p,[&](Processor&s){if(yuv)*yuv=s.background_yuv;if(color)*color=s.background;});}
++  void STDMETHODCALLTYPE VideoProcessorSetOutputAlphaFillMode(ID3D11VideoProcessor *p,D3D11_VIDEO_PROCESSOR_ALPHA_FILL_MODE mode,UINT stream)override{changeProcessor(p,[&](Processor&s){s.alpha_mode=mode;if(stream||unsigned(mode)>3)s.unsupported|=0x80000000u;});}
++  void STDMETHODCALLTYPE VideoProcessorGetOutputAlphaFillMode(ID3D11VideoProcessor *p,D3D11_VIDEO_PROCESSOR_ALPHA_FILL_MODE *mode,UINT *stream)override{changeProcessor(p,[&](Processor&s){if(mode)*mode=s.alpha_mode;if(stream)*stream=0;});}
++  void STDMETHODCALLTYPE VideoProcessorSetStreamAlpha(ID3D11VideoProcessor *p,UINT index,WINBOOL enable,float alpha)override{if(index)return;changeProcessor(p,[&](Processor&s){s.alpha_enabled=enable;s.alpha=alpha;});}
++  void STDMETHODCALLTYPE VideoProcessorGetStreamAlpha(ID3D11VideoProcessor *p,UINT index,WINBOOL *enable,float *alpha)override{if(index)return;changeProcessor(p,[&](Processor&s){if(enable)*enable=s.alpha_enabled;if(alpha)*alpha=s.alpha;});}
++  void STDMETHODCALLTYPE VideoProcessorSetOutputConstriction(ID3D11VideoProcessor *p,WINBOOL enable,SIZE)override{unsupportedProcessorState(processorFor(device_,p),1,bool(enable));}
++  void STDMETHODCALLTYPE VideoProcessorSetOutputStereoMode(ID3D11VideoProcessor *p,WINBOOL enable)override{unsupportedProcessorState(processorFor(device_,p),2,bool(enable));}
++  void STDMETHODCALLTYPE VideoProcessorSetStreamFrameFormat(ID3D11VideoProcessor *p,UINT index,D3D11_VIDEO_FRAME_FORMAT format)override{if(index)return;unsupportedProcessorState(processorFor(device_,p),4,bool(format!=D3D11_VIDEO_FRAME_FORMAT_PROGRESSIVE));}
++  void STDMETHODCALLTYPE VideoProcessorSetStreamOutputRate(ID3D11VideoProcessor *p,UINT index,D3D11_VIDEO_PROCESSOR_OUTPUT_RATE rate,WINBOOL repeat,const DXGI_RATIONAL *)override{if(index)return;unsupportedProcessorState(processorFor(device_,p),8,bool(rate!=D3D11_VIDEO_PROCESSOR_OUTPUT_RATE_NORMAL||repeat));}
++  void STDMETHODCALLTYPE VideoProcessorSetStreamPixelAspectRatio(ID3D11VideoProcessor *p,UINT index,WINBOOL enable,const DXGI_RATIONAL *src,const DXGI_RATIONAL *dst)override{if(index)return;unsupportedProcessorState(processorFor(device_,p),16,bool(enable&&(!src||!dst||uint64_t(src->Numerator)*dst->Denominator!=uint64_t(dst->Numerator)*src->Denominator)));}
++  void STDMETHODCALLTYPE VideoProcessorSetStreamLumaKey(ID3D11VideoProcessor *p,UINT index,WINBOOL enable,float,float)override{if(index)return;unsupportedProcessorState(processorFor(device_,p),32,bool(enable));}
++  void STDMETHODCALLTYPE VideoProcessorSetStreamStereoFormat(ID3D11VideoProcessor *p,UINT index,WINBOOL enable,D3D11_VIDEO_PROCESSOR_STEREO_FORMAT,WINBOOL,WINBOOL,D3D11_VIDEO_PROCESSOR_STEREO_FLIP_MODE,int)override{if(index)return;unsupportedProcessorState(processorFor(device_,p),64,bool(enable));}
++  void STDMETHODCALLTYPE VideoProcessorSetStreamFilter(ID3D11VideoProcessor *p,UINT index,D3D11_VIDEO_PROCESSOR_FILTER filter,WINBOOL enable,int)override{if(index)return;changeProcessor(p,[&](Processor&s){if(unsigned(filter)>=8){s.unsupported|=0x80000000u;return;}if(enable)s.unsupported_filters|=1u<<unsigned(filter);else s.unsupported_filters&=~(1u<<unsigned(filter));if(s.unsupported_filters)s.unsupported|=128;else s.unsupported&=~128u;});}
++  void STDMETHODCALLTYPE VideoProcessorSetStreamRotation(ID3D11VideoProcessor *p,UINT index,WINBOOL enable,D3D11_VIDEO_PROCESSOR_ROTATION rotation)override{if(index)return;unsupportedProcessorState(processorFor(device_,p),256,bool(enable&&rotation!=D3D11_VIDEO_PROCESSOR_ROTATION_IDENTITY));}
++  void STDMETHODCALLTYPE VideoProcessorSetStreamPalette(ID3D11VideoProcessor *p,UINT index,UINT count,const UINT *)override{if(index)return;unsupportedProcessorState(processorFor(device_,p),512,bool(count!=0));}
++  // AutoStreamCaps is zero: enabling optional automatic processing adds no work.
++  void STDMETHODCALLTYPE VideoProcessorSetStreamAutoProcessingMode(ID3D11VideoProcessor *p,UINT index,WINBOOL enable)override{if(index)return;changeProcessor(p,[&](Processor&s){s.auto_processing=bool(enable);});}
++  void STDMETHODCALLTYPE VideoProcessorGetStreamAutoProcessingMode(ID3D11VideoProcessor *p,UINT index,WINBOOL *enable)override{if(index)return;changeProcessor(p,[&](Processor&s){if(enable)*enable=s.auto_processing;});}
+   HRESULT STDMETHODCALLTYPE DecoderBeginFrame(ID3D11VideoDecoder *d, ID3D11VideoDecoderOutputView *v,
+                                               UINT key_size, const void *key) override {
+     auto decoder = checked(d); auto view = dynamic_cast<DecoderView *>(v);
+--- a/src/d3d11/meson.build
++++ b/src/d3d11/meson.build
+@@ -31,7 +31,8 @@
+ ]
+ 
+ if not dxmt_crossbuild
+-  d3d11_src += ['d3d11_video.cpp', 'd3d11_video_vt.cpp']
++  add_languages('objcpp', required : true)
++  d3d11_src += ['d3d11_video.cpp', 'd3d11_video_vt.cpp', 'd3d11_video_processor_metal.mm']
+ endif
+ 
+ d3d10_src = [
+--- /dev/null
++++ b/src/d3d11/d3d11_video_processor.inc
+@@ -0,0 +1,73 @@
++// Narrow progressive SDR video processor. Included in d3d11_video.cpp's private namespace.
++class ProcessorEnum final : public MTLD3D11DeviceChild<ID3D11VideoProcessorEnumerator> {
++  Com<ID3D11Device> owner_;
++public:
++  D3D11_VIDEO_PROCESSOR_CONTENT_DESC desc;
++  ProcessorEnum(MTLD3D11Device *d,const D3D11_VIDEO_PROCESSOR_CONTENT_DESC &v):MTLD3D11DeviceChild(d),owner_(d),desc(v){}
++  MTLD3D11Device *device()const{return m_parent;}
++  HRESULT STDMETHODCALLTYPE QueryInterface(REFIID id,void **out)override{
++    if(!out)return E_POINTER;*out=nullptr;
++    if(id==__uuidof(IUnknown)||id==__uuidof(ID3D11DeviceChild)||id==__uuidof(ID3D11VideoProcessorEnumerator)){*out=ref(this);return S_OK;}return E_NOINTERFACE;
++  }
++  HRESULT STDMETHODCALLTYPE GetVideoProcessorContentDesc(D3D11_VIDEO_PROCESSOR_CONTENT_DESC *out)override{if(!out)return E_POINTER;*out=desc;return S_OK;}
++  HRESULT STDMETHODCALLTYPE CheckVideoProcessorFormat(DXGI_FORMAT f,UINT *out)override{
++    if(!out)return E_POINTER;*out=0;
++    if(f==DXGI_FORMAT_NV12)*out=D3D11_VIDEO_PROCESSOR_FORMAT_SUPPORT_INPUT;
++    if(f==DXGI_FORMAT_B8G8R8A8_UNORM||f==DXGI_FORMAT_R8G8B8A8_UNORM)*out=D3D11_VIDEO_PROCESSOR_FORMAT_SUPPORT_INPUT|D3D11_VIDEO_PROCESSOR_FORMAT_SUPPORT_OUTPUT;
++    return S_OK;
++  }
++  HRESULT STDMETHODCALLTYPE GetVideoProcessorCaps(D3D11_VIDEO_PROCESSOR_CAPS *out)override{
++    if(!out)return E_POINTER;*out={};out->DeviceCaps=D3D11_VIDEO_PROCESSOR_DEVICE_CAPS_RGB_RANGE_CONVERSION|D3D11_VIDEO_PROCESSOR_DEVICE_CAPS_YCbCr_MATRIX_CONVERSION|D3D11_VIDEO_PROCESSOR_DEVICE_CAPS_NOMINAL_RANGE;
++    out->FeatureCaps=D3D11_VIDEO_PROCESSOR_FEATURE_CAPS_ALPHA_STREAM;
++    out->RateConversionCapsCount=out->MaxInputStreams=out->MaxStreamStates=1;return S_OK;
++  }
++  HRESULT STDMETHODCALLTYPE GetVideoProcessorRateConversionCaps(UINT index,D3D11_VIDEO_PROCESSOR_RATE_CONVERSION_CAPS *out)override{if(!out)return E_POINTER;*out={};return index?E_INVALIDARG:S_OK;}
++  HRESULT STDMETHODCALLTYPE GetVideoProcessorCustomRate(UINT,UINT,D3D11_VIDEO_PROCESSOR_CUSTOM_RATE *out)override{if(out)*out={};return E_NOTIMPL;}
++  HRESULT STDMETHODCALLTYPE GetVideoProcessorFilterRange(D3D11_VIDEO_PROCESSOR_FILTER,D3D11_VIDEO_PROCESSOR_FILTER_RANGE *out)override{if(out)*out={};return E_NOTIMPL;}
++};
++class Processor final : public MTLD3D11DeviceChild<ID3D11VideoProcessor> {
++  Com<ID3D11Device> owner_;
++public:
++  Com<ProcessorEnum> enumeration;
++  std::mutex mutex;
++  void *renderer=nullptr;
++  RECT source={},destination={},target={};
++  bool has_source=false,has_destination=false,has_target=false;
++  D3D11_VIDEO_PROCESSOR_COLOR_SPACE input_color={},output_color={};
++  D3D11_VIDEO_COLOR background={};
++  D3D11_VIDEO_PROCESSOR_ALPHA_FILL_MODE alpha_mode=D3D11_VIDEO_PROCESSOR_ALPHA_FILL_MODE_OPAQUE;
++  bool background_yuv=false,alpha_enabled=false,auto_processing=true;
++  float alpha=1;
++  UINT unsupported=0,unsupported_filters=0;
++  Processor(MTLD3D11Device *d,ProcessorEnum *e):MTLD3D11DeviceChild(d),owner_(d),enumeration(e){
++    background.RGBA.A=1;input_color.Nominal_Range=1; // legacy default studio-range YUV
++    renderer=NativeVideoProcessorCreate(d->GetMTLDevice().handle);
++  }
++  ~Processor(){NativeVideoProcessorDestroy(renderer);}
++  MTLD3D11Device *device()const{return m_parent;}
++  HRESULT STDMETHODCALLTYPE QueryInterface(REFIID id,void **out)override{
++    if(!out)return E_POINTER;*out=nullptr;if(id==__uuidof(IUnknown)||id==__uuidof(ID3D11DeviceChild)||id==__uuidof(ID3D11VideoProcessor)){*out=ref(this);return S_OK;}return E_NOINTERFACE;
++  }
++  void STDMETHODCALLTYPE GetContentDesc(D3D11_VIDEO_PROCESSOR_CONTENT_DESC *out)override{if(out)*out=enumeration->desc;}
++  void STDMETHODCALLTYPE GetRateConversionCaps(D3D11_VIDEO_PROCESSOR_RATE_CONVERSION_CAPS *out)override{if(out)*out={};}
++};
++template<class Interface,class Desc> class ProcessorView final : public MTLD3D11DeviceChild<Interface> {
++  Com<ID3D11Device> owner_;
++public:
++  Com<ID3D11Texture2D> texture;
++  Desc desc;
++  UINT slice;
++  ProcessorView(MTLD3D11Device *d,ID3D11Texture2D *t,const Desc &v,UINT s):MTLD3D11DeviceChild<Interface>(d),owner_(d),texture(t),desc(v),slice(s){}
++  MTLD3D11Device *device()const{return this->m_parent;}
++  HRESULT STDMETHODCALLTYPE QueryInterface(REFIID id,void **out)override{
++    if(!out)return E_POINTER;*out=nullptr;if(id==__uuidof(IUnknown)||id==__uuidof(ID3D11DeviceChild)||id==__uuidof(ID3D11View)||id==__uuidof(Interface)){*out=ref(this);return S_OK;}return E_NOINTERFACE;
++  }
++  void STDMETHODCALLTYPE GetResource(ID3D11Resource **out)override{if(out)*out=ref(texture.ptr());}
++  void STDMETHODCALLTYPE GetDesc(Desc *out)override{if(out)*out=desc;}
++};
++using ProcessorInput=ProcessorView<ID3D11VideoProcessorInputView,D3D11_VIDEO_PROCESSOR_INPUT_VIEW_DESC>;
++using ProcessorOutput=ProcessorView<ID3D11VideoProcessorOutputView,D3D11_VIDEO_PROCESSOR_OUTPUT_VIEW_DESC>;
++static bool rgbFormat(DXGI_FORMAT f){return f==DXGI_FORMAT_B8G8R8A8_UNORM||f==DXGI_FORMAT_R8G8B8A8_UNORM;}
++static bool validRect(const RECT &r,UINT width,UINT height){return r.left>=0&&r.top>=0&&r.right>r.left&&r.bottom>r.top&&UINT(r.right)<=width&&UINT(r.bottom)<=height;}
++static Processor *processorFor(MTLD3D11Device *dev,ID3D11VideoProcessor *p){auto v=dynamic_cast<Processor*>(p);return v&&v->device()==dev?v:nullptr;}
++static void unsupportedProcessorState(Processor *p,UINT bit,bool enabled){if(!p)return;std::lock_guard<std::mutex> lock(p->mutex);if(enabled)p->unsupported|=bit;else p->unsupported&=~bit;}
+--- /dev/null
++++ b/src/d3d11/d3d11_video_processor_metal.hpp
+@@ -0,0 +1,13 @@
++#pragma once
++#include <cstdint>
++struct NativeVideoProcessArgs {
++  float source[4], destination[4], background[4];
++  float y_offset, y_scale, uv_scale, matrix709;
++  float rgb_input_limited, rgb_output_limited, stream_alpha, alpha_mode;
++  uint32_t target[4];
++  uint32_t input_nv12, input_slice, output_slice, reserved;
++};
++void *NativeVideoProcessorCreate(uint64_t device);
++void NativeVideoProcessorDestroy(void *processor);
++int32_t NativeVideoProcessorRender(void *processor, uint64_t source, uint64_t uv,
++                                  uint64_t destination, const NativeVideoProcessArgs *args);
+--- /dev/null
++++ b/src/d3d11/d3d11_video_processor_metal.mm
+@@ -0,0 +1,110 @@
++// Progressive SDR video conversion on Metal. No CPU image conversion/readback.
++// SPDX-License-Identifier: LGPL-2.1-or-later
++#import <Metal/Metal.h>
++#include "d3d11_video_processor_metal.hpp"
++#include <mutex>
++struct NativeVideoRenderer {
++  id<MTLDevice> device;
++  id<MTLCommandQueue> queue;
++  id<MTLLibrary> library;
++  id<MTLRenderPipelineState> bgra, rgba;
++  std::mutex mutex;
++};
++static NSString *shader = @R"METAL(
++#include <metal_stdlib>
++using namespace metal;
++struct Args {
++ float4 source, destination, background;
++ float y_offset, y_scale, uv_scale, matrix709;
++ float rgb_input_limited, rgb_output_limited, stream_alpha, alpha_mode;
++ uint4 target;
++ uint input_nv12, input_slice, output_slice, reserved;
++};
++vertex float4 video_vertex(uint index [[vertex_id]]) {
++ return float4(index == 1 ? 3.0 : -1.0, index == 2 ? 3.0 : -1.0, 0, 1);
++}
++fragment float4 video_fragment(float4 position [[position]],
++ texture2d<float> input [[texture(0)]], texture2d<float> chroma [[texture(1)]],
++ constant Args &a [[buffer(0)]]) {
++ float2 p = position.xy;
++ if (any(p < a.destination.xy) || any(p >= a.destination.zw)) return float4(a.background.rgb,a.alpha_mode < .5 ? 1.0 : a.background.a);
++ float2 pixel = a.source.xy + (p-a.destination.xy) / (a.destination.zw-a.destination.xy) * (a.source.zw-a.source.xy);
++ pixel=clamp(pixel,a.source.xy+float2(.5),a.source.zw-float2(.5));
++ constexpr sampler s(coord::normalized,address::clamp_to_edge,filter::linear);
++ float2 uv = pixel / float2(input.get_width(),input.get_height());
++ float4 color;
++ if (a.input_nv12) {
++  float y = (input.sample(s,uv).r-a.y_offset)*a.y_scale;
++  float2 c = (chroma.sample(s,uv).rg-float2(128.0/255.0))*a.uv_scale;
++  float3 rgb = a.matrix709 > 0.5 ? float3(y+1.5748*c.y,y-.187324*c.x-.468124*c.y,y+1.8556*c.x)
++                               : float3(y+1.402*c.y,y-.344136*c.x-.714136*c.y,y+1.772*c.x);
++  color=float4(clamp(rgb,0.0,1.0),1);
++ } else {
++  color=input.sample(s,uv);
++  if (a.rgb_input_limited > 0.5) color.rgb=clamp((color.rgb-float3(16.0/255.0))*(255.0/219.0),0.0,1.0);
++ }
++ color.rgb=mix(a.background.rgb,color.rgb,a.stream_alpha);
++ if (a.rgb_output_limited > .5) color.rgb=color.rgb*(219.0/255.0)+float3(16.0/255.0);
++ color.a = a.alpha_mode < .5 ? 1.0 : (a.alpha_mode < 1.5 ? a.background.a : color.a);
++ return color;
++}
++)METAL";
++void *NativeVideoProcessorCreate(uint64_t raw) {
++ @autoreleasepool {
++  auto r = new NativeVideoRenderer{};
++  r->device=[(id<MTLDevice>)(uintptr_t)raw retain];
++  r->queue=[r->device newCommandQueue];
++  NSError *error=nil;
++  r->library=[r->device newLibraryWithSource:shader options:nil error:&error];
++  if (!r->queue || !r->library) { NativeVideoProcessorDestroy(r);return nullptr; }
++  for (unsigned i=0;i<2;i++) {
++   auto desc=[[MTLRenderPipelineDescriptor alloc] init];
++   desc.vertexFunction=[r->library newFunctionWithName:@"video_vertex"];
++   desc.fragmentFunction=[r->library newFunctionWithName:@"video_fragment"];
++   desc.colorAttachments[0].pixelFormat=i?MTLPixelFormatRGBA8Unorm:MTLPixelFormatBGRA8Unorm;
++   id<MTLRenderPipelineState> p=[r->device newRenderPipelineStateWithDescriptor:desc error:&error];
++   [desc.vertexFunction release];[desc.fragmentFunction release];[desc release];
++   if (i) r->rgba=p;else r->bgra=p;
++   if (!p) {NativeVideoProcessorDestroy(r);return nullptr;}
++  }
++  return r;
++ }
++}
++void NativeVideoProcessorDestroy(void *ptr) {
++ auto r=static_cast<NativeVideoRenderer*>(ptr);if(!r)return;
++ [r->rgba release];[r->bgra release];[r->library release];[r->queue release];[r->device release];delete r;
++}
++static id<MTLTexture> sliceView(id<MTLTexture> texture,unsigned slice) {
++ if (!texture || slice>=texture.arrayLength) return nil;
++ if (texture.textureType==MTLTextureType2D && slice==0) return [texture retain];
++ if (texture.textureType!=MTLTextureType2DArray) return nil;
++ return [texture newTextureViewWithPixelFormat:texture.pixelFormat textureType:MTLTextureType2D
++       levels:NSMakeRange(0,1) slices:NSMakeRange(slice,1)];
++}
++int32_t NativeVideoProcessorRender(void *ptr,uint64_t source,uint64_t uv,uint64_t output,const NativeVideoProcessArgs *a) {
++ auto r=static_cast<NativeVideoRenderer*>(ptr);if(!r||!source||!output||!a)return int32_t(0x80070057);
++ std::lock_guard<std::mutex> lock(r->mutex);
++ @autoreleasepool {
++  id<MTLTexture> input=sliceView((id<MTLTexture>)(uintptr_t)source,a->input_slice);
++  id<MTLTexture> chroma=a->input_nv12?sliceView((id<MTLTexture>)(uintptr_t)uv,a->input_slice):[input retain];
++  id<MTLTexture> destination=sliceView((id<MTLTexture>)(uintptr_t)output,a->output_slice);
++  if(!input||!chroma||!destination){[input release];[chroma release];[destination release];return int32_t(0x80070057);}
++  auto p=destination.pixelFormat==MTLPixelFormatBGRA8Unorm?r->bgra:r->rgba;
++  auto desc=[MTLRenderPassDescriptor renderPassDescriptor];
++  desc.colorAttachments[0].texture=destination;
++  desc.colorAttachments[0].loadAction=MTLLoadActionLoad;
++  desc.colorAttachments[0].storeAction=MTLStoreActionStore;
++  auto command=[r->queue commandBuffer];auto encoder=[command renderCommandEncoderWithDescriptor:desc];
++  if(!encoder){[input release];[chroma release];[destination release];return int32_t(0x80004005);}
++  [encoder setRenderPipelineState:p];
++  [encoder setViewport:(MTLViewport){0,0,double(destination.width),double(destination.height),0,1}];
++  [encoder setScissorRect:(MTLScissorRect){a->target[0],a->target[1],a->target[2]-a->target[0],a->target[3]-a->target[1]}];
++  [encoder setFragmentTexture:input atIndex:0];[encoder setFragmentTexture:chroma atIndex:1];
++  [encoder setFragmentBytes:a length:sizeof(*a) atIndex:0];
++  [encoder drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:3];[encoder endEncoding];
++  [command commit];[command waitUntilCompleted];
++  bool ok=command.status==MTLCommandBufferStatusCompleted;
++  [input release];[chroma release];[destination release];
++  return ok?0:int32_t(0x80004005);
++ }
++}

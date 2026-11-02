@@ -72,11 +72,20 @@ def main():
     for name, path in archives.items():
         if digest(path) != pins[name]['sha256']:
             raise ValueError('Archive differs from the pinned input: ' + name)
-    patches = [REPO / 'graphics/backend' / name for name in
-               ('shared-initialization.patch', 'nv12-native.patch', 'vp9-video-device.patch', 'video-resource-submit.patch', 'shared-video-native.patch', 'video-named-errors.patch')]
-    for patch, key in zip(patches, ('shared_initialization_patch_sha256', 'nv12_patch_sha256', 'vp9_video_patch_sha256', 'resource_submit_patch_sha256', 'shared_video_patch_sha256', 'named_errors_patch_sha256')):
-        if digest(patch) != pins[key]:
-            raise ValueError('Patch differs from the pinned input: ' + patch.name)
+    patch_inputs = (
+        ('shared-initialization.patch', 'shared_initialization_patch_sha256'),
+        ('nv12-native.patch', 'nv12_patch_sha256'),
+        ('vp9-video-device.patch', 'vp9_video_patch_sha256'),
+        ('video-resource-submit.patch', 'resource_submit_patch_sha256'),
+        ('shared-video-native.patch', 'shared_video_patch_sha256'),
+        ('video-named-errors.patch', 'named_errors_patch_sha256'),
+        ('video-processor-format-support.patch', 'processor_formats_patch_sha256'),
+        ('video-processor-native.patch', 'processor_patch_sha256'),
+    )
+    patches = [REPO / 'graphics/backend' / name for name, _ in patch_inputs]
+    for name, key in patch_inputs:
+        if digest(REPO / 'graphics/backend' / name) != pins[key]:
+            raise ValueError('Patch differs from the pinned input: ' + name)
     header = REPO / 'graphics/backend/video-resource-submit.h'
     if digest(header) != pins['resource_submit_header_sha256']:
         raise ValueError('Resource submission ABI differs from the pinned input')
@@ -106,7 +115,7 @@ def main():
     run([ninja, '-C', build, '-j1', 'src/dxmt-native/libdxmt-native.dylib'])
     library = build / 'src/dxmt-native/libdxmt-native.dylib'
     receipt = {'inputs': pins, 'commands': commands, 'backend_sha256': digest(library),
-               'qualification': 'build-only; run NativeVideoDecodeChecks, NativeVideoTextureChecks and NativeSharedTextureChecks'}
+               'qualification': 'build-only; qualify processor pixels, decoder, ordinary/shared NV12 and BGRA, then Windows/Edge separately'}
     (output / 'build-receipt.json').write_text(json.dumps(receipt, indent=2) + '\n')
     print(library)
 

@@ -49,3 +49,34 @@ ffmpeg -hide_banner -loglevel error -i "$video_qa_dir/frame.ivf" -frames:v 1 -pi
 Confrontare il digest del riferimento con `nv12SHA256`, non solo l'exit code. Verifica locale1novembre: hardwaretrue,3840×2160,2plane Metal,12.441.600byte; hash esatti. Il primo decode+wait10,11ms esclude setup e non misura FPS sostenuti. Vedere il diario per fallimento iniziale-12906 senza registrazione e limiti.
 
 Il lavoro successivo deve preservare la coppia Wire2 e le patch già distribuite, aggiungere supporto reale NV12/plane, decoder e gestione vita/completamento nel backend appropriato. La presenza dei messaggi video nel protocollo non implementa queste capacità. Nessuna accelerazione YouTube è ancora distribuita e Creality3D resta la seconda priorità richiesta.
+
+
+## Diagnostica ripetibile e registrazione della candidata
+
+`observe-video.ps1` osserva un endpoint Edge loopback già aperto (default9222)
+e la pagina YouTube di prova esistente. Sottoscrive Media, legge SystemInfo e
+contatori del video senza navigare o modificare play/qualità/flag. Parametri:
+`-SampleCount 30 -Port 9222`; conservare output JSON fuori Git. Il tempo campione
+è misurato con Stopwatch; massimo2000eventi Media, con conteggio esplicito degli
+eventi omessi. Escludere confronti che mescolano decoder/codec/risoluzione o pause;
+i contatori browser non misurano direttamente gli scarti del presenter Mac.
+Avviare Edge con profilo QA separato, raccogliere gli eventi mentre si sceglie la
+qualità dalla UI e distinguere replay di errori passati da nuovi crash nel campione.
+
+`install-video-candidate.ps1` registra soltanto la libreria user-mode sperimentale
+in una directory Program Files nuova. Richiede consenso amministrativo ordinario,
+UUID atteso, SHA256 candidato e PrivateBuild atteso come parametri obbligatori;
+`PayloadRoot` contiene `neptune_umd_arm64.dll`. Verifica kernel e quattro UMD
+originali, ABI100.6.101.58000, SecureBoot/CI/TestSigning, conserva wrapper/companion
+originali e backup dei soli UserModeDriverName modificati. DriverStore/WoW/Vulkan
+restano invariati. Non è il bootstrap universale del prodotto e non qualifica
+una candidata: usarlo su copia isolata con host/protocollo allineati e verificare
+i moduli effettivi dopo avvio completo, poi pixel e browser. Una precedente
+registrazione QA va ripristinata dal suo backup verificato prima della nuova
+installazione; non sovrascrivere o cancellare le directory precedenti.
+
+L'esito M4 del2novembre distingue tre frame Windows hardware corretti dalla
+successiva disconnessione Edge: il log correla E_NOTIMPL del processore video
+DirectComposition e uscita GPU34. La v5 aggiunge elaborazione SDRprogressiva
+reale e inoltro DDI, da qualificare prima della main; non equivale a un flag che
+forza il rendering. [Evidenze](../../docs/VERIFICATION.md#2-novembre--primo-edge-m4-e-disconnessione-nella-presentazione-directcomposition).

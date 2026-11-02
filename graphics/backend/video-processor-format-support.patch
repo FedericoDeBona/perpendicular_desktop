@@ -1,0 +1,25 @@
+--- a/src/d3d11/d3d11_device.cpp
++++ b/src/d3d11/d3d11_device.cpp
+@@ -486,7 +486,8 @@
+     if (Format == DXGI_FORMAT_NV12) {
+       if (pFormatSupport)
+         *pFormatSupport = D3D11_FORMAT_SUPPORT_TEXTURE2D | D3D11_FORMAT_SUPPORT_CPU_LOCKABLE |
+-                         D3D11_FORMAT_SUPPORT_SHADER_LOAD | D3D11_FORMAT_SUPPORT_SHADER_SAMPLE;
++                         D3D11_FORMAT_SUPPORT_SHADER_LOAD | D3D11_FORMAT_SUPPORT_SHADER_SAMPLE |
++                         D3D11_FORMAT_SUPPORT_VIDEO_PROCESSOR_INPUT;
+       return S_OK;
+     }
+ 
+@@ -502,6 +503,12 @@
+     }
+ 
+     UINT outFormatSupport = 0;
++    // The native processor implements these SDR input/output formats only.
++    // Planar NV12 remains input-only; do not advertise a YUV overlay target.
++    if (Format == DXGI_FORMAT_B8G8R8A8_UNORM || Format == DXGI_FORMAT_R8G8B8A8_UNORM)
++      outFormatSupport |= D3D11_FORMAT_SUPPORT_VIDEO_PROCESSOR_INPUT |
++                          D3D11_FORMAT_SUPPORT_VIDEO_PROCESSOR_OUTPUT;
++
+ 
+     if (metal_format.PixelFormat) {
+       // All graphics and compute kernels can read or sample a texture with any pixel format.

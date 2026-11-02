@@ -38,9 +38,9 @@ La libreria grezza è in `new-nv12-build/build/src/dxmt-native/libdxmt-native.dy
 
 ## Decoder VP9 attraverso le API D3D11 native
 
-`vp9-video-device.patch` si applica dopo shared-initialization e NV12; la ricetta richiede le tre patch iniziali e video-resource-submit.patch, con ABI e hash esatti. Aggiunge le interfacce video al device/context immediato nativo, un decoder profile0/8bit/4:2:0 e una sessione VideoToolbox che **richiede hardware** e ne controlla la proprietà effettiva. Nessun processore video, contenuto cifrato o fallback software viene dichiarato supportato. Device/context conservano l'identità IUnknown e le superfici/decoder hanno riferimenti espliciti e controlli di dimensione/ownership. Deferred context non espone VideoContext.
+`vp9-video-device.patch` si applica dopo shared-initialization e NV12; la ricetta richiede le tre patch iniziali e video-resource-submit.patch, con ABI e hash esatti. Aggiunge le interfacce video al device/context immediato nativo, un decoder profile0/8bit/4:2:0 e una sessione VideoToolbox che **richiede hardware** e ne controlla la proprietà effettiva. Contenuto cifrato e fallback software non sono supportati. Il processore SDR della candidata successiva è descritto sotto. Device/context conservano l'identità IUnknown e le superfici/decoder hanno riferimenti espliciti e controlli di dimensione/ownership. Deferred context non espone VideoContext.
 
-Il primo passaggio dati è funzionale: VideoToolbox→copia NV12 sul Mac→UpdateSubresource verso i due piani GPU. Non è un percorso senza copie né una qualifica di60FPS. Gli stub COM di video processing/protezione non sono capacità offerte e la creazione dei relativi oggetti fallisce esplicitamente.
+Il primo passaggio dati è funzionale: VideoToolbox→copia NV12 sul Mac→UpdateSubresource verso i due piani GPU. Non è un percorso senza copie né una qualifica di60FPS. La protezione video resta non supportata; la successiva patch processor aggiunge solo le capacità SDR descritte sotto.
 
 Controllo mirato, con gli eseguibili/output sempre fuori Git e `native_video_build` sostituito con l'output della ricetta:
 
@@ -77,7 +77,7 @@ python3 scripts/rebuild-video-umd.py \
   --output /private/path/new-video-umd
 ```
 
-Output `build/src/virtio/neptune/triton/neptune_umd.dll`, file version100.6.101.58000, abbinata al kernel originale verificato, marcatura PrivateBuild `Perpendicular video-resource-v3` e ricevuta. `--prepare-only` ricostruisce sorgenti/configurazione senza dichiarare una build. Non crea un package installabile, non cambia KMD/DriverStore/registro/protezioni. La DLL modificata non è firmata Microsoft e si identifica esplicitamente come sperimentale. La versione numerica è quella richiesta dall’ABI del kernel originale; revisione candidata, hash e interfaccia privata1 restano controlli separati. Il prototipo iniziale0.4.0.1 non va registrato con il kernel100.6.101.58000. LoadLibrary in un processo Windows è riuscito; D3D11CreateDevice tramite driver software fallisce8007007f: non usare quel percorso come qualifica della UMD registrata.
+Output `build/src/virtio/neptune/triton/neptune_umd.dll`, file version100.6.101.58000, abbinata al kernel originale verificato, marcatura PrivateBuild `Perpendicular video-resource-v5` e ricevuta. `--prepare-only` ricostruisce sorgenti/configurazione senza dichiarare una build. Non crea un package installabile, non cambia KMD/DriverStore/registro/protezioni. La DLL modificata non è firmata Microsoft e si identifica esplicitamente come sperimentale. La versione numerica è quella richiesta dall’ABI del kernel originale; revisione candidata, hash e interfaccia privata1 restano controlli separati. Il prototipo iniziale0.4.0.1 non va registrato con il kernel100.6.101.58000. LoadLibrary in un processo Windows è riuscito; D3D11CreateDevice tramite driver software fallisce8007007f: non usare quel percorso come qualifica della UMD registrata.
 
 La canonica continua sul runtime qualificato precedente. Prossima verifica: copia Windows isolata con normale registrazione UMD e kernel originale/protezioni conservate, tre frame corretti usando il normale percorso GetDecoderBuffer/SubmitDecoderBuffers (senza `--resources` nell'app Windows), poi browser reale. Non allentare i gate di produzione né promuovere questi soli risultati. [Verifica e limiti](../../docs/VERIFICATION.md#1-novembre--buffer-video-come-risorse-e-prima-umd-ddi).
 
@@ -115,3 +115,12 @@ compiler/linker sono verificati per hash. Il profilo originale resta il default.
 È richiesto anche PyYAML6.0.3, oltre a Meson/Mako già fissati. Gli strumenti
 locali Rust non sono un sostituto: su questo Mac rust-lld non trova libLLVM.dylib.
 Preparazione e compilazione della UMD non qualificano la sua esecuzione Windows.
+
+
+## Processore video SDR della candidata v5
+
+`video-processor-format-support.patch` e `video-processor-native.patch` aggiungono un pass Metal reale per un singolo stream progressivo NV12/BGRA/RGBA verso BGRA/RGBA, con crop, scale, BT.601/709, range e alpha stream. `video-processor-ddi.patch` collega le API Windows al backend e trasporta l’esito effettivo delle creazioni e di Blt attraverso le risposte già presenti nel protocollo. I pin di entrambe le ricette sono obbligatori: una patch locale diversa viene rifiutata prima di creare l’output. La coppia non è ancora qualificata in Edge o distribuita nella main.
+
+Il pass attende la coda D3D e il proprio completamento Metal: correttezza prima della misura prestazionale. AutoStreamCaps=0 non aggiunge filtri quando Windows abilita il suo stato automatico predefinito. Non sono annunciati NV12 output, HDR, filtri, stereo, interlace, conversione di frequenza o nuovi handle NT/keyed. `NativeVideoProcessorChecks.cpp` verifica sette conversioni sui pixel e il confine delle capacità; si compila con gli stessi include/link nativi indicati sopra. In Windows usa VIDEO_SUPPORT; il runtime può filtrare richieste di stati non annunciati e sintetizzare bit generici NV12 obbligatori: l’enumeratore specifico e le viste restano il gate effettivo. Non interpretare un test nativo come prova browser.
+
+[Prove, negativi e punto di ripresa](../../docs/VERIFICATION.md#2-novembre--processore-video-sdr-reale-e-ponte-hresult).

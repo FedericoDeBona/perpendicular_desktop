@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "status": "isolated Windows VP9 hardware 3-frame pixel check PASS with usage 2; browser/main unqualified; user paused",
+  "status": "M4 video processor candidate with synchronous HRESULT bridge; Windows and Edge qualification pending",
   "mesa": {
     "revision": "bf536bba65454900d782fa7417bc95c1608d7483",
     "url": "https://codeload.github.com/osy/virtio-win-mesa/tar.gz/bf536bba65454900d782fa7417bc95c1608d7483",
@@ -18,7 +18,7 @@
     "url": "https://github.com/llvm/llvm-project/releases/download/llvmorg-15.0.7/clang%2Bllvm-15.0.7-arm64-apple-darwin22.0.tar.xz",
     "sha256": "867c6afd41158c132ef05a8f1ddaecf476a26b91c85def8e124414f9a9ba188d"
   },
-  "mesa_patch_sha256": "d6c0a4fa363c4e73d3388f1ba854b70b004069518efba7b8974abfd2234c01e7",
+  "mesa_patch_sha256": "8ceee62727e06e86799e0aaeb787b104f89db487c2c72d14bf4d93683e46e475",
   "resource_header_sha256": "ad2f6d652779f29a8d63860333cb0007456c00fd020c2574d9118421a67a95cd",
   "compiler_version": "Apple clang version 21.0.0 (clang-2100.4.1.1)",
   "sdk_files": {
@@ -48,9 +48,10 @@
     "qualification_required": "isolated Windows frame and protected driver loading, then browser, before main promotion",
     "original_kernel_sha256": "cfbc713754c7f0dcae4803017af3a0ebfc781d37fd57604f8ee8f2cfdad306c4",
     "file_version_matches_original_kernel": true,
-    "video_decoder_buffer_usage": 2
+    "video_decoder_buffer_usage": 2,
+    "native_video_processor_version": 1
   },
-  "candidate_revision": "Perpendicular video-resource-v3",
+  "candidate_revision": "Perpendicular video-resource-v5",
   "toolchain_profiles": {
     "m4-clang-2100.3.34.2-llvm15": {
       "status": "build candidate; Windows qualification required before deployment",
@@ -63,5 +64,6 @@
       "linker_source": "llvm_resource_compiler pinned archive, bin/lld and bin/llvm-ar",
       "sdk_source": "same XWin headers and libraries as original profile"
     }
-  }
+  },
+  "processor_patch_sha256": "6ad0aa3c57f391092faa5e3cdcaa8a3cfbeeb6e47e2c83e3d762cb3b7b6b1d55"
 }
