@@ -73,8 +73,8 @@ def main():
         if digest(path) != pins[name]['sha256']:
             raise ValueError('Archive differs from the pinned input: ' + name)
     patches = [REPO / 'graphics/backend' / name for name in
-               ('shared-initialization.patch', 'nv12-native.patch', 'vp9-video-device.patch', 'video-resource-submit.patch')]
-    for patch, key in zip(patches, ('shared_initialization_patch_sha256', 'nv12_patch_sha256', 'vp9_video_patch_sha256', 'resource_submit_patch_sha256')):
+               ('shared-initialization.patch', 'nv12-native.patch', 'vp9-video-device.patch', 'video-resource-submit.patch', 'shared-video-native.patch', 'video-named-errors.patch')]
+    for patch, key in zip(patches, ('shared_initialization_patch_sha256', 'nv12_patch_sha256', 'vp9_video_patch_sha256', 'resource_submit_patch_sha256', 'shared_video_patch_sha256', 'named_errors_patch_sha256')):
         if digest(patch) != pins[key]:
             raise ValueError('Patch differs from the pinned input: ' + patch.name)
     header = REPO / 'graphics/backend/video-resource-submit.h'

@@ -32,8 +32,17 @@ def main():
     parser.add_argument('--ninja', type=Path, required=True)
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--prepare-only', action='store_true', help='Check inputs and reconstruct source without compiling')
+    parser.add_argument('--toolchain-profile', default='original',
+                        help='Explicit pinned toolchain; profiles do not change the driver/source ABI')
     args = parser.parse_args()
     pins = json.loads((REPO / 'graphics/backend/video-umd-inputs.json').read_text())
+    if args.toolchain_profile != 'original':
+        profiles = pins.get('toolchain_profiles', {})
+        if args.toolchain_profile not in profiles:
+            raise ValueError('Unknown pinned toolchain profile: ' + args.toolchain_profile)
+        profile = profiles[args.toolchain_profile]
+        pins = {**pins, 'compiler_version': profile['compiler_version'],
+                'sdk_files': {**pins['sdk_files'], **profile['sdk_files']}}
     output = args.output.resolve()
     if output.exists() or output.is_relative_to(REPO):
         raise ValueError('A fresh output outside the repository is required')
@@ -123,7 +132,7 @@ def main():
                      "\n[host_machine]\nsystem = 'windows'\ncpu_family = 'aarch64'\ncpu = 'armv8'\nendian = 'little'\n[built-in options]\n"+
                      'c_args = '+repr(compile_args)+'\ncpp_args = '+repr(compile_args)+'\nc_link_args = '+repr(link_args)+
                      '\ncpp_link_args = '+repr(link_args)+"\nb_vscrt = 'mt'\n")
-    receipt = {'inputs': pins, 'compiler': version, 'commands': commands,
+    receipt = {'inputs': pins, 'toolchain_profile': args.toolchain_profile, 'compiler': version, 'commands': commands,
                'qualification': 'source preparation only; no Windows install or video qualification'}
     if not args.prepare_only:
         build = output / 'build'

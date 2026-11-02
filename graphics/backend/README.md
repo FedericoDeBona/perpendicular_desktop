@@ -84,3 +84,34 @@ La canonica continua sul runtime qualificato precedente. Prossima verifica: copi
 ### Esito Windows circoscritto e ripresa
 
 La v3 (stesso kernel ABI100.6.101.58000) usa il valore2 nel descrittore buffer. Nel clone Windows M1 tre frame4K I/P/P hanno attraversato il normale GetDecoderBuffer/SubmitDecoderBuffers e il trasporto risorse verso VideoToolbox hardware, con NV12 pixel-identico al riferimento. Il valore1 si fermava al primo BufferInfo, prima del callback CreateDecoder. Il controllo Windows ora richiede VIDEO_SUPPORT e stampa i moduli caricati: la sola modifica del registro non bastava, è servito l'avvio completo. Nel clone sono preservati KMD originale/Secure Boot/CI/OpenGL; questa prova non qualifica il browser, la condivisione NV12 o60FPS. Le poche righe di traccia riguardano la creazione, non ogni frame. Lavoro in pausa su richiesta. [Evidenze e stato macchine](../../docs/VERIFICATION.md#1-novembre--primi-frame-windows-vp9-e-pausa).
+
+
+## Superfici NV12 condivise native (2 novembre, candidata M4)
+
+`shared-video-native.patch` estende il percorso POSIX shm già esistente a due
+piani Metal nello stesso buffer: Y all'inizio, UV dopo `stride * height`.
+Il descrittore conserva formato, stride, dimensione e fd del protocollo esistente.
+Il controllo import verifica lo spazio per entrambi i piani; l'allineamento Metal
+viene controllato prima di creare fd o mapping. Non cambia l'ABI del trasporto.
+Per NV12 sono ammessi soltanto `D3D11_RESOURCE_MISC_SHARED`, una slice e usage
+default; NT-handle e keyed mutex restano esplicitamente fuori dal nuovo supporto.
+`video-named-errors.patch` conserva i cinque messaggi diagnostici nominati della
+base ordinaria, adattati ai sorgenti della candidata. La ricetta verifica gli hash
+di entrambe le nuove patch: non riusare il precedente PASS su un backend vecchio.
+
+`tests/NativeSharedVideoTextureChecks.cpp` importa la superficie su un secondo
+device, controlla i pixel Y/UV inizializzati, aggiorna dall'importatore e verifica
+la vista del produttore dopo il rilascio dell'importatore. Compilarlo come gli
+altri controlli nativi sopra. Baseline v3: creazione rifiutata80070057; candidata:
+tre confronti pixel esatti. I controlli NV12 ordinario, BGRA condivisa e VP9
+hardware3frame4K restano positivi. Sono verifiche native, non una prova di FPS,
+condivisione tra processi Windows o risoluzione delle disconnessioni di Edge.
+
+Per la UMD sul M4 è disponibile il profilo esplicito
+`--toolchain-profile m4-clang-2100.3.34.2-llvm15`: Apple clang2100.3.34.2 e
+`lld`/`llvm-ar`15.0.7 dal medesimo archivio LLVM fissato, esposti come lld-link e
+llvm-lib. Header/librerie XWin e ABI KMD restano identici al profilo originale;
+compiler/linker sono verificati per hash. Il profilo originale resta il default.
+È richiesto anche PyYAML6.0.3, oltre a Meson/Mako già fissati. Gli strumenti
+locali Rust non sono un sostituto: su questo Mac rust-lld non trova libLLVM.dylib.
+Preparazione e compilazione della UMD non qualificano la sua esecuzione Windows.

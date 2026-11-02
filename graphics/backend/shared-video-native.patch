@@ -1,0 +1,77 @@
+--- a/src/d3d11/d3d11_resource_helper.cpp
++++ b/src/d3d11/d3d11_resource_helper.cpp
+@@ -311,7 +311,8 @@
+     if (Dimension != D3D11_RESOURCE_DIMENSION_TEXTURE2D || !NV12Layout::valid(Width, Height, Width) ||
+         ArraySize > D3D11_REQ_TEXTURE2D_ARRAY_AXIS_DIMENSION ||
+         Width > D3D11_REQ_TEXTURE2D_U_OR_V_DIMENSION || Height > D3D11_REQ_TEXTURE2D_U_OR_V_DIMENSION ||
+-        MipLevels > 1 || SampleCount != 1 || MiscFlags ||
++        MipLevels > 1 || SampleCount != 1 || (MiscFlags & ~D3D11_RESOURCE_MISC_SHARED) ||
++        (MiscFlags && (ArraySize != 1 || Usage != D3D11_USAGE_DEFAULT || CPUAccessFlags)) ||
+         (BindFlags & ~(D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_RENDER_TARGET |
+                        D3D11_BIND_DECODER | D3D11_BIND_VIDEO_ENCODER)) ||
+         (Usage == D3D11_USAGE_DYNAMIC && CPUAccessFlags != D3D11_CPU_ACCESS_WRITE) ||
+--- a/src/d3d11/d3d11_texture_shared_native.cpp
++++ b/src/d3d11/d3d11_texture_shared_native.cpp
+@@ -111,7 +111,7 @@
+     logical_size = import_size;
+     if (!stride || !finalDesc.Height || stride > UINT32_MAX || logical_size > UINT32_MAX ||
+         stride < (uint64_t)finalDesc.Width * format_desc.BytesPerTexel ||
+-        logical_size / stride < finalDesc.Height) {
++        logical_size / stride < uint64_t(finalDesc.Height) * (finalDesc.Format == DXGI_FORMAT_NV12 ? 3 : 2) / 2) {
+       ERR("shm texture: import descriptor stride/size inconsistent");
+       return E_INVALIDARG;
+     }
+@@ -135,6 +135,17 @@
+     ERR("shm texture: import offset out of range");
+     return E_INVALIDARG;
+   }
++  if (finalDesc.Format == DXGI_FORMAT_NV12) {
++    auto metal = pDevice->GetMTLDevice();
++    const uint64_t alignment = std::max(
++        metal.minimumLinearTextureAlignmentForPixelFormat(WMTPixelFormatR8Unorm),
++        metal.minimumLinearTextureAlignmentForPixelFormat(WMTPixelFormatRG8Unorm));
++    if (!alignment || stride % alignment || (delta + stride * finalDesc.Height) % alignment) {
++      ERR("shm NV12: plane offsets or stride are not aligned");
++      return E_INVALIDARG;
++    }
++  }
++
+   const uint64_t mapped_size = page_align(delta + logical_size);
+ 
+   int fd = import_fd >= 0 ? import_fd : anon_shm_file(mapped_size);
+@@ -182,6 +193,7 @@
+   linear_info.mach_port = 0;
+   linear_info.options = WMTResourceHazardTrackingModeUntracked;
+ 
++
+   Flags<TextureAllocationFlag> flags;
+   flags.set(TextureAllocationFlag::Shared);
+   if (finalDesc.Usage == D3D11_USAGE_IMMUTABLE)
+@@ -190,9 +202,10 @@
+     flags.set(TextureAllocationFlag::ShaderReadonly);
+ 
+   Rc<Texture> texture = new Texture((unsigned)logical_size, (unsigned)stride, linear_info, pDevice->GetMTLDevice());
++  texture->nv12 = finalDesc.Format == DXGI_FORMAT_NV12;
+   Rc<TextureAllocation> allocation =
+       texture->allocateFromBuffer(std::move(buffer), (uint8_t *)mapped + delta, (unsigned)delta, flags);
+-  if (!allocation->texture()) {
++  if (!allocation->texture() || (texture->nv12 && !allocation->texture(1))) {
+     ERR("shm texture: linear texture creation failed (stride=", stride, ")");
+     /* buffer reference died with `allocation`; its deallocator munmaps. */
+     if (import_fd < 0)
+--- a/src/dxmt/dxmt_texture.cpp
++++ b/src/dxmt/dxmt_texture.cpp
+@@ -65,6 +65,13 @@
+     flags_(flags) {
+   auto info_copy = info;
+   obj_ = buffer_.newTexture(info_copy, offset, bytes_per_row);
++  if (descriptor->nv12) {
++    auto uv_info = info;
++    uv_info.pixel_format = WMTPixelFormatRG8Unorm;
++    uv_info.width /= 2;
++    uv_info.height /= 2;
++    uv_ = buffer_.newTexture(uv_info, offset + bytes_per_row * info.height, bytes_per_row);
++  }
+ 
+   gpuResourceID = info_copy.gpu_resource_id;
+   machPort = 0;

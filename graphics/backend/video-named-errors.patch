@@ -1,0 +1,48 @@
+--- a/src/d3d11/d3d11_context_impl.cpp
++++ b/src/d3d11/d3d11_context_impl.cpp
+@@ -1345,7 +1345,7 @@
+     FIXME: for render targets we can use this information: LoadActionDontCare
+     FIXME: A Map with D3D11_MAP_WRITE type could become D3D11_MAP_WRITE_DISCARD?
+     */
+-    ERR_ONCE("Not implemented");
++    ERR_ONCE("ID3D11DeviceContext::DiscardResource: Not implemented");
+   }
+ 
+   void
+@@ -1357,7 +1357,7 @@
+   void
+   STDMETHODCALLTYPE
+   DiscardView1(ID3D11View *pResourceView, const D3D11_RECT *pRects, UINT NumRects) override {
+-    ERR_ONCE("Not implemented");
++    ERR_ONCE("ID3D11DeviceContext1::DiscardView1: Not implemented");
+   }
+ #pragma endregion
+ 
+--- a/src/d3d11/d3d11_device.cpp
++++ b/src/d3d11/d3d11_device.cpp
+@@ -748,12 +748,12 @@
+   }
+ 
+   HRESULT STDMETHODCALLTYPE SetExceptionMode(UINT RaiseFlags) override {
+-    ERR("Not implemented");
++    ERR("ID3D11Device::SetExceptionMode: Not implemented");
+     return E_NOTIMPL;
+   }
+ 
+   UINT STDMETHODCALLTYPE GetExceptionMode() override {
+-    ERR("Not implemented");
++    ERR("ID3D11Device::GetExceptionMode: Not implemented");
+     return 0;
+   }
+ 
+--- a/src/d3d11/d3d11_swapchain.cpp
++++ b/src/d3d11/d3d11_swapchain.cpp
+@@ -704,7 +704,7 @@
+   HRESULT
+   STDMETHODCALLTYPE
+   GetCoreWindow(REFIID refiid, void **ppUnk) final {
+-    ERR("Not implemented");
++    ERR("IDXGISwapChain1::GetCoreWindow: Not implemented");
+     return E_NOTIMPL;
+   };
+ 
