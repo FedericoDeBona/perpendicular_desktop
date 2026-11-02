@@ -1,0 +1,162 @@
+--- a/src/d3d11/d3d11_video_vt.hpp
++++ b/src/d3d11/d3d11_video_vt.hpp
+@@ -12,6 +12,11 @@
+   NativeVP9Session(unsigned width, unsigned height);
+   ~NativeVP9Session();
+   bool ready() const;
+-  bool decode(const uint8_t *bytes, size_t size, std::vector<uint8_t> &nv12);
++  bool decode(const uint8_t *bytes, size_t size, uint64_t luma, uint64_t chroma, unsigned slice);
+ };
+ }
++
++// Internal Metal transfer; the retained CoreVideo image outlives the GPU copy.
++void *NativeVideoFrameCopyCreate(uint64_t destination);
++void NativeVideoFrameCopyDestroy(void *copy);
++bool NativeVideoFrameCopy(void *copy, void *image, uint64_t luma, uint64_t chroma, unsigned slice);
+--- a/src/d3d11/d3d11_video_vt.cpp
++++ b/src/d3d11/d3d11_video_vt.cpp
+@@ -20,6 +20,7 @@
+   CVPixelBufferRef output = nullptr;
+   OSStatus output_status = noErr;
+   bool hardware = false;
++  void *metal_copy = nullptr;
+   Impl(unsigned w, unsigned h) : width(w), height(h) {
+     if (!NativeVP9HardwareAvailable()) return;
+     uint8_t config[] = {1,0,0,0,0,0,0x82,2,2,2,0,0};
+@@ -65,6 +66,7 @@
+     if (accelerated) CFRelease(accelerated);
+   }
+   ~Impl() {
++    NativeVideoFrameCopyDestroy(metal_copy);
+     if (session) { VTDecompressionSessionInvalidate(session); CFRelease(session); }
+     if (output) CFRelease(output);
+     if (format) CFRelease(format);
+@@ -73,7 +75,7 @@
+ NativeVP9Session::NativeVP9Session(unsigned w, unsigned h) : impl_(new Impl(w,h)) {}
+ NativeVP9Session::~NativeVP9Session() = default;
+ bool NativeVP9Session::ready() const { return impl_->session && impl_->hardware; }
+-bool NativeVP9Session::decode(const uint8_t *bytes, size_t size, std::vector<uint8_t> &nv12) {
++bool NativeVP9Session::decode(const uint8_t *bytes, size_t size, uint64_t luma, uint64_t chroma, unsigned slice) {
+   if (!ready() || !bytes || !size || size > 16 * 1024 * 1024 || (bytes[0] & 0xf0) != 0x80) return false;
+   auto &s = *impl_;
+   if (s.output) { CFRelease(s.output); s.output = nullptr; }
+@@ -96,21 +98,7 @@
+   if (CVPixelBufferGetWidth(image) != s.width || CVPixelBufferGetHeight(image) != s.height ||
+       CVPixelBufferGetPixelFormatType(image) != kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange ||
+       CVPixelBufferGetPlaneCount(image) != 2) return false;
+-  nv12.resize(size_t(s.width) * s.height * 3 / 2);
+-  if (CVPixelBufferLockBaseAddress(image, kCVPixelBufferLock_ReadOnly) != kCVReturnSuccess) return false;
+-  size_t offset = 0;
+-  bool valid = true;
+-  for (unsigned plane = 0; plane < 2; ++plane) {
+-    auto base = static_cast<const uint8_t *>(CVPixelBufferGetBaseAddressOfPlane(image, plane));
+-    auto rows = plane ? s.height / 2 : s.height;
+-    auto pitch = CVPixelBufferGetBytesPerRowOfPlane(image, plane);
+-    if (!base || pitch < s.width || CVPixelBufferGetHeightOfPlane(image, plane) != rows) { valid = false; break; }
+-    for (unsigned row = 0; row < rows; ++row) {
+-      std::memcpy(nv12.data() + offset, base + row * pitch, s.width);
+-      offset += s.width;
+-    }
+-  }
+-  CVPixelBufferUnlockBaseAddress(image, kCVPixelBufferLock_ReadOnly);
+-  return valid;
++  if (!s.metal_copy) s.metal_copy = NativeVideoFrameCopyCreate(luma);
++  return s.metal_copy && NativeVideoFrameCopy(s.metal_copy, image, luma, chroma, slice);
+ }
+ }
+--- a/src/d3d11/d3d11_video.cpp
++++ b/src/d3d11/d3d11_video.cpp
+@@ -259,7 +259,7 @@
+   D3D11_VIDEO_DECODER_CONFIG config;
+   Com<DecoderView> view;
+   ID3D11DeviceContext *active_context = nullptr; // borrowed only during a frame
+-  std::vector<uint8_t> submitted, pixels;
++  std::vector<uint8_t> submitted;
+   Decoder(MTLD3D11Device *dev, const D3D11_VIDEO_DECODER_DESC &d, const D3D11_VIDEO_DECODER_CONFIG &c)
+     : MTLD3D11DeviceChild(dev), owner_(dev), session(d.SampleWidth, d.SampleHeight), desc(d), config(c) {}
+   HRESULT STDMETHODCALLTYPE QueryInterface(REFIID id, void **out) override {
+@@ -618,8 +618,14 @@
+     for (auto &buffer : decoder->buffers) if (buffer.mapped) return E_INVALIDARG;
+     if (!view || decoder->submitted.empty()) return E_INVALIDARG;
+     try {
+-      if (!decoder->session.decode(decoder->submitted.data(), decoder->submitted.size(), decoder->pixels)) return E_FAIL;
+-      context_->UpdateSubresource(view->texture(), view->slice(), nullptr, decoder->pixels.data(), decoder->desc.SampleWidth, 0);
++      auto target = GetTexture(view->texture());
++      if (!target || !target->current()) return E_INVALIDARG;
++      // Complete earlier D3D work before the separate Metal queue writes the
++      // decoder target. The copy completes before EndFrame returns, so later
++      // D3D consumers observe both planes without a CPU readback/upload.
++      device_->GetImmediateContextPrivate()->WaitUntilGPUIdle();
++      if (!decoder->session.decode(decoder->submitted.data(), decoder->submitted.size(),
++          target->current()->texture().handle, target->current()->texture(1).handle, view->slice())) return E_FAIL;
+     } catch (const std::bad_alloc &) { return E_OUTOFMEMORY; }
+     return S_OK;
+   }
+--- a/src/d3d11/d3d11_video_processor_metal.mm
++++ b/src/d3d11/d3d11_video_processor_metal.mm
+@@ -108,3 +108,65 @@
+   return ok?0:int32_t(0x80004005);
+  }
+ }
++
++
++// VP9 output stays on the GPU. This synchronous transfer deliberately keeps
++// the existing EndFrame completion contract and does not introduce new fences.
++#import <CoreVideo/CoreVideo.h>
++#include "d3d11_video_vt.hpp"
++struct NativeFrameCopy {
++ id<MTLDevice> device=nil;
++ id<MTLCommandQueue> queue=nil;
++ CVMetalTextureCacheRef cache=nullptr;
++};
++void *NativeVideoFrameCopyCreate(uint64_t destination) {
++ @autoreleasepool {
++  auto target=(id<MTLTexture>)(uintptr_t)destination;
++  if(!target)return nullptr;
++  auto copy=new NativeFrameCopy;
++  copy->device=[target.device retain];
++  copy->queue=[copy->device newCommandQueue];
++  if(!copy->queue || CVMetalTextureCacheCreate(kCFAllocatorDefault,nullptr,copy->device,nullptr,&copy->cache)!=kCVReturnSuccess) {
++   NativeVideoFrameCopyDestroy(copy);return nullptr;
++  }
++  return copy;
++ }
++}
++void NativeVideoFrameCopyDestroy(void *ptr) {
++ auto copy=static_cast<NativeFrameCopy*>(ptr);if(!copy)return;
++ if(copy->cache)CFRelease(copy->cache);
++ [copy->queue release];[copy->device release];delete copy;
++}
++bool NativeVideoFrameCopy(void *ptr,void *image,uint64_t luma,uint64_t chroma,unsigned slice) {
++ auto copy=static_cast<NativeFrameCopy*>(ptr);auto pixel=(CVPixelBufferRef)image;
++ if(!copy||!pixel||!luma||!chroma||CVPixelBufferGetPlaneCount(pixel)!=2)return false;
++ @autoreleasepool {
++  id<MTLTexture> targets[2]={(id<MTLTexture>)(uintptr_t)luma,(id<MTLTexture>)(uintptr_t)chroma};
++  CVMetalTextureRef planes[2]={nullptr,nullptr};
++  bool valid=true;
++  for(unsigned i=0;i<2;i++){
++   auto t=targets[i];auto format=i?MTLPixelFormatRG8Unorm:MTLPixelFormatR8Unorm;
++   auto width=CVPixelBufferGetWidthOfPlane(pixel,i),height=CVPixelBufferGetHeightOfPlane(pixel,i);
++   if(t.device!=copy->device||t.pixelFormat!=format||t.width!=width||t.height!=height||slice>=t.arrayLength||
++      (t.textureType!=MTLTextureType2D&&t.textureType!=MTLTextureType2DArray)||
++      CVMetalTextureCacheCreateTextureFromImage(kCFAllocatorDefault,copy->cache,pixel,nullptr,format,width,height,i,&planes[i])!=kCVReturnSuccess){valid=false;break;}
++  }
++  if(valid){
++   auto command=[copy->queue commandBuffer];auto blit=[command blitCommandEncoder];
++   if(!blit)valid=false;
++   else {
++    for(unsigned i=0;i<2;i++){
++     auto source=CVMetalTextureGetTexture(planes[i]);
++     [blit copyFromTexture:source sourceSlice:0 sourceLevel:0 sourceOrigin:MTLOriginMake(0,0,0)
++       sourceSize:MTLSizeMake(source.width,source.height,1) toTexture:targets[i]
++       destinationSlice:slice destinationLevel:0 destinationOrigin:MTLOriginMake(0,0,0)];
++    }
++    [blit endEncoding];[command commit];[command waitUntilCompleted];
++    valid=command.status==MTLCommandBufferStatusCompleted;
++   }
++  }
++  // Keep CoreVideo wrappers (and the decoded IOSurface) alive through completion.
++  for(auto plane:planes)if(plane)CFRelease(plane);
++  return valid;
++ }
++}

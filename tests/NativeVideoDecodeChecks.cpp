@@ -73,12 +73,16 @@ int main(int argc, char **argv) {
   D3D11_TEXTURE2D_DESC td = {};
   td.Width = width; td.Height = height;
   td.MipLevels = td.ArraySize = td.SampleDesc.Count = 1;
+  // Exercise a nonzero decoder target slice: GPU plane copies must retain
+  // the output view's array selection, including chroma.
+  td.ArraySize = 2;
   td.Format = DXGI_FORMAT_NV12; td.Usage = D3D11_USAGE_DEFAULT;
   td.BindFlags = D3D11_BIND_DECODER | D3D11_BIND_SHADER_RESOURCE;
   ID3D11Texture2D *texture = nullptr, *staging = nullptr;
   check(device->CreateTexture2D(&td, nullptr, &texture), "NV12 output");
   D3D11_VIDEO_DECODER_OUTPUT_VIEW_DESC vd = {};
   vd.DecodeProfile = profile; vd.ViewDimension = D3D11_VDOV_DIMENSION_TEXTURE2D;
+  vd.Texture2D.ArraySlice = 1;
   ID3D11VideoDecoderOutputView *view = nullptr;
   check(video->CreateVideoDecoderOutputView(texture, &vd, &view), "decoder view");
   td.Usage = D3D11_USAGE_STAGING; td.BindFlags = 0; td.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
@@ -153,12 +157,12 @@ int main(int argc, char **argv) {
     }
     context->CopyResource(staging, texture);
     D3D11_MAPPED_SUBRESOURCE mapped = {};
-    check(context->Map(staging, 0, D3D11_MAP_READ, 0, &mapped), "decoded readback");
+    check(context->Map(staging, 1, D3D11_MAP_READ, 0, &mapped), "decoded readback");
     bool equal = mapped.RowPitch >= width;
     for (UINT row = 0; row < height * 3 / 2 && equal; ++row)
       equal = !std::memcmp((uint8_t *)mapped.pData + size_t(row) * mapped.RowPitch,
                            expected.data() + size_t(row) * width, width);
-    context->Unmap(staging, 0);
+    context->Unmap(staging, 1);
     if (!equal) { std::fprintf(stderr, "Decoded pixels differ in frame %u\n", frames); return 3; }
     ++frames;
   }

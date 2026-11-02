@@ -1,0 +1,218 @@
+--- a/src/virtio/neptune/triton/tritonFaultTrace.h
++++ b/src/virtio/neptune/triton/tritonFaultTrace.h
+@@ -5,15 +5,24 @@
+ #include <windows.h>
+ #include <evntprov.h>
+ #include <stdio.h>
+-static inline void tritonTraceFaultAt(const char *where, HRESULT hr, UINT detail) {
++static inline void tritonTraceFaultText(const WCHAR *message) {
+     static volatile LONG emitted;
+     if (InterlockedIncrement(&emitted) > 32) return;
+     static const GUID provider = {0x48dce1b6,0xe965,0x4e8a,{0xb5,0xfa,0xd9,0xcb,0x52,0x65,0x72,0x12}};
+     REGHANDLE handle = 0;
+     if (EventRegister(&provider, NULL, NULL, &handle) != ERROR_SUCCESS) return;
+-    WCHAR message[256];
+-    _snwprintf_s(message, 256, _TRUNCATE, L"Perpendicular video v12: %hs hr=0x%08x detail=%u", where, (UINT)hr, detail);
+     EventWriteString(handle, 2, 1, message);
+     EventUnregister(handle);
+ }
++static inline void tritonTraceFaultAt(const char *where, HRESULT hr, UINT detail) {
++    WCHAR message[256];
++    _snwprintf_s(message, 256, _TRUNCATE, L"Perpendicular video v13: %hs hr=0x%08x detail=%u", where, (UINT)hr, detail);
++    tritonTraceFaultText(message);
++}
++static inline void tritonTraceAllocation(const char *where, UINT64 bytes, UINT status, UINT64 detail) {
++    WCHAR message[256];
++    _snwprintf_s(message, 256, _TRUNCATE, L"Perpendicular allocation v13: %hs bytes=%llu status=0x%08x detail=%llu", where, bytes, status, detail);
++    tritonTraceFaultText(message);
++}
++
+ #endif
+--- a/src/virtio/neptune/triton/tritonResource.c
++++ b/src/virtio/neptune/triton/tritonResource.c
+@@ -737,7 +737,13 @@
+          * record what failed. */
+         TR_LOG("Map: sub=%u type=%u flags=0x%x hr=0x%08lx", Subresource,
+                (unsigned)DDIMap, Flags, hr);
+-        tritonTraceFaultAt("Map host result", hr, Subresource);
++        WCHAR diagnostic[256];
++        _snwprintf_s(diagnostic, 256, _TRUNCATE,
++            L"Perpendicular Map v13: resource=%p fmt=%u size=%ux%ux%u mips=%u array=%u usage=%u cpu=0x%x bind=0x%x misc=0x%x sub=%u map=%u flags=0x%x hr=0x%08x",
++            r->pResource, r->Format, r->Width, r->Height, r->Depth,
++            r->MipLevels, r->ArraySize, r->Usage, r->MapFlags,
++            r->BindFlags, r->MiscFlags, Subresource, (UINT)DDIMap, Flags, (UINT)hr);
++        tritonTraceFaultText(diagnostic);
+         tritonSetError(pD, D3DDDIERR_DEVICEREMOVED);
+         pMapped->pData = NULL;
+         pMapped->RowPitch = pMapped->DepthPitch = 0;
+--- a/src/virtio/neptune/triton/neptune_umd.rc
++++ b/src/virtio/neptune/triton/neptune_umd.rc
+@@ -30,7 +30,7 @@
+             VALUE "CompanyName", "Perpendicular experimental build; upstream Turing Software LLC"
+             VALUE "FileDescription", "Experimental Neptune video UMD - Perpendicular"
+             VALUE "FileVersion", NPT_RC_STR(VER)
+-            VALUE "PrivateBuild", "Perpendicular video-resource-v12"
++            VALUE "PrivateBuild", "Perpendicular video-resource-v13"
+             VALUE "InternalName", "neptune_umd"
+             VALUE "OriginalFilename", "neptune_umd.dll"
+             VALUE "ProductName", "Neptune"
+--- a/src/virtio/neptune/npt_resource.c
++++ b/src/virtio/neptune/npt_resource.c
+@@ -2,6 +2,13 @@
+  * Copyright 2026 Turing Software LLC
+  * SPDX-License-Identifier: MIT
+  */
++
++#if defined(_WIN32)
++#include "triton/tritonFaultTrace.h"
++#define NPT_ALLOC_TRACE(...) tritonTraceAllocation(__VA_ARGS__)
++#else
++#define NPT_ALLOC_TRACE(...) ((void)0)
++#endif
+ 
+ #include "npt_com.h"
+ #include "npt_device.h"
+@@ -203,6 +210,7 @@
+    struct npt_renderer_shmem *s =
+       npt_shmem_pool_alloc(rndr, &dev->map_pool, r->aligned_slot_size, &off);
+    if (!s) {
++      NPT_ALLOC_TRACE("map slot pool", r->aligned_slot_size, 0x8007000eu, idx);
+       npt_log("d3d_map_ring: pool_alloc slot %u (%u bytes) failed",
+               idx, r->aligned_slot_size);
+       return false;
+@@ -222,6 +230,7 @@
+ alloc_shmem_locked(struct npt_d3d_map_ring *r, uint32_t aligned_slot_size)
+ {
+    if (r->aligned_slot_size && r->aligned_slot_size != aligned_slot_size) {
++      NPT_ALLOC_TRACE("map size drift", aligned_slot_size, 0x8007000eu, r->aligned_slot_size);
+       npt_log("d3d_map_ring: size drift %u->%u (unsupported)",
+               r->aligned_slot_size, aligned_slot_size);
+       return false;
+@@ -238,8 +247,10 @@
+          aligned_slot_size <= 4096u  ? NPT_D3D_MAP_SLOT_MAX :
+          aligned_slot_size <= 65536u ? 16u : 8u;
+       struct npt_d3d_map_slot *slots = calloc(max_slots, sizeof(*slots));
+-      if (!slots)
++      if (!slots) {
++         NPT_ALLOC_TRACE("map slot records", max_slots * sizeof(*slots), 0x8007000eu, aligned_slot_size);
+          return false;
++      }
+       r->slots = slots;
+       r->max_slots = max_slots;
+       r->aligned_slot_size = aligned_slot_size;
+@@ -261,6 +272,7 @@
+    if (atomic_load_explicit(&r->ready, memory_order_acquire)) {
+       if (r->aligned_slot_size == aligned_slot_size)
+          return true;
++      NPT_ALLOC_TRACE("map size drift", aligned_slot_size, 0x8007000eu, r->aligned_slot_size);
+       npt_log("d3d_map_ring: size drift %u->%u (unsupported)",
+               r->aligned_slot_size, aligned_slot_size);
+       return false;
+@@ -387,6 +399,7 @@
+          struct npt_d3d_map_record *records =
+             realloc(r->records, cap * sizeof(*records));
+          if (!records) {
++            NPT_ALLOC_TRACE("map open records", cap * sizeof(*records), 0x8007000eu, rec->subresource);
+             mtx_unlock(&r->lock);
+             return false;
+          }
+@@ -1477,6 +1490,7 @@
+     * 16384 x 16384 subresource of a 16-byte format is 4 GB and cannot be
+     * mapped); slots are lazily allocated up to the ring's cap. */
+    if (per_slot == 0 || aligned_slot > (uint64_t)(2048u << 20)) {
++      NPT_ALLOC_TRACE("texture map size", per_slot, 0x8007000eu, aux->format);
+       npt_log("texture_ensure_map_shmem: bad size");
+       return false;
+    }
+--- a/src/virtio/neptune/npt_shmem_pool.c
++++ b/src/virtio/neptune/npt_shmem_pool.c
+@@ -2,6 +2,13 @@
+  * Copyright 2026 Turing Software LLC
+  * SPDX-License-Identifier: MIT
+  */
++
++#if defined(_WIN32)
++#include "triton/tritonFaultTrace.h"
++#define NPT_ALLOC_TRACE(...) tritonTraceAllocation(__VA_ARGS__)
++#else
++#define NPT_ALLOC_TRACE(...) ((void)0)
++#endif
+ 
+ #include "npt_shmem_pool.h"
+ 
+@@ -39,6 +46,7 @@
+    struct npt_renderer_shmem *shmem =
+       npt_renderer_shmem_create(renderer, alloc_size);
+    if (!shmem) {
++      NPT_ALLOC_TRACE("shmem pool create", alloc_size, 0x8007000eu, size);
+       npt_log("shmem pool: failed to allocate %zu bytes", alloc_size);
+       return false;
+    }
+--- a/src/virtio/neptune/npt_renderer_virtgpu_win32.c
++++ b/src/virtio/neptune/npt_renderer_virtgpu_win32.c
+@@ -15,6 +15,13 @@
+ /* WIN32_NO_STATUS keeps windows.h from defining a subset of STATUS_*
+  * codes; we get the full set from ntstatus.h below. */
+ #define WIN32_NO_STATUS
++#if defined(_WIN32)
++#include "triton/tritonFaultTrace.h"
++#define NPT_ALLOC_TRACE(...) tritonTraceAllocation(__VA_ARGS__)
++#else
++#define NPT_ALLOC_TRACE(...) ((void)0)
++#endif
++
+ #include <windows.h>
+ #undef WIN32_NO_STATUS
+ 
+@@ -510,6 +517,7 @@
+    };
+    NTSTATUS status = gpu->cb.createAllocation(&alloc);
+    if (!NT_SUCCESS(status)) {
++      NPT_ALLOC_TRACE("D3DKMTCreateAllocation", blob_size, (UINT)status, blob_flags);
+       npt_log("virtgpu: D3DKMTCreateAllocation failed 0x%lx", status);
+       return status;
+    }
+@@ -541,6 +549,7 @@
+    for (int attempt = 0;; attempt++) {
+       status = virtgpu_escape(gpu, &res_info);
+       if (!NT_SUCCESS(status)) {
++         NPT_ALLOC_TRACE("RES_INFO escape", blob_size, (UINT)status, attempt);
+          npt_log("virtgpu: RES_INFO escape failed 0x%lx", status);
+          goto fail_destroy;
+       }
+@@ -550,6 +559,7 @@
+          npt_log("virtgpu: RES_INFO reports blob not created (gave up after %d tries)",
+                  attempt + 1);
+          status = STATUS_INVALID_PARAMETER;
++         NPT_ALLOC_TRACE("RES_INFO not created", blob_size, (UINT)status, attempt);
+          goto fail_destroy;
+       }
+       if (attempt == 0)
+@@ -573,8 +583,10 @@
+     * shmem_create_host_visible. */
+    if (is_mappable && !res_info.ResourceInfo.UserVa) {
+       status = virtgpu_map_blob_op(gpu, *out_alloc, *out_res_id, VIOGPU_CMD_MAP_BLOB);
+-      if (!NT_SUCCESS(status))
++      if (!NT_SUCCESS(status)) {
++         NPT_ALLOC_TRACE("MAP_BLOB", blob_size, (UINT)status, *out_res_id);
+          goto fail_destroy;
++      }
+    }
+    return STATUS_SUCCESS;
+ 
+@@ -720,6 +732,7 @@
+    if (!ptr) {
+       status = virtgpu_lock(gpu, alloc, &ptr);
+       if (!NT_SUCCESS(status)) {
++         NPT_ALLOC_TRACE("shmem lock", alloc_size, (UINT)status, res_id);
+          npt_log("virtgpu: lock failed 0x%lx", status);
+          virtgpu_map_blob_op(gpu, alloc, res_id, VIOGPU_CMD_UNMAP_BLOB);
+          virtgpu_resource_destroy_blob(gpu, alloc, res_kmt);
+@@ -729,6 +742,7 @@
+ 
+    struct npt_virtgpu_shmem *s = npt_alloc(sizeof(*s));
+    if (!s) {
++      NPT_ALLOC_TRACE("shmem heap record", sizeof(*s), 0x8007000eu, alloc_size);
+       if (!kmd_va)
+          virtgpu_unlock(gpu, alloc);
+       virtgpu_map_blob_op(gpu, alloc, res_id, VIOGPU_CMD_UNMAP_BLOB);

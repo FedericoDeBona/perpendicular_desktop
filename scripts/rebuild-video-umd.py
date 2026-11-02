@@ -50,9 +50,10 @@ def main():
     for name, key in (('mesa', 'mesa'), ('wdk', 'wdk'), ('llvm', 'llvm_resource_compiler')):
         if digest(archives[name]) != pins[key]['sha256']:
             raise ValueError('Archive differs from the pinned input: ' + name)
-    patch, processor_patch, header = [REPO / 'graphics/backend' / name for name in
-                                     ('video-ddi.patch', 'video-processor-ddi.patch', 'video-resource-submit.h')]
+    patch, processor_patch, allocation_trace_patch, header = [REPO / 'graphics/backend' / name for name in
+                                     ('video-ddi.patch', 'video-processor-ddi.patch', 'map-allocation-trace.patch', 'video-resource-submit.h')]
     for path, key in ((patch, 'mesa_patch_sha256'), (processor_patch, 'processor_patch_sha256'),
+                      (allocation_trace_patch, 'map_allocation_trace_patch_sha256'),
                       (header, 'resource_header_sha256')):
         if digest(path) != pins[key]:
             raise ValueError('Shared fix differs from the pinned input: ' + path.name)
@@ -108,6 +109,8 @@ def main():
     run(['git', 'apply', patch], cwd=source)
     run(['git', 'apply', '--check', processor_patch], cwd=source)
     run(['git', 'apply', processor_patch], cwd=source)
+    run(['git', 'apply', '--check', allocation_trace_patch], cwd=source)
+    run(['git', 'apply', allocation_trace_patch], cwd=source)
     shutil.copyfile(header, source / 'src/virtio/neptune/triton/video-resource-submit.h')
     includes = [wdk / 'c/Include' / pins['wdk']['include_version'] / kind for kind in ('um', 'shared')]
     includes += [sdk / 'xwin' / name for name in ('sdk/include/ucrt', 'sdk/include/shared', 'sdk/include/um', 'sdk/include/winrt', 'crt/include')]

@@ -135,3 +135,46 @@ Gli array di riferimento sinistri con conteggio zero sono ignorati e normalizzat
 
 
 La v12 aggiunge soltanto diagnostica ETW limitata (massimo32eventi per unità compilata/processo): marker CreateDevice e primo errore SetErrorCb, risultato host Map/GetData o callback Present. Nessun pixel, URL o contenuto utente; HRESULT e logica grafica invariati. Provider `48DCE1B6-E965-4E8A-B5FA-D9CB52657212`, keyword1, livello2. Il provider viene registrato, usato e rilasciato nella stessa chiamata, senza callback pendenti durante lo scaricamento della DLL. Gli errori ordinari WASSTILLDRAWING non vengono tracciati. Usare il collector QA in graphics/browser e verificare prima un marker proveniente dalla UMD effettiva; una traccia vuota non dimostra assenza di errori. La diagnostica non qualifica la fluidità o la stabilità di Edge.
+
+
+## Candidata: immagine VP9 trasferita con blit Metal
+
+`vp9-gpu-output.patch`, applicata dopo il processore SDR solo con l’opzione
+`--gpu-output` della ricetta, importa i due piani
+CoreVideo tramite CVMetalTextureCache sullo stesso device delle texture target.
+Una copia Metal scrive Y/UV e la slice scelta dalla vista decoder. Elimina il
+readback CPU dell'immagine NV12 e il successivo UpdateSubresource del percorso
+precedente; il bitstream passa ancora attraverso le risorse/staging esistenti.
+Non è quindi una pipeline interamente senza copie né una nuova API/protocollo.
+
+Il passaggio conserva il completamento sincrono di EndFrame: prima termina il
+lavoro D3D già accodato, poi mantiene le superfici CoreVideo e le viste fino al
+completamento del blit. Controlla device, dimensioni, formati di piano, tipo e
+slice; un errore Metal resta un errore, senza fallback software o pixel ridotti.
+Il decoder continua a richiedere hardware VP9. Nessuna modifica UMD/kernel,
+capacità, cifratura o protezioni. La ricetta verifica anche l'hash di questa
+patch prima di generare output.
+
+M1: tre frame I/P/P 4K esatti nel controllo nativo tramite risorse, anche nella
+slice1 di una texture array, PASS. Il controllo condiviso NativeVideoDecodeChecks
+ora legge quella slice per coprire il nuovo confine. Tre frame Windows nella
+slice1 e regressione processore PASS. Primo Edge4K
+incontra una disconnessione GPU, poi un campione mantiene hardware4K senza
+nuovi crash ma perde357/1307frame (~27,3%); nessun vantaggio comparativo
+qualificato. Il percorso CPU v12 resta quindi il default della ricetta: il tempo
+totale dei tre readback non dimostra FPS o
+riduzione degli scarti. Conservare la v12 confezionata per il confronto; il guasto
+Map del M4 resta aperto e non è corretto da questa modifica.
+
+
+## Traccia Map v13
+
+`map-allocation-trace.patch` estende il provider v12 con descrittore della
+risorsa Map e bytes/status/detail degli errori nei record, slot, pool e
+allocazioni condivise Windows. La ricetta UMD verifica e applica il pin dopo
+le due patch funzionali; ABI invariata, PrivateBuild v13. Stesso limite32
+eventi per unità compilata/processo, nessun evento per frame riuscito, nessuna
+modifica ai limiti o agli HRESULT. Il collector esistente decodifica i messaggi
+UTF16 senza manifest. Un marker della DLL effettivamente caricata è necessario
+prima di interpretare una traccia vuota. Questo è un passo diagnostico, non
+una correzione dell'allocazione Map o una qualifica della fluidità.
