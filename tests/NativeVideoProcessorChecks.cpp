@@ -68,6 +68,20 @@ int main(){
   float y=(81.f-(full?0:16))/(full?255:219),u=(90.f-128)/(full?255:224),v=(240.f-128)/(full?255:224);
   readCheck(channelByte(y+(matrix?1.5748f:1.402f)*v),channelByte(y-(matrix?.187324f:.344136f)*u-(matrix?.468124f:.714136f)*v),channelByte(y+(matrix?1.8556f:1.772f)*u),pass==0?"BT601 limited crop/scale":pass==1?"BT709 limited crop/scale":"BT709 full crop/scale");
  }
+#if defined(_WIN32) && !defined(__APPLE__)
+ ID3D11VideoContext2 *vc2=nullptr;check(vc->QueryInterface(__uuidof(ID3D11VideoContext2),(void**)&vc2),"VideoContext2");
+ DXGI_HDR_METADATA_HDR10 displayMetadata={};displayMetadata.MaxMasteringLuminance=1000;displayMetadata.MinMasteringLuminance=1;
+ vc2->VideoProcessorSetOutputHDRMetaData(processor,DXGI_HDR_METADATA_TYPE_HDR10,sizeof(displayMetadata),&displayMetadata);
+ check(vc->VideoProcessorBlt(processor,outView,0,1,&stream),"SDR with display HDR metadata");
+ readCheck(channelByte(81.f/255+1.5748f*112.f/255),channelByte(81.f/255+.187324f*38.f/255-.468124f*112.f/255),channelByte(81.f/255-1.8556f*38.f/255),"SDR pixels unchanged by display metadata");
+ ID3D11VideoProcessorEnumerator1 *enum1=nullptr;check(enumerator->QueryInterface(__uuidof(ID3D11VideoProcessorEnumerator1),(void**)&enum1),"ProcessorEnumerator1");BOOL hdrSupported=TRUE;
+ check(enum1->CheckVideoProcessorFormatConversion(DXGI_FORMAT_NV12,DXGI_COLOR_SPACE_YCBCR_STUDIO_G22_LEFT_P709,DXGI_FORMAT_B8G8R8A8_UNORM,DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020,&hdrSupported),"HDR conversion query");expect(!hdrSupported,"HDR conversion remains unsupported");enum1->Release();
+ vc2->VideoProcessorSetOutputHDRMetaData(processor,DXGI_HDR_METADATA_TYPE_NONE,0,nullptr);vc2->Release();
+#endif
+ // Empty reference arrays are ignored when their frame counts are zero.
+ ID3D11VideoProcessorInputView *emptyReferences[]={input};stream.ppPastSurfaces=emptyReferences;stream.ppFutureSurfaces=emptyReferences;
+ check(vc->VideoProcessorBlt(processor,outView,0,1,&stream),"zero-count reference arrays");stream.ppPastSurfaces=nullptr;stream.ppFutureSurfaces=nullptr;
+ readCheck(channelByte(81.f/255+1.5748f*112.f/255),channelByte(81.f/255+.187324f*38.f/255-.468124f*112.f/255),channelByte(81.f/255-1.8556f*38.f/255),"zero-count reference arrays ignored");
  // Edge's software-upload path uses a dynamic decoder-bound NV12 input.
  D3D11_TEXTURE2D_DESC dynamicDesc={};dynamicDesc.Width=8;dynamicDesc.Height=4;dynamicDesc.MipLevels=dynamicDesc.ArraySize=dynamicDesc.SampleDesc.Count=1;dynamicDesc.Format=DXGI_FORMAT_NV12;dynamicDesc.Usage=D3D11_USAGE_DYNAMIC;dynamicDesc.BindFlags=D3D11_BIND_DECODER;dynamicDesc.CPUAccessFlags=D3D11_CPU_ACCESS_WRITE;
  ID3D11Texture2D *dynamicNV12=nullptr;ID3D11VideoProcessorInputView *dynamicInput=nullptr;check(dev->CreateTexture2D(&dynamicDesc,nullptr,&dynamicNV12),"dynamic NV12");check(video->CreateVideoProcessorInputView(dynamicNV12,enumerator,&inDesc,&dynamicInput),"dynamic NV12 input");

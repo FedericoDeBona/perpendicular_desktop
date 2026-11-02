@@ -2,7 +2,8 @@
 # Subscribes to Media events and reads playback counters; never navigates,
 # changes quality, starts/stops playback, changes browser flags or exports storage.
 param([ValidateRange(1,40)][int]$SampleCount=30,
-      [ValidateRange(1,65535)][int]$Port=9222)
+      [ValidateRange(1,65535)][int]$Port=9222,
+      [switch]$CompressOutput)
 $ErrorActionPreference='Stop';$ProgressPreference='SilentlyContinue'
 Add-Type -AssemblyName System.Net.Http
 $script:droppedEvents=0;$script:sequence=0;$script:events=New-Object 'System.Collections.Generic.List[object]'
@@ -15,4 +16,12 @@ $clock=[Diagnostics.Stopwatch]::StartNew();$started=[DateTime]::UtcNow.ToString(
 $browser=OpenWS $v.webSocketDebuggerUrl;$page=OpenWS $target.webSocketDebuggerUrl
 $before=Call $browser 'SystemInfo.getInfo' @{};$media=Call $page 'Media.enable' @{};$samples=New-Object 'System.Collections.Generic.List[object]'
 $expr="(()=>{const v=document.querySelector('video');if(!v)return null;const q=v.getVideoPlaybackQuality();return {time:v.currentTime,width:v.videoWidth,height:v.videoHeight,paused:v.paused,ready:v.readyState,total:q.totalVideoFrames,dropped:q.droppedVideoFrames,error:v.error?{code:v.error.code,message:v.error.message}:null}})()"
-try{for($i=0;$i -lt $SampleCount;$i++){$sample=Call $page 'Runtime.evaluate' @{expression=$expr;returnByValue=$true};$samples.Add(@{elapsedSeconds=$clock.Elapsed.TotalSeconds;value=$sample.result.result.value});Start-Sleep -Milliseconds 1000};$after=Call $browser 'SystemInfo.getInfo' @{};@{startedUTC=$started;durationSeconds=$clock.Elapsed.TotalSeconds;browser=$v.Browser;before=$before.result;after=$after.result;samples=$samples;media=$script:events;droppedMediaEvents=$script:droppedEvents}|ConvertTo-Json -Depth 18 -Compress}finally{$page.Dispose();$browser.Dispose()}
+try{for($i=0;$i -lt $SampleCount;$i++){$sample=Call $page 'Runtime.evaluate' @{expression=$expr;returnByValue=$true};$samples.Add(@{elapsedSeconds=$clock.Elapsed.TotalSeconds;value=$sample.result.result.value});Start-Sleep -Milliseconds 1000};$after=Call $browser 'SystemInfo.getInfo' @{};$report=@{startedUTC=$started;durationSeconds=$clock.Elapsed.TotalSeconds;browser=$v.Browser;target=@{id=$target.id;url=$target.url;title=$target.title};before=$before.result;after=$after.result;samples=$samples;media=$script:events;droppedMediaEvents=$script:droppedEvents}|ConvertTo-Json -Depth 18 -Compress
+if($CompressOutput){
+ $raw=[Text.Encoding]::UTF8.GetBytes($report);$buffer=New-Object IO.MemoryStream
+ try{$zip=[IO.Compression.GZipStream]::new($buffer,[IO.Compression.CompressionMode]::Compress,$true);try{$zip.Write($raw,0,$raw.Length)}finally{$zip.Dispose()};$data=[Convert]::ToBase64String($buffer.ToArray())}finally{$buffer.Dispose()}
+ if($data.Length -gt 60000){throw 'Compressed diagnostics exceed the control reply limit; reduce SampleCount'}
+ $hasher=[Security.Cryptography.SHA256]::Create();try{$hash=([BitConverter]::ToString($hasher.ComputeHash($raw))).Replace('-','').ToLowerInvariant()}finally{$hasher.Dispose()}
+ @{encoding='gzip+base64';bytes=$raw.Length;sha256=$hash;data=$data}|ConvertTo-Json -Compress
+}else{$report}
+}finally{$page.Dispose();$browser.Dispose()}

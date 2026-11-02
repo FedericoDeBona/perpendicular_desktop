@@ -80,3 +80,6 @@ successiva disconnessione Edge: il log correla E_NOTIMPL del processore video
 DirectComposition e uscita GPU34. La candidata aggiunge elaborazione SDRprogressiva
 reale e inoltro DDI, da qualificare prima della main; non equivale a un flag che
 forza il rendering. [Evidenze](../../docs/VERIFICATION.md#2-novembre--primo-edge-m4-e-disconnessione-nella-presentazione-directcomposition).
+
+
+Per il controllo guest con risposta limitata a64KiB, usare `-CompressOutput` e un campione breve (per esempio30). Il JSON esterno contiene `encoding=gzip+base64`, `bytes`, `sha256` e `data`; decodificare base64, decomprimere gzip e verificare dimensione/SHA256 prima di analizzare il report. Il limite di60000caratteri per data produce un errore esplicito: ridurre SampleCount, senza accettare risultati troncati. Il report include anche id/URL/titolo del target. Eseguire la misura dopo l'avvio del browser: avvio e campione insieme possono eccedere il timeout del controllo guest. L'opzione non cambia pagina, qualità, playback o flag del browser.

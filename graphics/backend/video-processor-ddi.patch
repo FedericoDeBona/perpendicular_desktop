@@ -8,7 +8,7 @@
  #include "video-resource-submit.h"
  #include "tritonVideoStubs.h"
  
-@@ -158,6 +159,413 @@
+@@ -158,6 +159,418 @@
      } else if (type == D3DWDDM2_0DDI_VIDEO_CAPABILITY_QUERY_DECODER_DOWNSAMPLE_OUTPUT_FORMAT && size == sizeof(D3DWDDM2_0DDI_VIDEO_CAPABILITY_DECODER_DOWNSAMPLE_OUTPUT_FORMAT)) {
          ((D3DWDDM2_0DDI_VIDEO_CAPABILITY_DECODER_DOWNSAMPLE_OUTPUT_FORMAT *)data)->Supported = FALSE;
      }
@@ -211,22 +211,23 @@
 +    ID3D11Resource_Release(v->boundResource); v->object = next; v->boundResource = resource; return S_OK;
 +}
 +/* Optional failure-only metadata trace in the caller-selected QA file. */
-+static void processorTraceFailure(TRITON_PROCESSOR *v) {
++static void processorTraceFailure(TRITON_PROCESSOR *v, const D3D11_1DDI_VIDEO_PROCESSOR_STREAM *stream) {
 +    char path[1024]; static LONG count;
 +    DWORD n = GetEnvironmentVariableA("PERP_VIDEO_TRACE_PATH", path, sizeof(path));
 +    if (!n || n >= sizeof(path) || InterlockedIncrement(&count) > 8) return;
 +    FILE *file = fopen(path, "a"); if (!file) return;
 +    fprintf(file, "pid=%lu blt state outputColor=%u inputColor=%u mirror=%d outputHDR=%d inputHDR=%d colorInvalid=%d/%d\n",
 +        GetCurrentProcessId(), v->outputColorTrace, v->inputColorTrace, v->badMirror, v->badOutputHDR, v->badStreamHDR, v->badOutputColor, v->badStreamColor);
++    if (stream) fprintf(file, "stream output=%u input=%u past=%u future=%u pastPointer=%d futurePointer=%d rightSurface=%d pastRight=%d futureRight=%d\n", stream->OutputIndex, stream->InputFrameOrField, stream->PastFrames, stream->FutureFrames, !!stream->pPastSurfaces, !!stream->pFutureSurfaces, !!stream->hInputSurfaceRight.pDrvPrivate, !!stream->pPastSurfacesRight, !!stream->pFutureSurfacesRight);
 +    fclose(file);
 +}
 +static HRESULT APIENTRY processorBlt(D3D10DDI_HDEVICE h, D3D11_1DDI_HVIDEOPROCESSOR object,
 +    D3D11_1DDI_HVIDEOPROCESSOROUTPUTVIEW output, UINT frame, UINT count, const D3D11_1DDI_VIDEO_PROCESSOR_STREAM *streams) {
 +    PTRITON_DEVICE p = videoDevice(h); TRITON_PROCESSOR *v = processorState(p, object); TRITON_PROCESSOR_OUTPUT *out = output.pDrvPrivate;
 +    if (!p || !p->pVideoCtx || !v || !out || out->owner != p || !out->object || count != 1 || !streams) return E_INVALIDARG;
-+    if (v->badOutputColor || v->badStreamColor || v->badMirror || v->badOutputHDR || v->badStreamHDR) { processorTraceFailure(v); return E_NOTIMPL; }
++    if (v->badOutputColor || v->badStreamColor || v->badMirror || v->badOutputHDR || v->badStreamHDR) { processorTraceFailure(v, streams); return E_NOTIMPL; }
 +    const D3D11_1DDI_VIDEO_PROCESSOR_STREAM *s = streams;
-+    if (s->PastFrames || s->FutureFrames || s->hInputSurfaceRight.pDrvPrivate || s->pPastSurfaces || s->pFutureSurfaces || s->pPastSurfacesRight || s->pFutureSurfacesRight) return E_NOTIMPL;
++    if (s->PastFrames || s->FutureFrames || s->hInputSurfaceRight.pDrvPrivate || s->pPastSurfacesRight || s->pFutureSurfacesRight) { processorTraceFailure(v, s); return E_NOTIMPL; }
 +    TRITON_PROCESSOR_INPUT *input = s->hInputSurface.pDrvPrivate;
 +    if (s->Enable && (!input || input->owner != p || !input->object)) return E_INVALIDARG;
 +    HRESULT hr = processorRefreshOutput(out); if (FAILED(hr)) return hr;
@@ -407,8 +408,12 @@
 +static VOID APIENTRY processorOutputHDR(D3D10DDI_HDEVICE h, D3D11_1DDI_HVIDEOPROCESSOR object, D3DDDI_HDR_METADATA_TYPE type, UINT size, const VOID *data) {
 +    PTRITON_DEVICE p = videoDevice(h); TRITON_PROCESSOR *v = processorState(p, object);
 +    if (!v) { processorError(p, E_INVALIDARG); return; }
-+    v->badOutputHDR = type != D3DDDI_HDR_METADATA_TYPE_NONE || size != 0;
-+    (void)data;
++    /* This API describes the display, including for SDR content. Only SDR
++     * output color spaces/formats are accepted elsewhere, so valid display
++     * HDR10 metadata does not request HDR conversion or change SDR pixels. */
++    BOOL none = type == D3DDDI_HDR_METADATA_TYPE_NONE && size == 0;
++    BOOL display = type == D3DDDI_HDR_METADATA_TYPE_HDR10 && size == sizeof(D3DDDI_HDR_METADATA_HDR10) && data;
++    v->badOutputHDR = !(none || display);
 +}
 +static VOID APIENTRY processorStreamHDR(D3D10DDI_HDEVICE h, D3D11_1DDI_HVIDEOPROCESSOR object, UINT stream, D3DDDI_HDR_METADATA_TYPE type, UINT size, const VOID *data) {
 +    PTRITON_DEVICE p = videoDevice(h); TRITON_PROCESSOR *v = processorState(p, object);
@@ -422,7 +427,7 @@
  }
  
  static void videoFill_D3D11_1DDI_VIDEODEVICEFUNCS(D3D11_1DDI_VIDEODEVICEFUNCS *p) {
-@@ -176,50 +584,50 @@
+@@ -176,50 +589,50 @@
      p->pfnVideoDecoderBeginFrame = videoBegin;
      p->pfnVideoDecoderEndFrame = videoEnd;
      p->pfnVideoDecoderSubmitBuffers = videoSubmitBuffers;
@@ -514,7 +519,7 @@
      p->pfnGetContentProtectionCaps = videoStub_PFND3D11_1DDI_GETCONTENTPROTECTIONCAPS;
      p->pfnGetCryptoKeyExchangeType = videoStub_PFND3D11_1DDI_GETCRYPTOKEYEXCHANGETYPE;
      p->pfnCalcPrivateCryptoSessionSize = videoStub_PFND3D11_1DDI_CALCPRIVATECRYPTOSESSIONSIZE;
-@@ -241,7 +649,7 @@
+@@ -241,7 +654,7 @@
      p->pfnConfigureAuthenticatedChannel = videoStub_PFND3D11_1DDI_CONFIGUREAUTHENTICATEDCHANNEL;
      p->pfnVideoDecoderGetHandle = videoStub_PFND3D11_1DDI_VIDEODECODERGETHANDLE;
      p->pfnCryptoSessionGetHandle = videoStub_PFND3D11_1DDI_CRYPTOSESSIONGETHANDLE;
@@ -523,7 +528,7 @@
      p->pfnGetCaptureHandle = videoStub_PFND3D11_1DDI_GETCAPTUREHANDLE;
  }
  
-@@ -261,50 +669,50 @@
+@@ -261,50 +674,50 @@
      p->pfnVideoDecoderBeginFrame = videoBegin;
      p->pfnVideoDecoderEndFrame = videoEnd;
      p->pfnVideoDecoderSubmitBuffers = videoSubmitBuffers;
@@ -615,7 +620,7 @@
      p->pfnGetContentProtectionCaps = videoStub_PFND3D11_1DDI_GETCONTENTPROTECTIONCAPS;
      p->pfnGetCryptoKeyExchangeType = videoStub_PFND3D11_1DDI_GETCRYPTOKEYEXCHANGETYPE;
      p->pfnCalcPrivateCryptoSessionSize = videoStub_PFND3D11_1DDI_CALCPRIVATECRYPTOSESSIONSIZE;
-@@ -326,20 +734,20 @@
+@@ -326,20 +739,20 @@
      p->pfnConfigureAuthenticatedChannel = videoStub_PFND3D11_1DDI_CONFIGUREAUTHENTICATEDCHANNEL;
      p->pfnVideoDecoderGetHandle = videoStub_PFND3D11_1DDI_VIDEODECODERGETHANDLE;
      p->pfnCryptoSessionGetHandle = videoStub_PFND3D11_1DDI_CRYPTOSESSIONGETHANDLE;
@@ -643,7 +648,7 @@
      p->pfnGetCryptoSessionPrivateDataSize = videoStub_PFND3DWDDM2_0DDI_GETCRYPTOSESSIONPRIVATEDATASIZE;
  }
  
-@@ -359,50 +767,50 @@
+@@ -359,50 +772,50 @@
      p->pfnVideoDecoderBeginFrame = videoBegin;
      p->pfnVideoDecoderEndFrame = videoEnd;
      p->pfnVideoDecoderSubmitBuffers = videoSubmitBuffers;
@@ -735,7 +740,7 @@
      p->pfnGetContentProtectionCaps = videoStub_PFND3D11_1DDI_GETCONTENTPROTECTIONCAPS;
      p->pfnGetCryptoKeyExchangeType = videoStub_PFND3D11_1DDI_GETCRYPTOKEYEXCHANGETYPE;
      p->pfnCalcPrivateCryptoSessionSize = videoStub_PFND3D11_1DDI_CALCPRIVATECRYPTOSESSIONSIZE;
-@@ -424,23 +832,23 @@
+@@ -424,23 +837,23 @@
      p->pfnConfigureAuthenticatedChannel = videoStub_PFND3D11_1DDI_CONFIGUREAUTHENTICATEDCHANNEL;
      p->pfnVideoDecoderGetHandle = videoStub_PFND3D11_1DDI_VIDEODECODERGETHANDLE;
      p->pfnCryptoSessionGetHandle = videoStub_PFND3D11_1DDI_CRYPTOSESSIONGETHANDLE;
