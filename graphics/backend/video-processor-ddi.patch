@@ -1,3 +1,134 @@
+--- a/src/virtio/neptune/triton/meson.build
++++ b/src/virtio/neptune/triton/meson.build
+@@ -13,6 +13,7 @@
+   'tritonPresent12.c',
+   'tritonResource.c',
+   'tritonVideo.c',
++  'tritonVideoProtocol.c',
+   'tritonView.c',
+   'tritonState.c',
+   'tritonShader.c',
+@@ -56,7 +57,7 @@
+   # header emits an identical symbol and the linker raises LNK2005.
+   # Both definitions agree, so picking the first instance is safe.
+   # dxguid.lib provides the IID_ID3D11Device*/IID_ID3D11DeviceContext* GUIDs.
+-  link_args : ['/FORCE:MULTIPLE', '/IGNORE:4006', 'dxguid.lib'],
++  link_args : ['/FORCE:MULTIPLE', '/IGNORE:4006', 'dxguid.lib', 'advapi32.lib'],
+   vs_module_defs : 'neptune_umd.def',
+   name_prefix : '',
+   gnu_symbol_visibility : 'hidden',
+--- a/src/virtio/neptune/triton/triton.h
++++ b/src/virtio/neptune/triton/triton.h
+@@ -17,6 +17,7 @@
+ #define COBJMACROS
+ 
+ #include <windows.h>
++#include "tritonFaultTrace.h"
+ /* d3dkmthk.h declares DDI signatures whose return type is NTSTATUS;
+  * winternl.h is the standard user-mode source for that typedef. */
+ #include <winternl.h>
+@@ -240,11 +241,14 @@
+         return sizeof(type);                                            \
+     }
+ 
+-static inline void tritonSetError(PTRITON_DEVICE pD, HRESULT hr)
++static inline void tritonSetErrorAt(PTRITON_DEVICE pD, HRESULT hr, const char *where, UINT line)
+ {
++    if (FAILED(hr) && hr != DXGI_DDI_ERR_WASSTILLDRAWING) tritonTraceFaultAt(where, hr, line);
+     if (pD && pD->pUMCallbacks && pD->pUMCallbacks->pfnSetErrorCb)
+         pD->pUMCallbacks->pfnSetErrorCb(pD->hRTCoreLayer, hr);
+ }
++
++#define tritonSetError(pD, hr) tritonSetErrorAt((pD), (hr), __func__, __LINE__)
+ 
+ /* Create and Open DDIs may report only E_OUTOFMEMORY or
+  * D3DDDIERR_DEVICEREMOVED; the runtime treats any other code as a driver bug
+--- a/src/virtio/neptune/triton/tritonDDI.c
++++ b/src/virtio/neptune/triton/tritonDDI.c
+@@ -746,6 +746,7 @@
+ static HRESULT APIENTRY tritonCreateDevice(D3D10DDI_HADAPTER hAdapter,
+                                            D3D10DDIARG_CREATEDEVICE *pArgs)
+ {
++    tritonTraceFaultAt("CreateDevice", S_OK, pArgs->Interface);
+     PTRITON_ADAPTER pAdapter = (PTRITON_ADAPTER)(hAdapter.pDrvPrivate);
+     PTRITON_DEVICE  p        = (PTRITON_DEVICE)(pArgs->hDrvDevice.pDrvPrivate);
+     if (!pAdapter || !p) {
+--- a/src/virtio/neptune/triton/tritonDxgi.c
++++ b/src/virtio/neptune/triton/tritonDxgi.c
+@@ -551,12 +551,16 @@
+ static HRESULT
+ tritonPresentSubmitCb(PTRITON_DEVICE pD, DXGIDDICB_PRESENT *cb)
+ {
+-   if (!pD->presentLockInit)
+-      return pD->pfnPresentCb(pD->hRTDevice.handle, cb);
++   if (!pD->presentLockInit) {
++      HRESULT hr = pD->pfnPresentCb(pD->hRTDevice.handle, cb);
++      if (FAILED(hr)) tritonTraceFaultAt("PresentCb unlocked", hr, 0);
++      return hr;
++   }
+    const double t0 = TRITON_PT_NOW();
+    EnterCriticalSection(&pD->kmCtxLock);
+    HRESULT hr = pD->pfnPresentCb(pD->hRTDevice.handle, cb);
+    LeaveCriticalSection(&pD->kmCtxLock);
++   if (FAILED(hr)) tritonTraceFaultAt("PresentCb", hr, 0);
+    if (NPT_DEBUG(PRESENT_TIMING))
+       InterlockedAdd64(&g_pt.cb_us, (LONG64)(TRITON_PT_NOW() - t0));
+    return hr;
+--- /dev/null
++++ b/src/virtio/neptune/triton/tritonFaultTrace.h
+@@ -0,0 +1,19 @@
++/* Bounded ETW diagnostics: metadata only, no HRESULT or rendering changes.
++ * Register/write/unregister per rare fault avoids DLL-unload registrations. */
++#ifndef PERP_TRITON_FAULT_TRACE_H
++#define PERP_TRITON_FAULT_TRACE_H
++#include <windows.h>
++#include <evntprov.h>
++#include <stdio.h>
++static inline void tritonTraceFaultAt(const char *where, HRESULT hr, UINT detail) {
++    static volatile LONG emitted;
++    if (InterlockedIncrement(&emitted) > 32) return;
++    static const GUID provider = {0x48dce1b6,0xe965,0x4e8a,{0xb5,0xfa,0xd9,0xcb,0x52,0x65,0x72,0x12}};
++    REGHANDLE handle = 0;
++    if (EventRegister(&provider, NULL, NULL, &handle) != ERROR_SUCCESS) return;
++    WCHAR message[256];
++    _snwprintf_s(message, 256, _TRUNCATE, L"Perpendicular video v12: %hs hr=0x%08x detail=%u", where, (UINT)hr, detail);
++    EventWriteString(handle, 2, 1, message);
++    EventUnregister(handle);
++}
++#endif
+--- a/src/virtio/neptune/triton/tritonQuery.c
++++ b/src/virtio/neptune/triton/tritonQuery.c
+@@ -133,8 +133,10 @@
+                                               pData, DataSize, Flags);
+     if (hr == S_FALSE)
+         tritonSetError(pD, DXGI_DDI_ERR_WASSTILLDRAWING);
+-    else if (FAILED(hr))
++    else if (FAILED(hr)) {
++        tritonTraceFaultAt("GetData host result", hr, DataSize);
+         tritonSetError(pD, D3DDDIERR_DEVICEREMOVED);
++    }
+ }
+ 
+ void APIENTRY
+@@ -466,6 +468,8 @@
+     if (s1 & D3D11_FORMAT_SUPPORT_IA_VERTEX_BUFFER)         caps |= D3D11_1DDI_FORMAT_SUPPORT_VERTEX_BUFFER;
+     if (s1 & D3D11_FORMAT_SUPPORT_SHADER_GATHER)            caps |= D3D11_1DDI_FORMAT_SUPPORT_SHADER_GATHER;
+     if (s1 & D3D11_FORMAT_SUPPORT_BUFFER)                   caps |= D3D11_1DDI_FORMAT_SUPPORT_BUFFER;
++    if (s1 & D3D11_FORMAT_SUPPORT_VIDEO_PROCESSOR_INPUT)    caps |= D3D11_1DDI_FORMAT_SUPPORT_VIDEO_PROCESSOR_INPUT;
++    if (s1 & D3D11_FORMAT_SUPPORT_VIDEO_PROCESSOR_OUTPUT)   caps |= D3D11_1DDI_FORMAT_SUPPORT_VIDEO_PROCESSOR_OUTPUT;
+     /* FORMAT_SUPPORT2, straight from the host's own per-format claims.
+      * UAV_READS is what backs the SHADER caps word's
+      * TYPED_UAV_LOAD_ADDITIONAL_FORMATS claim (tritonGetCaps) -- the two
+--- a/src/virtio/neptune/triton/tritonResource.c
++++ b/src/virtio/neptune/triton/tritonResource.c
+@@ -737,6 +737,7 @@
+          * record what failed. */
+         TR_LOG("Map: sub=%u type=%u flags=0x%x hr=0x%08lx", Subresource,
+                (unsigned)DDIMap, Flags, hr);
++        tritonTraceFaultAt("Map host result", hr, Subresource);
+         tritonSetError(pD, D3DDDIERR_DEVICEREMOVED);
+         pMapped->pData = NULL;
+         pMapped->RowPitch = pMapped->DepthPitch = 0;
 --- a/src/virtio/neptune/triton/tritonVideo.c
 +++ b/src/virtio/neptune/triton/tritonVideo.c
 @@ -4,6 +4,7 @@
@@ -773,51 +904,6 @@
  }
  
  static HRESULT APIENTRY videoRetrieve(D3D10DDI_HDEVICE h, UINT32 id, SIZE_T inputSize, void *input, SIZE_T outputSize, void *output) {
---- a/src/virtio/neptune/triton/tritonQuery.c
-+++ b/src/virtio/neptune/triton/tritonQuery.c
-@@ -466,6 +466,8 @@
-     if (s1 & D3D11_FORMAT_SUPPORT_IA_VERTEX_BUFFER)         caps |= D3D11_1DDI_FORMAT_SUPPORT_VERTEX_BUFFER;
-     if (s1 & D3D11_FORMAT_SUPPORT_SHADER_GATHER)            caps |= D3D11_1DDI_FORMAT_SUPPORT_SHADER_GATHER;
-     if (s1 & D3D11_FORMAT_SUPPORT_BUFFER)                   caps |= D3D11_1DDI_FORMAT_SUPPORT_BUFFER;
-+    if (s1 & D3D11_FORMAT_SUPPORT_VIDEO_PROCESSOR_INPUT)    caps |= D3D11_1DDI_FORMAT_SUPPORT_VIDEO_PROCESSOR_INPUT;
-+    if (s1 & D3D11_FORMAT_SUPPORT_VIDEO_PROCESSOR_OUTPUT)   caps |= D3D11_1DDI_FORMAT_SUPPORT_VIDEO_PROCESSOR_OUTPUT;
-     /* FORMAT_SUPPORT2, straight from the host's own per-format claims.
-      * UAV_READS is what backs the SHADER caps word's
-      * TYPED_UAV_LOAD_ADDITIONAL_FORMATS claim (tritonGetCaps) -- the two
---- a/src/virtio/neptune/triton/meson.build
-+++ b/src/virtio/neptune/triton/meson.build
-@@ -13,6 +13,7 @@
-   'tritonPresent12.c',
-   'tritonResource.c',
-   'tritonVideo.c',
-+  'tritonVideoProtocol.c',
-   'tritonView.c',
-   'tritonState.c',
-   'tritonShader.c',
---- /dev/null
-+++ b/src/virtio/neptune/triton/tritonVideoProtocol.h
-@@ -0,0 +1,21 @@
-+/* Copyright 2026 Turing Software LLC
-+ * SPDX-License-Identifier: MIT */
-+#ifndef TRITON_VIDEO_PROTOCOL_H
-+#define TRITON_VIDEO_PROTOCOL_H
-+#include <stdint.h>
-+
-+/* Keep SDK/WDK declarations separate from the generated protocol types.
-+ * Only scalars and guest COM pointers cross this private compilation boundary. */
-+typedef struct {
-+    uint32_t inputFormat, inputNumerator, inputDenominator, inputWidth, inputHeight;
-+    uint32_t outputNumerator, outputDenominator, outputWidth, outputHeight, usage;
-+} TRITON_VIDEO_CONTENT;
-+int32_t tritonVideoSyncEnum(void *device, const TRITON_VIDEO_CONTENT *desc, void **out);
-+int32_t tritonVideoSyncCreate(void *device, void *enumerator, uint32_t index, void **out);
-+int32_t tritonVideoSyncInput(void *device, void *resource, void *enumerator,
-+    uint32_t fourcc, uint32_t mip, uint32_t slice, void **out);
-+int32_t tritonVideoSyncOutput(void *device, void *resource, void *enumerator,
-+    uint32_t array, uint32_t mip, uint32_t slice, uint32_t count, void **out);
-+int32_t tritonVideoSyncBlt(void *context, void *processor, void *output, uint32_t frame,
-+    int32_t enable, uint32_t outputIndex, uint32_t inputFrame, void *input);
-+#endif
 --- /dev/null
 +++ b/src/virtio/neptune/triton/tritonVideoProtocol.c
 @@ -0,0 +1,64 @@
@@ -885,3 +971,27 @@
 +    return npt_call_ID3D11VideoContext_VideoProcessorBlt(
 +        npt_com_self_ring(context), npt_com_self_id(context), processor, output, frame, 1, &stream);
 +}
+--- /dev/null
++++ b/src/virtio/neptune/triton/tritonVideoProtocol.h
+@@ -0,0 +1,21 @@
++/* Copyright 2026 Turing Software LLC
++ * SPDX-License-Identifier: MIT */
++#ifndef TRITON_VIDEO_PROTOCOL_H
++#define TRITON_VIDEO_PROTOCOL_H
++#include <stdint.h>
++
++/* Keep SDK/WDK declarations separate from the generated protocol types.
++ * Only scalars and guest COM pointers cross this private compilation boundary. */
++typedef struct {
++    uint32_t inputFormat, inputNumerator, inputDenominator, inputWidth, inputHeight;
++    uint32_t outputNumerator, outputDenominator, outputWidth, outputHeight, usage;
++} TRITON_VIDEO_CONTENT;
++int32_t tritonVideoSyncEnum(void *device, const TRITON_VIDEO_CONTENT *desc, void **out);
++int32_t tritonVideoSyncCreate(void *device, void *enumerator, uint32_t index, void **out);
++int32_t tritonVideoSyncInput(void *device, void *resource, void *enumerator,
++    uint32_t fourcc, uint32_t mip, uint32_t slice, void **out);
++int32_t tritonVideoSyncOutput(void *device, void *resource, void *enumerator,
++    uint32_t array, uint32_t mip, uint32_t slice, uint32_t count, void **out);
++int32_t tritonVideoSyncBlt(void *context, void *processor, void *output, uint32_t frame,
++    int32_t enable, uint32_t outputIndex, uint32_t inputFrame, void *input);
++#endif

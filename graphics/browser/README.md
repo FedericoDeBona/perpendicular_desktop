@@ -83,3 +83,8 @@ forza il rendering. [Evidenze](../../docs/VERIFICATION.md#2-novembre--primo-edge
 
 
 Per il controllo guest con risposta limitata a64KiB, usare `-CompressOutput` e un campione breve (per esempio30). Il JSON esterno contiene `encoding=gzip+base64`, `bytes`, `sha256` e `data`; decodificare base64, decomprimere gzip e verificare dimensione/SHA256 prima di analizzare il report. Il limite di60000caratteri per data produce un errore esplicito: ridurre SampleCount, senza accettare risultati troncati. Il report include anche id/URL/titolo del target. Eseguire la misura dopo l'avvio del browser: avvio e campione insieme possono eccedere il timeout del controllo guest. L'opzione non cambia pagina, qualità, playback o flag del browser.
+
+
+Per la UMD diagnostica v12, `capture-video-faults.ps1 -Action Start -TracePath <nuovo-file.etl>` avvia una sessione ETW dedicata, circolare e limitata a4MiB. Eseguire prima un controllo Windows e verificare il marker CreateDevice della candidata effettiva; poi usare un nuovo file/sessione per il breve caso Edge. `-Action Stop` chiude la sessione (`-Action Read` rilegge una ETL già chiusa) e restituisce timestamp/PID/TID e messaggi dei primi120eventi, con conteggio degli omessi. Non abilita altri provider o protezioni ridotte. Un report vuoto è inconcludente senza marker della UMD. [API Microsoft EventRegister](https://learn.microsoft.com/en-us/windows/win32/api/evntprov/nf-evntprov-eventregister).
+
+Per CD QA ISO/Joliet su Mac, assegnare entrambe le etichette con `hdiutil makehybrid -iso -joliet -default-volume-name <etichetta>`: il solo `-iso-volume-name` lascia a Windows la diversa etichetta Joliet. Verificare Get-Volume prima di modificare registrazioni.
