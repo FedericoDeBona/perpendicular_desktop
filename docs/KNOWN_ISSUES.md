@@ -1,6 +1,6 @@
 # Registro dei problemi
 
-**2 novembre — recupero avvio main IN CORSO (SYS-001).** App principale aperta, ma nuovo bootQEMU94554 senza collegamento guest/scanout. Host canonico/effettivo29membri concordi; disco fermo fra due query, nessun crash/assertion dimostrato. ArrestoACPI non completato e processo ancora vivo dopo attesa verificata; richiesto consenso per spegnimento forzato/riaccensione. Nessun force-stop eseguito, firmware/TPM/configurazione invariati. Correzione fileFS-010 conservata, video/Creality ancora in pausa. [Evidenze](VERIFICATION.md#2-novembre--recupero-del-boot-main-senza-collegamento).
+**2 novembre — avvio main RECUPERATO nel caso corrente.** Dopo consenso, una sola interruzione forzata del boot bloccato echeckqcow2offline PASS. Windows ripartito ma primario4096×2160 oltrelimite: topologia ripristinata con CLI esistente, secondo arresto normale/boot97955 riusciti. Desktop nativo1920×1200 visibile eguest collegato,2schermiMac; appprincipale lasciata aperta. SYS-001/GFX-010 restano aperti per causa/recuperoautomatico, video/Creality in pausa. [Evidenze](VERIFICATION.md#2-novembre--recupero-del-boot-main-senza-collegamento).
 
 **2 novembre — esecuzione file nelle cartelle condivise CORRETTA nel caso verificato (FS-010).** Policy generale distribuita in canonica eQA: fileMac leggibili senza bitx ora apribili per esecuzioneWindows. Tre exportREAD|EXECUTE PASS e file non leggibili ancora negati; avvio reale di programmaMicrosoft daDownloads condivisa PASS. LOK intatto/0664, nessun chmod; build/firma/main riuscite. TODO-003 generale eFS-004 restano aperti, video/Creality in pausa. [Evidenze](VERIFICATION.md#2-novembre--permesso-di-esecuzione-windows-sulle-cartelle-smb).
 
@@ -279,6 +279,13 @@ Il ciclo RAM protetto 4→2→4 GiB con dati conservati resta la qualifica prece
 - **Fallimenti conservati:** controllo immediato del mount fallisce due volte, rollback riuscito; aggiunta attesa limitata della pubblicazione. Primo Ctrl+L mostra ancora suggerimenti X: della prova precedente: rimosse soltanto le relative voci TypedPaths, preservati gli altri valori/ordine.
 - **Criterio circoscritto verificato:** percorso C:\Users\federico\Downloads, unità logiche C:/D:/nessuna X:, byte e rinomina bidirezionali, riavvio servizio,9voci originali nel backup; Explorer con Downloads normale, Salva con nome Notepad→nuovo file effettivo Mac. Pulizia dei soli due file di prova confermata anche dal Mac. Qualifica del boot completo e semantiche generali restano TODO-003; non ripetere il caso già positivo senza modifiche pertinenti. [Diario](VERIFICATION.md#27-ottobre--download-ordinaria-senza-unita-aggiuntiva).
 
+### GFX-010 — Modo primario Windows oltre il limite del desktop
+
+- **Stato:** APERTO; recupero locale2novembre riuscito, correzione automatica DA FARE.
+- **Caso:** dopo coldboot Windows riferisce primario4096×2160 (oltre8.388.608pixel), parsermixeddisplay rifiuta il desktop e fallbackRFB mostraUnsupporteddesktopdimensions. Distinto dal precedente boot94554 privo di collegamento; non dimostrata causa comune.
+- **Recupero:** CLIguest esistente, topologia originale salvata, primario1920×1200 e due usciteMac compatibili; secondo shutdown normale/boot ripristina immagine nativa. Nessun incremento dei limiti, patch grafica o cancellazione dati.
+- **Prossimo passo/chiusura:** recuperare o normalizzare in modo controllato il modo persistito non supportato, poi verificare avvio e passaggi di modalità senza nero, preservando monitor/DPI e contratti. Non dichiarato risolto dal solo recupero manuale. [Evidenze](VERIFICATION.md#2-novembre--recupero-del-boot-main-senza-collegamento).
+
 ### GFX-009 — Desktop nero per backend duplicato e scanout escluso dalla build locale
 
 - **Stato:** corretto e verificato sul secondo Mac/VM93be6687; nessuna nuova qualifica generale del driver. Windows e le due uscite erano attivi, ma Apri Windows mostrava la console RFB inattiva800×600.
@@ -384,6 +391,8 @@ Il ciclo RAM protetto 4→2→4 GiB con dati conservati resta la qualifica prece
 - **Criterio soddisfatto:** stesso runtime locale e configurazione fissa avviati nella main con Windows collegato, senza errore PCI; Guest Tools aggiornati Running/hash concorde. [Diario](VERIFICATION.md#28-ottobre--pull-rebuild-0228-sulla-iot0795218c-in-attesa-del-consenso-macos).
 
 ### SYS-001 — Arresto HVF durante riavvio o arresto
+
+- **2 novembre, main:** boot94554 vivo senza bridge/IO, ACPI negativo; consensoesplicito→forcestop/uscita/checkqcow2PASS. Boot96935 collegato con distinto modo primario fuori limiteGFX-010; ripristino e secondo shutdownnormale/boot97955 recuperano desktop reale. Caso locale recuperato, causa del primo blocco e affidabilità generale aperte. [Evidenze](VERIFICATION.md#2-novembre--recupero-del-boot-main-senza-collegamento).
 
 - **2 novembre M4, osservazione distinta:** arresto ordinario QA bloccato, QMP non raggiungibile; stack reset GPU e pausa CPU concorrenti. Nessuna assertion HVF o correzione attribuita; recupero forzato poi autorizzato/eseguito nella sola QA, disco offline senza errori; arresto seguente ordinario PASS. [Evidenze](VERIFICATION.md#2-novembre--processore-video-sdr-reale-e-ponte-hresult).
 
