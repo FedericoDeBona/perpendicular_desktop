@@ -1,5 +1,8 @@
 # TODO — feature e correzioni
 
+**2 novembre — riduzione tentativi di crescita ring v15 IN CORSO.** V14 recupera le piccole Map, ma continua a tentare la crescita opzionale16MiB rifiutata a ogni rotazione. V15 attiva quattro cap reali e passa pixel/moduli, ma il tratto sovrapposto non mostra vantaggio (~14,2% contro4,7%v14, estremi approssimati). Esperimento solo su opzione; default v14 conservato. Ritorno v14 e misura take→presented Mac IN CORSO; confronto4K/main/Creality aperti. [Evidenze](VERIFICATION.md#2-novembre--profondita-del-ring-dopo-crescita-rifiutata-v15).
+
+
 **2 novembre — primo errore Map isolato sul M1; candidata v14 IN CORSO.** RES_INFO rifiuta blocchi16MiB conC000009A, poi Map buffer31920byte→8007000e/reset. Finestra CPU condivisa Windows, non prova di RAM Mac esaurita. Fallback del pool dopo rifiuto del batching: build/ricostruzione428file, controllo riferimenti, moduli/frame Windows e19recuperi64KiB effettivi PASS. Due brevi tratti4K fissi senza crash (~5,84%/~4,79%drop); confronto comune solo parziale/approssimato, non qualifica generale. Nessun limite/HRESULT/protezione allargato; main non promossa. [Evidenze](VERIFICATION.md#2-novembre--map-isolata-al-pool-condiviso-windows-e-candidata-compatta).
 
 
@@ -226,7 +229,7 @@ Priorità 1–4 corrispondenti alla richiesta iniziale dell'utente; TODO-017/018
 | TODO-004 | Tutti i tempi della pipeline grafica, desktop e singola app | IN CORSO: M1 v12 allineato,4K hardware con scarti; blit GPU senza vantaggio dimostrato | RES_INFO16MiB/C000009A e Map31920byte isolati; v14 fallback compatto/19recuperi e due tratti4K senza crash verificati; confronto completo/stabilità/main aperti. |
 | TODO-005 | Misurare e migliorare disco/I/O quando utile | IN CORSO: analisi circoscritta salvataggio/rilettura FATTA | Nessun limite rilevante dimostrato per questo caso, cache invariata; paging/code ancora incompleti. |
 | TODO-006 | Misurare CPU e costo della VM sempre accesa | IN CORSO: riduzione idle distribuita/verificata0.2.19 | Worker3,423→0,307%; finestre attive, residuo QEMU ed energia ancora aperti. |
-| TODO-007 | Misurare GPU e costo della traduzione grafica | IN CORSO: Map8007000e M4 aperto; traccia allocazioni v13: moduli/frame4K/marker Windows PASS, cattura Edge in corso | Primo4K hardware35campioni M4 PASS circoscritto; M1 v13 riproduce guasto. Fallback v14 verificato localmente; ridurre retry crescita opzionale e qualificare confronto scarti/stabilità prima della main. |
+| TODO-007 | Misurare GPU e costo della traduzione grafica | IN CORSO: Map8007000e M4 aperto; traccia allocazioni v13: moduli/frame4K/marker Windows PASS, cattura Edge in corso | Primo4K hardware35campioni M4 PASS circoscritto; M1 v13 riproduce guasto. Fallback v14 verificato localmente; V15 riduce retry ma non qualifica il guadagno: solo opt-in. Defaultv14, misura take→presented Mac poi confronto scarti/stabilità prima della main. |
 | TODO-016 | Correggere la sincronizzazione GPU Wait/Signal | BLOCCATO per una soluzione protetta qualificata; difetto aperto | GFX-007; segnalazione upstream nell'issue8, distinta dagli esperimenti ritirati. |
 | TODO-008 | Catture complete, aggiornate e risorse grafiche rilasciate | IN CORSO: priorità utente28 ottobre, desktop/menu main | GFX-001/003/004, difetti aperti. |
 | TODO-009 | Arresto/riavvio, aggiornamento e recupero | IN CORSO: riconnessione frontend corretta; affidabilità generale aperta | SYS-001/005; aggiornamento del servizio attraverso sé stesso interrotto. |

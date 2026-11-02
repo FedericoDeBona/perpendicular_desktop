@@ -1,5 +1,8 @@
 # Piano di lavoro — desktop Windows su Mac
 
+**2 novembre — riduzione tentativi di crescita ring v15 IN CORSO.** V14 recupera le piccole Map, ma continua a tentare la crescita opzionale16MiB rifiutata a ogni rotazione. V15 attiva quattro cap reali e passa pixel/moduli, ma il tratto sovrapposto non mostra vantaggio (~14,2% contro4,7%v14, estremi approssimati). Esperimento solo su opzione; default v14 conservato. Ritorno v14 e misura take→presented Mac IN CORSO; confronto4K/main/Creality aperti. [Evidenze](VERIFICATION.md#2-novembre--profondita-del-ring-dopo-crescita-rifiutata-v15).
+
+
 **2 novembre — primo errore Map isolato sul M1; candidata v14 IN CORSO.** RES_INFO rifiuta blocchi16MiB conC000009A, poi Map buffer31920byte→8007000e/reset. Finestra CPU condivisa Windows, non prova di RAM Mac esaurita. Fallback del pool dopo rifiuto del batching: build/ricostruzione428file, controllo riferimenti, moduli/frame Windows e19recuperi64KiB effettivi PASS. Due brevi tratti4K fissi senza crash (~5,84%/~4,79%drop); confronto comune solo parziale/approssimato, non qualifica generale. Nessun limite/HRESULT/protezione allargato; main non promossa. [Evidenze](VERIFICATION.md#2-novembre--map-isolata-al-pool-condiviso-windows-e-candidata-compatta).
 
 

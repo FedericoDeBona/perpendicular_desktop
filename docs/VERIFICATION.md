@@ -5097,3 +5097,33 @@ Evidenze private: map-v13-trace-final.json, map-v13-trace-retry-initial.json, ma
 
 
 **Consegna incremento v14:** sessione ETW conclusa/taskTraceReady/result0; cancellati soltanto i propri due task Limited dopo verifica delle azioni (Edge ancora Running, cancellata la pianificazione senza chiudere il browser), remaining0. Proprio CD espulso. Screenshot successivo conferma Edge QA ancora aperto/in pausa, main spenta, nessuna seconda VM concorrente. Implementazione condivisa e verifica locale circoscritta FATTE; PERF-002/TODO-004/007, distribuzione grafica main e obiettivo globale restano IN CORSO.
+
+
+## 2 novembre — profondita del ring dopo crescita rifiutata v15
+
+Ripresa obiettivo attivo, turno precedente classificato progresso: fix/commit b0580de con19recuperi reali64KiB e due brevi campioni4K senza crash, qualifica generale/main/Creality incompleti. Checkout pulito, unicaQA QEMU69859 disco autenticato, host immutabile395ec8…/29membri del manifesto esatti; Windows stesso boot20:45:46, UMDv14hash806369… e moduli Edge realmente dalla directory protetta corrispondente. Non ripetuta la diagnosi decoder/NV12/RES_INFO già conclusa.
+
+**Motivazione:** trace v14 continua a mostrare richieste opzionali slot7 da16MiB rifiutate a ogni rotazione, benché il percorso di riuso/attesa degli slot esistenti sia disponibile. Nuova candidata Windows conserva la profondità raggiunta dopo il primo fallimento di crescita di ciascun ring, evitando nuovi tentativi per quella risorsa fino alla sua distruzione; inizializzazione obbligatoria, scelta degli slot/Map aperte e fence restano invariati. Nessun aumento di memoria/limiti/HRESULT o modifica kernel/protezioni. Il riuso può comunque attendere il lavoro precedente: non si dichiara latenza/FPS migliorata per sola lettura del codice.
+
+Build ARM64 v15/ABI100.6.101.58000 PASS, SHA256633e058d266ece52e9132ae7378e302332d4d47950286aeed695b6684e56256c. Quinta patch/pin/ricetta condivisi,428file C/H/RC Neptune byte-identici fra sorgenti compilati e ricostruzione v14 più quinta patch. Marker video/allocazione etichettati v15; il record descrittore Map conserva il formato v13. Registrazione normale UAC nella sola QA e qualifica Windows/Edge IN CORSO, main non promossa. Nessun nuovo benchmark esteso; prossimo passo pixel/moduli/marker, un tratto Edge4K e verifica che il cap si attivi senza rigenerare il guasto Map.
+
+Evidenze private QA/video-goal-20261101: v15-start-alignment.json, map-v15-build-receipt.json, map-v15-source-proof; sorgenti/patch/ricetta nel progetto, DLL/ISO/VM fuoriGit.
+
+
+**Distribuzione v15:** normaleUAC/tre registrazioni/receiptinstalled/hash633e…/PrivateBuildv15/taskResult0 verificati e proprio task Limited rimosso. Arresto ACPI QA e checkpoint200659Z riusciti; avvio ordinario successivo, nessun force/reset. Prima dell'avvio il launcher conserva un errore transitorio dell'enumerazione app durante il precedente shutdown (registro marcato per eliminazione800703FA): non usato per diagnosticare un nuovo difetto grafico o dichiarare avvio fallito. Caricamento effettivo e prova4K restano da verificare dopo boot.
+
+
+**Prima del browser v15:** ricetta prepare-only completa con cinque patch, archivi/toolchain/header/pin PASS;428file identici alla build incrementale. Audit dopo boot21:08:15+01 conferma servizio/helper, OpenGL.31 sei DLL/due sidecar/tre registrazioni, KMD originale/SecureBoot1/CI49157. L'errore transitorio dell'enumerazione app non persiste nel nuovo launcher; resta il noto FS-004 nella preparazione share QA. Avvio trace temporanea prima del checker e Edge Limited, senza nuovi privilegi permanenti.
+
+
+**Moduli/pixel v15 PASS:** checker avviato sotto nuova ETW carica wrapper/ARM64 da video-633e058d266e e confronta tre frame array4K pixel-identici347,090ms (include readback/confronto, non FPS). Edge unico profiloQA/paginaaqz-KE-bpKQ senza flag grafici forzati, primo Auto720p non qualificato; pausa, selezione UI2160p60 fissa, salto2 confermato a2:06. Avviata misura40campioni nella scena già misurata; niente confronto dedotto prima di validare contatori/risoluzione/player.
+
+
+**Qualifica v15 NON SUPERATA sul piano prestazionale:**40campioni, t149,527344→184,846438 in39,995s, tutti3840×2160/D3D11VideoDecoder/platformtrue, crashCount0→0/errornull;289/2119drop (~13,64%). Confronto locale sulla sovrapposizione dei due dataset: v14t149,680288→171,793403,62/1328 (~4,67%); v15t149,527344→172,054280,194/1367 (~14,19%). Stessa pagina/codec/qualità/finestra, endpoint approssimati fino0,261s, campioni non simultanei: il risultato non prova da solo causalità/regressione deterministica del cap, ma non qualifica alcun vantaggio.
+
+**ETW v15 qualificata e chiusa:**75eventi/omitted0, markerchecker/browser, quattro cap effettivi di slot16MiB alle profondità7/7/6/6;4fallimenti crescita pool/slot contro32eventi ciascuno nella precedentev14.28recuperi compatti,32RES_INFO e zeroMap/SetError falliti registrati. La modifica attiva la politica prevista, non risolve i frame persi. Conservata come esperimento esplicito --bounded-map-growth, ricetta default/revisione restituiti a v14; patch e pin restano riproducibili. Non promossa nella main.
+
+**Alternativa concreta:** ritorno alla UMDv14 protetta già qualificata, senza reinstallare/duplicare binari, con guard UUID/hash/v15corrente/v14destinazione e sostituzione soltanto delle tre registrazioni attese tramite normale UAC. Propri taskv15 controllati/rimossi, trace fermata e video in pausa/Edge chiuso. Dopo ripristino e boot, misurare il segmento host take→ready→presented con PipelineTrace opt-in già esistente; non aggiunti contatori/benchmark o modifiche di dispatch/presentazione. App privata Video Pipeline copia della stessa basehostv12/29membri, frontend invariato, ID distinto e LSEnvironment verso nuovo file privato0600/12000eventi/360s. Attivazione effettiva della traccia ancora DA VERIFICARE: non dedotta dal plist.
+
+
+**Ritorno v14 selezionato:** receiptselected/revisionv14/hash806369…/tre registrazioni/taskResult0 confermati e proprio task Limited rimosso. Shutdown ACPI/checkpoint202519Z e frontend QA precedente chiuso senza richiamarne il vecchio handle; inventario processi senza VM/frontend prima della nuova app Pipeline. Nuova app privata firmata deep/strict, stesso backendCPUv12/runtime395ec8…29/29 e frontend; UMDv14 effettiva e attivazione del file PipelineTrace da verificare dopo avvio/apertura Desktop. Nessuna qualifica dedotta da LSEnvironment.

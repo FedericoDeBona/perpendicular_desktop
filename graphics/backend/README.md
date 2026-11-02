@@ -207,3 +207,22 @@ nessuna promozione main. I grandi slot opzionali possono ancora non crescere:
 il ring usa gli slot esistenti e attende i fence. La modifica non garantisce
 allocazioni grandi né elimina tutte le attese; evitare i retry opzionali
 ripetuti dopo un rifiuto è il prossimo passo circoscritto.
+
+
+## Crescita opzionale del ring Windows v15
+
+`bounded-map-growth.patch`, quinta patch verificata dalla ricetta UMD e applicata
+solo con `--bounded-map-growth`, mantiene
+la profondità già raggiunta quando una crescita opzionale viene rifiutata.
+Evita che ogni DISCARD ripeta una creazione/mappatura Windows destinata a
+fallire nello stesso ring. Si continua a scegliere fra gli slot esistenti e
+ad attendere i loro fence; le allocazioni iniziali obbligatorie conservano
+il comportamento precedente. Il cap dura quanto la risorsa: nuova risorsa,
+nuova opportunità di crescita. Nessuna dimensione arbitraria o aumento limiti.
+Marker ETW limitato `map growth capped` con dimensione dello slot e profondità
+raggiunta; marker video/allocazione v15, formato descrittore Map v13 conservato.
+Build/riproduzione sorgenti M1, moduli Windows/frame4K e quattro cap effettivi
+PASS. Nel tratto sovrapposto Edgev15 ha194/1367drop contro62/1328v14, con
+endpoint approssimati fino0,261s: nessun vantaggio qualificato, senza attribuire
+causalità certa da un solo confronto. Il default della ricetta resta v14; la
+v15 rimane un esperimento esplicito, senza promozione main.

@@ -31,11 +31,14 @@ def main():
     parser.add_argument('--meson', type=Path, required=True)
     parser.add_argument('--ninja', type=Path, required=True)
     parser.add_argument('--output', type=Path, required=True)
+    parser.add_argument('--bounded-map-growth', action='store_true', help='Opt in to v15 pressure cap experiment; browser performance is not qualified')
     parser.add_argument('--prepare-only', action='store_true', help='Check inputs and reconstruct source without compiling')
     parser.add_argument('--toolchain-profile', default='original',
                         help='Explicit pinned toolchain; profiles do not change the driver/source ABI')
     args = parser.parse_args()
     pins = json.loads((REPO / 'graphics/backend/video-umd-inputs.json').read_text())
+    if args.bounded_map_growth:
+        pins['candidate_revision'] = pins['bounded_map_growth_revision']
     if args.toolchain_profile != 'original':
         profiles = pins.get('toolchain_profiles', {})
         if args.toolchain_profile not in profiles:
@@ -50,11 +53,12 @@ def main():
     for name, key in (('mesa', 'mesa'), ('wdk', 'wdk'), ('llvm', 'llvm_resource_compiler')):
         if digest(archives[name]) != pins[key]['sha256']:
             raise ValueError('Archive differs from the pinned input: ' + name)
-    patch, processor_patch, allocation_trace_patch, compact_shmem_patch, header = [REPO / 'graphics/backend' / name for name in
-                                     ('video-ddi.patch', 'video-processor-ddi.patch', 'map-allocation-trace.patch', 'compact-shmem-fallback.patch', 'video-resource-submit.h')]
+    patch, processor_patch, allocation_trace_patch, compact_shmem_patch, bounded_growth_patch, header = [REPO / 'graphics/backend' / name for name in
+                                     ('video-ddi.patch', 'video-processor-ddi.patch', 'map-allocation-trace.patch', 'compact-shmem-fallback.patch', 'bounded-map-growth.patch', 'video-resource-submit.h')]
     for path, key in ((patch, 'mesa_patch_sha256'), (processor_patch, 'processor_patch_sha256'),
                       (allocation_trace_patch, 'map_allocation_trace_patch_sha256'),
                       (compact_shmem_patch, 'compact_shmem_patch_sha256'),
+                      (bounded_growth_patch, 'bounded_map_growth_patch_sha256'),
                       (header, 'resource_header_sha256')):
         if digest(path) != pins[key]:
             raise ValueError('Shared fix differs from the pinned input: ' + path.name)
@@ -114,6 +118,9 @@ def main():
     run(['git', 'apply', allocation_trace_patch], cwd=source)
     run(['git', 'apply', '--check', compact_shmem_patch], cwd=source)
     run(['git', 'apply', compact_shmem_patch], cwd=source)
+    if args.bounded_map_growth:
+        run(['git', 'apply', '--check', bounded_growth_patch], cwd=source)
+        run(['git', 'apply', bounded_growth_patch], cwd=source)
     shutil.copyfile(header, source / 'src/virtio/neptune/triton/video-resource-submit.h')
     includes = [wdk / 'c/Include' / pins['wdk']['include_version'] / kind for kind in ('um', 'shared')]
     includes += [sdk / 'xwin' / name for name in ('sdk/include/ucrt', 'sdk/include/shared', 'sdk/include/um', 'sdk/include/winrt', 'crt/include')]
@@ -142,7 +149,7 @@ def main():
                      "\n[host_machine]\nsystem = 'windows'\ncpu_family = 'aarch64'\ncpu = 'armv8'\nendian = 'little'\n[built-in options]\n"+
                      'c_args = '+repr(compile_args)+'\ncpp_args = '+repr(compile_args)+'\nc_link_args = '+repr(link_args)+
                      '\ncpp_link_args = '+repr(link_args)+"\nb_vscrt = 'mt'\n")
-    receipt = {'inputs': pins, 'toolchain_profile': args.toolchain_profile, 'compiler': version, 'commands': commands,
+    receipt = {'inputs': pins, 'bounded_map_growth_experiment': args.bounded_map_growth, 'toolchain_profile': args.toolchain_profile, 'compiler': version, 'commands': commands,
                'qualification': 'source preparation only; no Windows install or video qualification'}
     if not args.prepare_only:
         build = output / 'build'

@@ -1,0 +1,51 @@
+--- a/src/virtio/neptune/npt_resource.c
++++ b/src/virtio/neptune/npt_resource.c
+@@ -360,8 +360,18 @@
+       return next;
+ 
+    /* Grow path: bring up a fresh slot at active_count. */
+-   if (cnt < r->max_slots && alloc_slot_locked(r, cnt))
+-      return cnt;
++   if (cnt < r->max_slots) {
++      if (alloc_slot_locked(r, cnt))
++         return cnt;
++#if defined(_WIN32)
++      /* RES_INFO can refuse another CPU window under pressure.  The
++       * existing slots are usable: keep their fence-backed wait path,
++       * and stop retrying the same optional growth on every DISCARD.
++       * This resource retains its successful depth until destruction. */
++      r->max_slots = cnt;
++      NPT_ALLOC_TRACE("map growth capped", r->aligned_slot_size, 0, cnt);
++#endif
++   }
+ 
+    /* At cap (or grow failed): the first slot no open Map holds, waiting
+     * for the host there. */
+--- a/src/virtio/neptune/triton/tritonFaultTrace.h
++++ b/src/virtio/neptune/triton/tritonFaultTrace.h
+@@ -16,12 +16,12 @@
+ }
+ static inline void tritonTraceFaultAt(const char *where, HRESULT hr, UINT detail) {
+     WCHAR message[256];
+-    _snwprintf_s(message, 256, _TRUNCATE, L"Perpendicular video v13: %hs hr=0x%08x detail=%u", where, (UINT)hr, detail);
++    _snwprintf_s(message, 256, _TRUNCATE, L"Perpendicular video v15: %hs hr=0x%08x detail=%u", where, (UINT)hr, detail);
+     tritonTraceFaultText(message);
+ }
+ static inline void tritonTraceAllocation(const char *where, UINT64 bytes, UINT status, UINT64 detail) {
+     WCHAR message[256];
+-    _snwprintf_s(message, 256, _TRUNCATE, L"Perpendicular allocation v13: %hs bytes=%llu status=0x%08x detail=%llu", where, bytes, status, detail);
++    _snwprintf_s(message, 256, _TRUNCATE, L"Perpendicular allocation v15: %hs bytes=%llu status=0x%08x detail=%llu", where, bytes, status, detail);
+     tritonTraceFaultText(message);
+ }
+ 
+--- a/src/virtio/neptune/triton/neptune_umd.rc
++++ b/src/virtio/neptune/triton/neptune_umd.rc
+@@ -30,7 +30,7 @@
+             VALUE "CompanyName", "Perpendicular experimental build; upstream Turing Software LLC"
+             VALUE "FileDescription", "Experimental Neptune video UMD - Perpendicular"
+             VALUE "FileVersion", NPT_RC_STR(VER)
+-            VALUE "PrivateBuild", "Perpendicular video-resource-v14"
++            VALUE "PrivateBuild", "Perpendicular video-resource-v15"
+             VALUE "InternalName", "neptune_umd"
+             VALUE "OriginalFilename", "neptune_umd.dll"
+             VALUE "ProductName", "Neptune"
