@@ -77,6 +77,6 @@ installazione; non sovrascrivere o cancellare le directory precedenti.
 
 L'esito M4 del2novembre distingue tre frame Windows hardware corretti dalla
 successiva disconnessione Edge: il log correla E_NOTIMPL del processore video
-DirectComposition e uscita GPU34. La v5 aggiunge elaborazione SDRprogressiva
+DirectComposition e uscita GPU34. La candidata aggiunge elaborazione SDRprogressiva
 reale e inoltro DDI, da qualificare prima della main; non equivale a un flag che
 forza il rendering. [Evidenze](../../docs/VERIFICATION.md#2-novembre--primo-edge-m4-e-disconnessione-nella-presentazione-directcomposition).

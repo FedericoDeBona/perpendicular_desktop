@@ -43,12 +43,12 @@
 +  HRESULT STDMETHODCALLTYPE CreateVideoProcessorInputView(ID3D11Resource *resource,ID3D11VideoProcessorEnumerator *e,
 +      const D3D11_VIDEO_PROCESSOR_INPUT_VIEW_DESC *desc,ID3D11VideoProcessorInputView **out)override{
 +    if(!out)return E_POINTER;*out=nullptr;auto enumeration=dynamic_cast<ProcessorEnum*>(e);
-+    if(!resource||!enumeration||enumeration->device()!=device_||!desc||desc->FourCC||desc->ViewDimension!=D3D11_VPIV_DIMENSION_TEXTURE2D||desc->Texture2D.MipSlice)return E_INVALIDARG;
++    if(!resource||!enumeration||enumeration->device()!=device_||!desc||desc->FourCC||desc->ViewDimension!=D3D11_VPIV_DIMENSION_TEXTURE2D||desc->Texture2D.MipSlice){ERR("VideoProcessorInputView: invalid arguments resource=",bool(resource)," enum=",bool(enumeration)," desc=",bool(desc));return E_INVALIDARG;}
 +    Com<ID3D11Texture2D> texture;Com<ID3D11Device> owner;
 +    if(FAILED(resource->QueryInterface(__uuidof(ID3D11Texture2D),reinterpret_cast<void**>(&texture))))return E_INVALIDARG;
-+    texture->GetDevice(&owner);if(owner.ptr()!=device_)return E_INVALIDARG;
++    texture->GetDevice(&owner);if(owner.ptr()!=device_){ERR("VideoProcessorInputView: resource device differs");return E_INVALIDARG;}
 +    D3D11_TEXTURE2D_DESC td;texture->GetDesc(&td);
-+    if((td.Format!=DXGI_FORMAT_NV12&&!rgbFormat(td.Format))||td.Usage!=D3D11_USAGE_DEFAULT||td.SampleDesc.Count!=1||td.MipLevels!=1||desc->Texture2D.ArraySlice>=td.ArraySize)return E_INVALIDARG;
++    if((td.Format!=DXGI_FORMAT_NV12&&!rgbFormat(td.Format))||(td.Usage!=D3D11_USAGE_DEFAULT&&!(td.Format==DXGI_FORMAT_NV12&&td.Usage==D3D11_USAGE_DYNAMIC))||td.SampleDesc.Count!=1||td.MipLevels!=1||desc->Texture2D.ArraySlice>=td.ArraySize){ERR("VideoProcessorInputView: unsupported texture format=",UINT(td.Format)," size=",td.Width,"x",td.Height," usage=",UINT(td.Usage)," samples=",td.SampleDesc.Count," mips=",td.MipLevels," array=",td.ArraySize," slice=",desc->Texture2D.ArraySlice," bind=",td.BindFlags," misc=",td.MiscFlags);return E_INVALIDARG;}
 +    try{*out=ref(new ProcessorInput(device_,texture.ptr(),*desc,desc->Texture2D.ArraySlice));return S_OK;}catch(const std::bad_alloc&){return E_OUTOFMEMORY;}
 +  }
 +  HRESULT STDMETHODCALLTYPE CreateVideoProcessorOutputView(ID3D11Resource *resource,ID3D11VideoProcessorEnumerator *e,
@@ -79,9 +79,9 @@
 +    if(!proc||!output||output->device()!=device_||count!=1||!streams||!streams[0].Enable)return E_INVALIDARG;
 +    const auto &stream=streams[0];auto input=dynamic_cast<ProcessorInput*>(stream.pInputSurface);
 +    if(!input||input->device()!=device_||input->texture.ptr()==output->texture.ptr())return E_INVALIDARG;
-+    if(stream.OutputIndex||stream.InputFrameOrField||stream.PastFrames||stream.FutureFrames||stream.ppPastSurfaces||stream.ppFutureSurfaces||stream.pInputSurfaceRight||stream.ppPastSurfacesRight||stream.ppFutureSurfacesRight)return E_NOTIMPL;
++    if(stream.OutputIndex||stream.InputFrameOrField||stream.PastFrames||stream.FutureFrames||stream.ppPastSurfaces||stream.ppFutureSurfaces||stream.pInputSurfaceRight||stream.ppPastSurfacesRight||stream.ppFutureSurfacesRight){ERR("VideoProcessorBlt: unsupported stream output=",stream.OutputIndex," inputFrame=",stream.InputFrameOrField," past=",stream.PastFrames," future=",stream.FutureFrames);return E_NOTIMPL;}
 +    std::lock_guard<std::mutex> lock(proc->mutex);
-+    if(proc->unsupported||proc->background_yuv||proc->input_color.Reserved||proc->output_color.Reserved||proc->input_color.YCbCr_xvYCC||proc->output_color.YCbCr_xvYCC||proc->input_color.Nominal_Range>2||proc->output_color.Nominal_Range>2||proc->alpha_mode==D3D11_VIDEO_PROCESSOR_ALPHA_FILL_MODE_DESTINATION)return E_NOTIMPL;
++    if(proc->unsupported||proc->background_yuv||proc->input_color.Reserved||proc->output_color.Reserved||proc->input_color.YCbCr_xvYCC||proc->output_color.YCbCr_xvYCC||proc->input_color.Nominal_Range>2||proc->output_color.Nominal_Range>2||proc->alpha_mode==D3D11_VIDEO_PROCESSOR_ALPHA_FILL_MODE_DESTINATION){ERR("VideoProcessorBlt: unsupported state flags=",proc->unsupported," yuvBackground=",proc->background_yuv," alphaMode=",UINT(proc->alpha_mode)," inputReserved=",proc->input_color.Reserved," outputReserved=",proc->output_color.Reserved," inputRange=",proc->input_color.Nominal_Range," outputRange=",proc->output_color.Nominal_Range," inputXV=",proc->input_color.YCbCr_xvYCC," outputXV=",proc->output_color.YCbCr_xvYCC);return E_NOTIMPL;}
 +    D3D11_TEXTURE2D_DESC in,out;input->texture->GetDesc(&in);output->texture->GetDesc(&out);
 +    RECT source=proc->has_source?proc->source:RECT{0,0,LONG(in.Width),LONG(in.Height)};
 +    RECT dest=proc->has_destination?proc->destination:RECT{0,0,LONG(out.Width),LONG(out.Height)};

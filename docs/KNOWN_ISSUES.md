@@ -1,6 +1,6 @@
 # Registro dei problemi
 
-**2 novembre — processore video SDR e ponte HRESULT implementati, PERF-002 IN CORSO.** Sette casi pixel nativi PASS; Windows v5 restituisce errori reali e tre conversioni NV12 passano disabilitando il default automatico, ora corretto nel backend. Nuova coppia firmata pronta, prova Windows completa/Edge/main DA FARE. Arresto ordinario della sola QA bloccato fra reset grafico e pausa CPU; nessuna forzatura, recupero con consenso distinto in attesa. Main spenta e intatta. Prossimo passo recupero QA, allineamento effettivo e stesso YouTube4K; criterio finale stabilità e scarti ridotti misurati resta aperto. [Evidenze](VERIFICATION.md#2-novembre--processore-video-sdr-reale-e-ponte-hresult).
+**2 novembre — NV12 dinamica corretta e otto casi pixel Windows PASS; Edge ancora NON SUPERATO.** Hostv7/UMDv6 effettivi verificati,3frame VP9 hardware4K corretti. Edge supera la vista e tenta realmente VP9hardware4K ma Blt E_NOTIMPL provoca ancora3crashGPU e fallback; nessuna fluidità sostenuta rivendicata. Diagnostica v8 build/installata nella sola QA per identificare stato/colore rifiutato. Recupero QA autorizzato, qcow2offline senza errori; main spenta/intatta e protezioni da riauditare dopo il caso. Prossimo passo correggere il rifiuto osservato→4K sostenuto→scarti confrontabili→main. PERF-002/TODO-004/007 IN CORSO. [Evidenze](VERIFICATION.md#2-novembre--processore-video-sdr-reale-e-ponte-hresult).
 
 
 **2 novembre — disconnessione Edge M4 isolata al processore video DirectComposition, PERF-002 IN CORSO.** Decoder Windows3frame4K esatti e moduli candidati effettivi PASS; Edge tentaVP9hardware4K ma CreateVideoProcessorEnumeratorE_NOTIMPL precede tre usciteGPU34 e disconnessione. Ripiego software4K:737/2191drop nel campione, nessun miglioramento rivendicato. Video in pausa, main invariata/spenta. Implementazione processore nativo e inoltroDDI v4 IN CORSO; prossima prova pixel→Windows→stesso Edge, caps oneste e protezioni/OpenGL conservati. [Evidenze e limiti](VERIFICATION.md#2-novembre--primo-edge-m4-e-disconnessione-nella-presentazione-directcomposition).
@@ -338,7 +338,7 @@ Il ciclo RAM protetto 4→2→4 GiB con dati conservati resta la qualifica prece
 
 ### SYS-001 — Arresto HVF durante riavvio o arresto
 
-- **2 novembre M4, osservazione distinta:** arresto ordinario QA bloccato, QMP non raggiungibile; stack reset GPU e pausa CPU concorrenti. Nessuna assertion HVF o correzione attribuita; recupero forzato non eseguito senza consenso distinto. [Evidenze](VERIFICATION.md#2-novembre--processore-video-sdr-reale-e-ponte-hresult).
+- **2 novembre M4, osservazione distinta:** arresto ordinario QA bloccato, QMP non raggiungibile; stack reset GPU e pausa CPU concorrenti. Nessuna assertion HVF o correzione attribuita; recupero forzato poi autorizzato/eseguito nella sola QA, disco offline senza errori; arresto seguente ordinario PASS. [Evidenze](VERIFICATION.md#2-novembre--processore-video-sdr-reale-e-ponte-hresult).
 
 - **1 novembre M1, aggiornamento0.2.59:** Quit and Keep Windows chiude anche QEMU96429; nuova apertura ordinaria97970. Nessun force-stop o attribuzione a segnale/assertion senza evidenza; continuità della sessione non qualificata. Problema aperto. [Diario](VERIFICATION.md#1-novembre--aggiornamento0259-sul-m1-e-prova-task-manager).
 

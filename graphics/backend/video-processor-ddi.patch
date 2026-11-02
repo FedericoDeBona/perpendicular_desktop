@@ -8,7 +8,7 @@
  #include "video-resource-submit.h"
  #include "tritonVideoStubs.h"
  
-@@ -158,6 +159,394 @@
+@@ -158,6 +159,413 @@
      } else if (type == D3DWDDM2_0DDI_VIDEO_CAPABILITY_QUERY_DECODER_DOWNSAMPLE_OUTPUT_FORMAT && size == sizeof(D3DWDDM2_0DDI_VIDEO_CAPABILITY_DECODER_DOWNSAMPLE_OUTPUT_FORMAT)) {
          ((D3DWDDM2_0DDI_VIDEO_CAPABILITY_DECODER_DOWNSAMPLE_OUTPUT_FORMAT *)data)->Supported = FALSE;
      }
@@ -38,7 +38,7 @@
 +/* Processor objects remain normal D3D11 COM objects on the paired host.
 + * The runtime's private handles never cross the Neptune resource wire. */
 +typedef struct { PTRITON_DEVICE owner; ID3D11VideoProcessorEnumerator *object; } TRITON_PROCESSOR_ENUM;
-+typedef struct { PTRITON_DEVICE owner; ID3D11VideoProcessor *object; BOOL badOutputColor, badStreamColor, badMirror, badOutputHDR, badStreamHDR; } TRITON_PROCESSOR;
++typedef struct { PTRITON_DEVICE owner; ID3D11VideoProcessor *object; BOOL badOutputColor, badStreamColor, badMirror, badOutputHDR, badStreamHDR; UINT inputColorTrace, outputColorTrace; } TRITON_PROCESSOR;
 +typedef struct {
 +    PTRITON_DEVICE owner; ID3D11VideoProcessorInputView *object;
 +    PTRITON_RESOURCE resource; ID3D11Resource *boundResource;
@@ -131,6 +131,14 @@
 +static HRESULT APIENTRY processorCreateInput(D3D10DDI_HDEVICE h, const D3D11_1DDIARG_CREATEVIDEOPROCESSORINPUTVIEW *args,
 +    D3D11_1DDI_HVIDEOPROCESSORINPUTVIEW object, D3D11_1DDI_HRTVIDEOPROCESSORINPUTVIEW runtime) {
 +    PTRITON_DEVICE p = videoDevice(h); TRITON_PROCESSOR_INPUT *out = object.pDrvPrivate; if (out) memset(out, 0, sizeof(*out));
++    static unsigned inputTraceCount;
++    if (args && inputTraceCount++ < 4) {
++        PTRITON_RESOURCE trace = args->hDrvResource.pDrvPrivate;
++        npt_log("video: input desc fourcc=%u mip=%u slice=%u count=%u resource=%u %ux%u mips=%u array=%u bind=%u",
++            args->FourCC, args->MipSlice, args->FirstArraySlice, args->ArraySize,
++            trace ? (UINT)trace->Format : 0, trace ? trace->Width : 0, trace ? trace->Height : 0,
++            trace ? trace->MipLevels : 0, trace ? trace->ArraySize : 0, trace ? trace->BindFlags : 0);
++    }
 +    if (!p || !p->pVideoDev || !args || !out || args->ArraySize > 1 || args->FourCC || args->MipSlice) return E_INVALIDARG;
 +    PTRITON_RESOURCE r = args->hDrvResource.pDrvPrivate; ID3D11VideoProcessorEnumerator *e = processorEnum(p, args->hDrvVideoProcessorEnum);
 +    if (!e || !r || !r->pResource) return E_INVALIDARG;
@@ -138,6 +146,7 @@
 +    D3D11_VIDEO_PROCESSOR_INPUT_VIEW_DESC desc = {0}; desc.FourCC = args->FourCC; desc.ViewDimension = D3D11_VPIV_DIMENSION_TEXTURE2D;
 +    desc.Texture2D.MipSlice = args->MipSlice; desc.Texture2D.ArraySlice = args->FirstArraySlice;
 +    hr = processorSyncInput(p, r->pResource, e, &desc, &out->object);
++    if (FAILED(hr)) npt_log("video: input host hr=%08x", (unsigned)hr);
 +    if (SUCCEEDED(hr)) {
 +        out->owner = p; out->resource = r; out->boundResource = r->pResource; out->enumerator = e; out->desc = desc;
 +        ID3D11Resource_AddRef(out->boundResource); ID3D11VideoProcessorEnumerator_AddRef(e);
@@ -201,11 +210,21 @@
 +    ID3D11Resource_AddRef(resource); ID3D11VideoProcessorOutputView_Release(v->object);
 +    ID3D11Resource_Release(v->boundResource); v->object = next; v->boundResource = resource; return S_OK;
 +}
++/* Optional failure-only metadata trace in the caller-selected QA file. */
++static void processorTraceFailure(TRITON_PROCESSOR *v) {
++    char path[1024]; static LONG count;
++    DWORD n = GetEnvironmentVariableA("PERP_VIDEO_TRACE_PATH", path, sizeof(path));
++    if (!n || n >= sizeof(path) || InterlockedIncrement(&count) > 8) return;
++    FILE *file = fopen(path, "a"); if (!file) return;
++    fprintf(file, "pid=%lu blt state outputColor=%u inputColor=%u mirror=%d outputHDR=%d inputHDR=%d colorInvalid=%d/%d\n",
++        GetCurrentProcessId(), v->outputColorTrace, v->inputColorTrace, v->badMirror, v->badOutputHDR, v->badStreamHDR, v->badOutputColor, v->badStreamColor);
++    fclose(file);
++}
 +static HRESULT APIENTRY processorBlt(D3D10DDI_HDEVICE h, D3D11_1DDI_HVIDEOPROCESSOR object,
 +    D3D11_1DDI_HVIDEOPROCESSOROUTPUTVIEW output, UINT frame, UINT count, const D3D11_1DDI_VIDEO_PROCESSOR_STREAM *streams) {
 +    PTRITON_DEVICE p = videoDevice(h); TRITON_PROCESSOR *v = processorState(p, object); TRITON_PROCESSOR_OUTPUT *out = output.pDrvPrivate;
 +    if (!p || !p->pVideoCtx || !v || !out || out->owner != p || !out->object || count != 1 || !streams) return E_INVALIDARG;
-+    if (v->badOutputColor || v->badStreamColor || v->badMirror || v->badOutputHDR || v->badStreamHDR) return E_NOTIMPL;
++    if (v->badOutputColor || v->badStreamColor || v->badMirror || v->badOutputHDR || v->badStreamHDR) { processorTraceFailure(v); return E_NOTIMPL; }
 +    const D3D11_1DDI_VIDEO_PROCESSOR_STREAM *s = streams;
 +    if (s->PastFrames || s->FutureFrames || s->hInputSurfaceRight.pDrvPrivate || s->pPastSurfaces || s->pFutureSurfaces || s->pPastSurfacesRight || s->pFutureSurfacesRight) return E_NOTIMPL;
 +    TRITON_PROCESSOR_INPUT *input = s->hInputSurface.pDrvPrivate;
@@ -352,12 +371,12 @@
 +}
 +static VOID APIENTRY processorOutputColor1(D3D10DDI_HDEVICE h, D3D11_1DDI_HVIDEOPROCESSOR object, D3DDDI_COLOR_SPACE_TYPE color) {
 +    PTRITON_DEVICE p = videoDevice(h); TRITON_PROCESSOR *v = processorState(p, object); if (!v || !p->pVideoCtx) { processorError(p, E_INVALIDARG); return; }
-+    D3D11_VIDEO_PROCESSOR_COLOR_SPACE mapped; v->badOutputColor = !processorColorSpace(color, &mapped);
++    v->outputColorTrace = (UINT)color; D3D11_VIDEO_PROCESSOR_COLOR_SPACE mapped; v->badOutputColor = !processorColorSpace(color, &mapped);
 +    if (!v->badOutputColor) ID3D11VideoContext_VideoProcessorSetOutputColorSpace(p->pVideoCtx, v->object, &mapped);
 +}
 +static VOID APIENTRY processorStreamColor1(D3D10DDI_HDEVICE h, D3D11_1DDI_HVIDEOPROCESSOR object, UINT stream, D3DDDI_COLOR_SPACE_TYPE color) {
 +    PTRITON_DEVICE p = videoDevice(h); TRITON_PROCESSOR *v = processorState(p, object); if (!v || !p->pVideoCtx || stream) { processorError(p, E_INVALIDARG); return; }
-+    D3D11_VIDEO_PROCESSOR_COLOR_SPACE mapped; v->badStreamColor = !processorColorSpace(color, &mapped);
++    v->inputColorTrace = (UINT)color; D3D11_VIDEO_PROCESSOR_COLOR_SPACE mapped; v->badStreamColor = !processorColorSpace(color, &mapped);
 +    if (!v->badStreamColor) ID3D11VideoContext_VideoProcessorSetStreamColorSpace(p->pVideoCtx, v->object, stream, &mapped);
 +}
 +static VOID APIENTRY processorFormatConversion(D3D10DDI_HDEVICE h, D3D11_1DDI_HVIDEOPROCESSORENUM object, D3DWDDM2_0DDI_CHECK_VIDEO_PROCESSOR_FORMAT_CONVERSION *args) {
@@ -403,7 +422,7 @@
  }
  
  static void videoFill_D3D11_1DDI_VIDEODEVICEFUNCS(D3D11_1DDI_VIDEODEVICEFUNCS *p) {
-@@ -176,50 +565,50 @@
+@@ -176,50 +584,50 @@
      p->pfnVideoDecoderBeginFrame = videoBegin;
      p->pfnVideoDecoderEndFrame = videoEnd;
      p->pfnVideoDecoderSubmitBuffers = videoSubmitBuffers;
@@ -495,7 +514,7 @@
      p->pfnGetContentProtectionCaps = videoStub_PFND3D11_1DDI_GETCONTENTPROTECTIONCAPS;
      p->pfnGetCryptoKeyExchangeType = videoStub_PFND3D11_1DDI_GETCRYPTOKEYEXCHANGETYPE;
      p->pfnCalcPrivateCryptoSessionSize = videoStub_PFND3D11_1DDI_CALCPRIVATECRYPTOSESSIONSIZE;
-@@ -241,7 +630,7 @@
+@@ -241,7 +649,7 @@
      p->pfnConfigureAuthenticatedChannel = videoStub_PFND3D11_1DDI_CONFIGUREAUTHENTICATEDCHANNEL;
      p->pfnVideoDecoderGetHandle = videoStub_PFND3D11_1DDI_VIDEODECODERGETHANDLE;
      p->pfnCryptoSessionGetHandle = videoStub_PFND3D11_1DDI_CRYPTOSESSIONGETHANDLE;
@@ -504,7 +523,7 @@
      p->pfnGetCaptureHandle = videoStub_PFND3D11_1DDI_GETCAPTUREHANDLE;
  }
  
-@@ -261,50 +650,50 @@
+@@ -261,50 +669,50 @@
      p->pfnVideoDecoderBeginFrame = videoBegin;
      p->pfnVideoDecoderEndFrame = videoEnd;
      p->pfnVideoDecoderSubmitBuffers = videoSubmitBuffers;
@@ -596,7 +615,7 @@
      p->pfnGetContentProtectionCaps = videoStub_PFND3D11_1DDI_GETCONTENTPROTECTIONCAPS;
      p->pfnGetCryptoKeyExchangeType = videoStub_PFND3D11_1DDI_GETCRYPTOKEYEXCHANGETYPE;
      p->pfnCalcPrivateCryptoSessionSize = videoStub_PFND3D11_1DDI_CALCPRIVATECRYPTOSESSIONSIZE;
-@@ -326,20 +715,20 @@
+@@ -326,20 +734,20 @@
      p->pfnConfigureAuthenticatedChannel = videoStub_PFND3D11_1DDI_CONFIGUREAUTHENTICATEDCHANNEL;
      p->pfnVideoDecoderGetHandle = videoStub_PFND3D11_1DDI_VIDEODECODERGETHANDLE;
      p->pfnCryptoSessionGetHandle = videoStub_PFND3D11_1DDI_CRYPTOSESSIONGETHANDLE;
@@ -624,7 +643,7 @@
      p->pfnGetCryptoSessionPrivateDataSize = videoStub_PFND3DWDDM2_0DDI_GETCRYPTOSESSIONPRIVATEDATASIZE;
  }
  
-@@ -359,50 +748,50 @@
+@@ -359,50 +767,50 @@
      p->pfnVideoDecoderBeginFrame = videoBegin;
      p->pfnVideoDecoderEndFrame = videoEnd;
      p->pfnVideoDecoderSubmitBuffers = videoSubmitBuffers;
@@ -716,7 +735,7 @@
      p->pfnGetContentProtectionCaps = videoStub_PFND3D11_1DDI_GETCONTENTPROTECTIONCAPS;
      p->pfnGetCryptoKeyExchangeType = videoStub_PFND3D11_1DDI_GETCRYPTOKEYEXCHANGETYPE;
      p->pfnCalcPrivateCryptoSessionSize = videoStub_PFND3D11_1DDI_CALCPRIVATECRYPTOSESSIONSIZE;
-@@ -424,23 +813,23 @@
+@@ -424,23 +832,23 @@
      p->pfnConfigureAuthenticatedChannel = videoStub_PFND3D11_1DDI_CONFIGUREAUTHENTICATEDCHANNEL;
      p->pfnVideoDecoderGetHandle = videoStub_PFND3D11_1DDI_VIDEODECODERGETHANDLE;
      p->pfnCryptoSessionGetHandle = videoStub_PFND3D11_1DDI_CRYPTOSESSIONGETHANDLE;

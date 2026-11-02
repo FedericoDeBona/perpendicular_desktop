@@ -810,7 +810,7 @@
 +            VALUE "CompanyName", "Perpendicular experimental build; upstream Turing Software LLC"
 +            VALUE "FileDescription", "Experimental Neptune video UMD - Perpendicular"
              VALUE "FileVersion", NPT_RC_STR(VER)
-+            VALUE "PrivateBuild", "Perpendicular video-resource-v5"
++            VALUE "PrivateBuild", "Perpendicular video-resource-v8"
              VALUE "InternalName", "neptune_umd"
              VALUE "OriginalFilename", "neptune_umd.dll"
              VALUE "ProductName", "Neptune"

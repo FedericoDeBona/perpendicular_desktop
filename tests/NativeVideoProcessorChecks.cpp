@@ -68,6 +68,12 @@ int main(){
   float y=(81.f-(full?0:16))/(full?255:219),u=(90.f-128)/(full?255:224),v=(240.f-128)/(full?255:224);
   readCheck(channelByte(y+(matrix?1.5748f:1.402f)*v),channelByte(y-(matrix?.187324f:.344136f)*u-(matrix?.468124f:.714136f)*v),channelByte(y+(matrix?1.8556f:1.772f)*u),pass==0?"BT601 limited crop/scale":pass==1?"BT709 limited crop/scale":"BT709 full crop/scale");
  }
+ // Edge's software-upload path uses a dynamic decoder-bound NV12 input.
+ D3D11_TEXTURE2D_DESC dynamicDesc={};dynamicDesc.Width=8;dynamicDesc.Height=4;dynamicDesc.MipLevels=dynamicDesc.ArraySize=dynamicDesc.SampleDesc.Count=1;dynamicDesc.Format=DXGI_FORMAT_NV12;dynamicDesc.Usage=D3D11_USAGE_DYNAMIC;dynamicDesc.BindFlags=D3D11_BIND_DECODER;dynamicDesc.CPUAccessFlags=D3D11_CPU_ACCESS_WRITE;
+ ID3D11Texture2D *dynamicNV12=nullptr;ID3D11VideoProcessorInputView *dynamicInput=nullptr;check(dev->CreateTexture2D(&dynamicDesc,nullptr,&dynamicNV12),"dynamic NV12");check(video->CreateVideoProcessorInputView(dynamicNV12,enumerator,&inDesc,&dynamicInput),"dynamic NV12 input");
+ D3D11_MAPPED_SUBRESOURCE dynamicMap={};check(ctx->Map(dynamicNV12,0,D3D11_MAP_WRITE_DISCARD,0,&dynamicMap),"dynamic NV12 map");
+ for(unsigned y=0;y<6;y++)std::copy_n(pixels.data()+y*8,8,(unsigned char*)dynamicMap.pData+y*dynamicMap.RowPitch);ctx->Unmap(dynamicNV12,0);dynamicNV12->Release();stream.pInputSurface=dynamicInput;ctx->UpdateSubresource(output,0,nullptr,init.data(),64,0);
+ check(vc->VideoProcessorBlt(processor,outView,0,1,&stream),"dynamic NV12 blit");float dy=81.f/255,du=-38.f/255,dv=112.f/255;readCheck(channelByte(dy+1.5748f*dv),channelByte(dy-.187324f*du-.468124f*dv),channelByte(dy+1.8556f*du),"dynamic NV12 map and retained input");stream.pInputSurface=input;dynamicInput->Release();
  vc->VideoProcessorSetOutputBackgroundColor(processor,TRUE,&bg);expect(FAILED(vc->VideoProcessorBlt(processor,outView,0,1,&stream)),"unsupported YUV background rejected");vc->VideoProcessorSetOutputBackgroundColor(processor,FALSE,&bg);
 #if !defined(_WIN32) || defined(__APPLE__)
  vc->VideoProcessorSetOutputAlphaFillMode(processor,D3D11_VIDEO_PROCESSOR_ALPHA_FILL_MODE_DESTINATION,0);expect(FAILED(vc->VideoProcessorBlt(processor,outView,0,1,&stream)),"destination alpha rejected");vc->VideoProcessorSetOutputAlphaFillMode(processor,D3D11_VIDEO_PROCESSOR_ALPHA_FILL_MODE_OPAQUE,0);
@@ -75,7 +81,7 @@ int main(){
 #endif
  stream.PastFrames=1;expect(FAILED(vc->VideoProcessorBlt(processor,outView,0,1,&stream)),"past frame rejected");stream.PastFrames=0;
  // Crop the blue half of a BGRA source, then scale it into the destination.
- td={};td.Width=8;td.Height=4;td.MipLevels=td.ArraySize=td.SampleDesc.Count=1;td.Format=DXGI_FORMAT_B8G8R8A8_UNORM;td.Usage=D3D11_USAGE_DEFAULT;td.BindFlags=D3D11_BIND_SHADER_RESOURCE;
+ td={};td.Width=8;td.Height=4;td.MipLevels=td.ArraySize=td.SampleDesc.Count=1;td.Format=DXGI_FORMAT_B8G8R8A8_UNORM;td.Usage=D3D11_USAGE_DEFAULT;td.BindFlags=D3D11_BIND_RENDER_TARGET|D3D11_BIND_SHADER_RESOURCE;
  std::vector<unsigned char> rgb(8*4*4,0);for(unsigned y=0;y<4;y++)for(unsigned x=0;x<8;x++){rgb[(y*8+x)*4+(x<4?2:0)]=255;rgb[(y*8+x)*4+3]=255;}
  D3D11_SUBRESOURCE_DATA data={rgb.data(),32,0};ID3D11Texture2D *bgra=nullptr;check(dev->CreateTexture2D(&td,&data,&bgra),"BGRA");ID3D11VideoProcessorInputView *bgraInput=nullptr;check(video->CreateVideoProcessorInputView(bgra,enumerator,&inDesc,&bgraInput),"BGRA input");
  stream.pInputSurface=bgraInput;src.left=4;vc->VideoProcessorSetStreamSourceRect(processor,0,TRUE,&src);D3D11_VIDEO_PROCESSOR_COLOR_SPACE rgbColor={};vc->VideoProcessorSetStreamColorSpace(processor,0,&rgbColor);ctx->UpdateSubresource(output,0,nullptr,init.data(),64,0);
@@ -93,7 +99,7 @@ int main(){
  vc->VideoProcessorSetStreamAlpha(processor,0,FALSE,1);
  bgraInput->Release();
  // RGBA input follows the same documented color order, not a hidden BGRA alias.
- for(size_t i=0;i<rgb.size();i+=4)std::swap(rgb[i],rgb[i+2]);td={};td.Width=8;td.Height=4;td.MipLevels=td.ArraySize=td.SampleDesc.Count=1;td.Format=DXGI_FORMAT_R8G8B8A8_UNORM;td.Usage=D3D11_USAGE_DEFAULT;td.BindFlags=D3D11_BIND_SHADER_RESOURCE;
+ for(size_t i=0;i<rgb.size();i+=4)std::swap(rgb[i],rgb[i+2]);td={};td.Width=8;td.Height=4;td.MipLevels=td.ArraySize=td.SampleDesc.Count=1;td.Format=DXGI_FORMAT_R8G8B8A8_UNORM;td.Usage=D3D11_USAGE_DEFAULT;td.BindFlags=D3D11_BIND_RENDER_TARGET|D3D11_BIND_SHADER_RESOURCE;
  data={rgb.data(),32,0};check(dev->CreateTexture2D(&td,&data,&bgra),"RGBA input texture");check(video->CreateVideoProcessorInputView(bgra,enumerator,&inDesc,&bgraInput),"RGBA input view");bgra->Release();stream.pInputSurface=bgraInput;ctx->UpdateSubresource(output,0,nullptr,init.data(),64,0);
  check(vc->VideoProcessorBlt(processor,outView,0,1,&stream),"RGBA input blit");readCheck(0,0,255,"RGBA input channel order");
  bgraInput->Release();input->Release();nv12->Release();outView->Release();output->Release();staging->Release();processor->Release();enumerator->Release();vc->Release();video->Release();ctx->Release();dev->Release();

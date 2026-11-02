@@ -77,7 +77,7 @@ python3 scripts/rebuild-video-umd.py \
   --output /private/path/new-video-umd
 ```
 
-Output `build/src/virtio/neptune/triton/neptune_umd.dll`, file version100.6.101.58000, abbinata al kernel originale verificato, marcatura PrivateBuild `Perpendicular video-resource-v5` e ricevuta. `--prepare-only` ricostruisce sorgenti/configurazione senza dichiarare una build. Non crea un package installabile, non cambia KMD/DriverStore/registro/protezioni. La DLL modificata non è firmata Microsoft e si identifica esplicitamente come sperimentale. La versione numerica è quella richiesta dall’ABI del kernel originale; revisione candidata, hash e interfaccia privata1 restano controlli separati. Il prototipo iniziale0.4.0.1 non va registrato con il kernel100.6.101.58000. LoadLibrary in un processo Windows è riuscito; D3D11CreateDevice tramite driver software fallisce8007007f: non usare quel percorso come qualifica della UMD registrata.
+Output `build/src/virtio/neptune/triton/neptune_umd.dll`, file version100.6.101.58000, abbinata al kernel originale verificato, marcatura PrivateBuild `Perpendicular video-resource-v8` e ricevuta. `--prepare-only` ricostruisce sorgenti/configurazione senza dichiarare una build. Non crea un package installabile, non cambia KMD/DriverStore/registro/protezioni. La DLL modificata non è firmata Microsoft e si identifica esplicitamente come sperimentale. La versione numerica è quella richiesta dall’ABI del kernel originale; revisione candidata, hash e interfaccia privata1 restano controlli separati. Il prototipo iniziale0.4.0.1 non va registrato con il kernel100.6.101.58000. LoadLibrary in un processo Windows è riuscito; D3D11CreateDevice tramite driver software fallisce8007007f: non usare quel percorso come qualifica della UMD registrata.
 
 La canonica continua sul runtime qualificato precedente. Prossima verifica: copia Windows isolata con normale registrazione UMD e kernel originale/protezioni conservate, tre frame corretti usando il normale percorso GetDecoderBuffer/SubmitDecoderBuffers (senza `--resources` nell'app Windows), poi browser reale. Non allentare i gate di produzione né promuovere questi soli risultati. [Verifica e limiti](../../docs/VERIFICATION.md#1-novembre--buffer-video-come-risorse-e-prima-umd-ddi).
 
@@ -117,10 +117,14 @@ locali Rust non sono un sostituto: su questo Mac rust-lld non trova libLLVM.dyli
 Preparazione e compilazione della UMD non qualificano la sua esecuzione Windows.
 
 
-## Processore video SDR della candidata v5
+## Processore video SDR sperimentale
 
 `video-processor-format-support.patch` e `video-processor-native.patch` aggiungono un pass Metal reale per un singolo stream progressivo NV12/BGRA/RGBA verso BGRA/RGBA, con crop, scale, BT.601/709, range e alpha stream. `video-processor-ddi.patch` collega le API Windows al backend e trasporta l’esito effettivo delle creazioni e di Blt attraverso le risposte già presenti nel protocollo. I pin di entrambe le ricette sono obbligatori: una patch locale diversa viene rifiutata prima di creare l’output. La coppia non è ancora qualificata in Edge o distribuita nella main.
 
 Il pass attende la coda D3D e il proprio completamento Metal: correttezza prima della misura prestazionale. AutoStreamCaps=0 non aggiunge filtri quando Windows abilita il suo stato automatico predefinito. Non sono annunciati NV12 output, HDR, filtri, stereo, interlace, conversione di frequenza o nuovi handle NT/keyed. `NativeVideoProcessorChecks.cpp` verifica sette conversioni sui pixel e il confine delle capacità; si compila con gli stessi include/link nativi indicati sopra. In Windows usa VIDEO_SUPPORT; il runtime può filtrare richieste di stati non annunciati e sintetizzare bit generici NV12 obbligatori: l’enumeratore specifico e le viste restano il gate effettivo. Non interpretare un test nativo come prova browser.
 
 [Prove, negativi e punto di ripresa](../../docs/VERIFICATION.md#2-novembre--processore-video-sdr-reale-e-ponte-hresult).
+
+L’ingresso NV12 supporta anche DYNAMIC/CPU write, osservato nel caricamento software di Edge: il processore legge la texture GPU dopo Unmap e attesa delle operazioni pendenti. Output e ingressi RGB restano DEFAULT. Il controllo pixel include Map WRITE_DISCARD, lifetime della vista e confronto con la baseline che rifiuta lo stesso descrittore; la sola riuscita nativa non qualifica il browser. I diagnostici riportano solo metadati della risorsa rifiutata, senza pixel; la UMD limita ai primi quattro i descrittori input per processo.
+
+Per una diagnosi mirata, `PERP_VIDEO_TRACE_PATH` può indicare un file privato Windows: la UMD scrive soltanto i primi otto rifiuti Blt per processo (flag e codici colore, nessun pixel). Senza variabile non crea file. È una traccia opzionale, non un requisito operativo o una modifica delle capacità.

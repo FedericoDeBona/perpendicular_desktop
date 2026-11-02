@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "status": "M4 video processor candidate with synchronous HRESULT bridge; Windows and Edge qualification pending",
+  "status": "native default/dynamic NV12 processor pixels verified in Windows; paired UMD v8 failure metadata; Edge Blt rejection under qualification",
   "mesa": {
     "revision": "bf536bba65454900d782fa7417bc95c1608d7483",
     "url": "https://codeload.github.com/osy/virtio-win-mesa/tar.gz/bf536bba65454900d782fa7417bc95c1608d7483",
@@ -18,7 +18,7 @@
     "url": "https://github.com/llvm/llvm-project/releases/download/llvmorg-15.0.7/clang%2Bllvm-15.0.7-arm64-apple-darwin22.0.tar.xz",
     "sha256": "867c6afd41158c132ef05a8f1ddaecf476a26b91c85def8e124414f9a9ba188d"
   },
-  "mesa_patch_sha256": "8ceee62727e06e86799e0aaeb787b104f89db487c2c72d14bf4d93683e46e475",
+  "mesa_patch_sha256": "d7aff2a63951ce5b6a17a55e5f79a3c64574fc50cb98db75b91a1558ea1af12b",
   "resource_header_sha256": "ad2f6d652779f29a8d63860333cb0007456c00fd020c2574d9118421a67a95cd",
   "compiler_version": "Apple clang version 21.0.0 (clang-2100.4.1.1)",
   "sdk_files": {
@@ -51,7 +51,7 @@
     "video_decoder_buffer_usage": 2,
     "native_video_processor_version": 1
   },
-  "candidate_revision": "Perpendicular video-resource-v5",
+  "candidate_revision": "Perpendicular video-resource-v8",
   "toolchain_profiles": {
     "m4-clang-2100.3.34.2-llvm15": {
       "status": "build candidate; Windows qualification required before deployment",
@@ -65,5 +65,5 @@
       "sdk_source": "same XWin headers and libraries as original profile"
     }
   },
-  "processor_patch_sha256": "6ad0aa3c57f391092faa5e3cdcaa8a3cfbeeb6e47e2c83e3d762cb3b7b6b1d55"
+  "processor_patch_sha256": "50887c12206b9be083dbb559da8d90a70cd904c877a43c05eb938d1ef898464f"
 }
