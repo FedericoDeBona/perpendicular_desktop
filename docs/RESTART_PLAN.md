@@ -1,5 +1,8 @@
 # Piano di lavoro — desktop Windows su Mac
 
+**2 novembre — misura Mac riuscita, fluidità ancora NON SUPERATA.** Traccia su richiesta start/stop qualificata nella QA:12000record/25,81s,799frame ricevuti,274presentazioni positive/522zero; take→GPU completa mediana2,22ms, take→presented positivo21,53ms. Edge4K nello stesso tratto:147/504drop (~29,17%), stalli e crash0→0; geometria diversa dai vecchi campioni, nessun A/B favorevole. Dispatch/import brevi, pacing non ancora attribuito; non ripetere le candidate Metal escluse il25ottobre. Main/Creality aperti. [Evidenze](VERIFICATION.md#2-novembre--avvio-su-richiesta-della-traccia-pipeline-mac).
+
+
 **2 novembre — riduzione tentativi di crescita ring v15 IN CORSO.** V14 recupera le piccole Map, ma continua a tentare la crescita opzionale16MiB rifiutata a ogni rotazione. V15 attiva quattro cap reali e passa pixel/moduli, ma il tratto sovrapposto non mostra vantaggio (~14,2% contro4,7%v14, estremi approssimati). Esperimento solo su opzione; default v14 conservato. Ritorno v14 e misura take→presented Mac IN CORSO; confronto4K/main/Creality aperti. [Evidenze](VERIFICATION.md#2-novembre--profondita-del-ring-dopo-crescita-rifiutata-v15).
 
 

@@ -10,18 +10,21 @@ final class PipelineTrace:@unchecked Sendable {
     private let lock=NSLock()
     private var count=0
     private var previousCostMilliseconds=0.0
-    private let started=ProcessInfo.processInfo.systemUptime
-    private let fd:Int32
+    private var started=ProcessInfo.processInfo.systemUptime
+    private var fd:Int32
+    private let destination:String?
     private init(){
         if let path=ProcessInfo.processInfo.environment["PERPENDICULAR_PIPELINE_TRACE"],path.hasPrefix("/") {
+            destination=path
             fd=Darwin.open(path,O_WRONLY|O_CREAT|O_EXCL|O_NOFOLLOW,0o600)
-        }else{fd = -1}
+        }else{destination=nil;fd = -1}
     }
     static func record(_ event:String,_ id:String,_ fields:[String:Any]=[:]){
         let trace=shared
+        guard trace.destination != nil else{return}
+        trace.lock.lock();defer{trace.lock.unlock()}
         guard trace.fd>=0 else{return}
         let now=ProcessInfo.processInfo.systemUptime
-        trace.lock.lock();defer{trace.lock.unlock()}
         guard trace.count<12000,now-trace.started<360 else{return}
         var row=fields;row["event"]=event;row["id"]=id;row["hostSeconds"]=now
         row["previousRecordMilliseconds"]=trace.previousCostMilliseconds
@@ -31,7 +34,29 @@ final class PipelineTrace:@unchecked Sendable {
         trace.count+=1
         trace.previousCostMilliseconds=(ProcessInfo.processInfo.systemUptime-now)*1000
     }
-    static var enabled:Bool {shared.fd>=0}
+    static var enabled:Bool {
+        let trace=shared;guard trace.destination != nil else{return false}
+        trace.lock.lock();defer{trace.lock.unlock()}
+        return trace.fd>=0
+    }
+    /// A fresh bounded capture after boot/UI preparation, only when the app
+    /// was explicitly launched with a diagnostic destination. No caller path.
+    static func restart()->[String:Any]? {
+        let trace=shared;guard let base=trace.destination else{return nil}
+        let path=(base as NSString).deletingPathExtension+"-"+UUID().uuidString+".jsonl"
+        trace.lock.lock();defer{trace.lock.unlock()}
+        let next=Darwin.open(path,O_WRONLY|O_CREAT|O_EXCL|O_NOFOLLOW,0o600)
+        guard next>=0 else{return nil}
+        if trace.fd>=0 {_=Darwin.close(trace.fd)}
+        trace.fd=next;trace.count=0;trace.previousCostMilliseconds=0
+        trace.started=ProcessInfo.processInfo.systemUptime
+        return ["path":path,"hostSeconds":trace.started,"maxEvents":12000,"maxSeconds":360]
+    }
+    static func stop()->[String:Any] {
+        let trace=shared;trace.lock.lock();defer{trace.lock.unlock()}
+        if trace.fd>=0 {_=Darwin.close(trace.fd);trace.fd = -1}
+        return ["records":trace.count,"hostSeconds":ProcessInfo.processInfo.systemUptime]
+    }
     static func frameID(_ header:[String:Any])->String {
         "wgc:\(header["window"] ?? "?"):\(header["generation"] ?? "?"):\(header["sequence"] ?? "?")"
     }

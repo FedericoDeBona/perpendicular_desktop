@@ -614,7 +614,7 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
               let command=request["command"] as? String else {
             localResponse(["ok":false,"error":"Expected a JSON command."],reply:reply);return
         }
-        let allowed:Set<String>=["status","memory_status","execute","display_info","display_topology","driver_info","graphics_info","geometry_snapshot","application_status","process_list","process_terminate","pipeline_clock","window_refresh"]
+        let allowed:Set<String>=["status","memory_status","execute","display_info","display_topology","driver_info","graphics_info","geometry_snapshot","application_status","process_list","process_terminate","pipeline_clock","pipeline_trace_start","pipeline_trace_stop","window_refresh"]
         guard allowed.contains(command) else {
             localResponse(["ok":false,"error":"This local command is not supported."],reply:reply);return
         }
@@ -652,6 +652,15 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
         }
         guard connected,let bridge else {
             localResponse(["ok":false,"error":"Windows is not connected."],reply:reply);return
+        }
+        if command == "pipeline_trace_start" {
+            guard let value=PipelineTrace.restart() else {
+                localResponse(["ok":false,"error":"Pipeline tracing needs a configured diagnostic destination and a new writable file."],reply:reply);return
+            }
+            localResponse(["ok":true,"result":value],reply:reply);return
+        }
+        if command == "pipeline_trace_stop" {
+            localResponse(["ok":true,"result":PipelineTrace.stop()],reply:reply);return
         }
         if command == "pipeline_clock" {
             let started=ProcessInfo.processInfo.systemUptime

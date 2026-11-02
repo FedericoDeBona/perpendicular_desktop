@@ -1,5 +1,8 @@
 # Registro dei problemi
 
+**2 novembre — misura Mac riuscita, fluidità ancora NON SUPERATA.** Traccia su richiesta start/stop qualificata nella QA:12000record/25,81s,799frame ricevuti,274presentazioni positive/522zero; take→GPU completa mediana2,22ms, take→presented positivo21,53ms. Edge4K nello stesso tratto:147/504drop (~29,17%), stalli e crash0→0; geometria diversa dai vecchi campioni, nessun A/B favorevole. Dispatch/import brevi, pacing non ancora attribuito; non ripetere le candidate Metal escluse il25ottobre. Main/Creality aperti. [Evidenze](VERIFICATION.md#2-novembre--avvio-su-richiesta-della-traccia-pipeline-mac).
+
+
 **2 novembre — riduzione tentativi di crescita ring v15 IN CORSO.** V14 recupera le piccole Map, ma continua a tentare la crescita opzionale16MiB rifiutata a ogni rotazione. V15 attiva quattro cap reali e passa pixel/moduli, ma il tratto sovrapposto non mostra vantaggio (~14,2% contro4,7%v14, estremi approssimati). Esperimento solo su opzione; default v14 conservato. Ritorno v14 e misura take→presented Mac IN CORSO; confronto4K/main/Creality aperti. [Evidenze](VERIFICATION.md#2-novembre--profondita-del-ring-dopo-crescita-rifiutata-v15).
 
 
@@ -271,6 +274,9 @@ Il ciclo RAM protetto 4→2→4 GiB con dati conservati resta la qualifica prece
 - **Evidenze:** [diario](VERIFICATION.md#26-ottobre--ripristino-del-desktop-nativo-sul-secondo-mac).
 
 ### PERF-002 — Frame persi nei video 4K in Desktop Mode
+
+**2 novembre — misura della finestra Mac IN CORSO.** V15 non qualifica un guadagno, defaultv14 ripristinato. Prima traccia Mac scaduta durante permessi/focus:25frame desktop, nessuna misura YouTube valida. Aggiunto avvio su richiesta della stessa traccia limitata, senza path dal chiamante; build/verifica IN CORSO. Prossimo passo tratto4K con take→presented reali; main/Creality ancora aperti. [Evidenze](VERIFICATION.md#2-novembre--avvio-su-richiesta-della-traccia-pipeline-mac).
+
 
 **2 novembre — riduzione tentativi di crescita ring v15 IN CORSO.** V14 recupera le piccole Map, ma continua a tentare la crescita opzionale16MiB rifiutata a ogni rotazione. V15 attiva quattro cap reali e passa pixel/moduli, ma il tratto sovrapposto non mostra vantaggio (~14,2% contro4,7%v14, estremi approssimati). Esperimento solo su opzione; default v14 conservato. Ritorno v14 e misura take→presented Mac IN CORSO; confronto4K/main/Creality aperti. [Evidenze](VERIFICATION.md#2-novembre--profondita-del-ring-dopo-crescita-rifiutata-v15).
 
