@@ -5205,3 +5205,13 @@ Modifica candidata: `acl allow execute always = yes` solo nei singoli export aut
 
 
 **Allineamento finale PASS:** servizioWindowsPerpendicularRestart Running/hashfef0e11f… esatto al bundle e cinque helper inProgramFiles conformi. Primo audit cercava gli helper accanto all’exe del servizio e falliscePathNotFound: corretto al percorso già documentatoC:\ProgramFiles\PerpendicularSharedFiles, nessuna reinstallazione o falso difetto aperto. Samba effettivo della mainPID92826 nel runtimeb92d73…, versione4.25.1 e246file del manifest esatti; tre policy di esecuzione presenti nel file generato dall’app installata. Frontend/Native3D/Samba effettivo/servizio e helper confrontati separatamente; non dedotti dalla sola versione0.2.59. App principale aperta e Windows collegato, copiaQA chiusa, nessuna VM concorrente. Repository contiene solo sorgente/registri, nessun binario o credenziale.
+
+
+## 2 novembre — recupero del boot main senza collegamento
+
+Dopo «apri quello giusto e fermati», app canonica94311 aperta ma l’utente segnala cheWindows non parte. QEMU94554 vivo sul disco principale, serialBootManager avviato, controllo localeconnectedfalse/nativeActivefalse e screenshotCUA“Display output is not active”. Il precedente messaggio confermava soltanto l’apertura dell’app, non un avvioWindows riuscito. Runtimecanonico ed effettivob92d73…29membri esatti, nessuna diversa distribuzione grafica o modifica config/protezioni per questa diagnosi.
+
+QMP confermaUUID/running, disco1072536064byte letti/19697664scritti, identici fra due query successive; processovivo e sample2s mostra vCPU soprattuttoWFI, non causaWindows isolata. Nessuna assertionHVF nuova o vecchie righe di qemu.log attribuite automaticamente al nuovoPID. CtrlAltDel viaCUA non produce accesso visibile. Menu normaleSpegniWindows→system_powerdown richiesto, attesa processo specifico; nessun kill/force/reset. Evidenze privateQA/startup-stalled-20261102. Recupero da completare prima di dichiarareWindows pronto; dati/VM principale conservati.
+
+
+**Arresto normale non completato:** dopo richiestaACPI, attesa sul PID94554 verificato vivo per altri30,1s oltre i rilievi intermedi; status ancora running/connectedfalse e nessuna nuova IO. Richiesto all’utente consenso per spegnimento forzato e nuovo avvio, motivato dal rischio di interrompere operazioni disco/sessione. Nessun consenso presunto, nessun force-stop o ripristino disco eseguito. Stato conservato inbefore-recovery.json e log privati; prima di nuovo avvio verificare uscita reale e disco/UUID dell’istanza corrente.
