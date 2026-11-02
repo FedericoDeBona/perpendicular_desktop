@@ -1,0 +1,54 @@
+--- a/src/d3d11/d3d11_video.cpp
++++ b/src/d3d11/d3d11_video.cpp
+@@ -253,6 +253,8 @@
+ public:
+   struct Buffer { std::vector<uint8_t> bytes; bool mapped = false; };
+   std::array<Buffer, 3> buffers;
++  Com<ID3D11Buffer> resource_staging;
++  UINT resource_staging_capacity = 0;
+   std::mutex mutex;
+   NativeVP9Session session;
+   D3D11_VIDEO_DECODER_DESC desc;
+@@ -592,20 +594,30 @@
+     if (bitstream < 0) return S_OK;
+     auto &entry = entries[bitstream];
+     try {
+-      D3D11_BUFFER_DESC desc = {};
+-      desc.ByteWidth = entry.size; desc.Usage = D3D11_USAGE_STAGING; desc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+-      Com<ID3D11Buffer> staging;
+-      HRESULT hr = device_->CreateBuffer(&desc, nullptr, &staging);
+-      if (FAILED(hr)) return hr;
+-      std::vector<uint8_t> bytes(entry.size);
++      // The decoder mutex serializes submits. Reuse one bounded readback
++      // buffer, retaining the previous allocation if growth fails. The copy
++      // and blocking Map still order every resource write before the CPU read.
++      if (decoder->resource_staging_capacity < entry.size) {
++        UINT capacity = 4096;
++        while (capacity < entry.size) capacity <<= 1;
++        D3D11_BUFFER_DESC desc = {};
++        desc.ByteWidth = capacity; desc.Usage = D3D11_USAGE_STAGING;
++        desc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
++        Com<ID3D11Buffer> next;
++        HRESULT hr = device_->CreateBuffer(&desc, nullptr, &next);
++        if (FAILED(hr)) return hr;
++        decoder->resource_staging = std::move(next);
++        decoder->resource_staging_capacity = capacity;
++      }
++      auto staging = decoder->resource_staging.ptr();
++      decoder->submitted.resize(entry.size);
+       D3D11_BOX box = {entry.offset, 0, 0, entry.offset + entry.size, 1, 1};
+-      context_->CopySubresourceRegion(staging.ptr(), 0, 0, 0, 0, sources[bitstream].ptr(), 0, &box);
++      context_->CopySubresourceRegion(staging, 0, 0, 0, 0, sources[bitstream].ptr(), 0, &box);
+       D3D11_MAPPED_SUBRESOURCE mapped = {};
+-      hr = context_->Map(staging.ptr(), 0, D3D11_MAP_READ, 0, &mapped);
+-      if (FAILED(hr)) return hr;
+-      std::memcpy(bytes.data(), mapped.pData, entry.size);
+-      context_->Unmap(staging.ptr(), 0);
+-      decoder->submitted.swap(bytes);
++      HRESULT hr = context_->Map(staging, 0, D3D11_MAP_READ, 0, &mapped);
++      if (FAILED(hr)) { decoder->submitted.clear(); return hr; }
++      std::memcpy(decoder->submitted.data(), mapped.pData, entry.size);
++      context_->Unmap(staging, 0);
+       return S_OK;
+     } catch (const std::bad_alloc &) { return E_OUTOFMEMORY; }
+   }

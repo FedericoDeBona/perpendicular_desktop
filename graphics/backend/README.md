@@ -226,3 +226,10 @@ PASS. Nel tratto sovrapposto Edgev15 ha194/1367drop contro62/1328v14, con
 endpoint approssimati fino0,261s: nessun vantaggio qualificato, senza attribuire
 causalità certa da un solo confronto. Il default della ricetta resta v14; la
 v15 rimane un esperimento esplicito, senza promozione main.
+
+
+## Riuso staging compresso, esperimento M1 del 2 novembre
+
+`video-staging-reuse.patch` è disponibile con `rebuild-native-video.py --reuse-bitstream-staging`. Il default resta CPUv12; `--gpu-output` è una scelta distinta, non necessaria al riuso. La ricetta verifica entrambi i pin anche quando le opzioni sono disattivate e registra le scelte nella ricevuta. Un decoder conserva una risorsa stagingCPUREAD, cresciuta a potenza2 solo quando serve e comunque entro16MiB già ammessi dal protocollo. Il mutex serializza i submit; copia,MapREAD bloccante,Unmap e controlli ownership/range restano obbligatori. Nessuna lettura diretta di memoria CPUWRITE o bypass di sincronizzazione. Il vettore compresso conserva la capacità fra i frame.
+
+Qualifica nativa su M1:3frame4K/offset16/slice1 pixel-identici,472file ricostruiti identici; 3frame4K Windows pure pixel-identici. Il confronto Edge nella stessa geometria non mostra vantaggio (15,31%drop base contro16,03%candidata, estremi approssimati), perciò resta solo opt-in e non promossa. Il profilo mostra creazione/readback per frame, ma non attribuisce tutti gli scarti all’allocatore. Per il confezionamento sperimentale partire dalla copia del runtime locale verificata29/29, sostituire il solo backend compilato, risolvere le dipendenze non di sistema verso le librerie già incluse con install-name relativo, firmarlo e verificarlo prima di aggiornarne l’hash nel runtime.json. Conservare patch e ricevuta della build in Notices/Perpendicular, marcarne esplicitamente la qualifica incompleta e verificare nuovamente tutti i membri. Non cambiare pin di produzione né trasferire librerie/runtime da un altro Mac. Il runtime immutabile effettivo e i moduli Windows vanno confermati al boot prima del confronto reale. [Evidenze](../../docs/VERIFICATION.md#2-novembre--riuso-bounded-dello-staging-bitstream).
