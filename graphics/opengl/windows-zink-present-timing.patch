@@ -1,0 +1,83 @@
+--- a/src/gallium/targets/wgl/wgl.c
++++ b/src/gallium/targets/wgl/wgl.c
+@@ -37,6 +37,8 @@
+ #include <windows.h>
+ 
+ #include "util/u_debug.h"
++#include "util/os_time.h"
++#include <stdio.h>
+ #include "stw_winsys.h"
+ #include "stw_device.h"
+ #include "gdi/gdi_sw_winsys.h"
+@@ -170,6 +172,12 @@
+ {
+    if (!ctx || !res || !res->width0 || !res->height0)
+       return;
++   /* Process-local, bounded diagnostics. Never enabled by the ordinary app. */
++   const char *trace_path = getenv("PERP_WGL_PRESENT_TRACE");
++   const bool trace = trace_path && trace_path[0];
++   const int64_t started = trace ? os_time_get_nano() : 0;
++   int64_t sync_ns = 0, map_ns = 0, convert_ns = 0, unmap_ns = 0, gdi_ns = 0;
++   unsigned maps = 0;
+    const unsigned width = res->width0, height = res->height0;
+    if (width > INT_MAX / 4 || height > SIZE_MAX / ((size_t)width * 4))
+       return;
+@@ -178,6 +186,7 @@
+    if (!pixels)
+       return;
+    ctx = threaded_context_unwrap_sync(ctx);
++   if (trace) sync_ns = os_time_get_nano() - started;
+    /* Keep individual GPU-to-CPU mappings small: a full Retina window can
+     * exceed a contiguous free range in the WDDM host-visible aperture. */
+    const size_t source_row = (size_t)width * util_format_get_blocksize(res->format);
+@@ -186,8 +195,11 @@
+    for (unsigned y = 0; y < height;) {
+       const unsigned rows = MIN2(rows_per_map, height - y);
+       struct pipe_transfer *transfer = NULL;
++      const int64_t map_start = trace ? os_time_get_nano() : 0;
+       void *map = pipe_texture_map(ctx, res, 0, 0, PIPE_MAP_READ,
+                                    0, y, width, rows, &transfer);
++      const int64_t convert_start = trace ? os_time_get_nano() : 0;
++      if (trace) {map_ns += convert_start - map_start; maps++;}
+       if (!map) {
+          complete = false;
+          break;
+@@ -196,7 +208,10 @@
+                                              (uint8_t *)pixels + (size_t)y * stride,
+                                              stride, 0, 0, res->format,
+                                              map, transfer->stride, 0, 0, width, rows);
++      const int64_t unmap_start = trace ? os_time_get_nano() : 0;
++      if (trace) convert_ns += unmap_start - convert_start;
+       pipe_texture_unmap(ctx, transfer);
++      if (trace) unmap_ns += os_time_get_nano() - unmap_start;
+       if (!converted) {
+          complete = false;
+          break;
+@@ -211,10 +226,27 @@
+       info.bmiHeader.biPlanes = 1;
+       info.bmiHeader.biBitCount = 32;
+       info.bmiHeader.biCompression = BI_RGB;
++      const int64_t gdi_start = trace ? os_time_get_nano() : 0;
+       StretchDIBits(hdc, 0, 0, width, height, 0, 0, width, height,
+                     pixels, &info, DIB_RGB_COLORS, SRCCOPY);
++      if (trace) gdi_ns = os_time_get_nano() - gdi_start;
+    }
+    free(pixels);
++   if (trace) {
++      const int64_t ended = os_time_get_nano();
++      static volatile LONG samples = 0;
++      if (InterlockedIncrement(&samples) <= 600) {
++         FILE *file = fopen(trace_path, "ab");
++         if (file) {
++            fprintf(file, "pid=%lu tid=%lu end_ns=%lld width=%u height=%u maps=%u complete=%u total_ns=%lld sync_ns=%lld map_ns=%lld convert_ns=%lld unmap_ns=%lld gdi_ns=%lld\n",
++                    (unsigned long)GetCurrentProcessId(), (unsigned long)GetCurrentThreadId(),
++                    (long long)ended, width, height, maps, complete,
++                    (long long)(ended-started), (long long)sync_ns, (long long)map_ns,
++                    (long long)convert_ns, (long long)unmap_ns, (long long)gdi_ns);
++            fclose(file);
++         }
++      }
++   }
+ }
+ #endif
+ 

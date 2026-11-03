@@ -91,3 +91,34 @@ Le due librerie OpenGL corrispondenti all'architettura vengono copiate accanto a
 Per annullare usare lo stesso installer con UUID attesa e `-Restore`, ad applicazione chiusa. Il ripristino controlla che chiavi/file non siano cambiati esternamente, ricrea tipi/valori originali e ripristina o elimina soltanto le due DLL registrate nel backup. Conserva lo storico `restored-*.json` e la release protetta. Installazione→ripristino→audit→reinstallazione verificati sulla VM ordinaria. L'aggiornamento di una release già attiva è deliberatamente rifiutato: prima ripristinare o qualificare esplicitamente una migrazione.
 
 `windows-zink-bounded-readback.patch`, dopo windows-zink-gdi-present.patch, suddivide la lettura per presentazione in fasce con obiettivo2MiB in base ai byte per riga (minimo una riga). Presenta il bitmap CPU soltanto se tutte le fasce sono riuscite. Non aumenta RAM/apertura GPU e non disattiva errori o sincronizzazione. Non è zero-copy né una soluzione per qualsiasi allocazione grande dell'app; l'errore storico e il perimetro della verifica corrente restano nel diario.
+
+
+## Misura presentazione WGL per il requisito Creality del3novembre
+
+`windows-zink-present-timing.patch` è sola diagnostica opt-in sul fallback GDI,
+non un miglioramento prestazionale o payload ordinario. Nessun ramo nominativo
+Creality: misura qualunque presentazione WGL/Zink su questo percorso. Con
+`PERP_WGL_PRESENT_TRACE` impostato a un file privato nel solo processo di prova,
+registra al massimo600presentazioni: timestamp monotono, PID/TID, geometria,
+numeroMap/esito, durata totale, sync threaded-context, Map, conversione, Unmap e
+StretchDIBits. Include il tempo di attesa nel Map; non è tempo GPU puro. Le durate
+non includono la scrittura della riga, ma gli intervalli tra righe sì: confronti
+prestazionali finali richiedono anche prova senza tracing. Non sono FPS dello
+schermo Mac o contatori dei frame persi. Idle e dimensioni diverse vanno separati.
+
+Ricetta incrementale sulla cache locale qualificata M1x64/Mesa25.1.9:
+
+```sh
+python3 scripts/build-wgl-present-timing.py   --cache /private/path/perpendicular-opengl-cache   --output /private/path/new-diagnostic-output   --meson /private/path/tools/bin/meson --ninja /private/path/tools/bin/ninja
+```
+
+La ricetta richiede Meson1.12.1 come la cache, verifica SHA della funzione/base e
+DLL0.2.31, prende un lock, conserva backup nel nuovo output e ripristina sorgente
+ed esatto DLL qualificato anche se compilazione fallisce. Conservare la cache,
+SDK e wrapper esistenti; dipendenze Python della cache ripristinate per questa
+prova: Mako1.3.10/PyYAML6.0.3 e Ninja1.13.0. Il resto dei sorgenti/toolchain resta
+la base descritta sopra. Non eseguire due build esterne sulla stessa cache.
+Il binario diagnostico ha un hash distinto, non soddisfa il gate del payload
+ordinario e non viene automaticamente distribuito/installato. Per il controllo
+applicativo serve registrare esattamente DLL caricata, gesto reale e output;
+compilazione riuscita da sola non qualifica la misura né il guadagno.
