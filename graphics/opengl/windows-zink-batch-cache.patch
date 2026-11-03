@@ -1,0 +1,109 @@
+--- a/src/gallium/drivers/zink/zink_resource.c
++++ b/src/gallium/drivers/zink/zink_resource.c
+@@ -2678,7 +2678,7 @@
+       return false;
+    const unsigned rows_per_band = max_bytes / row_bytes;
+    const unsigned count = (pres->height0 - 1) / rows_per_band + 1;
+-   if (count > 64)
++   if (count > 16 || (uint64_t)row_bytes * pres->height0 > 32 * 1024 * 1024)
+       return false;
+    struct pipe_resource **bands = calloc(count, sizeof(*bands));
+    if (!bands)
+@@ -2689,6 +2689,28 @@
+    struct zink_screen *screen = zink_screen(pctx->screen);
+    struct zink_resource *res = zink_resource(pres);
+    bool complete = false;
++   bool cache = sizeof(void *) == 8 && debug_get_bool_option("PERP_WGL_BATCH_CACHE", true);
++   bool mismatch = false;
++   for (unsigned i = 0; i < ARRAY_SIZE(ctx->batch_readback_staging); i++) {
++      struct pipe_resource *saved = ctx->batch_readback_staging[i];
++      if (!saved) continue;
++      if (p_atomic_read(&saved->reference.count) != 1)
++         cache = false;
++      if (i >= count || saved->format != pres->format ||
++          saved->width0 != row_bytes * MIN2(rows_per_band, pres->height0 - i * rows_per_band))
++         mismatch = true;
++   }
++   /* Never overwrite a staging buffer with another live owner. On resize,
++    * replace the idle pool; busy pools use temporary buffers for this frame. */
++   if (cache && mismatch) {
++      for (unsigned i = 0; i < ARRAY_SIZE(ctx->batch_readback_staging); i++) {
++         if (ctx->batch_readback_maps[i])
++            unmap_resource(screen, zink_resource(ctx->batch_readback_staging[i]));
++         ctx->batch_readback_maps[i] = NULL;
++         pipe_resource_reference(&ctx->batch_readback_staging[i], NULL);
++      }
++   }
++   unsigned reused = 0;
+    /* Allocate before recording any copies, so an allocation failure can
+     * return to the existing serial path without a partial submission. */
+    for (unsigned i = 0, y = 0; i < count; i++, y += rows_per_band) {
+@@ -2704,15 +2726,28 @@
+       templ.array_size = 1;
+       templ.nr_samples = templ.nr_storage_samples = 0;
+       templ.flags = 0;
+-      bands[i] = zink_resource_create(pctx->screen, &templ);
++      if (cache && ctx->batch_readback_staging[i]) {
++         pipe_resource_reference(&bands[i], ctx->batch_readback_staging[i]);
++         mapped[i] = ctx->batch_readback_maps[i];
++         reused++;
++      } else
++         bands[i] = zink_resource_create(pctx->screen, &templ);
+       if (!bands[i])
+          goto done;
+       /* Venus defers export/page injection until MapMemory. Establish each
+        * bounded mapping before commands can write this presentation batch. */
+-      mapped[i] = map_resource(screen, zink_resource(bands[i]));
++      if (!mapped[i])
++         mapped[i] = map_resource(screen, zink_resource(bands[i]));
+       if (!mapped[i])
+          goto done;
+-   }
++      if (cache && !ctx->batch_readback_staging[i] && zink_resource(bands[i])->obj->coherent) {
++         pipe_resource_reference(&ctx->batch_readback_staging[i], bands[i]);
++         ctx->batch_readback_maps[i] = mapped[i];
++      }
++   }
++   if (reused && !ctx->batch_readback_hits++)
++      mesa_logi("ZINK: bounded batch readback staging reused (%u bands, %llu bytes)",
++                reused, (unsigned long long)row_bytes * pres->height0);
+    struct pipe_box whole;
+    u_box_2d(0, 0, pres->width0, pres->height0, &whole);
+    zink_fb_clears_apply_region(ctx, pres, zink_rect_from_box(&whole), 0, 1);
+@@ -2754,7 +2789,8 @@
+    complete = true;
+ done:
+    for (unsigned i = 0; i < count; i++) {
+-      if (mapped[i]) unmap_resource(screen, zink_resource(bands[i]));
++      if (mapped[i] && bands[i] != ctx->batch_readback_staging[i])
++         unmap_resource(screen, zink_resource(bands[i]));
+       pipe_resource_reference(&bands[i], NULL);
+    }
+    free(mapped);
+--- a/src/gallium/drivers/zink/zink_types.h
++++ b/src/gallium/drivers/zink/zink_types.h
+@@ -1799,6 +1799,10 @@
+    struct pipe_resource *readback_staging;
+    void *readback_staging_map;
+    unsigned readback_staging_hits;
++   /* At most 16 individually bounded mappings, <=32 MiB for a color frame. */
++   struct pipe_resource *batch_readback_staging[16];
++   void *batch_readback_maps[16];
++   unsigned batch_readback_hits;
+ #endif
+    struct threaded_context *tc;
+    struct slab_child_pool transfer_pool;
+--- a/src/gallium/drivers/zink/zink_context.c
++++ b/src/gallium/drivers/zink/zink_context.c
+@@ -147,6 +147,11 @@
+    if (ctx->readback_staging_map)
+       zink_bo_unmap(screen, zink_resource(ctx->readback_staging)->obj->bo);
+    pipe_resource_reference(&ctx->readback_staging, NULL);
++   for (unsigned i = 0; i < ARRAY_SIZE(ctx->batch_readback_staging); i++) {
++      if (ctx->batch_readback_maps[i])
++         zink_bo_unmap(screen, zink_resource(ctx->batch_readback_staging[i])->obj->bo);
++      pipe_resource_reference(&ctx->batch_readback_staging[i], NULL);
++   }
+ #endif
+    for (unsigned i = 0; i < ARRAY_SIZE(ctx->program_cache); i++) {
+       simple_mtx_lock((&ctx->program_lock[i]));

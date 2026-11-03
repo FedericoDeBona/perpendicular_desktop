@@ -1,5 +1,5 @@
 /* A bounded WGL shader/readback check. No installation or user documents.
- * Pass an explicit opengl32.dll, optionally --present, --large-present,
+ * Pass an explicit opengl32.dll, optionally --present, --large-present, --large-repeat,
  * --msaa or --atlas.
  * MSAA resolves a four-sample target, reproducing the M1 sampler-name failure. */
 #define WIN32_LEAN_AND_MEAN
@@ -44,8 +44,9 @@ static LONG WINAPI report_exception(EXCEPTION_POINTERS *exception)
 
 int main(int argc,char **argv)
 {
-    if(argc<2||argc>3||(argc==3&&strcmp(argv[2],"--present")&&strcmp(argv[2],"--large-present")&&strcmp(argv[2],"--msaa")&&strcmp(argv[2],"--atlas")))return 2;
-    const int large=argc==3&&!strcmp(argv[2],"--large-present");
+    if(argc<2||argc>3||(argc==3&&strcmp(argv[2],"--present")&&strcmp(argv[2],"--large-present")&&strcmp(argv[2],"--large-repeat")&&strcmp(argv[2],"--msaa")&&strcmp(argv[2],"--atlas")))return 2;
+    const int repeat=argc==3&&!strcmp(argv[2],"--large-repeat");
+    const int large=repeat||(argc==3&&!strcmp(argv[2],"--large-present"));
     const int present=large||(argc==3&&!strcmp(argv[2],"--present"));
     const int width=large?1536:128,height=large?1024:128;
     if(large)SetProcessDPIAware();
@@ -200,6 +201,21 @@ int main(int argc,char **argv)
                 if(GetRValue(edge)<248||GetGValue(edge)>7||GetBValue(edge)>7)success=0;
             }
             printf("Bounded multi-band window %dx%d=%s\n",width,height,success?"PASS":"FAIL");
+        }
+        /* Two changed frames exercise retained staging without accepting a
+         * stale copy of the first frame. This is a correctness check, not FPS. */
+        for(int frame=0;success&&repeat&&frame<2;frame++){
+            pglClearColor(frame?1:0,0,frame?0:1,1);
+            pglClear(GL_COLOR_BUFFER_BIT|GL_DEPTH_BUFFER_BIT);
+            if(!swap(dc)){success=0;break;}
+            GdiFlush();
+            for(int y=1;y<height;y+=height/8){
+                COLORREF c=GetPixel(dc,width/2,y);
+                if(frame ? (GetRValue(c)<248||GetGValue(c)>7||GetBValue(c)>7) :
+                           (GetRValue(c)>7||GetGValue(c)>7||GetBValue(c)<248))success=0;
+            }
+            if(pglGetError())success=0;
+            printf("Changed multi-band frame %d=%s\n",frame+1,success?"PASS":"FAIL");
         }
     }
     if(initial_error||shader_error||buffer_error||draw_error||!atlas_ok)success=0;

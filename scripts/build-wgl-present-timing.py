@@ -45,7 +45,12 @@ def main():
     parser.add_argument('--compare-readback', action='store_true', help='Compare rejected batch bytes with serial; presents serial, diagnostic only')
     parser.add_argument('--batch-host-read', action='store_true', help='Reproduce rejected host-visibility variant (still incorrect bytes); requires batch')
     parser.add_argument('--batch-box', action='store_true', help='Correct experimental batch pipe_box areas using u_box_2d; requires batch')
+    parser.add_argument('--cached-batch', action='store_true', help='Keep production serial cache and bounded batch staging pool; requires batch and corrected boxes')
     args = parser.parse_args()
+    if args.cached_batch and not (args.batch_readback and args.batch_box):
+        parser.error('--cached-batch requires --batch-readback --batch-box')
+    if args.cached_batch and (args.compare_readback or args.batch_host_read):
+        parser.error('Use clean cached batch for application timing, no comparison instrumentation')
     if args.batch_box and not args.batch_readback:
         parser.error('--batch-box requires --batch-readback')
     if args.batch_host_read and not args.batch_readback:
@@ -60,6 +65,8 @@ def main():
     dll = build / 'src/gallium/targets/wgl/libgallium_wgl.dll'
     release = json.loads((REPO / 'graphics/opengl/releases/0.2.31-darwin-arm64.json').read_text())
     patches = [REPO / 'graphics/opengl/windows-zink-present-timing.patch']
+    if args.cached_batch:
+        patches.append(REPO / 'graphics/opengl/windows-zink-readback-cache.patch')
     if args.batch_readback:
         patches.append(REPO / 'graphics/opengl/windows-zink-batch-readback.patch')
     if args.compare_readback:
@@ -70,6 +77,8 @@ def main():
         patches.append(REPO / 'graphics/opengl/windows-zink-reuse-readback.patch')
     if args.batch_host_read:
         patches.append(REPO / 'graphics/opengl/windows-zink-batch-host-read.patch')
+    if args.cached_batch:
+        patches.append(REPO / 'graphics/opengl/windows-zink-batch-cache.patch')
     meson, ninja = args.meson.resolve(strict=True), args.ninja.resolve(strict=True)
     if subprocess.check_output([str(meson), '--version'], text=True).strip() != '1.12.1':
         raise ValueError('Use Meson 1.12.1, matching the qualified cache')
@@ -81,6 +90,8 @@ def main():
         originals = {wgl: original}
         if args.batch_readback or args.reuse_readback:
             sources = dict(BATCH_SOURCES if args.batch_readback else REUSE_SOURCES)
+            if args.cached_batch:
+                sources.update(REUSE_SOURCES)
             if args.compare_readback:
                 sources['src/gallium/drivers/zink/zink_context.c'] = REUSE_SOURCES['src/gallium/drivers/zink/zink_context.c']
             for name, expected in sources.items():
@@ -111,7 +122,7 @@ def main():
                 'patches': {p.name: sha(p.read_bytes()) for p in patches}, 'dll_sha256': sha(candidate),
                 'baseline_sha256': sha(qualified), 'mesa': '25.1.9', 'meson': '1.12.1',
                 'architecture': 'x64', 'limit': 600, 'batch_readback_opt_in': args.batch_readback,
-                'reuse_readback_opt_in': args.reuse_readback, 'readback_compare': args.compare_readback, 'batch_host_read': args.batch_host_read, 'batch_box': args.batch_box,
+                'reuse_readback_opt_in': args.reuse_readback, 'readback_compare': args.compare_readback, 'batch_host_read': args.batch_host_read, 'batch_box': args.batch_box, 'cached_batch': args.cached_batch,
             }, indent=2) + '\n')
         finally:
             for file, data in originals.items():
