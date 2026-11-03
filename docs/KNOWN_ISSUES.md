@@ -1,5 +1,7 @@
 # Registro dei problemi
 
+**3 novembre — LOK/WARP NON UTILIZZABILE, riscontro utente:** il gioco parte ma va a pochissimi FPS. Il menu software non soddisfa il requisito; GFX-011/TODO-007 IN CORSO per il percorso hardware x86. Preparazione della candidata circoscritta al protocollo, senza promozione video o modifica della main. [Registro](VERIFICATION.md#3-novembre--lok-hardware-dopo-il-riscontro-sulla-fluidita).
+
 **3 novembre — LOK: menu raggiunto con WARP, driver x86 ancora APERTO (GFX-011).** Permessi SMB già corretti e componenti effettivi allineati. Log Unity precedente con device removed/crash; nuovo avvio hardware registra errore di protocollo CreateInputLayout. Rendering software Microsoft arriva al menu nell'app principale; collegamento `LOK (compatibilita).lnk` creato e riletto nella cartella del gioco, ricetta condivisa. Nessuna qualifica di partita/FPS/stabilità o correzione generale del driver; nessuna nuova build o promozione video. [Evidenze e limiti](VERIFICATION.md#3-novembre--lok-x86-e-avvio-software).
 
 **2 novembre — avvio main RECUPERATO nel caso corrente.** Dopo consenso, una sola interruzione forzata del boot bloccato echeckqcow2offline PASS. Windows ripartito ma primario4096×2160 oltrelimite: topologia ripristinata con CLI esistente, secondo arresto normale/boot97955 riusciti. Desktop nativo1920×1200 visibile eguest collegato,2schermiMac; appprincipale lasciata aperta. SYS-001/GFX-010 restano aperti per causa/recuperoautomatico, video/Creality in pausa. [Evidenze](VERIFICATION.md#2-novembre--recupero-del-boot-main-senza-collegamento).
@@ -284,6 +286,8 @@ Il ciclo RAM protetto 4→2→4 GiB con dati conservati resta la qualifica prece
 - **Criterio circoscritto verificato:** percorso C:\Users\federico\Downloads, unità logiche C:/D:/nessuna X:, byte e rinomina bidirezionali, riavvio servizio,9voci originali nel backup; Explorer con Downloads normale, Salva con nome Notepad→nuovo file effettivo Mac. Pulizia dei soli due file di prova confermata anche dal Mac. Qualifica del boot completo e semantiche generali restano TODO-003; non ripetere il caso già positivo senza modifiche pertinenti. [Diario](VERIFICATION.md#27-ottobre--download-ordinaria-senza-unita-aggiuntiva).
 
 ### GFX-011 — Avvio Unity x86 interrotto sul percorso Direct3D
+
+- **Seguito utente 3 novembre:** WARP avvia il gioco ma la fluidità è inutilizzabile («pochissimi FPS», non misura numerica). Alternativa NON SUPERATA come soluzione d'uso; priorità corrente ripristinare il percorso hardware x86. Implementazione/verifica candidata IN CORSO, clone/main ancora da qualificare.
 
 - **Stato:** APERTO; caso LOK 32 bit nella main M1 del 3 novembre. Servizio, UMD originali, backend effettivo e policy SMB concordi con la distribuzione prevista; nessuna correzione x86 già qualificata mancante identificata.
 - **Evidenza:** Player.log dell'uso precedente contiene DXGI_ERROR_DEVICE_REMOVED e crash UnityPlayer/c0000005. Nuovo avvio hardware registra `cmd_type=0xff005708`/dispatch failed, cioè ID3D11Device::CreateInputLayout; non ancora isolato il parametro che invalida la decodifica. Non attribuire il guasto a un limite texture o alla sola RAM.

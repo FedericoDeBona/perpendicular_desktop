@@ -1,0 +1,67 @@
+--- a/src/virtio/neptune/neptune-protocol/npt_protocol_common_types.h
++++ b/src/virtio/neptune/neptune-protocol/npt_protocol_common_types.h
+@@ -14882,44 +14882,57 @@
+     npt_decode_int64_t_array(dec, (int64_t *)val, count);
+ }
+ 
+-/* SIZE_T (alias for uint64_t) */
++/* SIZE_T is pointer-sized in the Windows ABI; the wire is always 64 bits.
++ * Never cast SIZE_T pointers to uint64_t pointers: Win32 values occupy four
++ * bytes, and both scalar access and array strides would cross their bounds. */
+ 
+ static inline size_t
+ npt_sizeof_SIZE_T(const SIZE_T *val, int max_mode)
+ {
+-    return npt_sizeof_uint64_t((const uint64_t *)val, max_mode);
++    (void)val;
++    return npt_sizeof_uint64_t(NULL, max_mode);
+ }
+ 
+ static inline void
+ npt_encode_SIZE_T(struct npt_cs_encoder *enc, const SIZE_T *val)
+ {
+-    npt_encode_uint64_t(enc, (const uint64_t *)val);
++    const uint64_t wire = (uint64_t)*val;
++    npt_encode_uint64_t(enc, &wire);
+ }
+ 
+ static inline void
+ npt_decode_SIZE_T(struct npt_cs_decoder *dec, SIZE_T *val)
+ {
+-    npt_decode_uint64_t(dec, (uint64_t *)val);
++    uint64_t wire = 0;
++    npt_decode_uint64_t(dec, &wire);
++    if (wire > (uint64_t)SIZE_MAX) {
++        npt_cs_decoder_set_fatal(dec);
++        return;
++    }
++    *val = (SIZE_T)wire;
+ }
+ 
+ static inline size_t
+ npt_sizeof_SIZE_T_array(const SIZE_T *val, uint32_t count)
+ {
+-    return npt_sizeof_uint64_t_array((const uint64_t *)val, count);
++    (void)val;
++    return npt_sizeof_uint64_t_array(NULL, count);
+ }
+ 
+ static inline void
+ npt_encode_SIZE_T_array(struct npt_cs_encoder *enc,
+                              const SIZE_T *val, uint32_t count)
+ {
+-    npt_encode_uint64_t_array(enc, (const uint64_t *)val, count);
++    for (uint32_t i = 0; i < count; ++i)
++        npt_encode_SIZE_T(enc, &val[i]);
+ }
+ 
+ static inline void
+ npt_decode_SIZE_T_array(struct npt_cs_decoder *dec,
+                              SIZE_T *val, uint32_t count)
+ {
+-    npt_decode_uint64_t_array(dec, (uint64_t *)val, count);
++    for (uint32_t i = 0; i < count; ++i)
++        npt_decode_SIZE_T(dec, &val[i]);
+ }
+ 
+ /* UCHAR (alias for uint8_t) */

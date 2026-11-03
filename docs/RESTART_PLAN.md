@@ -1,5 +1,7 @@
 # Piano di lavoro — desktop Windows su Mac
 
+**3 novembre — LOK software respinto per fluidità:** avvio confermato dall'utente, ma pochissimi FPS. Priorità corrente GFX-011/TODO-007: correggere CreateInputLayout/serializzazione x86 e verificare rendering hardware utilizzabile prima nel clone, poi nella main. Conservare la coppia runtime/UMD, OpenGL e protezioni; nessuna promozione della candidata video in pausa. [Evidenze](VERIFICATION.md#3-novembre--lok-hardware-dopo-il-riscontro-sulla-fluidita).
+
 **3 novembre — LOK nella main:** permessi SMB già attivi, problema residuo Direct3D x86 GFX-011. Menu raggiunto con WARP Microsoft e collegamento per-app distribuito; partita/FPS/stabilità non verificati. Nessuna modifica del driver/runtime/protezioni e nessuna promozione della candidata video. Per il fix generale isolare il rifiuto CreateInputLayout, senza aggirare i controlli del protocollo; video/Creality restano in pausa. [Evidenze](VERIFICATION.md#3-novembre--lok-x86-e-avvio-software).
 
 **2 novembre — avvio main RECUPERATO nel caso corrente.** Dopo consenso, una sola interruzione forzata del boot bloccato echeckqcow2offline PASS. Windows ripartito ma primario4096×2160 oltrelimite: topologia ripristinata con CLI esistente, secondo arresto normale/boot97955 riusciti. Desktop nativo1920×1200 visibile eguest collegato,2schermiMac; appprincipale lasciata aperta. SYS-001/GFX-010 restano aperti per causa/recuperoautomatico, video/Creality in pausa. [Evidenze](VERIFICATION.md#2-novembre--recupero-del-boot-main-senza-collegamento).
