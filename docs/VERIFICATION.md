@@ -5338,3 +5338,10 @@ Il solo resize Desktop usa prime250ms→off250ms→target. La scrittura seriale 
 **Allineamento finale:** canonica/build0.2.61 conformi; runtime effettivo29hash identici alla canonica e configurazione2efcfffa… byte-identica; guestc438… Running dopo nuovo boot, SecureBoot1/CI0xc001/TestSigningfalse/taskupdate0. Nessun nuovo aggiornamento guest necessario per i soli sorgenti Mac. LOK/Win32 e OpenGL conservati, video/Creality in pausa. Implementazione/build/distribuzione e verifica main dell’incremento FATTE; clone NON ESEGUITO, GFX-006/TODO-001 generali aperti con limite chiusura sopra e nessuna qualifica M1 trasferita dal M4.
 
 Evidenze private QA/resize-20261103: user-fullscreen-failure/topology, build-0261/final, package-0261, shutdown-0260, startup/after-open-0261, live-0261.ndjson/summary (limite temporale esplicito), final-0261/topology, guest-final-0261 e final-alignment-0261. Nessun dato utente/log/VM/binario in Git.
+
+
+## 3 novembre — rimozione Bing Wallpaper richiesta dall’utente
+
+Manutenzione della sola installazione Windows principale, nessuna modifica al prodotto o ripresa grafica. App/Windows già collegati. Identificato esattamente Microsoft.BingWallpaper_1.1.471.0_x86__8wekyb3d8bbwe, nome Microsoft.BingWallpaper/famiglia8wekyb3d8bbwe, InstallLocation coincidente con il percorso WindowsApps indicato; NonRemovablefalse, nessun processo relativo iniziale. Eseguito il normale Remove-AppxPackage sul solo PackageFullName verificato, nell’utente Windows corrente. Risultato exit0; rilettura Get-AppxPackage restituisce0pacchetti, Get-StartApps0voci della famiglia e nessun processo Bing Wallpaper. Nessuna rimozione manuale dei file WindowsApps, modifica di ACL o riavvio.
+
+Richiesta locale FATTA nel perimetro disinstallazione dell’utente corrente; altri profili/provisioning di sistema non modificati o qualificati. Nessun difetto Perpendicular riprodotto, quindi nessuna nuova voce KNOWN_ISSUES o chiusura di compatibilità generale. Evidenze private QA/uninstall-bing-20261103/before.json e removal.json; script/log fuori Git. Nessuna build necessaria, app e VM conservate in esecuzione.
