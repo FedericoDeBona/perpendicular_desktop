@@ -4,7 +4,7 @@ Obiettivo: OpenGL accelerato con kernel ARM64 v0.4 originale Microsoft-signed, S
 
 **Regola permanente tra macchine:** i fix necessari sono dichiarati in `requirements.json`, indipendentemente dal numero della release locale. `scripts/check-opengl-payload.py --app <bundle>` controlla le patch richieste contro i sorgenti e tutti i sei hash DLL. La build ordinaria lo esegue prima della compilazione/copia e sul risultato finale, incluso SKIP_RUNTIME; anche copy-main-runtime.py rifiuta un riferimento obsoleto prima di scrivere la destinazione. Allo scarto va completata la distribuzione della ricetta compatibile esistente, prima di riaprire la diagnosi del bug. La verifica delle DLL e del runtime effettivamente usati in Windows resta obbligatoria per la consegna: un bundle corretto da solo non la sostituisce. Per ogni nuovo fix binario aggiornare patch/ricetta/pin e questo contratto, così l'altra macchina ne rileva la mancanza. Le release M1 0.2.31 e M4 0.2.32 erano allineate prima del requisito readback del3novembre; il nuovo profilo M1 è0.2.33. Non occorre uniformare indiscriminatamente i runtime host.
 
-## Riuso readback Windows0.2.33 — distribuzione in corso
+## Riuso readback Windows0.2.33 — distribuito, navigazione in verifica
 
 `windows-zink-readback-cache.patch` conserva nel context un solo buffer coerente
 di staging, massimo2MiB, per letture color2D Windows64bit. Riusa memoria e mapping
@@ -20,7 +20,7 @@ Confronto fresco Creality/cubo20 e viewport1488×1107, stessoDLL diagnostico:
 mediana316ms disattivato contro69ms attivo (~4,56volte meno tempo nel percorso
 WGL). Non sono FPS continui sul Mac. Build di produzione ARM64/x64, pixel finestra,
 MSAA e confronto integrale dell'atlante112295936byte PASS nella copia. Installazione,
-restore e reinstallazione0.2.33 PASS nella copia. Installazione main e audit completo PASS; librerie effettive Creality e riuso confermati. Navigazione continua principale in verifica.
+restore e reinstallazione0.2.33 PASS nella copia. Installazione main e audit completo PASS; librerie effettive Creality e riuso confermati. Main: cubo/testi/cambio orientamento e zoom corretti senza trace. Navigazione continua e pan ancora da qualificare; nessun FPS generale rivendicato.
 
 Ricostruzione incrementale dalla cache Mesa25.1.9 qualificata di questa macchina:
 
