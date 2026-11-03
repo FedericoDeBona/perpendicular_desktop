@@ -75,3 +75,21 @@ senza sovrascrivere; una registrazione diversa viene preservata e rifiutata.
 Dopo la prima installazione serve spegnimento/avvio completo di Windows e
 conferma del modulo effettivo: il primo processo prima del reboot usava ancora
 la vecchia DLL. Sorgenti/patch/ricette sono in Git, DLL/dischi/SDK restano fuori.
+
+### Profilo M4 e release Win32 0.1.1
+
+Il builder accetta `--toolchain-profile m4-clang-2100.3.34.2-llvm15`,
+con gli stessi archivi, SDK Win32, patch e ABI della release0.1.0. Il profilo
+vincola Apple clang2100.3.34.2 e `lld`/`llvm-ar`15.0.7 estratti dall’archivio
+LLVM già fissato, senza cambiare i pin originali o il backend host del Mac.
+La [release0.1.1](releases/x86-0.1.1.json) fissa il relativo output Windows32.
+Il normale packager può ricevere questo manifesto tramite `--release-manifest`.
+
+Nel Windows principale M4, dopo arresto/avvio normale, codec SIZE_T32
+scalare/array/canary/overflow e CreateInputLayout→draw→readback su VirtIO
+hardware passano; modulo effettivo `x86-6cf6a7915f20` confermato. Sono prove
+di correttezza e distribuzione. La prima sessione LOK sul Desktop lagga perché
+il log identifica WARP; riaperto lo stesso exe senza `-force-driver-type-warp`,
+carica la nuova UMD/VirtIO e l’utente conferma «Ora è fluido». Il vecchio
+collegamento software è stato conservato e aggiornato a `-force-d3d11`, senza
+forzare risoluzione. Non è una misura FPS. [Evidenze e limiti](../../docs/VERIFICATION.md#3-novembre--pull-rebuild-e-guest-tools-sul-m4).

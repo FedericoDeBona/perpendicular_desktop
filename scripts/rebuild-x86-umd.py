@@ -23,8 +23,17 @@ def main():
     for name in ('windows-sdk', 'x86-sdk', 'meson', 'ninja', 'output'):
         p.add_argument('--' + name, type=Path, required=True)
     p.add_argument('--prepare-only', action='store_true')
+    p.add_argument('--toolchain-profile', default='original',
+                   help='Explicit pinned compiler/linker profile; source and Windows ABI stay unchanged')
     a = p.parse_args()
     pins = json.loads((REPO / 'graphics/driver/x86-umd-inputs.json').read_text())
+    if a.toolchain_profile != 'original':
+        profiles = pins.get('toolchain_profiles', {})
+        if a.toolchain_profile not in profiles:
+            raise ValueError('Unknown pinned toolchain profile: ' + a.toolchain_profile)
+        profile = profiles[a.toolchain_profile]
+        pins = {**pins, 'compiler_version': profile['compiler_version'],
+                'tools': {**pins['tools'], **profile['tools']}}
     output = a.output.resolve()
     if output.exists() or output.is_relative_to(REPO):
         raise ValueError('Use a fresh output outside the repository')

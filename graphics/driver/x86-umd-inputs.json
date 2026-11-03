@@ -23,7 +23,7 @@
     "sha256": "867c6afd41158c132ef05a8f1ddaecf476a26b91c85def8e124414f9a9ba188d"
   },
   "schema": 1,
-  "status": "Win32 SIZE_T wire fix qualified with LOK hardware/input and user-confirmed improved fluidity in the M1 QA copy; release 0.1.0 packaged; ordinary Windows registration still to verify",
+  "status": "Win32 SIZE_T wire fix qualified with LOK hardware/input and user-confirmed improved fluidity in M1 QA (release 0.1.0) and M4 main (release 0.1.1); no numerical FPS; ordinary M1 Windows registration remains separate",
   "patch_sha256": "3bae3b4a9c1f348b0a60439c4ef182aa66f56583835414440788f078367c4aa3",
   "original_header_sha256": "4089064fbb4071d4bbd42f019171f4151adb800f14f1db6350d0ed27f03e085e",
   "tools": {
@@ -53,5 +53,16 @@
     "secure_boot": true,
     "test_signing": false
   },
-  "toolchain_patch_sha256": "d65e99900aeb41fd3b5315c967f229f042eab319b0afd68d8c3bb0cc7a19f48c"
+  "toolchain_patch_sha256": "d65e99900aeb41fd3b5315c967f229f042eab319b0afd68d8c3bb0cc7a19f48c",
+  "toolchain_profiles": {
+    "m4-clang-2100.3.34.2-llvm15": {
+      "compiler_version": "Apple clang version 21.0.0 (clang-2100.3.34.2)",
+      "tools": {
+        "lld-link": "5de6f5ba2e865d6819bed3e017be221e1ee0ee06cc61286aa1cff4d06adf09c0",
+        "llvm-lib": "e4dcb80e30e7d9ba7f173ee03ddff0758369ab86324933c707303de91638161b"
+      },
+      "linker_source": "llvm_resource_compiler pinned archive, bin/lld and bin/llvm-ar",
+      "status": "qualified on M4 main: Windows32 wire/draw/readback, actual LOK module/menu, user-confirmed fluidity; no numerical FPS"
+    }
+  }
 }
