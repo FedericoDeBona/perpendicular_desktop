@@ -20,7 +20,7 @@ Confronto fresco Creality/cubo20 e viewport1488×1107, stessoDLL diagnostico:
 mediana316ms disattivato contro69ms attivo (~4,56volte meno tempo nel percorso
 WGL). Non sono FPS continui sul Mac. Build di produzione ARM64/x64, pixel finestra,
 MSAA e confronto integrale dell'atlante112295936byte PASS nella copia. Installazione,
-restore e reinstallazione0.2.33 PASS; scena reale senza trace e main in verifica.
+restore e reinstallazione0.2.33 PASS nella copia. Installazione main e audit completo PASS; librerie effettive Creality e riuso confermati. Navigazione continua principale in verifica.
 
 Ricostruzione incrementale dalla cache Mesa25.1.9 qualificata di questa macchina:
 
