@@ -1,0 +1,99 @@
+--- a/src/gallium/drivers/zink/zink_types.h
++++ b/src/gallium/drivers/zink/zink_types.h
+@@ -1794,6 +1794,12 @@
+ 
+ struct zink_context {
+    struct pipe_context base;
++#ifdef _WIN32
++   /* One bounded, coherent color-readback buffer owned by this context. */
++   struct pipe_resource *readback_staging;
++   void *readback_staging_map;
++   unsigned readback_staging_hits;
++#endif
+    struct threaded_context *tc;
+    struct slab_child_pool transfer_pool;
+    struct slab_child_pool transfer_pool_unsync;
+--- a/src/gallium/drivers/zink/zink_context.c
++++ b/src/gallium/drivers/zink/zink_context.c
+@@ -22,6 +22,7 @@
+  */
+ 
+ #include "zink_clear.h"
++#include "zink_bo.h"
+ #include "zink_context.h"
+ #include "zink_descriptors.h"
+ #include "zink_fence.h"
+@@ -142,6 +143,11 @@
+       }
+    }
+ 
++#ifdef _WIN32
++   if (ctx->readback_staging_map)
++      zink_bo_unmap(screen, zink_resource(ctx->readback_staging)->obj->bo);
++   pipe_resource_reference(&ctx->readback_staging, NULL);
++#endif
+    for (unsigned i = 0; i < ARRAY_SIZE(ctx->program_cache); i++) {
+       simple_mtx_lock((&ctx->program_lock[i]));
+       hash_table_foreach(&ctx->program_cache[i], entry) {
+--- a/src/gallium/drivers/zink/zink_resource.c
++++ b/src/gallium/drivers/zink/zink_resource.c
+@@ -2544,11 +2544,36 @@
+       templ.array_size = 1;
+       templ.flags = 0;
+ 
+-      trans->staging_res = zink_resource_create(pctx->screen, &templ);
++#ifdef _WIN32
++      const bool cache_allowed = sizeof(void *) == 8 &&
++         debug_get_bool_option("PERP_ZINK_REUSE_READBACK", true) &&
++         (usage & (PIPE_MAP_READ | PIPE_MAP_WRITE)) == PIPE_MAP_READ &&
++         pres->target == PIPE_TEXTURE_2D &&
++         !util_format_is_depth_or_stencil(format) && templ.width0 <= 2 * 1024 * 1024;
++      const bool cache_idle = !ctx->readback_staging ||
++         p_atomic_read(&ctx->readback_staging->reference.count) == 1;
++      if (cache_allowed && cache_idle && ctx->readback_staging &&
++          (ctx->readback_staging->width0 < templ.width0 || ctx->readback_staging->format != format)) {
++         if (ctx->readback_staging_map)
++            unmap_resource(screen, zink_resource(ctx->readback_staging));
++         ctx->readback_staging_map = NULL;
++         pipe_resource_reference(&ctx->readback_staging, NULL);
++      }
++      if (cache_allowed && cache_idle && ctx->readback_staging) {
++         pipe_resource_reference(&trans->staging_res, ctx->readback_staging);
++         if (!ctx->readback_staging_hits++)
++            mesa_logi("ZINK: bounded coherent readback staging reused (%u bytes)", templ.width0);
++      } else
++#endif
++         trans->staging_res = zink_resource_create(pctx->screen, &templ);
+       if (!trans->staging_res)
+          goto fail;
+ 
+       struct zink_resource *staging_res = zink_resource(trans->staging_res);
++#ifdef _WIN32
++      if (cache_allowed && cache_idle && !ctx->readback_staging && staging_res->obj->coherent)
++         pipe_resource_reference(&ctx->readback_staging, trans->staging_res);
++#endif
+ 
+       if (usage & PIPE_MAP_READ) {
+          assert(!(usage & TC_TRANSFER_MAP_THREADED_UNSYNC));
+@@ -2560,7 +2585,20 @@
+          zink_fence_wait(pctx);
+       }
+ 
+-      ptr = map_resource(screen, staging_res);
++#ifdef _WIN32
++      /* Keep the existing copy/fence for every band. Only resource creation
++       * and mapping are reused; the buffer is never shared by live transfers. */
++      if (trans->staging_res == ctx->readback_staging && ctx->readback_staging_map)
++         ptr = ctx->readback_staging_map;
++      else
++#endif
++         ptr = map_resource(screen, staging_res);
++#ifdef _WIN32
++      if (trans->staging_res == ctx->readback_staging) {
++         ctx->readback_staging_map = ptr;
++         if (!ptr) pipe_resource_reference(&ctx->readback_staging, NULL);
++      }
++#endif
+    } else {
+       assert(res->linear);
+       ptr = map_resource(screen, res);

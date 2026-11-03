@@ -2,7 +2,56 @@
 
 Obiettivo: OpenGL accelerato con kernel ARM64 v0.4 originale Microsoft-signed, Secure Boot/CI attivi e TESTSIGNING disattivato. Stato generale in TODO-014/APP-001 e [report](../../docs/reports/2026-10-28-opengl.md). Non sostituire il pacchetto nel DriverStore o promuovere una candidata dal solo esito di un probe.
 
-**Regola permanente tra macchine:** i fix necessari sono dichiarati in `requirements.json`, indipendentemente dal numero della release locale. `scripts/check-opengl-payload.py --app <bundle>` controlla le patch richieste contro i sorgenti e tutti i sei hash DLL. La build ordinaria lo esegue prima della compilazione/copia e sul risultato finale, incluso SKIP_RUNTIME; anche copy-main-runtime.py rifiuta un riferimento obsoleto prima di scrivere la destinazione. Allo scarto va completata la distribuzione della ricetta compatibile esistente, prima di riaprire la diagnosi del bug. La verifica delle DLL e del runtime effettivamente usati in Windows resta obbligatoria per la consegna: un bundle corretto da solo non la sostituisce. Per ogni nuovo fix binario aggiornare patch/ricetta/pin e questo contratto, così l'altra macchina ne rileva la mancanza. Le release M1 0.2.31 e M4 0.2.32 contengono gli stessi fix richiesti; non occorre uniformare indiscriminatamente i runtime host.
+**Regola permanente tra macchine:** i fix necessari sono dichiarati in `requirements.json`, indipendentemente dal numero della release locale. `scripts/check-opengl-payload.py --app <bundle>` controlla le patch richieste contro i sorgenti e tutti i sei hash DLL. La build ordinaria lo esegue prima della compilazione/copia e sul risultato finale, incluso SKIP_RUNTIME; anche copy-main-runtime.py rifiuta un riferimento obsoleto prima di scrivere la destinazione. Allo scarto va completata la distribuzione della ricetta compatibile esistente, prima di riaprire la diagnosi del bug. La verifica delle DLL e del runtime effettivamente usati in Windows resta obbligatoria per la consegna: un bundle corretto da solo non la sostituisce. Per ogni nuovo fix binario aggiornare patch/ricetta/pin e questo contratto, così l'altra macchina ne rileva la mancanza. Le release M1 0.2.31 e M4 0.2.32 erano allineate prima del requisito readback del3novembre; il nuovo profilo M1 è0.2.33. Non occorre uniformare indiscriminatamente i runtime host.
+
+## Riuso readback Windows0.2.33 — distribuzione in corso
+
+`windows-zink-readback-cache.patch` conserva nel context un solo buffer coerente
+di staging, massimo2MiB, per letture color2D Windows64bit. Riusa memoria e mapping
+quando il buffer non appartiene ad altri transfer, mantenendo copia e fence per
+ogni fascia. Formati non coperti, buffer occupato o memoria non coerente seguono
+il percorso precedente. Alla distruzione context il mapping viene rilasciato
+dopo l'attesa GPU già esistente. Nessuna variazione a risoluzione, dimensioni
+texture, capacità, kernel o protocollo host. `PERP_ZINK_REUSE_READBACK=false`
+nel solo processo permette il confronto diagnostico; il valore predefinito è
+attivo. Non include timing o il batch errato descritto sotto.
+
+Confronto fresco Creality/cubo20 e viewport1488×1107, stessoDLL diagnostico:
+mediana316ms disattivato contro69ms attivo (~4,56volte meno tempo nel percorso
+WGL). Non sono FPS continui sul Mac. Build di produzione ARM64/x64, pixel finestra,
+MSAA e confronto integrale dell'atlante112295936byte PASS nella copia. Installazione,
+restore e reinstallazione0.2.33 PASS; scena reale senza trace e main in verifica.
+
+Ricostruzione incrementale dalla cache Mesa25.1.9 qualificata di questa macchina:
+
+```sh
+python3 scripts/build-wgl-readback-cache.py --cache /private/path/mesa-cache --output /private/path/new-wgl-output --meson /private/path/venv/bin/meson --ninja /private/path/venv/bin/ninja --base-release graphics/opengl/releases/0.2.31-darwin-arm64.json
+```
+
+La ricetta verifica sorgenti, entrambe le DLL precedenti e Meson1.12.1; prende lo
+stesso lock della diagnostica, conserva backup/ricevuta, compila con due job e
+ripristina la cache qualificata anche su errore. Richiede la toolchain Windows
+già configurata per ciascuna architettura. Su M4 usare il relativo manifesto base
+0.2.32 e toolchain compatibile; produrre pin locali, senza copiare il runtime M1
+o forzare gli hash. Il profilo nuovo M4 non è ancora qualificato.
+
+Per confezionare, copiare il payload precedente completo in un nuovo output e
+sostituire solo le due libgallium con gli output della ricetta. Il profilo M1
+`releases/0.2.33-darwin-arm64-m1.json` fissa seiDLL e patch, oltre agli hash di
+manifesto host e release precedenti. Usare `package-opengl-guest-update.py` su
+una build separata, firmare e verificare. Il requisito condiviso ora rifiuta i
+vecchi payload. Host/video/Venus/shim restano byte-identici.
+
+In Windows, ad app chiusa e con UUID verificata, usare l'installer esistente in
+due processi PowerShell separati: prima `install.ps1 -ExpectedMachineID <UUID>
+-Restore`, poi `install.ps1 -ExpectedMachineID <UUID> -PayloadRoot <nuovo-payload>
+-ApplicationExecutable <exe>`. Richiedono normale elevazione. Conservare payload
+precedente/backup e verificare install-state, seiDLL, registrazioni e moduli
+effettivi. Per rollback: restore nuovo e reinstallare il payload precedente,
+sempre con gli stessi controlli. Le sole sidecar diagnostiche private vanno
+prima ripristinate all'esatto hash precedente; l'installer rifiuta file estranei.
+La copia/firma del bundle non aggiorna automaticamente una vecchia installazione
+OpenGL già attiva dentro Windows.
 
 **Stato corrente28 ottobre —0.2.27 installata sulla VM ordinaria:** shader/profondità/pixel finestra ARM64/x64 PASS da librerie installate; Creality7.3 ordinario dal launcher reale importa e renderizza il cubo20mm anche nella finestra Mac2177×1191. Kernel originale e Secure Boot/CI conservati, TESTSIGNINGfalse. Presentazione GDI con readback suddiviso; funzioni Vulkan mancanti e compatibilità generale ancora aperte. [Evidenze e limiti main](../../docs/VERIFICATION.md#28-ottobre--installazione-opengl-sulla-vm-corrente). I paragrafi successivi conservano le tappe precedenti nel clone.
 

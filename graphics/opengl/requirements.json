@@ -3,6 +3,7 @@
   "required_patches": [
     "windows-zink-bounded-readback.patch",
     "windows-zink-bounded-upload.patch",
-    "zink-moltenvk-sampler-name.patch"
+    "zink-moltenvk-sampler-name.patch",
+    "windows-zink-readback-cache.patch"
   ]
 }
