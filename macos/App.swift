@@ -112,6 +112,7 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
     private var desktopReadRequest:UUID?
     private var desktopReadAgain=false
     private var desktopResizeRequest:UUID?
+    private var desktopResizeChangedAt:TimeInterval=0
     private var desktopAttempted=NSSize.zero
     private var restarting=false
     private var awaitingInitialGuest=false
@@ -1250,38 +1251,21 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
             guard !Task.isCancelled,let self,self.desktopResizeRequest == nil,self.desktopReadRequest == nil,self.connected,
                   let epoch=self.displayEpoch,self.machine?.desktopState["visible"] as? Bool == true else{return}
             let desired=self.desktopSize
-            // Preserve the user's window and bound the requested backing size.
-            // Native3D selects a mode already advertised by Windows below.
+            // Resize Windows to the view's backing raster, rather than fitting
+            // an unrelated advertised mode into the user's Mac window.
             let scale=min(1,4096/desired.width,4096/desired.height,sqrt(8_388_608/(desired.width*desired.height)))
-            var mode=NSSize(width:max(640,(desired.width*scale).rounded()),height:max(480,(desired.height*scale).rounded()))
-            if self.machine?.nativeGraphicsEnabled == true {
-                // The signed primary driver caches its mode list. Publishing
-                // an arbitrary raster requires unplugging it, which also moves
-                // Windows' other displays. Select an advertised mode instead.
-                guard let primary=self.launcherDisplays.first(where:{$0["primary"] as? Bool == true}),
-                      let modes=primary["modes"] as? [[String:Any]] else{return}
-                let available=modes.compactMap { value -> NSSize? in
-                    guard let w=value["width"] as? Int,let h=value["height"] as? Int,
-                          (640...4096).contains(w),(480...4096).contains(h),w*h<=8_388_608 else{return nil}
-                    return NSSize(width:w,height:h)
-                }
-                let target=mode
-                func distance(_ size:NSSize)->Double {
-                    let x=log(size.width/target.width),y=log(size.height/target.height)
-                    return abs(x)+abs(y)+2*abs(x-y)
-                }
-                guard let supported=available.min(by:{distance($0)<distance($1)}) else{return}
-                mode=supported
-            }
+            let mode=NSSize(width:max(640,(desired.width*scale).rounded()),height:max(480,(desired.height*scale).rounded()))
             guard mode != self.desktopConfirmed,mode != self.desktopAttempted else{return}
             self.desktopAttempted=mode
             let request=UUID();self.desktopResizeRequest=request
-            if self.machine?.nativeGraphicsEnabled != true {self.machine?.requestDesktopResolution(mode)}
+            self.desktopResizeChangedAt=ProcessInfo.processInfo.systemUptime
+            self.displayReadTask?.cancel();self.displayReadTask=nil
+            self.machine?.requestDesktopResolution(mode)
             // The driver's resolution event and application are asynchronous.
             // Keep one transaction pending and verify actual Windows geometry.
             var checks=0
             let deadline=ProcessInfo.processInfo.systemUptime+12
-            while checks<5 && ProcessInfo.processInfo.systemUptime<deadline {
+            while checks<10 && ProcessInfo.processInfo.systemUptime<deadline {
                 try? await Task.sleep(for:.milliseconds(300))
                 guard !Task.isCancelled,self.connected,self.displayEpoch == epoch,self.desktopResizeRequest == request else{return}
                 // Keep this transaction until the monitor is reattached. A
@@ -1294,6 +1278,12 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
                         if case .success(let reply)=result,let snapshot=reply["value"] as? [String:Any],
                            let primary=(snapshot["displays"] as? [[String:Any]])?.first(where:{$0["primary"] as? Bool == true}),
                            primary["width"] as? Int == Int(mode.width),primary["height"] as? Int == Int(mode.height) {
+                            // Notifications during reconnect describe temporary
+                            // topology. Let the exact raster settle before N+1
+                            // can repair the app outputs, once, from a fresh read.
+                            guard ProcessInfo.processInfo.systemUptime-self.desktopResizeChangedAt>=0.6 else {
+                                continuation.resume(returning:false);return
+                            }
                             self.machine?.finishDesktopResolution();self.desktopResizeRequest=nil
                             self.desktopReadAgain=false
                             if self.launcherNotice=="Windows non ha confermato la risoluzione richiesta." {self.launcherNotice=nil}
@@ -1409,6 +1399,10 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
             }
         case "display_changed":
             guard value["epoch"] as? String == displayEpoch else{return}
+            if desktopResizeRequest != nil {
+                desktopResizeChangedAt=ProcessInfo.processInfo.systemUptime
+                return
+            }
             if machine?.mixedDisplaysEnabled == true,mixedDisplayConfiguring {return}
             if machine?.mixedDisplaysEnabled != true {invalidateDisplay("Checking Windows display…")}
             displayReadTask?.cancel()

@@ -1,5 +1,7 @@
 # Risoluzioni personalizzate del desktop
 
+**Aggiornamento3novembre0.2.60:** il ripiego0.2.57 sui modi pubblicizzati, seguito da fill sui due assi0.2.58, deforma visibilmente le finestre strette. Il requisito utente è raster Windows corretto, senza margini o stretch. Il frontend torna a pubblicare il raster della vista; mantiene la transazione aperta durante il reconnect e fino a600ms senza notifiche display, poi verifica Windows e rilegge N+1. Le notifiche intermedie non avviano riparazioni concorrenti dei monitor app. Wide1920×1280/narrow960×1280 confermati sulla main M4, fullscreen/ritorno ancora da qualificare. Il runtime/driver protetto esistente resta invariato. [Evidenze](../../docs/VERIFICATION.md#3-novembre--resize-reale-del-desktop-e-proporzioni).
+
 Il desktop Windows segue il raster della vista Mac senza cambiare la cornice scelta dall’utente. Il percorso corrente usa il KMD ufficiale ARM64 v0.4 firmato Microsoft, Secure Boot attivo e modalità test disattivata. Non richiede una patch kernel.
 
 Il frontend pubblica il target via RFB `SetDesktopSize`, attende 1 s, invia 0×0 per disconnettere il monitor, attende 1 s e ripubblica il target. Il primo invio aggiorna il modo custom prima dell’invalidazione della cache dei modi Windows. La sola sequenza 0×0→target è risultata insufficiente per una seconda misura personalizzata.
