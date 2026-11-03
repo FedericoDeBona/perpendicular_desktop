@@ -46,7 +46,10 @@ def main():
     parser.add_argument('--batch-host-read', action='store_true', help='Reproduce rejected host-visibility variant (still incorrect bytes); requires batch')
     parser.add_argument('--batch-box', action='store_true', help='Correct experimental batch pipe_box areas using u_box_2d; requires batch')
     parser.add_argument('--cached-batch', action='store_true', help='Keep production serial cache and bounded batch staging pool; requires batch and corrected boxes')
+    parser.add_argument('--batch-control', action='store_true', help='Private one-byte file switches batch/serial between frames; requires cached batch')
     args = parser.parse_args()
+    if args.batch_control and not args.cached_batch:
+        parser.error('--batch-control requires --cached-batch')
     if args.cached_batch and not (args.batch_readback and args.batch_box):
         parser.error('--cached-batch requires --batch-readback --batch-box')
     if args.cached_batch and (args.compare_readback or args.batch_host_read):
@@ -79,6 +82,8 @@ def main():
         patches.append(REPO / 'graphics/opengl/windows-zink-batch-host-read.patch')
     if args.cached_batch:
         patches.append(REPO / 'graphics/opengl/windows-zink-batch-cache.patch')
+    if args.batch_control:
+        patches.append(REPO / 'graphics/opengl/windows-zink-batch-control.patch')
     meson, ninja = args.meson.resolve(strict=True), args.ninja.resolve(strict=True)
     if subprocess.check_output([str(meson), '--version'], text=True).strip() != '1.12.1':
         raise ValueError('Use Meson 1.12.1, matching the qualified cache')
@@ -122,7 +127,7 @@ def main():
                 'patches': {p.name: sha(p.read_bytes()) for p in patches}, 'dll_sha256': sha(candidate),
                 'baseline_sha256': sha(qualified), 'mesa': '25.1.9', 'meson': '1.12.1',
                 'architecture': 'x64', 'limit': 600, 'batch_readback_opt_in': args.batch_readback,
-                'reuse_readback_opt_in': args.reuse_readback, 'readback_compare': args.compare_readback, 'batch_host_read': args.batch_host_read, 'batch_box': args.batch_box, 'cached_batch': args.cached_batch,
+                'reuse_readback_opt_in': args.reuse_readback, 'readback_compare': args.compare_readback, 'batch_host_read': args.batch_host_read, 'batch_box': args.batch_box, 'cached_batch': args.cached_batch, 'batch_control': args.batch_control,
             }, indent=2) + '\n')
         finally:
             for file, data in originals.items():
