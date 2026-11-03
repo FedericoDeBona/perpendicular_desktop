@@ -55,6 +55,16 @@ import AppKit
         }catch{}
         precondition(connected.modes[0].width==2940 && connected.modes[0].height==2008,
                      "The dedicated raster must include the Windows taskbar outside the Mac viewport")
+        var hiddenTaskbar=app
+        hiddenTaskbar["workArea"]=["x":0,"y":0,"width":2940,"height":1912]
+        let hiddenPlan=try MixedDisplayPlan(hosts:[first],bindings:bindings,
+            topology:["paths":[desktop,hiddenTaskbar],"monitors":["displays":[desktop,hiddenTaskbar]]],
+            previousInsets:connected.insets)
+        precondition(hiddenPlan.modes[0].height==2008,
+                     "A transiently hidden taskbar must not shrink and reconnect an admitted app monitor")
+        let visibleAgain=try MixedDisplayPlan(hosts:[first],bindings:bindings,topology:topology,previousInsets:hiddenPlan.insets)
+        precondition(visibleAgain.modes[0].height==2008,
+                     "Taskbar return must not start a second app-monitor size cycle")
         precondition(reused[0].macFrame(forGuest:reused[0].guestWorkArea!)==first.workArea,
                      "Maximize must occupy exactly the ordinary Mac work area with a hidden Dock")
         for area in [NSRect(x:0,y:70,width:1470,height:853),NSRect(x:80,y:0,width:1390,height:923)] {

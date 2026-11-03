@@ -7,6 +7,7 @@ private final class DesktopSurface:NSView {
     var onUserInput:(()->Void)?
     var connection:DesktopConnection?
     var bridge:GuestBridge?
+    var inputAvailable=true
     private var clipboardRequest:UUID?
     private var clipboardBusy=false
     private var consumed=Set<UInt16>()
@@ -35,7 +36,7 @@ private final class DesktopSurface:NSView {
         super.updateTrackingAreas()
     }
     private func mouse(_ event:NSEvent){
-        guard source.width>0,source.height>0,bounds.width>0,bounds.height>0 else{return}
+        guard inputAvailable,source.width>0,source.height>0,bounds.width>0,bounds.height>0 else{return}
         window?.makeFirstResponder(self)
         // Desktop presentation fills the view on both axes. Input must use
         // that same transform, including the taskbar and all four corners.
@@ -47,11 +48,12 @@ private final class DesktopSurface:NSView {
     override func mouseMoved(with event:NSEvent){mouse(event)}
     override func mouseDragged(with event:NSEvent){mouse(event)}
     override func rightMouseDragged(with event:NSEvent){mouse(event)}
-    override func mouseDown(with event:NSEvent){buttons |= 1;mouse(event);onUserInput?()}
+    override func mouseDown(with event:NSEvent){guard inputAvailable else{return};buttons |= 1;mouse(event);onUserInput?()}
     override func mouseUp(with event:NSEvent){buttons &= ~1;mouse(event)}
-    override func rightMouseDown(with event:NSEvent){buttons |= 4;mouse(event);onUserInput?()}
+    override func rightMouseDown(with event:NSEvent){guard inputAvailable else{return};buttons |= 4;mouse(event);onUserInput?()}
     override func rightMouseUp(with event:NSEvent){buttons &= ~4;mouse(event)}
     override func scrollWheel(with event:NSEvent){
+        guard inputAvailable else{return}
         mouse(event);guard event.scrollingDeltaY != 0 else{return}
         connection?.pointer(x:Int(cursor.x),y:Int(cursor.y),buttons:buttons | (event.scrollingDeltaY>0 ? 8:16))
         connection?.pointer(x:Int(cursor.x),y:Int(cursor.y),buttons:buttons)
@@ -81,7 +83,7 @@ private final class DesktopSurface:NSView {
         let alert=NSAlert();alert.messageText="Appunti";alert.informativeText=message;alert.beginSheetModal(for:window)
     }
     private func transferClipboard(_ action:String){
-        guard !clipboardBusy,window?.isKeyWindow == true,window?.firstResponder === self,let bridge else{return}
+        guard inputAvailable,!clipboardBusy,window?.isKeyWindow == true,window?.firstResponder === self,let bridge else{return}
         let board=NSPasteboard.general,version=board.changeCount,nonce=UUID()
         var request:[String:Any]=["action":action == "paste" ? "write":"prepare"]
         if action == "paste" {
@@ -123,7 +125,7 @@ private final class DesktopSurface:NSView {
         keyDown(with:event);return true
     }
     override func keyDown(with event:NSEvent){
-        guard !clipboardBusy else{return}
+        guard inputAvailable,!clipboardBusy else{return}
         let flags=event.modifierFlags,shift:[UInt32]=flags.contains(.shift) ? [0xffe1]:[]
         if flags.contains(.command),!flags.contains(.control),!flags.contains(.option){
             consumed.insert(event.keyCode)
@@ -148,7 +150,7 @@ private final class DesktopSurface:NSView {
         if let value=symbol(event){keys[event.keyCode]=value;connection?.key(value,down:true);onUserInput?()}
     }
     override func keyUp(with event:NSEvent){if consumed.remove(event.keyCode) != nil{return};if let value=keys.removeValue(forKey:event.keyCode){connection?.key(value,down:false)}}
-    override func flagsChanged(with event:NSEvent){if !clipboardBusy {synchronizeModifiers(event.modifierFlags)}}
+    override func flagsChanged(with event:NSEvent){if inputAvailable && !clipboardBusy {synchronizeModifiers(event.modifierFlags)}}
     private func synchronizeModifiers(_ flags:NSEvent.ModifierFlags){
         var next=Set<UInt32>()
         // Match the application-window convention: Command is Control in the
@@ -182,23 +184,31 @@ final class DesktopWindow:NSObject,NSWindowDelegate {
     private var nativeActive=false
     private var timer:Timer?
     private var visible=false
+    private var fullScreenTransition=false
+    private var pendingResolution:NSSize?
+    private let resized:(NSSize)->Void
 
-    var state:[String:Any] {["visible":visible,"fullScreen":window.styleMask.contains(.fullScreen),"viewWidth":Int(surface.bounds.width),"viewHeight":Int(surface.bounds.height),"backingScale":window.backingScaleFactor,"nativeActive":nativeActive,"width":Int(surface.source.width),"height":Int(surface.source.height)]}
+    var state:[String:Any] {["visible":visible,"fullScreen":window.styleMask.contains(.fullScreen),"fullScreenTransition":fullScreenTransition,"resolutionPending":pendingResolution != nil,"viewWidth":Int(surface.bounds.width),"viewHeight":Int(surface.bounds.height),"backingScale":window.backingScaleFactor,"nativeActive":nativeActive,"width":Int(surface.source.width),"height":Int(surface.source.height)]}
     init(socket:String,endpoint:@escaping ()->NativeDisplayEndpoint?,resized:@escaping (NSSize)->Void = {_ in},input:@escaping ()->Void = {})throws{
-        self.socket=socket;self.endpoint=endpoint;surface=DesktopSurface(renderer:try WindowRenderer(opaque:true,fillBounds:true))
+        self.socket=socket;self.endpoint=endpoint;self.resized=resized;surface=DesktopSurface(renderer:try WindowRenderer(opaque:true,fillBounds:true))
         window=NSWindow(contentRect:NSRect(x:140,y:120,width:960,height:640),styleMask:[.titled,.closable,.miniaturizable,.resizable],backing:.buffered,defer:false)
         super.init()
         surface.onUserInput=input
         window.title="Desktop Mode";window.isReleasedWhenClosed=false;window.contentView=surface;window.delegate=self
-        surface.onResize={ [weak self] in
-            guard let self,self.visible else{return}
-            resized(self.surface.convertToBacking(self.surface.bounds).size)
-        }
+        surface.onResize={ [weak self] in self?.publishSize() }
         window.collectionBehavior.insert(.fullScreenPrimary)
         window.backgroundColor = .black
         window.minSize=NSSize(width:480,height:320);window.acceptsMouseMovedEvents=true
     }
     func configureClipboard(_ bridge:GuestBridge?){surface.bridge=bridge}
+    private func publishSize(){
+        guard visible,!fullScreenTransition,!window.inLiveResize else{return}
+        resized(surface.convertToBacking(surface.bounds).size)
+    }
+    func beginResolutionChange(_ size:NSSize){
+        pendingResolution=size;surface.releaseInput();surface.inputAvailable=false
+    }
+    func finishResolutionChange(){pendingResolution=nil;surface.inputAvailable=true}
     func show(){
         visible=true;window.makeKeyAndOrderFront(nil);window.makeFirstResponder(surface)
         NSApp.activate(ignoringOtherApps:true);connect();surface.onResize?()
@@ -214,7 +224,7 @@ final class DesktopWindow:NSObject,NSWindowDelegate {
         if desktop == nil {
             let id=UUID();connectionID=id
             let client=DesktopConnection(path:socket,receive:{[weak self] pixels,width,height in
-                guard let self,self.visible,self.connectionID == id,!self.nativeActive else{return}
+                guard let self,self.visible,self.connectionID == id,!self.nativeActive,self.pendingResolution == nil else{return}
                 self.surface.source=NSSize(width:width,height:height)
                 self.surface.renderer.present(pixels,width:width,height:height);self.window.title="Desktop Mode"
             },layout:{[weak self] screen in
@@ -230,6 +240,10 @@ final class DesktopWindow:NSObject,NSWindowDelegate {
             let id=UUID();readerID=id
             let reader=NativeDisplayReader(endpoint:endpoint,device:surface.renderer.device,receive:{[weak self] frame in
                 guard let self,self.visible,self.readerID == id else{return}
+                if let pending=self.pendingResolution,
+                   frame.texture.width != Int(pending.width) || frame.texture.height != Int(pending.height) {
+                    frame.finishReading();return
+                }
                 self.nativeActive=true;self.desktop?.requestPixels(false)
                 self.surface.source=NSSize(width:frame.texture.width,height:frame.texture.height)
                 self.surface.inputScreen=DesktopScreen(id:0,x:0,y:0,width:frame.texture.width,height:frame.texture.height)
@@ -238,12 +252,30 @@ final class DesktopWindow:NSObject,NSWindowDelegate {
                 guard let self,self.readerID == id else{return}
                 let wasNative=self.nativeActive
                 self.readerID=nil;self.native?.stop();self.native=nil;self.nativeActive=false
-                if wasNative {self.surface.renderer.clear();self.desktop?.requestPixels(true)}
-                self.window.title="Desktop Mode — \(message)"
+                if wasNative {
+                    if self.pendingResolution == nil {self.surface.renderer.clear()}
+                    self.desktop?.requestPixels(true)
+                }
+                if self.pendingResolution != nil {
+                    Task{@MainActor [weak self] in
+                        try? await Task.sleep(for:.milliseconds(250))
+                        guard let self,self.visible,self.pendingResolution != nil,self.native == nil else{return}
+                        self.connect()
+                    }
+                }else{self.window.title="Desktop Mode — \(message)"}
             })
             native=reader;reader.start()
         }
     }
     func windowWillClose(_ notification:Notification){stop()}
     func windowDidResignKey(_ notification:Notification){surface.cancelClipboard();surface.releaseInput()}
+    func windowWillEnterFullScreen(_ notification:Notification){fullScreenTransition=true}
+    func windowWillExitFullScreen(_ notification:Notification){fullScreenTransition=true}
+    func windowDidEnterFullScreen(_ notification:Notification){fullScreenTransition=false;publishSize()}
+    func windowDidExitFullScreen(_ notification:Notification){fullScreenTransition=false;publishSize()}
+    func windowDidFailToEnterFullScreen(_ window:NSWindow){fullScreenTransition=false;publishSize()}
+    func windowDidFailToExitFullScreen(_ window:NSWindow){fullScreenTransition=false;publishSize()}
+    func windowDidResize(_ notification:Notification){publishSize()}
+    func windowDidChangeScreen(_ notification:Notification){publishSize()}
+    func windowDidChangeBackingProperties(_ notification:Notification){publishSize()}
 }

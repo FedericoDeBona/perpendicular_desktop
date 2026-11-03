@@ -71,6 +71,17 @@ struct AppMonitorMode:Sendable {
     let changed:Bool
 }
 
+/// Keep admitted taskbar padding through transient fullscreen/hotplug Shell
+/// states. A disappearing taskbar must not resize every dedicated app monitor.
+struct AppMonitorInsets:Equatable {
+    let left:Int,top:Int,right:Int,bottom:Int
+    func retaining(_ previous:Self?)->Self {
+        guard let previous else{return self}
+        return Self(left:max(left,previous.left),top:max(top,previous.top),
+                    right:max(right,previous.right),bottom:max(bottom,previous.bottom))
+    }
+}
+
 struct MixedDisplayPlan {
     let layout:[[String:Any]]
     let hosts:[HostDisplay]
@@ -78,6 +89,7 @@ struct MixedDisplayPlan {
     let scale:Int
     let unavailableHosts:Int
     let modes:[AppMonitorMode]
+    let insets:[String:AppMonitorInsets]
     private let viewports:[String:NSRect]
 
     static func rasterScale(_ hosts:[HostDisplay])->Int {
@@ -93,7 +105,7 @@ struct MixedDisplayPlan {
     }
     private static func failure(_ text:String)->NSError {NSError(domain:"Displays",code:1,userInfo:[NSLocalizedDescriptionKey:text])}
 
-    init(hosts:[HostDisplay],bindings:AppDisplayBindings,topology:[String:Any])throws {
+    init(hosts:[HostDisplay],bindings:AppDisplayBindings,topology:[String:Any],previousInsets:[String:AppMonitorInsets]=[:])throws {
         guard !hosts.isEmpty,
               Set(bindings.displays.map(\.hostID)).count==bindings.displays.count,
               Set(bindings.displays.map(\.slot)).count==bindings.displays.count,
@@ -138,6 +150,7 @@ struct MixedDisplayPlan {
         // their invisible padding cannot overlap a neighbouring monitor.
         var left=0
         var modes:[AppMonitorMode]=[]
+        var insets:[String:AppMonitorInsets]=[:]
         var viewports:[String:NSRect]=[:]
         for host in available {
             guard let binding=bindings.displays.first(where:{$0.hostID==host.stableID}),
@@ -150,10 +163,13 @@ struct MixedDisplayPlan {
                 throw Self.failure("Windows non ha comunicato l’area della barra delle applicazioni.")
             }
             let ratio=CGFloat(96*scale)/CGFloat(dpi)
-            let insetLeft=Int(((guestWork.minX-frame.minX)*ratio).rounded())
-            let insetTop=Int(((guestWork.minY-frame.minY)*ratio).rounded())
-            let insetRight=Int(((frame.maxX-guestWork.maxX)*ratio).rounded())
-            let insetBottom=Int(((frame.maxY-guestWork.maxY)*ratio).rounded())
+            let measured=AppMonitorInsets(left:Int(((guestWork.minX-frame.minX)*ratio).rounded()),
+                top:Int(((guestWork.minY-frame.minY)*ratio).rounded()),
+                right:Int(((frame.maxX-guestWork.maxX)*ratio).rounded()),
+                bottom:Int(((frame.maxY-guestWork.maxY)*ratio).rounded()))
+            let reserved=measured.retaining(previousInsets[host.stableID!])
+            insets[host.stableID!]=reserved
+            let insetLeft=reserved.left,insetTop=reserved.top,insetRight=reserved.right,insetBottom=reserved.bottom
             let viewportWidth=Int((host.frame.width*CGFloat(scale)).rounded())
             let viewportHeight=Int((host.frame.height*CGFloat(scale)).rounded())
             let width=viewportWidth+insetLeft+insetRight,height=viewportHeight+insetTop+insetBottom
@@ -182,7 +198,7 @@ struct MixedDisplayPlan {
         }
         guard Set(devices).count==available.count,monitors.count==layout.count else {throw Self.failure("Le uscite Windows non sono distinte.")}
         self.layout=layout;self.hosts=available;self.devices=devices;self.scale=scale;self.unavailableHosts=hosts.count-available.count
-        self.modes=modes;self.viewports=viewports
+        self.modes=modes;self.viewports=viewports;self.insets=insets
     }
 
     func mappings(snapshot:[String:Any])throws->[SharedDisplay] {

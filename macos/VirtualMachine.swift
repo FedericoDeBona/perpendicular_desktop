@@ -229,10 +229,11 @@ final class VirtualMachineController {
             }
         }.value
     }
-    func requestDesktopResolution(_ size:NSSize){
+    func requestDesktopResolution(_ size:NSSize,reconnectDelay:TimeInterval=0.25){
         guard let launch=desktopLaunch() else{return}
         displayControl?.stop()
         let request=UUID();displayRequest=request;desktopResolutionPending=true
+        desktop?.beginResolutionChange(size)
         // This publishes the custom mode to virtio-gpu. The guest's driver
         // helper applies it; RFB's framebuffer acknowledgement is not proof
         // of the Windows mode, which ApplicationModel reads back separately.
@@ -240,11 +241,11 @@ final class VirtualMachineController {
             guard let self,self.displayRequest == request else{return};self.desktopResolutionPending=false
         })
         displayControl=client;client.requestPixels(false)
-        client.setScreens([DesktopScreen(id:0,x:0,y:0,width:Int(size.width),height:Int(size.height))],reconnectMonitor:nativeGraphicsEnabled,submitted:{[weak self] in
+        client.setScreens([DesktopScreen(id:0,x:0,y:0,width:Int(size.width),height:Int(size.height))],reconnectMonitor:nativeGraphicsEnabled,reconnectDelay:reconnectDelay,submitted:{[weak self] in
             guard let self,self.displayRequest == request else{return};self.desktopResolutionPending=false
         });client.start()
     }
-    func finishDesktopResolution(){displayRequest=nil;desktopResolutionPending=false;displayControl?.stop();displayControl=nil}
+    func finishDesktopResolution(){displayRequest=nil;desktopResolutionPending=false;displayControl?.stop();displayControl=nil;desktop?.finishResolutionChange()}
     func closeDesktop(){finishDesktopResolution();desktop?.stop();desktop?.window.close();desktop=nil}
     func closeForegroundApplication(notAfter:Double) async throws {
         try await sendApplicationChord(["alt","f4"],notAfter:notAfter)

@@ -100,6 +100,8 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
     private var sharedDisplay:SharedDisplay?
     private var sharedDisplays:[SharedDisplay]=[]
     private var mixedDisplayConfiguring=false
+    private var mixedDisplayInsets:[String:AppMonitorInsets]=[:]
+    private var mixedDisplayInsetScale=0
     private var lastHostDisplays:[HostDisplay]=[]
     private var mixedDisplayChecks=0
     private var mixedDisplayApplies=0
@@ -113,6 +115,7 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
     private var desktopReadAgain=false
     private var desktopResizeRequest:UUID?
     private var desktopResizeChangedAt:TimeInterval=0
+    private var desktopResizeReport:[String:Any]=[:]
     private var desktopAttempted=NSSize.zero
     private var restarting=false
     private var awaitingInitialGuest=false
@@ -150,6 +153,7 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
                     self.folderIntegrationStatus="Le cartelle saranno preparate quando Windows sarà collegato."
                     self.folderIntegrationFailed=false;self.folderIntegrationBusy=false
                     self.mixedDisplayConfiguring=false
+                    self.mixedDisplayInsets=[:];self.mixedDisplayInsetScale=0
                     self.desktopResizeTask?.cancel();self.desktopResizeTask=nil
                     self.desktopReadRequest=nil;self.desktopReadAgain=false
                     self.machine?.finishDesktopResolution()
@@ -647,6 +651,7 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
                 "windowGPUCache":NativeWindowFrames.shared.cacheDiagnostics,
                 "launcher":["cursor":launcher.cursorDiagnostics,"catalogueAutomaticEligible":launcher.isVisible && !launcher.isMiniaturized,"catalogueAgeSeconds":ProcessInfo.processInfo.systemUptime-lastCatalogueRefresh,"catalogueRefreshes":catalogueRefreshes,"statusMessage":launcherStatusMessage as Any? ?? NSNull(),"dragSamples":launcher.dragSamples,"dragPointer":["x":launcher.dragPointer.x,"y":launcher.dragPointer.y],"dragRequested":["x":launcher.dragRequested.x,"y":launcher.dragRequested.y],"frame":["x":launcher.frame.minX,"y":launcher.frame.minY,"width":launcher.frame.width,"height":launcher.frame.height],"screen":launcher.screen?.localizedName ?? "", "apps":apps.map{["id":$0.id,"name":$0.name,"key":$0.key,"essential":$0.essential]},"opening":Array(openingApps).sorted(),"notice":launcherNotice as Any? ?? NSNull(),"iconCacheHits":iconCacheHits,"iconFetches":iconFetches,"cachedIcons":applicationIcons.count,"recent":launcherPreferences.recent(apps).map(\.id),"favorites":launcherPreferences.sections(apps).favorites.map(\.id),"appearance":launcherAppearance.rawValue,"indicator":launcherWindowsStatus.title],
                 "desktop":machine?.desktopState ?? [:],
+                "desktopResize":desktopResizeReport,
                 "lastCommandRTTMilliseconds":bridge?.lastRoundTripMilliseconds ?? 0,
                 "frameReceiveMilliseconds":bridge?.frameReceiveMilliseconds ?? 0,
                 "frameTimings":bridge?.lastFrameTimings ?? [:]]],reply:reply);return
@@ -1135,6 +1140,7 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
     private func acceptMixedDisplay(_ plan:MixedDisplayPlan,_ snapshot:[String:Any])throws {
         let mappings=try plan.mappings(snapshot:snapshot)
         mixedDisplayConfiguring=false
+        mixedDisplayInsets=plan.insets;mixedDisplayInsetScale=plan.scale
         if guestCapabilities["nativeAppInput"] == true {
             bridge.command("app_input_mode",["enabled":true]){[weak self] result in
                 if case .failure(let error)=result {self?.launcherNotice=error.localizedDescription}
@@ -1180,7 +1186,9 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
             do {
                 let reply=try result.get()
                 guard let topology=reply["value"] as? [String:Any] else{throw CocoaError(.coderReadCorrupt)}
-                let plan=try MixedDisplayPlan(hosts:HostDisplay.current(),bindings:bindings,topology:topology)
+                let hosts=HostDisplay.current()
+                let insets=MixedDisplayPlan.rasterScale(hosts)==self.mixedDisplayInsetScale ? self.mixedDisplayInsets:[:]
+                let plan=try MixedDisplayPlan(hosts:hosts,bindings:bindings,topology:topology,previousInsets:insets)
                 // Settings notifications do not prove that topology changed.
                 // A verified unchanged layout must preserve an in-flight drag,
                 // resize and keyboard focus, without another display command.
@@ -1244,12 +1252,14 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
     private func scheduleDesktopResize(){
         guard (desktopOnly || machine?.mixedDisplaysEnabled == true),connected,displayConfigurable,!mixedDisplayConfiguring,desktopResizeRequest == nil,desktopReadRequest == nil,
               desktopSize.width>0,desktopSize.height>0,
+              machine?.desktopState["fullScreenTransition"] as? Bool != true,
               machine?.desktopState["visible"] as? Bool == true else{return}
         desktopResizeTask?.cancel()
         desktopResizeTask=Task{@MainActor [weak self] in
             try? await Task.sleep(for:.milliseconds(300))
             guard !Task.isCancelled,let self,self.desktopResizeRequest == nil,self.desktopReadRequest == nil,self.connected,
-                  let epoch=self.displayEpoch,self.machine?.desktopState["visible"] as? Bool == true else{return}
+                  let epoch=self.displayEpoch,self.machine?.desktopState["visible"] as? Bool == true,
+                  self.machine?.desktopState["fullScreenTransition"] as? Bool != true else{return}
             let desired=self.desktopSize
             // Resize Windows to the view's backing raster, rather than fitting
             // an unrelated advertised mode into the user's Mac window.
@@ -1259,18 +1269,22 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
             self.desktopAttempted=mode
             let request=UUID();self.desktopResizeRequest=request
             self.desktopResizeChangedAt=ProcessInfo.processInfo.systemUptime
+            let started=self.desktopResizeChangedAt
+            self.desktopResizeReport=["targetWidth":Int(mode.width),"targetHeight":Int(mode.height),"phase":"publishing","fallback":false,"events":0]
             self.displayReadTask?.cancel();self.displayReadTask=nil
             self.machine?.requestDesktopResolution(mode)
             // The driver's resolution event and application are asynchronous.
             // Keep one transaction pending and verify actual Windows geometry.
             var checks=0
+            var slowRetry=false
             let deadline=ProcessInfo.processInfo.systemUptime+12
             while checks<10 && ProcessInfo.processInfo.systemUptime<deadline {
-                try? await Task.sleep(for:.milliseconds(300))
+                try? await Task.sleep(for:.milliseconds(150))
                 guard !Task.isCancelled,self.connected,self.displayEpoch == epoch,self.desktopResizeRequest == request else{return}
                 // Keep this transaction until the monitor is reattached. A
                 // newer request must not race the previous final host raster.
                 if self.machine?.desktopResolutionPending == true {continue}
+                self.desktopResizeReport["phase"]="confirming"
                 checks+=1
                 let matched=await withCheckedContinuation { continuation in
                     self.bridge.command("display_info",timeout:.seconds(5)){result in
@@ -1278,14 +1292,22 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
                         if case .success(let reply)=result,let snapshot=reply["value"] as? [String:Any],
                            let primary=(snapshot["displays"] as? [[String:Any]])?.first(where:{$0["primary"] as? Bool == true}),
                            primary["width"] as? Int == Int(mode.width),primary["height"] as? Int == Int(mode.height) {
+                            if self.machine?.nativeGraphicsEnabled == true,
+                               self.machine?.desktopState["width"] as? Int != Int(mode.width)
+                                || self.machine?.desktopState["height"] as? Int != Int(mode.height) {
+                                self.desktopResizeReport["phase"]="waitingFrame"
+                                continuation.resume(returning:false);return
+                            }
                             // Notifications during reconnect describe temporary
                             // topology. Let the exact raster settle before N+1
                             // can repair the app outputs, once, from a fresh read.
-                            guard ProcessInfo.processInfo.systemUptime-self.desktopResizeChangedAt>=0.6 else {
+                            guard ProcessInfo.processInfo.systemUptime-self.desktopResizeChangedAt>=0.3 else {
                                 continuation.resume(returning:false);return
                             }
                             self.machine?.finishDesktopResolution();self.desktopResizeRequest=nil
                             self.desktopReadAgain=false
+                            self.desktopResizeReport["phase"]="confirmed"
+                            self.desktopResizeReport["milliseconds"]=(ProcessInfo.processInfo.systemUptime-started)*1000
                             if self.launcherNotice=="Windows non ha confermato la risoluzione richiesta." {self.launcherNotice=nil}
                             if self.machine?.mixedDisplaysEnabled == true {
                                 self.desktopConfirmed=mode;self.readMixedDisplay()
@@ -1296,7 +1318,12 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
                             // driver's helper first tries the mode. Apply the
                             // exact raster once its mode set becomes available;
                             // the next read still confirms Windows' actual size.
-                            self.bridge.command("display_configure",["width":Int(mode.width),"height":Int(mode.height)],timeout:.seconds(3)){_ in
+                            self.bridge.command("display_configure",["width":Int(mode.width),"height":Int(mode.height)],timeout:.seconds(3)){result in
+                                if case .failure=result,!slowRetry,self.machine?.nativeGraphicsEnabled == true {
+                                    slowRetry=true
+                                    self.desktopResizeReport["fallback"]=true
+                                    self.machine?.requestDesktopResolution(mode,reconnectDelay:1)
+                                }
                                 continuation.resume(returning:false)
                             }
                         }else {continuation.resume(returning:false)}
@@ -1305,6 +1332,8 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
                 if matched {return}
             }
             self.machine?.finishDesktopResolution();self.desktopResizeRequest=nil
+            self.desktopResizeReport["phase"]="failed"
+            self.desktopResizeReport["milliseconds"]=(ProcessInfo.processInfo.systemUptime-started)*1000
             self.launcherNotice="Windows non ha confermato la risoluzione richiesta."
             self.readDisplay()
         }
@@ -1401,6 +1430,7 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
             guard value["epoch"] as? String == displayEpoch else{return}
             if desktopResizeRequest != nil {
                 desktopResizeChangedAt=ProcessInfo.processInfo.systemUptime
+                desktopResizeReport["events"]=(desktopResizeReport["events"] as? Int ?? 0)+1
                 return
             }
             if machine?.mixedDisplaysEnabled == true,mixedDisplayConfiguring {return}
