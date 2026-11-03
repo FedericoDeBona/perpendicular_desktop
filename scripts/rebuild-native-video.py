@@ -64,7 +64,10 @@ def main():
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--gpu-output', action='store_true', help='Opt in to the pixel-qualified GPU transfer experiment; browser performance is not qualified')
     parser.add_argument('--reuse-bitstream-staging', action='store_true', help='Opt in to bounded per-decoder input staging reuse; browser performance must be qualified')
+    parser.add_argument('--cpu-video-input', action='store_true', help='Opt in to the pixel-qualified CPU input experiment; no browser gain qualified')
     args = parser.parse_args()
+    if args.cpu_video_input and args.reuse_bitstream_staging:
+        raise ValueError('CPU video input and the rejected staging reuse experiment must be qualified separately')
     pins = json.loads((REPO / 'graphics/backend/video-inputs.json').read_text())
     output = args.output.resolve()
     if output.exists() or output.is_relative_to(REPO):
@@ -85,10 +88,12 @@ def main():
         ('video-processor-native.patch', 'processor_patch_sha256'),
         ('vp9-gpu-output.patch', 'vp9_gpu_output_patch_sha256'),
         ('video-staging-reuse.patch', 'staging_reuse_patch_sha256'),
+        ('video-staging-input.patch', 'staging_input_patch_sha256'),
     )
     patches = [REPO / 'graphics/backend' / name for name, _ in patch_inputs
                if (name != 'vp9-gpu-output.patch' or args.gpu_output)
-               and (name != 'video-staging-reuse.patch' or args.reuse_bitstream_staging)]
+               and (name != 'video-staging-reuse.patch' or args.reuse_bitstream_staging)
+               and (name != 'video-staging-input.patch' or args.cpu_video_input)]
     for name, key in patch_inputs:
         if digest(REPO / 'graphics/backend' / name) != pins[key]:
             raise ValueError('Patch differs from the pinned input: ' + name)
@@ -121,7 +126,8 @@ def main():
     run([ninja, '-C', build, '-j1', 'src/dxmt-native/libdxmt-native.dylib'])
     library = build / 'src/dxmt-native/libdxmt-native.dylib'
     receipt = {'inputs': pins, 'gpu_output_experiment': args.gpu_output,
-               'staging_reuse_experiment': args.reuse_bitstream_staging, 'commands': commands, 'backend_sha256': digest(library),
+               'staging_reuse_experiment': args.reuse_bitstream_staging,
+               'cpu_video_input_experiment': args.cpu_video_input, 'commands': commands, 'backend_sha256': digest(library),
                'qualification': 'build-only; qualify processor pixels, decoder, ordinary/shared NV12 and BGRA, then Windows/Edge separately'}
     (output / 'build-receipt.json').write_text(json.dumps(receipt, indent=2) + '\n')
     print(library)

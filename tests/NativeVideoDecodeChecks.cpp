@@ -16,8 +16,9 @@ static uint32_t little(const uint8_t *p, unsigned n) {
   uint32_t v = 0; for (unsigned i = 0; i < n; ++i) v |= uint32_t(p[i]) << (i * 8); return v;
 }
 int main(int argc, char **argv) {
-  bool resources = argc == 4 && !std::strcmp(argv[3], "--resources");
-  if (argc != 3 && !resources) { std::fprintf(stderr, "Usage: check-video stream.ivf reference.nv12 [--resources]\n"); return 2; }
+  bool dynamicResources = argc == 4 && !std::strcmp(argv[3], "--dynamic-resources");
+  bool resources = dynamicResources || (argc == 4 && !std::strcmp(argv[3], "--resources"));
+  if (argc != 3 && !resources) { std::fprintf(stderr, "Usage: check-video stream.ivf reference.nv12 [--resources|--dynamic-resources]\n"); return 2; }
   FILE *input = std::fopen(argv[1], "rb"), *reference = std::fopen(argv[2], "rb");
   if (!input || !reference) return 2;
   uint8_t header[32];
@@ -95,6 +96,14 @@ int main(int argc, char **argv) {
   std::vector<uint8_t> expected(size_t(width) * height * 3 / 2), bytes;
   auto started = std::chrono::steady_clock::now();
   unsigned frames = 0;
+  ID3D11Buffer *dynamicInput = nullptr;
+  if (dynamicResources) {
+    D3D11_BUFFER_DESC inputDesc = {};
+    inputDesc.ByteWidth = PERP_VIDEO_MAX_BITSTREAM;
+    inputDesc.Usage = D3D11_USAGE_DYNAMIC; inputDesc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
+    inputDesc.BindFlags = D3D11_BIND_SHADER_RESOURCE; // Read-only binding must retain CPU upload eligibility.
+    check(device->CreateBuffer(&inputDesc, nullptr, &dynamicInput), "dynamic decoder input");
+  }
   for (;;) {
     uint8_t frame[12]; size_t got = std::fread(frame, 1, sizeof(frame), input);
     if (!got) break;
@@ -107,15 +116,32 @@ int main(int argc, char **argv) {
     check(vc->DecoderBeginFrame(decoder, view, 0, nullptr), "begin frame");
     if (resources) {
       D3D11_BUFFER_DESC inputDesc = {};
-      inputDesc.ByteWidth = size + 16;
-      inputDesc.Usage = D3D11_USAGE_STAGING; inputDesc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
+      inputDesc.ByteWidth = dynamicResources ? PERP_VIDEO_MAX_BITSTREAM : size + 16;
+      // Cover a CPU upload, a queued GPU write into staging, and a default
+      // GPU resource that must keep the ordinary readback path. All use the
+      // same nonzero offset and independently decoded pixel reference.
+      inputDesc.Usage = dynamicResources ? D3D11_USAGE_DYNAMIC : (frames == 2 ? D3D11_USAGE_DEFAULT : D3D11_USAGE_STAGING);
+      inputDesc.CPUAccessFlags = !dynamicResources && frames == 2 ? 0 : D3D11_CPU_ACCESS_WRITE;
+      std::vector<uint8_t> upload(inputDesc.ByteWidth, 0);
+      std::memcpy(upload.data() + 16, bytes.data(), size);
+      D3D11_SUBRESOURCE_DATA initial = {upload.data(), 0, 0};
       ID3D11Buffer *inputBuffer = nullptr;
-      check(device->CreateBuffer(&inputDesc, nullptr, &inputBuffer), "compressed resource");
-      D3D11_MAPPED_SUBRESOURCE write = {};
-      check(context->Map(inputBuffer, 0, D3D11_MAP_WRITE, 0, &write), "compressed resource map");
-      std::memset(write.pData, 0, 16);
-      std::memcpy((uint8_t *)write.pData + 16, bytes.data(), size);
-      context->Unmap(inputBuffer, 0);
+      if (dynamicResources) { inputBuffer = dynamicInput; inputBuffer->AddRef(); }
+      else check(device->CreateBuffer(&inputDesc, frames == 2 ? &initial : nullptr, &inputBuffer), "compressed resource");
+      if (frames == 0 || (dynamicResources && frames == 2)) {
+        D3D11_MAPPED_SUBRESOURCE write = {};
+        check(context->Map(inputBuffer, 0, dynamicResources ? D3D11_MAP_WRITE_DISCARD : D3D11_MAP_WRITE, 0, &write), "compressed resource map");
+        std::memcpy(write.pData, upload.data(), size + 16);
+        context->Unmap(inputBuffer, 0);
+      } else if (frames == 1) {
+        D3D11_BUFFER_DESC sourceDesc = inputDesc;
+        sourceDesc.Usage = D3D11_USAGE_DEFAULT; sourceDesc.CPUAccessFlags = 0;
+        ID3D11Buffer *gpuSource = nullptr;
+        check(device->CreateBuffer(&sourceDesc, &initial, &gpuSource), "GPU input source");
+        // No Flush or wait here: the decoder input snapshot must order this.
+        context->CopyResource(inputBuffer, gpuSource);
+        gpuSource->Release();
+      }
       struct {
         perp_video_resource_header header;
         perp_video_resource_buffer buffer;
@@ -168,7 +194,8 @@ int main(int argc, char **argv) {
   }
   if (!frames || std::fgetc(reference) != EOF) return 2;
   double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - started).count();
-  std::printf("D3D11 VP9 hardware %ux%u (%s): %u frames pixel-identical; decode/upload/readback %.3f ms total\n", width,height,resources ? "resource submit" : "decoder buffer",frames,ms);
+  std::printf("D3D11 VP9 hardware %ux%u (%s): %u frames pixel-identical; decode/upload/readback %.3f ms total\n", width,height,dynamicResources ? "dynamic resources" : (resources ? "resource submit" : "decoder buffer"),frames,ms);
+  if (dynamicInput) dynamicInput->Release();
   staging->Release(); view->Release(); texture->Release(); decoder->Release();
   vc->Release(); video->Release(); context->Release(); device->Release();
   std::fclose(reference); std::fclose(input);

@@ -233,3 +233,36 @@ v15 rimane un esperimento esplicito, senza promozione main.
 `video-staging-reuse.patch` è disponibile con `rebuild-native-video.py --reuse-bitstream-staging`. Il default resta CPUv12; `--gpu-output` è una scelta distinta, non necessaria al riuso. La ricetta verifica entrambi i pin anche quando le opzioni sono disattivate e registra le scelte nella ricevuta. Un decoder conserva una risorsa stagingCPUREAD, cresciuta a potenza2 solo quando serve e comunque entro16MiB già ammessi dal protocollo. Il mutex serializza i submit; copia,MapREAD bloccante,Unmap e controlli ownership/range restano obbligatori. Nessuna lettura diretta di memoria CPUWRITE o bypass di sincronizzazione. Il vettore compresso conserva la capacità fra i frame.
 
 Qualifica nativa su M1:3frame4K/offset16/slice1 pixel-identici,472file ricostruiti identici; 3frame4K Windows pure pixel-identici. Il confronto Edge nella stessa geometria non mostra vantaggio (15,31%drop base contro16,03%candidata, estremi approssimati), perciò resta solo opt-in e non promossa. Il profilo mostra creazione/readback per frame, ma non attribuisce tutti gli scarti all’allocatore. Per il confezionamento sperimentale partire dalla copia del runtime locale verificata29/29, sostituire il solo backend compilato, risolvere le dipendenze non di sistema verso le librerie già incluse con install-name relativo, firmarlo e verificarlo prima di aggiornarne l’hash nel runtime.json. Conservare patch e ricevuta della build in Notices/Perpendicular, marcarne esplicitamente la qualifica incompleta e verificare nuovamente tutti i membri. Non cambiare pin di produzione né trasferire librerie/runtime da un altro Mac. Il runtime immutabile effettivo e i moduli Windows vanno confermati al boot prima del confronto reale. [Evidenze](../../docs/VERIFICATION.md#2-novembre--riuso-bounded-dello-staging-bitstream).
+
+
+## Snapshot CPU coerente del bitstream (candidata M1, non promossa)
+
+`video-staging-input.patch` è opzionale con `rebuild-native-video.py --cpu-video-input`.
+Si applica alla base CPUv12; non si combina con `--reuse-bitstream-staging`, già
+escluso come miglioramento browser. Archivi, header condiviso e tutte le patch
+sono controllati tramite `video-inputs.json`, anche quando l'opzione è spenta.
+Gli altri argomenti della ricetta restano quelli sopra; la build ordinaria non
+cambia backend né registra driver Windows automaticamente.
+
+Il submit valida device, risorse, offset e size come prima. Il contesto copia
+la porzione necessaria dal proprio storage CPU sotto mutex. Per STAGING attende
+il fence delle precedenti scritture GPU. Per DYNAMIC CPU_WRITE senza bind di output/misc
+usa la memoria della corrente allocazione solo finché non è mai stata destinazione
+di una copia GPU; CopyBuffer/CopyStructureCount/upload GPU invalidano la scorciatoia
+al momento della registrazione, anche deferred. L'invalidazione resta permanente,
+compreso un successivo WRITE_DISCARD. In questi casi e per DEFAULT resta il
+readback precedente. Evita un nuovo blit/attesa per gli upload CPU effettivamente
+isolati. Nessun puntatore sopravvive allo snapshot; nessun permesso Map pubblico
+ampliato. Limite16MiB,
+HRESULT, hardware richiesto e ABI risorse1 invariati. Le prime otto letture per
+worker registrano soltanto capacity/offset/size/CPUflags/waited, per qualificare
+il ramo realmente utilizzato, senza contenuti video.
+
+NativeVideoDecodeChecks `--resources` usa un CPU upload, una scrittura GPU
+accodata verso staging senza flush esplicito e un input DEFAULT di ripiego.
+`--dynamic-resources` riusa un buffer16MiB: CPU WRITE_DISCARD, copia GPU accodata
+e nuovo WRITE_DISCARD. Entrambi passano tre frame4K I/P/P/slice1/offset16
+pixel-identici sulla candidata M1; il secondo mostra shortcut S_OK→S_FALSE→S_FALSE,
+quindi anche il riuso mantiene la disabilitazione dopo GPU-write. STAGING GPU-write
+richiede effettivamente il fence (`waited=1`). Non sono una prova FPS. Windows3frame4K e ramo CPU effettivo in Edge PASS; confronto4K NON SUPERATO: circa19,47%drop contro8,14% nel tratto sovrapposto approssimato, con underflow e senza nuovi crash/errori. DefaultCPUv12 conservato; nessuna promozione. Non ripetere questa sola scorciatoia come ipotesi di guadagno. Prossimo lavoro sul volume Unmap/attesa decoder richiede nuova evidenza di coerenza e un confronto reale;
+[registro corrente](../../docs/VERIFICATION.md#3-novembre--snapshot-coerente-dello-staging-video-sul-m1).

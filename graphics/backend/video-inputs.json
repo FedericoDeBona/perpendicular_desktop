@@ -18,7 +18,7 @@
   "shared_initialization_patch_sha256": "fd16333b1bf057abd985b01d8ffd8c29bb5ec07c06cddb4e94f680893c939827",
   "shared_initialization_source_sha256": "51d09b022faeb49e1ebc39c3e02f473ee6641589b5e42b2686f3465dc994dac1",
   "nv12_patch_sha256": "920c19e67ec26c0224713764720f1deb9fc4306ba82bd73b1f55c951532462e1",
-  "status": "default v12 candidate; optional --gpu-output transfer has native/Windows array pixels PASS but no demonstrated browser gain and one GPU disconnect; not promoted",
+  "status": "default CPUv12 unchanged; --cpu-video-input has native/Windows pixels and actual Edge CPU branch PASS but no qualified browser gain (worse 4K sample); optional GPU output and staging reuse likewise not promoted",
   "vp9_video_patch_sha256": "faa55e0876949d365c350fbb78628be73353b47474b78ce31c1a55567eb351f1",
   "resource_submit_patch_sha256": "4a2b310dbb0d9ea8a3e609add6996991437f0f57a10c9d047de9106951ec1657",
   "resource_submit_header_sha256": "ad2f6d652779f29a8d63860333cb0007456c00fd020c2574d9118421a67a95cd",
@@ -27,5 +27,6 @@
   "processor_formats_patch_sha256": "3677f718e105bc9eb8d5048bafa36a7b29e07d9ea4832a83b0f2bad422c8a453",
   "processor_patch_sha256": "a0e9f490908322b143487af549ab941958b04113db6490d571cac9c7ffa5bed5",
   "vp9_gpu_output_patch_sha256": "f686ec1ea36d39dc3c63e40ef834c1df147c8fbc390f6b323db324c568ca90a3",
-  "staging_reuse_patch_sha256": "fa2b0211d92ddb07492e3df73785b984bfc2b5c1129c7cead82cbc1b2e87c74b"
+  "staging_reuse_patch_sha256": "fa2b0211d92ddb07492e3df73785b984bfc2b5c1129c7cead82cbc1b2e87c74b",
+  "staging_input_patch_sha256": "056618041bbd0bb3bf918128980097d3f113b1de8f4064bf223dcde8620e99df"
 }

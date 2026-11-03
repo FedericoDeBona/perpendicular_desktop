@@ -1,0 +1,206 @@
+--- a/src/d3d11/d3d11_video.hpp
++++ b/src/d3d11/d3d11_video.hpp
+@@ -11,5 +11,9 @@
+   virtual ~NativeVideoContext() = default;
+ };
+ std::unique_ptr<NativeVideoDevice> CreateNativeVideoDevice(MTLD3D11Device *device);
++// Internal decoder snapshot; S_FALSE selects the ordinary GPU readback path.
++// The public D3D Map permissions and the wire protocol are unchanged.
++HRESULT CopyCPUVideoInput(ID3D11DeviceContext *context, ID3D11Buffer *source,
++                             UINT offset, UINT size, void *destination);
+ std::unique_ptr<NativeVideoContext> CreateNativeVideoContext(MTLD3D11Device *device, ID3D11DeviceContext *context);
+ }
+--- a/src/d3d11/d3d11_context_imm.cpp
++++ b/src/d3d11/d3d11_context_imm.cpp
+@@ -6,6 +6,7 @@
+ #include "d3d11_context_impl.cpp"
+ #include "dxmt_context.hpp"
+ #include "dxmt_staging.hpp"
++#include <cstdio>
+ 
+ namespace dxmt {
+ struct ContextInternalState {
+@@ -131,6 +132,47 @@
+     }
+ 
+     return dynamic->immediateMappedMemory();
++  }
++
++  HRESULT CopyCPUVideoInput(ID3D11Buffer *source, UINT offset, UINT size, void *destination) {
++    std::lock_guard<d3d11_device_mutex> lock(mutex);
++    if (!source || !destination || !size) return E_INVALIDARG;
++    D3D11_BUFFER_DESC desc = {};
++    source->GetDesc(&desc);
++    if (desc.Usage == D3D11_USAGE_DYNAMIC) {
++      HRESULT hr = GetResourceCommon(source)->copyCPUVideoInput(offset, size, destination);
++      static std::atomic<unsigned> dynamic_samples{0};
++      if (dynamic_samples.fetch_add(1, std::memory_order_relaxed) < 8)
++        std::fprintf(stderr, "Perpendicular video dynamic snapshot: capacity=%u offset=%u bytes=%u hr=0x%x\n",
++                     desc.ByteWidth, offset, size, unsigned(hr));
++      return hr;
++    }
++    if (desc.Usage != D3D11_USAGE_STAGING) return S_FALSE;
++    auto staging = GetStagingResource(source, 0);
++    if (!staging || offset > staging->length || size > staging->length - offset)
++      return E_INVALIDARG;
++    // Read the current CPU allocation only after all writes to it complete.
++    // CPU-only uploads have no GPU write dependency. A prior GPU copy still
++    // requires the same queue fence as Map(READ), without adding another blit.
++    bool waited = false;
++    for (;;) {
++      auto coherent = cmd_queue.CoherentSeqId();
++      auto result = staging->tryMap(coherent, true, false);
++      if (result == StagingMapResult::Mapped || result == StagingMapResult::Renamable)
++        return E_FAIL;
++      if (result == StagingMapResult::Mappable) break;
++      Flush();
++      cmd_queue.WaitCPUFence(coherent + uint64_t(result));
++      waited = true;
++    }
++    auto bytes = static_cast<const uint8_t *>(staging->mappedImmediateMemory());
++    if (!bytes) return E_FAIL;
++    std::memcpy(destination, bytes + offset, size);
++    static std::atomic<unsigned> samples{0};
++    if (samples.fetch_add(1, std::memory_order_relaxed) < 8)
++      std::fprintf(stderr, "Perpendicular video input snapshot: capacity=%u offset=%u bytes=%u cpu=0x%x waited=%u\n",
++                   desc.ByteWidth, offset, size, desc.CPUAccessFlags, unsigned(waited));
++    return S_OK;
+   }
+ 
+   HRESULT
+@@ -640,6 +682,12 @@
+   bool ignore_map_flag_no_wait_;
+ };
+ 
++HRESULT CopyCPUVideoInput(ID3D11DeviceContext *context, ID3D11Buffer *source,
++                             UINT offset, UINT size, void *destination) {
++  auto immediate = dynamic_cast<MTLD3D11ImmediateContext *>(context);
++  return immediate ? immediate->CopyCPUVideoInput(source, offset, size, destination) : E_INVALIDARG;
++}
++
+ std::unique_ptr<MTLD3D11DeviceContextBase>
+ InitializeImmediateContext(MTLD3D11Device *pDevice, CommandQueue &cmd_queue) {
+   return std::make_unique<MTLD3D11ImmediateContext>(pDevice, cmd_queue);
+--- a/src/d3d11/d3d11_video.cpp
++++ b/src/d3d11/d3d11_video.cpp
+@@ -12,6 +12,8 @@
+ #include <array>
+ #include <mutex>
+ #include <cstring>
++#include <cstdio>
++#include <atomic>
+ 
+ namespace dxmt {
+ namespace {
+@@ -592,6 +594,24 @@
+     if (bitstream < 0) return S_OK;
+     auto &entry = entries[bitstream];
+     try {
++      // Snapshot CPU-backed inputs through the context's coherence tracker.
++      // No public Map(READ) on a CPU_WRITE-only resource and no retained pointer.
++      D3D11_BUFFER_DESC sourceDesc = {};
++      sources[bitstream]->GetDesc(&sourceDesc);
++      static std::atomic<unsigned> descriptors{0};
++      if (descriptors.fetch_add(1, std::memory_order_relaxed) < 8)
++        std::fprintf(stderr, "Perpendicular video input descriptor: usage=%u capacity=%u offset=%u bytes=%u cpu=0x%x bind=0x%x misc=0x%x\n",
++                     unsigned(sourceDesc.Usage), sourceDesc.ByteWidth, entry.offset, entry.size, sourceDesc.CPUAccessFlags, sourceDesc.BindFlags, sourceDesc.MiscFlags);
++      if (sourceDesc.Usage == D3D11_USAGE_STAGING || sourceDesc.Usage == D3D11_USAGE_DYNAMIC) {
++        std::vector<uint8_t> snapshot(entry.size);
++        HRESULT copied = CopyCPUVideoInput(context_, sources[bitstream].ptr(),
++                                               entry.offset, entry.size, snapshot.data());
++        if (FAILED(copied)) return copied;
++        if (copied == S_OK) {
++          decoder->submitted.swap(snapshot);
++          return S_OK;
++        }
++      }
+       D3D11_BUFFER_DESC desc = {};
+       desc.ByteWidth = entry.size; desc.Usage = D3D11_USAGE_STAGING; desc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+       Com<ID3D11Buffer> staging;
+--- a/src/d3d11/d3d11_resource.hpp
++++ b/src/d3d11/d3d11_resource.hpp
+@@ -130,6 +130,11 @@
+   CreateSharedHandle(const SECURITY_ATTRIBUTES *Attributes, DWORD Access, const WCHAR *pName, HANDLE *pNTHandle) = 0;
+ 
+   virtual Rc<StagingResource> staging(UINT Subresource) = 0;
++  // A GPU copy destination permanently loses the CPU-only video shortcut.
++  // Invalidate when recording, including deferred command lists, so replay
++  // cannot race a previously captured hint. Other resource kinds opt out.
++  virtual void invalidateCPUVideoInput() {}
++  virtual HRESULT copyCPUVideoInput(UINT, UINT, void *) { return S_FALSE; }
+   virtual Rc<DynamicBuffer> dynamicBuffer(UINT *pBufferLength, UINT *pBindFlags) = 0;
+   /* Embedder-shared backing for a DYNAMIC buffer (dxmt_native.h). */
+   virtual HRESULT
+--- a/src/d3d11/d3d11_buffer.cpp
++++ b/src/d3d11/d3d11_buffer.cpp
+@@ -1,3 +1,4 @@
++#include <cstdio>
+ /*
+  * Copyright 2026 Feifan He for CodeWeavers
+  *
+@@ -45,6 +46,7 @@
+   bool allow_raw_view;
+ 
+   Rc<DynamicBuffer> dynamic_;
++  std::atomic<bool> gpu_copy_destination_{false};
+   /* Mapped pointer -> cookie of each external allocation; an allocation
+    * lives as long as the buffer, so entries are never removed. */
+   std::mutex external_mutex_;
+@@ -145,6 +147,31 @@
+     return dynamic_;
+   }
+ 
++  void invalidateCPUVideoInput() override {
++    gpu_copy_destination_.store(true, std::memory_order_release);
++  }
++
++  HRESULT copyCPUVideoInput(UINT offset, UINT size, void *destination) override {
++    // Only a dynamic upload with no GPU-output binding is CPU-only. A dynamic buffer
++    // may legally receive GPU copies, so its first such write permanently
++    // disables this path, even after a later DISCARD/rename.
++    bool gpu_written = gpu_copy_destination_.load(std::memory_order_acquire);
++    static std::atomic<unsigned> eligibility_samples{0};
++    if (eligibility_samples.fetch_add(1, std::memory_order_relaxed) < 8)
++      std::fprintf(stderr, "Perpendicular video CPU eligibility: usage=%u bind=0x%x misc=0x%x cpu=0x%x allocation=%u gpuWritten=%u\n",
++                   unsigned(desc.Usage), desc.BindFlags, desc.MiscFlags, desc.CPUAccessFlags,
++                   unsigned(dynamic_.ptr() != nullptr), unsigned(gpu_written));
++    if (desc.Usage != D3D11_USAGE_DYNAMIC || desc.CPUAccessFlags != D3D11_CPU_ACCESS_WRITE ||
++        (desc.BindFlags & kD3D11OutputBindFlags) || desc.MiscFlags || !dynamic_.ptr() || gpu_written)
++      return S_FALSE;
++    if (!destination || !size || offset > desc.ByteWidth || size > desc.ByteWidth - offset)
++      return E_INVALIDARG;
++    auto bytes = static_cast<const uint8_t *>(dynamic_->immediateMappedMemory());
++    if (!bytes) return S_FALSE;
++    std::memcpy(destination, bytes + offset, size);
++    return S_OK;
++  }
++
+   HRESULT
+   bindDynamicBufferExternalFd(int fd, uint64_t backing_length, uint32_t cookie) override {
+     if (!dynamic_.ptr())
+--- a/src/d3d11/d3d11_context_impl.cpp
++++ b/src/d3d11/d3d11_context_impl.cpp
+@@ -1207,6 +1207,7 @@
+     if (auto uav = static_cast<D3D11UnorderedAccessView *>(pSrcView)) {
+       if (!uav->hasCounter())
+         return;
++      GetResourceCommon(pDstBuffer)->invalidateCPUVideoInput();
+       if (auto staging_dst = GetStagingResource(pDstBuffer, 0)) {
+         SwitchToBlitEncoder(CommandBufferState::ReadbackBlitEncoderActive);
+         UseCopyDestination(staging_dst);
+@@ -1314,6 +1315,7 @@
+         });
+         promote_flush = true;
+       } else if (auto bindable = GetResourceCommon(pDstResource)) {
++        bindable->invalidateCPUVideoInput();
+         auto [staging_buffer, offset] = AllocateStagingBuffer(copy_len, 16);
+         staging_buffer.updateContents(offset, pSrcData, copy_len);
+         SwitchToBlitEncoder(CommandBufferState::UpdateBlitEncoderActive);
+@@ -3905,6 +3907,7 @@
+     }
+     if (SrcBox.right <= SrcBox.left)
+       return;
++    GetResourceCommon(pDstResource)->invalidateCPUVideoInput();
+     if (auto staging_dst = GetStagingResource(pDstResource, DstSubresource)) {
+       if (auto staging_src = GetStagingResource(pSrcResource, SrcSubresource)) {
+         SwitchToBlitEncoder(CommandBufferState::BlitEncoderActive);
