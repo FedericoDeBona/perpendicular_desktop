@@ -228,6 +228,36 @@ causalità certa da un solo confronto. Il default della ricetta resta v14; la
 v15 rimane un esperimento esplicito, senza promozione main.
 
 
+## DISCARD condiviso degli input video v16 (sperimentale)
+
+`external-video-discard.patch` si applica con `rebuild-video-umd.py
+--external-video-discard`, separatamente da `--bounded-map-growth`. Il default
+resta v14. Richiede la capacità host già esistente
+`NPT_CAPSET_CAP_D3D11_EXTERNAL_BUFFERS`; non introduce un nuovo protocollo.
+Solo buffer DYNAMIC CPUWRITE senza CPUREAD, almeno1MiB e con BindFlags
+esattamente DECODER possono offrire il primo slot condiviso già sul primo
+WRITE_DISCARD. Gli altri buffer mantengono l'attivazione su NO_OVERWRITE.
+
+La risposta Map del backend decide se lo slot condiviso è utilizzabile.
+Rimangono il buffer intero, il limite esistente di quattro slot per16MiB,
+la rinuncia sul contesto differito e il ripiego ordinario se l'offerta fallisce.
+Non si limita Unmap al DataSize del primo submit: altri submit/copie possono
+usare byte successivi. Per uno slot accettato l'Unmap host esistente evita la
+copia intera; lettura/decodifica e upload NV12 successivi rimangono separati.
+
+`capture-video-faults.ps1 -IncludeInputMaps` include otto record informativi
+Map con capacità e cookie, senza indirizzi o contenuti. Un cookie diverso da
+NONE indica uno slot riconosciuto dal backend, non un contatore dei byte
+copiati o una misura FPS. Qualificare pixel, fallback e caso Edge reale prima
+di una promozione; `NativeVideoDecodeChecks --decoder-offsets` verifica tre
+posizioni16/4096/128 attraverso le normali API decoder Windows.
+
+M1:441sorgenti ricostruiti, coldboot protetto e tre frame4K Windows esatti,
+con cookie0→NONE→0. Edge usa il percorso (7cookie validi/8Map iniziali).
+Primo campione3,66%drop e overlap approssimato3,89%contro8,54%v14 sono
+favorevoli, ma manca un A/B fresco: defaultv14 e main non promossi.
+[Evidenze e limiti](../../docs/VERIFICATION.md#3-novembre--discard-condiviso-degli-input-decoder-sul-m1).
+
 ## Riuso staging compresso, esperimento M1 del 2 novembre
 
 `video-staging-reuse.patch` è disponibile con `rebuild-native-video.py --reuse-bitstream-staging`. Il default resta CPUv12; `--gpu-output` è una scelta distinta, non necessaria al riuso. La ricetta verifica entrambi i pin anche quando le opzioni sono disattivate e registra le scelte nella ricevuta. Un decoder conserva una risorsa stagingCPUREAD, cresciuta a potenza2 solo quando serve e comunque entro16MiB già ammessi dal protocollo. Il mutex serializza i submit; copia,MapREAD bloccante,Unmap e controlli ownership/range restano obbligatori. Nessuna lettura diretta di memoria CPUWRITE o bypass di sincronizzazione. Il vettore compresso conserva la capacità fra i frame.

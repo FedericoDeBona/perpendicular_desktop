@@ -1,0 +1,95 @@
+--- a/src/virtio/neptune/npt_overrides_d3d11_context.c
++++ b/src/virtio/neptune/npt_overrides_d3d11_context.c
+@@ -6,6 +6,13 @@
+  * UpdateSubresource (registry-skipped because pSrcData is unsized),
+  * and End/GetData with shared-memory query feedback.
+  */
++
++#if defined(_WIN32)
++#include "triton/tritonFaultTrace.h"
++#define NPT_VIDEO_INPUT_TRACE(...) tritonTraceVideoInput(__VA_ARGS__)
++#else
++#define NPT_VIDEO_INPUT_TRACE(...) ((void)0)
++#endif
+ 
+ #include "npt_com.h"
+ #include "npt_overrides_d3d11_feedback.h"
+@@ -137,6 +144,10 @@
+       ptr = npt_d3d11_buffer_slot_ptr(b, 0);
+    }
+ 
++   D3D11_BUFFER_DESC desc;
++   if (npt_d3d11_buffer_fill_desc(b, &desc) &&
++       desc.BindFlags == D3D11_BIND_DECODER)
++      NPT_VIDEO_INPUT_TRACE(desc.ByteWidth, cookie);
+    pMappedResource->pData = ptr;
+    pMappedResource->RowPitch = row_pitch;
+    pMappedResource->DepthPitch = depth_pitch;
+@@ -166,12 +177,28 @@
+          npt_d3d11_buffer_drop_external(b);
+          return false;
+       }
+-      /* This NO_OVERWRITE itself still takes the map ring: the host's
+-       * current contents are not in a shmem yet. */
+-      if (MapType == D3D11_MAP_WRITE_NO_OVERWRITE &&
+-          npt_d3d11_buffer_claim_external(b))
+-         npt_d3d11_buffer_add_external_slot(b, npt_com_self_ring(self));
+-      return false;
++      D3D11_BUFFER_DESC desc;
++      const bool video_discard = MapType == D3D11_MAP_WRITE_DISCARD &&
++         npt_d3d11_buffer_fill_desc(b, &desc) &&
++         desc.BindFlags == D3D11_BIND_DECODER;
++      if (video_discard) {
++         /* Decoder inputs use DISCARD without a preceding NO_OVERWRITE.
++          * Offer storage before this rename; the existing host Map reply
++          * decides whether it is safe to write in place.  Keep the full
++          * buffer, slot cap, retirement and ordinary-copy fallback. */
++         if (!npt_d3d11_buffer_claim_external(b) ||
++             !npt_d3d11_buffer_add_external_slot(b, npt_com_self_ring(self))) {
++            npt_d3d11_buffer_drop_external(b);
++            return false;
++         }
++      } else {
++         /* This NO_OVERWRITE itself still takes the map ring: the host's
++          * current contents are not in a shmem yet. */
++         if (MapType == D3D11_MAP_WRITE_NO_OVERWRITE &&
++             npt_d3d11_buffer_claim_external(b))
++            npt_d3d11_buffer_add_external_slot(b, npt_com_self_ring(self));
++         return false;
++      }
+    }
+ 
+    if (MapType == D3D11_MAP_WRITE_DISCARD) {
+--- a/src/virtio/neptune/triton/tritonFaultTrace.h
++++ b/src/virtio/neptune/triton/tritonFaultTrace.h
+@@ -25,4 +25,19 @@
+     tritonTraceFaultText(message);
+ }
+ 
++/* Eight informational Map records, independently bounded from faults.
++ * Cookie names accepted host-shared storage, not an address or byte counter. */
++static inline void tritonTraceVideoInput(UINT bytes, UINT cookie) {
++    static volatile LONG emitted;
++    if (InterlockedIncrement(&emitted) > 8) return;
++    static const GUID provider = {0x48dce1b6,0xe965,0x4e8a,{0xb5,0xfa,0xd9,0xcb,0x52,0x65,0x72,0x12}};
++    REGHANDLE handle = 0;
++    if (EventRegister(&provider, NULL, NULL, &handle) != ERROR_SUCCESS) return;
++    WCHAR message[256];
++    _snwprintf_s(message, 256, _TRUNCATE,
++        L"Perpendicular video input v16: capacity=%u external_cookie=%u", bytes, cookie);
++    EventWriteString(handle, 4, 1, message);
++    EventUnregister(handle);
++}
++
+ #endif
+--- a/src/virtio/neptune/triton/neptune_umd.rc
++++ b/src/virtio/neptune/triton/neptune_umd.rc
+@@ -30,7 +30,7 @@
+             VALUE "CompanyName", "Perpendicular experimental build; upstream Turing Software LLC"
+             VALUE "FileDescription", "Experimental Neptune video UMD - Perpendicular"
+             VALUE "FileVersion", NPT_RC_STR(VER)
+-            VALUE "PrivateBuild", "Perpendicular video-resource-v14"
++            VALUE "PrivateBuild", "Perpendicular video-resource-v16"
+             VALUE "InternalName", "neptune_umd"
+             VALUE "OriginalFilename", "neptune_umd.dll"
+             VALUE "ProductName", "Neptune"

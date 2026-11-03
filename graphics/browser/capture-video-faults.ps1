@@ -1,13 +1,15 @@
 # Short, metadata-only trace for the experimental video UMD. Use in QA.
 # Start before a fresh Edge GPU process; Stop emits a bounded read-only report.
 param([Parameter(Mandatory=$true)][ValidateSet('Start','Stop','Read')][string]$Action,
-      [Parameter(Mandatory=$true)][string]$TracePath)
+      [Parameter(Mandatory=$true)][string]$TracePath,
+      [switch]$IncludeInputMaps)
 $ErrorActionPreference='Stop';$ProgressPreference='SilentlyContinue'
 $name='PerpendicularVideoQA-FirstFault'
 $provider='{48DCE1B6-E965-4E8A-B5FA-D9CB52657212}'
 if($Action -eq 'Start'){
  if(Test-Path -LiteralPath $TracePath){throw 'Fresh trace file required'}
- & logman.exe create trace $name -o $TracePath -p $provider 0x1 2 -f bincirc -max 4 -nb 2 4 -bs 64 -ft 1 -ets | Out-Null
+ $level=if($IncludeInputMaps){4}else{2}
+ & logman.exe create trace $name -o $TracePath -p $provider 0x1 $level -f bincirc -max 4 -nb 2 4 -bs 64 -ft 1 -ets | Out-Null
  if($LASTEXITCODE -ne 0){throw ('Trace start failed: '+$LASTEXITCODE)}
  @{status='started';session=$name;provider=$provider;path=$TracePath;maxMiB=4}|ConvertTo-Json -Compress
 }else{

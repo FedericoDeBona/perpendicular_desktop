@@ -17,8 +17,9 @@ static uint32_t little(const uint8_t *p, unsigned n) {
 }
 int main(int argc, char **argv) {
   bool dynamicResources = argc == 4 && !std::strcmp(argv[3], "--dynamic-resources");
+  bool decoderOffsets = argc == 4 && !std::strcmp(argv[3], "--decoder-offsets");
   bool resources = dynamicResources || (argc == 4 && !std::strcmp(argv[3], "--resources"));
-  if (argc != 3 && !resources) { std::fprintf(stderr, "Usage: check-video stream.ivf reference.nv12 [--resources|--dynamic-resources]\n"); return 2; }
+  if (argc != 3 && !resources && !decoderOffsets) { std::fprintf(stderr, "Usage: check-video stream.ivf reference.nv12 [--resources|--dynamic-resources|--decoder-offsets]\n"); return 2; }
   FILE *input = std::fopen(argv[1], "rb"), *reference = std::fopen(argv[2], "rb");
   if (!input || !reference) return 2;
   uint8_t header[32];
@@ -167,8 +168,10 @@ int main(int argc, char **argv) {
     } else {
     UINT capacity = 0; void *buffer = nullptr;
     check(vc->GetDecoderBuffer(decoder, D3D11_VIDEO_DECODER_BUFFER_BITSTREAM, &capacity, &buffer), "buffer");
-    if (size > capacity || !buffer) return 3;
-    std::memcpy(buffer, bytes.data(), size);
+    const UINT offsets[] = {16, 4096, 128};
+    const UINT offset = decoderOffsets ? offsets[frames % 3] : 0;
+    if (offset > capacity || size > capacity - offset || !buffer) return 3;
+    std::memcpy(static_cast<uint8_t *>(buffer) + offset, bytes.data(), size);
     check(vc->ReleaseDecoderBuffer(decoder, D3D11_VIDEO_DECODER_BUFFER_BITSTREAM), "release buffer");
     if (!frames) {
       D3D11_VIDEO_DECODER_BUFFER_DESC invalid = {};
@@ -177,7 +180,7 @@ int main(int argc, char **argv) {
       if (vc->SubmitDecoderBuffers(decoder, 1, &invalid) != E_INVALIDARG) return 3;
     }
     D3D11_VIDEO_DECODER_BUFFER_DESC submit = {};
-    submit.BufferType = D3D11_VIDEO_DECODER_BUFFER_BITSTREAM; submit.DataSize = size;
+    submit.BufferType = D3D11_VIDEO_DECODER_BUFFER_BITSTREAM; submit.DataSize = size; submit.DataOffset = offset;
     check(vc->SubmitDecoderBuffers(decoder, 1, &submit), "submit");
     check(vc->DecoderEndFrame(decoder), "end frame");
     }

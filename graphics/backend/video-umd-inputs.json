@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "status": "default v14 retains verified small-map recovery; optional --bounded-map-growth v15 activates real caps but no demonstrated browser gain and worse overlapping sample; not promoted",
+  "status": "default v14 retained; v15 pressure cap and v16 early external decoder DISCARD are separate opt-in experiments, browser gain not qualified",
   "mesa": {
     "revision": "bf536bba65454900d782fa7417bc95c1608d7483",
     "url": "https://codeload.github.com/osy/virtio-win-mesa/tar.gz/bf536bba65454900d782fa7417bc95c1608d7483",
@@ -69,5 +69,7 @@
   "map_allocation_trace_patch_sha256": "782638c63cb1ffb965b1747d77dc048df5709222e72f9fcd084c90b01406cf24",
   "compact_shmem_patch_sha256": "132b5a55e512637f364e0adea8029fd05c88738232f317f149b8d8e43e3f61f7",
   "bounded_map_growth_patch_sha256": "017a8e4fd7ba2c5062be7c4f454c758d78092edd4939bb502ce89f663e05cf90",
-  "bounded_map_growth_revision": "Perpendicular video-resource-v15"
+  "bounded_map_growth_revision": "Perpendicular video-resource-v15",
+  "external_video_discard_patch_sha256": "dc4dc0f46fd3bcdf4611c676b02788a5bf98a41ff3bb0a82e78c0941011ed550",
+  "external_video_discard_revision": "Perpendicular video-resource-v16"
 }

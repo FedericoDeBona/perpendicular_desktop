@@ -1,5 +1,8 @@
 # Registro dei problemi
 
+**3 novembre — DISCARD condiviso v16: primo confronto favorevole, qualifica generale IN CORSO.** Build/441sorgenti, coldboot/protezioni e tre frame4K Windows PASS; shared e fallback esercitati, percorso effettivo anche in Edge. Campione4K:65/1777drop3,66%; overlap approssimato45/1158 (3,89%) contro99/1159v14 (8,54%), endpoint entro0,276s. Non A/B fresco o zero-frame; main/defaultv14 non promossi. QA corrente CPUv12/UMDv16, vecchio hotspot Unmap assente dal nuovo sample breve; attesaVT/Map/presentazione restano. Prossimo passo riferimento v14 fresco, conferma v16 e residuo; poi Creality/main. [Evidenze](VERIFICATION.md#3-novembre--discard-condiviso-degli-input-decoder-sul-m1).
+
+
 **3 novembre — inputCPU video M1: pixel PASS, guadagno NON SUPERATO.** Ramo effettivo DYNAMIC/BindDECODER confermato nel probe e in Edge, sei frame nativi e tre Windows corretti, BGRA condivisa conservata. Stesso2160p60 hardware: candidata287/1474drop19,47%, base119/1462drop8,14% nel tratto sovrapposto approssimato; underflow senza crash/errori nuovi, nessuna regressione causale isolata. Esperimento solo opt-in, CPUv12/UMDv14 ripristinati e verificati. Profilo breve: snapshotCPU6stack, Unmap298memcpy, decodeVT318/attesa, uploadNV12115; non percentualiCPU o tempi perframe. Prossimo passo volume del trasferimento driver e attesa decoder, preservando dati/ordinamento; video poi Creality e main restano aperti. [Evidenze](VERIFICATION.md#3-novembre--snapshot-coerente-dello-staging-video-sul-m1).
 
 

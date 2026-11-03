@@ -32,13 +32,18 @@ def main():
     parser.add_argument('--ninja', type=Path, required=True)
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--bounded-map-growth', action='store_true', help='Opt in to v15 pressure cap experiment; browser performance is not qualified')
+    parser.add_argument('--external-video-discard', action='store_true', help='Opt in to v16 shared input storage on decoder DISCARD; browser performance is not qualified')
     parser.add_argument('--prepare-only', action='store_true', help='Check inputs and reconstruct source without compiling')
     parser.add_argument('--toolchain-profile', default='original',
                         help='Explicit pinned toolchain; profiles do not change the driver/source ABI')
     args = parser.parse_args()
+    if args.bounded_map_growth and args.external_video_discard:
+        parser.error('Choose one driver experiment at a time')
     pins = json.loads((REPO / 'graphics/backend/video-umd-inputs.json').read_text())
     if args.bounded_map_growth:
         pins['candidate_revision'] = pins['bounded_map_growth_revision']
+    if args.external_video_discard:
+        pins['candidate_revision'] = pins['external_video_discard_revision']
     if args.toolchain_profile != 'original':
         profiles = pins.get('toolchain_profiles', {})
         if args.toolchain_profile not in profiles:
@@ -63,6 +68,9 @@ def main():
         if digest(path) != pins[key]:
             raise ValueError('Shared fix differs from the pinned input: ' + path.name)
     sdk = args.windows_sdk.resolve(strict=True)
+    external_patch = REPO / 'graphics/backend/external-video-discard.patch'
+    if digest(external_patch) != pins['external_video_discard_patch_sha256']:
+        raise ValueError('Shared fix differs from the pinned input: ' + external_patch.name)
     for name, expected in pins['sdk_files'].items():
         if digest(sdk / name) != expected:
             raise ValueError('SDK/tool input differs: ' + name)
@@ -121,6 +129,9 @@ def main():
     if args.bounded_map_growth:
         run(['git', 'apply', '--check', bounded_growth_patch], cwd=source)
         run(['git', 'apply', bounded_growth_patch], cwd=source)
+    if args.external_video_discard:
+        run(['git', 'apply', '--check', external_patch], cwd=source)
+        run(['git', 'apply', external_patch], cwd=source)
     shutil.copyfile(header, source / 'src/virtio/neptune/triton/video-resource-submit.h')
     includes = [wdk / 'c/Include' / pins['wdk']['include_version'] / kind for kind in ('um', 'shared')]
     includes += [sdk / 'xwin' / name for name in ('sdk/include/ucrt', 'sdk/include/shared', 'sdk/include/um', 'sdk/include/winrt', 'crt/include')]
@@ -149,7 +160,8 @@ def main():
                      "\n[host_machine]\nsystem = 'windows'\ncpu_family = 'aarch64'\ncpu = 'armv8'\nendian = 'little'\n[built-in options]\n"+
                      'c_args = '+repr(compile_args)+'\ncpp_args = '+repr(compile_args)+'\nc_link_args = '+repr(link_args)+
                      '\ncpp_link_args = '+repr(link_args)+"\nb_vscrt = 'mt'\n")
-    receipt = {'inputs': pins, 'bounded_map_growth_experiment': args.bounded_map_growth, 'toolchain_profile': args.toolchain_profile, 'compiler': version, 'commands': commands,
+    receipt = {'inputs': pins, 'bounded_map_growth_experiment': args.bounded_map_growth,
+               'external_video_discard_experiment': args.external_video_discard, 'toolchain_profile': args.toolchain_profile, 'compiler': version, 'commands': commands,
                'qualification': 'source preparation only; no Windows install or video qualification'}
     if not args.prepare_only:
         build = output / 'build'
