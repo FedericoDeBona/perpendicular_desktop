@@ -1,5 +1,7 @@
 # Registro dei problemi
 
+**3 novembre — LOK: menu raggiunto con WARP, driver x86 ancora APERTO (GFX-011).** Permessi SMB già corretti e componenti effettivi allineati. Log Unity precedente con device removed/crash; nuovo avvio hardware registra errore di protocollo CreateInputLayout. Rendering software Microsoft arriva al menu nell'app principale; collegamento `LOK (compatibilita).lnk` creato e riletto nella cartella del gioco, ricetta condivisa. Nessuna qualifica di partita/FPS/stabilità o correzione generale del driver; nessuna nuova build o promozione video. [Evidenze e limiti](VERIFICATION.md#3-novembre--lok-x86-e-avvio-software).
+
 **2 novembre — avvio main RECUPERATO nel caso corrente.** Dopo consenso, una sola interruzione forzata del boot bloccato echeckqcow2offline PASS. Windows ripartito ma primario4096×2160 oltrelimite: topologia ripristinata con CLI esistente, secondo arresto normale/boot97955 riusciti. Desktop nativo1920×1200 visibile eguest collegato,2schermiMac; appprincipale lasciata aperta. SYS-001/GFX-010 restano aperti per causa/recuperoautomatico, video/Creality in pausa. [Evidenze](VERIFICATION.md#2-novembre--recupero-del-boot-main-senza-collegamento).
 
 **2 novembre — esecuzione file nelle cartelle condivise CORRETTA nel caso verificato (FS-010).** Policy generale distribuita in canonica eQA: fileMac leggibili senza bitx ora apribili per esecuzioneWindows. Tre exportREAD|EXECUTE PASS e file non leggibili ancora negati; avvio reale di programmaMicrosoft daDownloads condivisa PASS. LOK intatto/0664, nessun chmod; build/firma/main riuscite. TODO-003 generale eFS-004 restano aperti, video/Creality in pausa. [Evidenze](VERIFICATION.md#2-novembre--permesso-di-esecuzione-windows-sulle-cartelle-smb).
@@ -197,6 +199,8 @@ Il ciclo RAM protetto 4→2→4 GiB con dati conservati resta la qualifica prece
 
 ### FS-010 — Eseguibili Windows leggibili rifiutati dalle cartelle SMB
 
+- **3 novembre, seguito LOK:** policy ancora presente su tutti i tre export e gioco effettivamente avviato dalla Download condivisa. Il problema residuo grafico è GFX-011: il PASS dei permessi non equivale alla compatibilità di ogni applicazione. [Verifica](VERIFICATION.md#3-novembre--lok-x86-e-avvio-software).
+
 - **Stato:** CORRETTO nel perimetro verificato main2novembre; accessoSMBexecute e avvio daWindows riusciti, senza cambiare il modoMac0664 del fileutente.
 - **Perimetro:** tutti gli export autenticati delle cartelle personali. File/policyWindows da distinguere da errore esecuzione nel Finder; nessun chmod ricorsivo.
 - **Correzione distribuita e verificata:** policy SMB `acl allow execute always = yes` per ogni export, conservando autenticazione/lettura/loopback/SMB3cifrato e modiMac. Non disabilitare SmartScreen/Defender/CodeIntegrity.
@@ -278,6 +282,14 @@ Il ciclo RAM protetto 4→2→4 GiB con dati conservati resta la qualifica prece
 - **Requisito/correzione:** client firmato montato direttamente nella Downloads del profilo, Known Folder normale; nessuna unità aggiuntiva, NoDrives o riferimenti al backend nelle operazioni ordinarie. Vecchi dati Windows rinominati integralmente sullo stesso volume in backup interno. Componenti tecnici restano amministrativamente ispezionabili.
 - **Fallimenti conservati:** controllo immediato del mount fallisce due volte, rollback riuscito; aggiunta attesa limitata della pubblicazione. Primo Ctrl+L mostra ancora suggerimenti X: della prova precedente: rimosse soltanto le relative voci TypedPaths, preservati gli altri valori/ordine.
 - **Criterio circoscritto verificato:** percorso C:\Users\federico\Downloads, unità logiche C:/D:/nessuna X:, byte e rinomina bidirezionali, riavvio servizio,9voci originali nel backup; Explorer con Downloads normale, Salva con nome Notepad→nuovo file effettivo Mac. Pulizia dei soli due file di prova confermata anche dal Mac. Qualifica del boot completo e semantiche generali restano TODO-003; non ripetere il caso già positivo senza modifiche pertinenti. [Diario](VERIFICATION.md#27-ottobre--download-ordinaria-senza-unita-aggiuntiva).
+
+### GFX-011 — Avvio Unity x86 interrotto sul percorso Direct3D
+
+- **Stato:** APERTO; caso LOK 32 bit nella main M1 del 3 novembre. Servizio, UMD originali, backend effettivo e policy SMB concordi con la distribuzione prevista; nessuna correzione x86 già qualificata mancante identificata.
+- **Evidenza:** Player.log dell'uso precedente contiene DXGI_ERROR_DEVICE_REMOVED e crash UnityPlayer/c0000005. Nuovo avvio hardware registra `cmd_type=0xff005708`/dispatch failed, cioè ID3D11Device::CreateInputLayout; non ancora isolato il parametro che invalida la decodifica. Non attribuire il guasto a un limite texture o alla sola RAM.
+- **Alternativa circoscritta:** WARP Microsoft raggiunge il menu LOK nella vista Desktop. Collegamento per-app con finestra 1280×720 creato accanto all'exe; ricetta [create-unity-software-shortcut.ps1](../scripts/create-unity-software-shortcut.ps1). Non è una correzione del driver né una misura di prestazioni. Partita/input/stabilità non qualificati; richiesta firewall vista e non autorizzata dall'agente.
+- **Prossimo passo:** isolare gli argomenti/ramo fatal di CreateInputLayout su x86 e verificare serializzazione SIZE_T (ipotesi da confermare nel caso reale); candidata compatibile prima nel clone. Conservare le validazioni del protocollo e i driver/protezioni originali.
+- **Chiusura:** stesso gioco con rendering hardware, menu e partita/input utilizzabili senza errori di protocollo o device loss, poi verifica nell'app principale. [Evidenze e tentativi](VERIFICATION.md#3-novembre--lok-x86-e-avvio-software).
 
 ### GFX-010 — Modo primario Windows oltre il limite del desktop
 
