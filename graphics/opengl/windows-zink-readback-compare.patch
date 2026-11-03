@@ -1,0 +1,126 @@
+--- a/src/gallium/targets/wgl/wgl.c
++++ b/src/gallium/targets/wgl/wgl.c
+@@ -199,6 +199,16 @@
+       if (trace) map_ns += os_time_get_nano() - batch_start;
+       if (batch) maps = (height - 1) / rows_per_map + 1;
+    }
++   /* Diagnostic only: compare the same image against the known serial path.
++    * Present the serial result, never use this mode as a batch correctness PASS. */
++   void *batch_pixels = NULL;
++   if (batch && debug_get_bool_option("PERP_WGL_COMPARE_READBACK", false)) {
++      batch_pixels = malloc((size_t)stride * height);
++      if (batch_pixels) {
++         memcpy(batch_pixels, pixels, (size_t)stride * height);
++         batch = false;
++      }
++   }
+    bool complete = true;
+    for (unsigned y = 0; !batch && y < height;) {
+       const unsigned rows = MIN2(rows_per_map, height - y);
+@@ -225,6 +235,38 @@
+          break;
+       }
+       y += rows;
++   }
++   if (batch_pixels) {
++      if (complete) {
++         const uint8_t *a = batch_pixels, *b = pixels;
++         size_t bad = 0, rgb_bad = 0, first = (size_t)stride * height;
++         unsigned bad_rows = 0;
++         for (unsigned y = 0; y < height; y++) {
++            unsigned row_bad = 0;
++            for (unsigned x = 0; x < stride; x++) {
++               const size_t n = (size_t)y * stride + x;
++               if (a[n] != b[n]) {
++                  bad++;
++                  if ((x & 3) != 3) {
++                     rgb_bad++;
++                     row_bad++;
++                     if (first == (size_t)stride * height) first = n;
++                  }
++               }
++            }
++            bad_rows += row_bad != 0;
++         }
++         fprintf(stderr, "WGL_COMPARE presented_serial=1 width=%u height=%u bytes=%zu different=%zu rgb_different=%zu bad_rows=%u first_rgb_byte=%zu\n",
++                 width, height, (size_t)stride * height, bad, rgb_bad, bad_rows, first);
++         for (unsigned y = 0; y < height; y += MAX2(1, rows_per_map / 2)) {
++            const size_t n = (size_t)y * stride + (width / 2) * 4;
++            fprintf(stderr, "WGL_COMPARE_ROW y=%u batch=%u,%u,%u,%u serial=%u,%u,%u,%u\n",
++                    y, a[n], a[n+1], a[n+2], a[n+3], b[n], b[n+1], b[n+2], b[n+3]);
++         }
++      } else {
++         fprintf(stderr, "WGL_COMPARE serial_failed=1\n");
++      }
++      free(batch_pixels);
+    }
+    if (complete) {
+       BITMAPINFO info = {0};
+--- a/src/gallium/drivers/zink/zink_resource.c
++++ b/src/gallium/drivers/zink/zink_resource.c
+@@ -2674,6 +2674,37 @@
+       mapped[i] = map_resource(screen, zink_resource(bands[i]));
+       if (!mapped[i])
+          goto done;
++      if (debug_get_bool_option("PERP_WGL_COMPARE_READBACK", false)) {
++         struct zink_resource_object *obj = zink_resource(bands[i])->obj;
++         struct zink_bo *bo = obj->bo;
++         struct zink_bo *real = bo->mem ? bo : bo->u.slab.real;
++         fprintf(stderr, "WGL_COMPARE_BAND i=%u y=%u rows=%u resource=%p object=%p buffer=%p bo=%p memory=%p bo_offset=%llu obj_offset=%llu bytes=%u cpu=%p coherent=%u\n",
++                 i, y, rows, (void *)bands[i], (void *)obj,
++                 (void *)(uintptr_t)obj->buffer, (void *)bo, (void *)(uintptr_t)real->mem,
++                 (unsigned long long)bo->offset, (unsigned long long)obj->offset,
++                 templ.width0, mapped[i], obj->coherent);
++      }
++   }
++   if (debug_get_bool_option("PERP_WGL_COMPARE_READBACK", false)) {
++      fprintf(stderr, "WGL_COMPARE_SOURCE linear=%u host_visible=%u coherent=%u format=%u width=%u height=%u\n",
++              res->linear, res->obj->host_visible, res->obj->coherent, pres->format,
++              pres->width0, pres->height0);
++      /* Diagnostic CPU-backing independence check. Coherent staging only,
++       * before GPU copies; the source image is never modified intentionally. */
++      bool all_coherent = true;
++      for (unsigned i = 0; i < count; i++)
++         all_coherent &= zink_resource(bands[i])->obj->coherent;
++      if (all_coherent) {
++         for (unsigned i = 0; i < count; i++)
++            memset(mapped[i], 0x21 + i, bands[i]->width0);
++         for (unsigned i = 0; i < count; i++) {
++            const uint8_t *b = mapped[i];
++            size_t bad = 0;
++            for (size_t n = 0; n < bands[i]->width0; n++) bad += b[n] != 0x21 + i;
++            fprintf(stderr, "WGL_COMPARE_CPU_BACKING i=%u marker=%u changed_bytes=%zu\n",
++                    i, 0x21 + i, bad);
++         }
++      }
+    }
+    struct pipe_box whole = {0, 0, 0, pres->width0, pres->height0, 1};
+    zink_fb_clears_apply_region(ctx, pres, zink_rect_from_box(&whole), 0, 1);
+@@ -2695,10 +2726,27 @@
+    ctx->no_reorder = saved_no_reorder;
+    /* The batch retains source/destination resources through completion. */
+    zink_fence_wait(pctx);
++   if (debug_get_bool_option("PERP_WGL_COMPARE_READBACK", false) &&
++       debug_get_bool_option("PERP_WGL_COMPARE_QUEUE_IDLE", false)) {
++      simple_mtx_lock(&screen->queue_lock);
++      VkResult idle = VKSCR(QueueWaitIdle)(screen->queue);
++      simple_mtx_unlock(&screen->queue_lock);
++      fprintf(stderr, "WGL_COMPARE_QUEUE_IDLE result=%d pending_work=%u reordered_work=%u in_rp=%u\n",
++              idle, ctx->bs->has_work, ctx->bs->has_reordered_work, ctx->in_rp);
++      if (idle != VK_SUCCESS) goto done;
++   }
+    for (unsigned i = 0, y = 0; i < count; i++, y += rows_per_band) {
+       struct zink_resource *band = zink_resource(bands[i]);
+       const unsigned rows = MIN2(rows_per_band, pres->height0 - y);
+       void *map = mapped[i];
++      if (debug_get_bool_option("PERP_WGL_COMPARE_READBACK", false)) {
++         const uint8_t *b = map;
++         const size_t n = (size_t)row_bytes * rows;
++         size_t zero = 0;
++         for (size_t k = 0; k < n; k++) zero += b[k] == 0;
++         fprintf(stderr, "WGL_COMPARE_DATA i=%u bytes=%zu zero=%zu first=%u,%u,%u,%u last=%u,%u,%u,%u\n",
++                 i, n, zero, b[0], b[1], b[2], b[3], b[n-4], b[n-3], b[n-2], b[n-1]);
++      }
+       bool valid = true;
+       if (!band->obj->coherent) {
+          VkMappedMemoryRange range = zink_resource_init_mem_range(screen, band->obj,

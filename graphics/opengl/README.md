@@ -92,7 +92,7 @@ Build privata verificata con Windows SDK/CRT ARM64 10.0.26100 tramite xwin e hea
 - `probe.ps1`: WGL, disponibilità D3D12/Vulkan e stato Secure Boot; nessuna installazione.
 - `probe-host-vulkan.c`: GPU ed estensioni contro una libreria Vulkan host esplicita.
 - `probe-icd.ps1 -IcdPath <DLL>`: separa il caricamento dell'ICD dall'inizializzazione; logging limitato al processo.
-- `probe-vulkan-buffer.c <DLL>`: un solo trasferimento GPU con lettura dei4096byte, tramite ICD esplicito e GPU hardware. Non qualifica WSI o OpenGL.
+- `probe-vulkan-buffer.c <DLL>`: trasferimento GPU/lettura4096byte tramite ICD esplicito e GPU hardware. Con `--multi` verifica quattrobuffer premappati (2095104/2095104/2095104/6144byte), marcatori/fill distinti, un submit e confronto completo dopo barrieraHOST/QueueWaitIdle. Non qualifica copie immagine, WSI, OpenGL o fluidità.
 
 Output, DLL, ISO, log e dischi di prova vanno fuori Git. Le prove nel clone non sostituiscono la verifica di una scena nell'app principale. [Diario](../../docs/VERIFICATION.md#28-ottobre--memoria-venus-wddm2-e-primo-trasferimento-gpu-protetto).
 
@@ -205,3 +205,29 @@ cache; limita il parallelismo per convivere con la VM M1. Le due opzioni sono
 mutuamente esclusive e non cambiano i requisiti/payload della release. Solo una
 correzione qualificata può aggiungere un nuovo profilo e requisito al gate della
 build ordinaria. [Evidenze e fallimenti](../../docs/VERIFICATION.md#3-novembre--costo-readback-creality-e-prime-candidate-respinte).
+
+
+## Confronto completo del batch respinto
+
+Dopo il riscontro utente «scatta ancora molto» sulla produzione.33, il requisito
+usabilità rimane NON SUPERATO. La diagnostica `--batch-readback --compare-readback`
+aggiunge `windows-zink-readback-compare.patch`: con envprocess-local
+`PERP_WGL_BATCH_READBACK=true` e `PERP_WGL_COMPARE_READBACK=true` confronta tutti i
+byte dello stesso bitmap batch/seriale e presenta **sempre il seriale**. Il PASS
+finestra di questa modalità non è un PASS del batch. Primo1536×1024:1618148byteRGB
+diversi su1024righe prima diGDI. Ora osserva anche identità/mapping/contenuto delle
+fasce, senza cambiare l'algoritmo V3. Nessuna promozione o nuovoFPS dimostrato;
+artefatti/test privati e corrispondenti ricevute nel diario.
+
+
+Il confronto diagnostico può inizializzare gli staging coerenti con marcatori
+CPU distinti e controllare tutto il backing prima delle copie: il caso reale
+non sovrappone i quattro buffer, ma la prima fascia resta non scritta. Queste
+scritture diagnostiche alterano il contenuto iniziale e non sono un benchmark.
+La variante `--batch-host-read` è riproducibile ma respinta: aggiungere la barriera
+versoHOST non corregge i dati. `PERP_WGL_COMPARE_QUEUE_IDLE=true`, nel solo processo
+con compare attivo, serve a distinguere completamento insufficiente da copie
+errate; registra esito e stato della coda. Non è una modalità produzione o un
+motivo per promuovere un batch dal PASS della sola finestra seriale.
+
+La diagnostica confronto accetta anche `PERP_WGL_COMPARE_QUEUE_IDLE=true`: attende la coda completa dopo la fenceZink e registra l’esito. Sul M1 non corregge i byte errati, come la variante hostread; non è un’ottimizzazione da distribuire. Il probe Vulkan diretto `--multi` invece passa tutti i word: separa il semplice backing multi-buffer dal caso immagine/Zink ancora aperto.

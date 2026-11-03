@@ -1,0 +1,20 @@
+--- a/src/gallium/drivers/zink/zink_resource.c
++++ b/src/gallium/drivers/zink/zink_resource.c
+@@ -2692,6 +2692,17 @@
+                                          MIN2(rows_per_band, pres->height0 - y), 1};
+       zink_transfer_copy_bufimage(ctx, zink_resource(bands[i]), res, &trans);
+    }
++   /* Transfer completion and host visibility are separate dependencies.
++    * Make every staging write available to host reads before the one fence. */
++   VkMemoryBarrier host_read = {
++      .sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER,
++      .srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
++      .dstAccessMask = VK_ACCESS_HOST_READ_BIT,
++   };
++   VKCTX(CmdPipelineBarrier)(ctx->bs->cmdbuf,
++                             VK_PIPELINE_STAGE_TRANSFER_BIT,
++                             VK_PIPELINE_STAGE_HOST_BIT,
++                             0, 1, &host_read, 0, NULL, 0, NULL);
+    ctx->no_reorder = saved_no_reorder;
+    /* The batch retains source/destination resources through completion. */
+    zink_fence_wait(pctx);
