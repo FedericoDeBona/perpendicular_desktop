@@ -27,6 +27,8 @@ def main():
                     '--app', str(source)], check=True)
     subprocess.run(['python3', str(Path(__file__).with_name('check-x86-payload.py')),
                     '--app', str(source)], check=True)
+    subprocess.run(['python3', str(Path(__file__).with_name('check-video-payload.py')),
+                    '--app', str(source)], check=True)
     native = source / 'Contents/Resources/Native3D'
     manifest = json.loads((native / 'runtime.json').read_text())
     if manifest.get('hvf_dynamic_memory_version') != 1:
@@ -39,6 +41,7 @@ def main():
     if (source / 'Contents/Resources/Guest/OpenGL').is_dir():
         members.append('Resources/Guest/OpenGL')
     members.append('Resources/Guest/X86Graphics')
+    members.append('Resources/Guest/VideoGraphics')
     for name in members:
         root = source / 'Contents' / name
         for file in root.rglob('*'):

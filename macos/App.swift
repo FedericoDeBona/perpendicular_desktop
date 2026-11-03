@@ -36,6 +36,8 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
     @Published var launcherNotice:String?
     private var mixedDisplayNotice:String?
     private var windowNotice:(id:String,message:String,frame:Bool)?
+    private var windowEndpointPID:Int32?
+    private var windowEndpointNotice:String?
     @Published private(set) var openingApps:Set<String>=[]
     private var seamlessTransferApps:Set<String>=[]
     @Published private(set) var activeApps:Set<String>=[]
@@ -295,6 +297,9 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
         let changed=machineState != state
         if changed {machineState=state}
         if state == .stopped,changed {
+            windowEndpointPID=nil
+            if let notice=windowEndpointNotice,launcherNotice==notice {launcherNotice=nil}
+            windowEndpointNotice=nil
             awaitingInitialGuest=false;guestContactEstablished=false
             bridge?.disconnect()
             for window in Array(windows.values) {window.retire()}
@@ -306,6 +311,22 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
             status="Windows acceso · collegamento in attesa"
         }
     }
+    private func publishWindowEndpointIfReady(_ state:MachineRuntimeState){
+        guard case .running(let pid)=state,windowEndpointPID != pid else{return}
+        do {
+            // start() can return with a live process before QMP is ready.
+            // Keep its UUID/PID authentication and retry from observation;
+            // a late graphics endpoint must not label Windows startup failed.
+            try NativeWindowFrames.shared.publishEndpoint()
+            windowEndpointPID=pid
+            if let notice=windowEndpointNotice,launcherNotice==notice {launcherNotice=nil}
+            windowEndpointNotice=nil
+        }catch {
+            let message="Non riesco a preparare il collegamento grafico. "+error.localizedDescription
+            if launcherNotice == nil || launcherNotice==windowEndpointNotice {launcherNotice=message}
+            windowEndpointNotice=message
+        }
+    }
     private func startMachineObservation(){
         machineStateTask=Task{@MainActor [weak self] in
             while !Task.isCancelled {
@@ -315,6 +336,7 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
                     if !Task.isCancelled,self.machine === machine,self.machineStateRevision == revision,
                        self.machineOperation == nil,!self.restarting {
                         self.acceptMachineState(state)
+                        self.publishWindowEndpointIfReady(state)
                         let memory=state.pid != nil ? (self.memoryController?.state ?? [:]):[:]
                         // Only these fields are displayed. Device counters and
                         // the polling timestamp must not invalidate the entire
@@ -333,6 +355,7 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
         }
     }
     private func configureMachineControllers(){
+        windowEndpointPID=nil
         network.configure(machine:machine,bridge:bridge,guestBusy:{[weak self] in self?.folderIntegrationBusy ?? true})
         memoryController?.stop();memoryController=nil;vmMemoryState=[:]
         machine.desktopClipboardBridge=bridge
@@ -414,7 +437,9 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
             do {
                 let machine=try await self.prepareMachineForStart()
                 if await machine.observedState() == .stopped {self.awaitingInitialGuest=true;self.guestContactEstablished=false}
-                try await machine.start();try NativeWindowFrames.shared.publishEndpoint();self.acceptMachineState(await machine.observedState())
+                try await machine.start()
+                let state=await machine.observedState()
+                self.acceptMachineState(state);self.publishWindowEndpointIfReady(state)
             }
             catch {self.acceptMachineState(await self.machine.observedState());self.launcherNotice="Non riesco ad avviare Windows. "+error.localizedDescription}
         }

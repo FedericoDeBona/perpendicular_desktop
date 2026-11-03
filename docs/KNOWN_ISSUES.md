@@ -1,5 +1,8 @@
 # Registro dei problemi
 
+**3 novembre — build unica resize + video0.2.62 installata; ultima verifica main IN ATTESA.** Pacchetto video0.1.0 con ricette/pin/gate e installer ripetibile; QA install/ripristino/coldboot/tre frame4K/resize-fullscreen-input PASS. Corretto anche falso errore avvio dovuto alla pubblicazione endpoint prima di QMP. Canonica finale e driver/servizio Windows aggiornati; nuovo avvio main trattenuto dal controllo macOS sulle cartelle già condivise, clic Dock richiesto. Prossimo passo coldboot/allineamento e breve resize+4K main. Nessuna forzatura, zero-drop/Creality non qualificati; implementazione e distribuzione presenti, qualifica finale non dichiarata FATTA. [Evidenze](VERIFICATION.md#3-novembre--build-unica-resize-e-video0262-sul-m1).
+
+
 **3 novembre — DISCARD condiviso v16: primo confronto favorevole, qualifica generale IN CORSO.** Build/441sorgenti, coldboot/protezioni e tre frame4K Windows PASS; shared e fallback esercitati, percorso effettivo anche in Edge. Campione4K:65/1777drop3,66%; overlap approssimato45/1158 (3,89%) contro99/1159v14 (8,54%), endpoint entro0,276s. Non A/B fresco o zero-frame; main/defaultv14 non promossi. QA corrente CPUv12/UMDv16, vecchio hotspot Unmap assente dal nuovo sample breve; attesaVT/Map/presentazione restano. Prossimo passo riferimento v14 fresco, conferma v16 e residuo; poi Creality/main. [Evidenze](VERIFICATION.md#3-novembre--discard-condiviso-degli-input-decoder-sul-m1).
 
 
@@ -266,6 +269,8 @@ Il ciclo RAM protetto 4→2→4 GiB con dati conservati resta la qualifica prece
 
 ### FS-005 — Scadenza backend durante il consenso macOS alle cartelle
 
+**3 novembre, integrazione0.2.62:** Dopo frontend0.2.62 il nuovo avvio main attende nuovamente requestAccess/opendir prima di lanciareQEMU. Nessuna scadenza/kill applicata, controllo automatico non attiva la richiesta. Chiesto clicDock/eventuale consenso; verifica finale della consegna in attesa. [Evidenze](VERIFICATION.md#3-novembre--build-unica-resize-e-video0262-sul-m1).
+
 - **28 ottobre, nuova distribuzione locale0.2.28:** consenso richiesto nuovamente dopo cambio firma; utente conferma due volte (prima build e correzione PCI). Attesa terminata e Windows avviato. Nessuna scadenza backend osservata né riduzione/aggiramento TCC. [Seguito verificato](VERIFICATION.md#28-ottobre--completamento-rebuild-e-guest-tools-0228-sulla-iot0795218c).
 
 - **Stato:** corretto e verificato nell'avvio reale0.2.23 della main, nessun clone.
@@ -328,6 +333,8 @@ Il ciclo RAM protetto 4→2→4 GiB con dati conservati resta la qualifica prece
 - **Evidenze:** [diario](VERIFICATION.md#26-ottobre--ripristino-del-desktop-nativo-sul-secondo-mac).
 
 ### PERF-002 — Frame persi nei video 4K in Desktop Mode
+
+**3 novembre, integrazione0.2.62:** CPUv12/UMDv16 integrati nella0.2.62 su richiesta. QA pixel/4K/resize PASS, main driver aggiornati ma nuovo boot e4K reale in attesa del consenso cartelle; fluidità generale non chiusa. [Evidenze](VERIFICATION.md#3-novembre--build-unica-resize-e-video0262-sul-m1).
 
 **3 novembre, M1 — esperimento inputCPU concluso, PERF-002 APERTO:** Native6frame/Windows3frame/coerenza e ramo realeDYNAMIC/BindDECODER PASS, ma confronto4K NON SUPERATO (circa19,47%drop candidata contro8,14% base nel tratto comune approssimato). Nessun crash/error nuovo e nessuna regressione causale isolata. Sorgente/ricetta soloopt-in, CPUv12/UMDv14 ripristinati/verificati; main intatta. Prossimo passo volume effettivo Unmap e trasferimento driver/range, con ownership/submit multipli/GPU Copy preservati, poi attesa decoder. Non ripetere la sola snapshotCPU o gli esperimenti già esclusi. [Evidenze](VERIFICATION.md#3-novembre--snapshot-coerente-dello-staging-video-sul-m1).
 
@@ -403,6 +410,8 @@ Il ciclo RAM protetto 4→2→4 GiB con dati conservati resta la qualifica prece
 
 ### GFX-006 — Risoluzione e DPI errati dopo installazione a caldo
 
+**3 novembre, integrazione0.2.62:** Resize/fullscreen0.2.61 integrato con video nella0.2.62. QA1920→1720→2880→1720 concorde con vista, applies2/invalidations3 invariati e inputSearch PASS. Verifica finale main in attesa del consenso cartelle; limite diagnostica dopo chiusura resta aperto. [Evidenze](VERIFICATION.md#3-novembre--build-unica-resize-e-video0262-sul-m1).
+
 - **0.2.61,3novembre: fullscreen/resize confermati dall’utente.** “ora va abbastanza bene. funziona tutto: fullscreen+resize”. Candidata distribuita: callback finali fullscreen, frame valido trattenuto, padding app monitor stabile e reconnect250ms con ripiego singolo1s. Primo raster1920×1280 confermato in1982ms senza ripiego (non tempo del ciclo fullscreen). Due controlli taskbar PASS; nessuna misura di flicker zero o confronto generale. Alla chiusura Desktop durante l’ultima richiesta, Windows1846×1356 corrisponde alla vista923×678@2 ma la diagnostica attende un frame non più ricevuto e termina failed: limite del caso chiuso, non prova negativa del fullscreen confermato. Questo annullamento e qualifica generale restano aperti. [Evidenze](VERIFICATION.md#3-novembre--fullscreen-e-resize-confermati-nella0261).
 
 - **Riscontro utente0.2.60,3novembre: NON SUPERATO.** Sfarfallio importante, fullscreen non ridimensiona correttamente, finestra converge lentamente. applies3→7/invalidations4→8 e app2256→2160 dopo il ciclo; il PASS dei due raster non prova qualità. Candidata0.2.61 compilata con callback finali fullscreen, padding taskbar stabile, ultimo frame conservato e reconnect250ms con ripiego singolo1s; test taskbar PASS, main ancora da qualificare.
@@ -431,6 +440,8 @@ Il ciclo RAM protetto 4→2→4 GiB con dati conservati resta la qualifica prece
 - **Criterio soddisfatto:** stesso runtime locale e configurazione fissa avviati nella main con Windows collegato, senza errore PCI; Guest Tools aggiornati Running/hash concorde. [Diario](VERIFICATION.md#28-ottobre--pull-rebuild-0228-sulla-iot0795218c-in-attesa-del-consenso-macos).
 
 ### SYS-001 — Arresto HVF durante riavvio o arresto
+
+**3 novembre, integrazione0.2.62:** Corretto caso distinto di falso errore all’avvio: endpoint pubblicato solo dopo QMP autenticato, ripresa osservata se ritardato. ColdbootQA/PIDendpoint/desktop PASS; nessuna nuova chiusura della causaHVF o affidabilità generale. [Evidenze](VERIFICATION.md#3-novembre--build-unica-resize-e-video0262-sul-m1).
 
 - **2 novembre, main:** boot94554 vivo senza bridge/IO, ACPI negativo; consensoesplicito→forcestop/uscita/checkqcow2PASS. Boot96935 collegato con distinto modo primario fuori limiteGFX-010; ripristino e secondo shutdownnormale/boot97955 recuperano desktop reale. Caso locale recuperato, causa del primo blocco e affidabilità generale aperte. [Evidenze](VERIFICATION.md#2-novembre--recupero-del-boot-main-senza-collegamento).
 

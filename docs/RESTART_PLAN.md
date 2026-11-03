@@ -1,5 +1,8 @@
 # Piano di lavoro — desktop Windows su Mac
 
+**3 novembre — build unica resize + video0.2.62 installata; ultima verifica main IN ATTESA.** Pacchetto video0.1.0 con ricette/pin/gate e installer ripetibile; QA install/ripristino/coldboot/tre frame4K/resize-fullscreen-input PASS. Corretto anche falso errore avvio dovuto alla pubblicazione endpoint prima di QMP. Canonica finale e driver/servizio Windows aggiornati; nuovo avvio main trattenuto dal controllo macOS sulle cartelle già condivise, clic Dock richiesto. Prossimo passo coldboot/allineamento e breve resize+4K main. Nessuna forzatura, zero-drop/Creality non qualificati; implementazione e distribuzione presenti, qualifica finale non dichiarata FATTA. [Evidenze](VERIFICATION.md#3-novembre--build-unica-resize-e-video0262-sul-m1).
+
+
 **3 novembre — DISCARD condiviso v16: primo confronto favorevole, qualifica generale IN CORSO.** Build/441sorgenti, coldboot/protezioni e tre frame4K Windows PASS; shared e fallback esercitati, percorso effettivo anche in Edge. Campione4K:65/1777drop3,66%; overlap approssimato45/1158 (3,89%) contro99/1159v14 (8,54%), endpoint entro0,276s. Non A/B fresco o zero-frame; main/defaultv14 non promossi. QA corrente CPUv12/UMDv16, vecchio hotspot Unmap assente dal nuovo sample breve; attesaVT/Map/presentazione restano. Prossimo passo riferimento v14 fresco, conferma v16 e residuo; poi Creality/main. [Evidenze](VERIFICATION.md#3-novembre--discard-condiviso-degli-input-decoder-sul-m1).
 
 

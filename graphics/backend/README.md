@@ -296,3 +296,43 @@ pixel-identici sulla candidata M1; il secondo mostra shortcut S_OK→S_FALSE→S
 quindi anche il riuso mantiene la disabilitazione dopo GPU-write. STAGING GPU-write
 richiede effettivamente il fence (`waited=1`). Non sono una prova FPS. Windows3frame4K e ramo CPU effettivo in Edge PASS; confronto4K NON SUPERATO: circa19,47%drop contro8,14% nel tratto sovrapposto approssimato, con underflow e senza nuovi crash/errori. DefaultCPUv12 conservato; nessuna promozione. Non ripetere questa sola scorciatoia come ipotesi di guadagno. Prossimo lavoro sul volume Unmap/attesa decoder richiede nuova evidenza di coerenza e un confronto reale;
 [registro corrente](../../docs/VERIFICATION.md#3-novembre--snapshot-coerente-dello-staging-video-sul-m1).
+
+## Pacchetto della build 0.2.62
+
+Su richiesta dell'utente, `VideoGraphics` entra nell'aggiornamento guest ordinario
+insieme al resize/fullscreen0.2.61. `video-requirements.json` definisce i fix
+minimi; `releases/video-0.1.0.json` fissa sorgenti, UMDv16 e profilo host
+M1CPUv12. La consegna non chiude la qualifica generale della fluidità4K.
+Gli esperimenti nativeCPUinput/staging/GPUoutput respinti restano esclusi.
+
+Preparare una copia separata della distribuzione locale conservata, quindi:
+
+```sh
+python3 scripts/package-video-payload.py --app /private/path/Reference.app \
+  --backend /private/path/compatible-signed-libdxmt-native.dylib \
+  --umd /private/path/neptune_umd_arm64.dll --host-profile m1-cpu-v12
+codesign --force --sign - /private/path/Reference.app
+PERPENDICULAR_RUNTIME_APP=/private/path/Reference.app zsh scripts/build-macos.sh
+```
+
+Il packager verifica i29membri della base e sostituisce solo il backend
+esplicitamente abbinato, aggiungendo payload/provenienza. La libreria nativa si
+ricostruisce con la ricetta CPUv12 di default; la UMD con
+`rebuild-video-umd.py --external-video-discard`. Archivi/toolchain restano fissati
+nei rispettivi inputs. Per un altro Mac serve un profilo locale compatibile
+verificato: non copiare l'intero runtime M1 o modificare hash per superare il
+gate. I profili possono avere hash differenti dopo build/firma locale.
+
+`check-video-payload.py` viene eseguito prima della build, nella copia del runtime
+e prima di creare il CD guest: librerie mancanti/vecchie o coppie diverse
+vengono rifiutate. `bootstrap-guest.py` include VideoGraphics nel digest e nel
+supporto. L'installer guest applica video e fixWin32 con normali diritti
+amministrativi; non cambia kernel, DriverStore, protezioni o OpenGL.
+
+L'installer video registra una cartella stabile in ProgramFiles, conserva le
+registrazioni precedenti e controlla il readback. Supporta prima installazione
+dall'originale o dalla QA con lo stesso hash, aggiornamento ripetuto, `-Restore`
+e nuova applicazione dopo restore. Stati esterni diversi vengono preservati
+e rifiutati, senza sovrascrivere registrazioni ignote. Il coldboot e il controllo
+dei moduli effettivi restano necessari per evitare di provare una UMD precedente
+ancora nella cache WDDM. Gli altri payload e i dati della VM restano separati.

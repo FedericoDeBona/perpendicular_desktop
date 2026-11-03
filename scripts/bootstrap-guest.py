@@ -68,7 +68,10 @@ shared=repo/'.build/Perpendicular.app/Contents/Resources/Guest/SharedFiles'
 if not shared.is_dir():
     raise RuntimeError('Build the complete Mac app first: the Windows shared-folder payload is missing.')
 x86=repo/'.build/Perpendicular.app/Contents/Resources/Guest/X86Graphics'
+video=repo/'.build/Perpendicular.app/Contents/Resources/Guest/VideoGraphics'
 subprocess.run([sys.executable,str(repo/'scripts/check-x86-payload.py'),
+                '--app',str(repo/'.build/Perpendicular.app')],check=True)
+subprocess.run([sys.executable,str(repo/'scripts/check-video-payload.py'),
                 '--app',str(repo/'.build/Perpendicular.app')],check=True)
 digest=hashlib.sha256()
 for source in sources:
@@ -86,6 +89,9 @@ for source in sorted(shared.rglob('*')):
 for source in sorted(x86.rglob('*')):
     if source.is_file():
         digest.update(('X86Graphics/'+str(source.relative_to(x86))).encode());digest.update(source.read_bytes())
+for source in sorted(video.rglob('*')):
+    if source.is_file():
+        digest.update(('VideoGraphics/'+str(source.relative_to(video))).encode());digest.update(source.read_bytes())
 if arguments.dry_run:
     print('Setup inputs verified. No CD created or attached.')
     raise SystemExit(0)
@@ -107,6 +113,7 @@ for source,name in memory_drivers:
     shutil.copy2(source,destination)
 shutil.copytree(shared,setup/'SharedFiles',dirs_exist_ok=True)
 shutil.copytree(x86,setup/'X86Graphics',dirs_exist_ok=True)
+shutil.copytree(video,setup/'VideoGraphics',dirs_exist_ok=True)
 (setup/'connection.json').write_text(json.dumps({'port':configuration['guestPort'],'token':configuration['token']}))
 (setup/'connection.json').chmod(0o600)
 iso=setup.with_suffix('.iso')

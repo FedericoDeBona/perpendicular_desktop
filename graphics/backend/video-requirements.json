@@ -1,0 +1,13 @@
+{
+  "schema": 1,
+  "required_fixes": [
+    "native-vp9",
+    "shared-nv12",
+    "sdr-video-processor",
+    "compact-shmem-map",
+    "external-decoder-discard"
+  ],
+  "architecture": "aarch64",
+  "guest_wire_version": 2,
+  "kernel_abi": "100.6.101.58000"
+}
