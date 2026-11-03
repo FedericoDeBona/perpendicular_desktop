@@ -1,0 +1,169 @@
+--- a/src/gallium/drivers/zink/zink_public.h
++++ b/src/gallium/drivers/zink/zink_public.h
+@@ -25,10 +25,16 @@
+ #define ZINK_PUBLIC_H
+ 
+ struct pipe_screen;
++struct pipe_context;
++struct pipe_resource;
+ struct sw_winsys;
+ struct pipe_screen_config;
+ 
+ bool zink_has_native_swapchain(struct pipe_screen *screen);
++#ifdef _WIN32
++bool zink_wgl_readback_bgra(struct pipe_context *ctx, struct pipe_resource *res,
++                           void *pixels, unsigned stride, unsigned max_bytes);
++#endif
+ 
+ struct pipe_screen *
+ zink_create_screen(struct sw_winsys *winsys, const struct pipe_screen_config *config);
+--- a/src/gallium/drivers/zink/zink_resource.c
++++ b/src/gallium/drivers/zink/zink_resource.c
+@@ -22,6 +22,7 @@
+  */
+ 
+ #include "zink_resource.h"
++#include "zink_public.h"
+ 
+ #include "zink_batch.h"
+ #include "zink_clear.h"
+@@ -2621,6 +2622,107 @@
+    destroy_transfer(ctx, trans);
+    return NULL;
+ }
++
++
++#ifdef _WIN32
++/* Queue bounded color readbacks together. Keep each CPU mapping small, but
++ * wait for one submitted batch instead of serializing once per image band. */
++bool
++zink_wgl_readback_bgra(struct pipe_context *pctx, struct pipe_resource *pres,
++                       void *pixels, unsigned stride, unsigned max_bytes)
++{
++   if (!pres || pres->target != PIPE_TEXTURE_2D || !pres->width0 || !pres->height0 ||
++       pres->depth0 != 1 || pres->array_size != 1 || pres->nr_samples > 1 ||
++       util_format_is_compressed(pres->format) || util_format_is_depth_or_stencil(pres->format))
++      return false;
++   const unsigned row_bytes = util_format_get_stride(pres->format, pres->width0);
++   if (!row_bytes || row_bytes > max_bytes)
++      return false;
++   const unsigned rows_per_band = max_bytes / row_bytes;
++   const unsigned count = (pres->height0 - 1) / rows_per_band + 1;
++   if (count > 64)
++      return false;
++   struct pipe_resource **bands = calloc(count, sizeof(*bands));
++   if (!bands)
++      return false;
++   void **mapped = calloc(count, sizeof(*mapped));
++   if (!mapped) {free(bands); return false;}
++   struct zink_context *ctx = zink_context(pctx);
++   struct zink_screen *screen = zink_screen(pctx->screen);
++   struct zink_resource *res = zink_resource(pres);
++   bool complete = false;
++   /* Allocate before recording any copies, so an allocation failure can
++    * return to the existing serial path without a partial submission. */
++   for (unsigned i = 0, y = 0; i < count; i++, y += rows_per_band) {
++      const unsigned rows = MIN2(rows_per_band, pres->height0 - y);
++      struct pipe_resource templ = *pres;
++      templ.next = NULL;
++      templ.usage = PIPE_USAGE_STAGING;
++      templ.target = PIPE_BUFFER;
++      templ.bind = PIPE_BIND_LINEAR;
++      templ.width0 = row_bytes * rows;
++      templ.height0 = templ.depth0 = 0;
++      templ.last_level = 0;
++      templ.array_size = 1;
++      templ.nr_samples = templ.nr_storage_samples = 0;
++      templ.flags = 0;
++      bands[i] = zink_resource_create(pctx->screen, &templ);
++      if (!bands[i])
++         goto done;
++      /* Venus defers export/page injection until MapMemory. Establish each
++       * bounded mapping before commands can write this presentation batch. */
++      mapped[i] = map_resource(screen, zink_resource(bands[i]));
++      if (!mapped[i])
++         goto done;
++   }
++   struct pipe_box whole = {0, 0, 0, pres->width0, pres->height0, 1};
++   zink_fb_clears_apply_region(ctx, pres, zink_rect_from_box(&whole), 0, 1);
++   if (zink_resource_usage_is_unflushed_write(res))
++      zink_resource_usage_wait(ctx, res, ZINK_RESOURCE_ACCESS_WRITE);
++   /* All bands belong to the same completed presentation image. Keep their
++    * transitions/copies ordered together, instead of letting subsequent
++    * read-only copies migrate to the unordered command buffer. */
++   const bool saved_no_reorder = ctx->no_reorder;
++   ctx->no_reorder = true;
++   for (unsigned i = 0, y = 0; i < count; i++, y += rows_per_band) {
++      struct zink_transfer trans = {0};
++      trans.base.b.level = 0;
++      trans.base.b.usage = PIPE_MAP_READ;
++      trans.base.b.box = (struct pipe_box){0, y, 0, pres->width0,
++                                         MIN2(rows_per_band, pres->height0 - y), 1};
++      zink_transfer_copy_bufimage(ctx, zink_resource(bands[i]), res, &trans);
++   }
++   ctx->no_reorder = saved_no_reorder;
++   /* The batch retains source/destination resources through completion. */
++   zink_fence_wait(pctx);
++   for (unsigned i = 0, y = 0; i < count; i++, y += rows_per_band) {
++      struct zink_resource *band = zink_resource(bands[i]);
++      const unsigned rows = MIN2(rows_per_band, pres->height0 - y);
++      void *map = mapped[i];
++      bool valid = true;
++      if (!band->obj->coherent) {
++         VkMappedMemoryRange range = zink_resource_init_mem_range(screen, band->obj,
++                                                                 band->obj->offset, band->obj->size);
++         valid = VKSCR(InvalidateMappedMemoryRanges)(screen->dev, 1, &range) == VK_SUCCESS;
++      }
++      if (valid)
++         valid = util_format_translate(PIPE_FORMAT_B8G8R8A8_UNORM,
++                                       (uint8_t *)pixels + (size_t)y * stride, stride, 0, 0,
++                                       pres->format, map, row_bytes, 0, 0, pres->width0, rows);
++      if (!valid)
++         goto done;
++   }
++   complete = true;
++done:
++   for (unsigned i = 0; i < count; i++) {
++      if (mapped[i]) unmap_resource(screen, zink_resource(bands[i]));
++      pipe_resource_reference(&bands[i], NULL);
++   }
++   free(mapped);
++   free(bands);
++   return complete;
++}
++#endif
+ 
+ static void
+ zink_image_subdata(struct pipe_context *pctx,
+--- a/src/gallium/targets/wgl/wgl.c
++++ b/src/gallium/targets/wgl/wgl.c
+@@ -191,8 +191,16 @@
+     * exceed a contiguous free range in the WDDM host-visible aperture. */
+    const size_t source_row = (size_t)width * util_format_get_blocksize(res->format);
+    const unsigned rows_per_map = source_row ? MAX2(1, (2 * 1024 * 1024) / source_row) : 1;
++   bool batch = false;
++   if (debug_get_bool_option("PERP_WGL_BATCH_READBACK", false)) {
++      const int64_t batch_start = trace ? os_time_get_nano() : 0;
++      batch = zink_wgl_readback_bgra(ctx, res, pixels, stride, 2 * 1024 * 1024);
++      /* For the batch path this aggregate also includes conversion. */
++      if (trace) map_ns += os_time_get_nano() - batch_start;
++      if (batch) maps = (height - 1) / rows_per_map + 1;
++   }
+    bool complete = true;
+-   for (unsigned y = 0; y < height;) {
++   for (unsigned y = 0; !batch && y < height;) {
+       const unsigned rows = MIN2(rows_per_map, height - y);
+       struct pipe_transfer *transfer = NULL;
+       const int64_t map_start = trace ? os_time_get_nano() : 0;
+@@ -238,9 +246,9 @@
+       if (InterlockedIncrement(&samples) <= 600) {
+          FILE *file = fopen(trace_path, "ab");
+          if (file) {
+-            fprintf(file, "pid=%lu tid=%lu end_ns=%lld width=%u height=%u maps=%u complete=%u total_ns=%lld sync_ns=%lld map_ns=%lld convert_ns=%lld unmap_ns=%lld gdi_ns=%lld\n",
++            fprintf(file, "pid=%lu tid=%lu end_ns=%lld width=%u height=%u maps=%u complete=%u batch=%u total_ns=%lld sync_ns=%lld map_ns=%lld convert_ns=%lld unmap_ns=%lld gdi_ns=%lld\n",
+                     (unsigned long)GetCurrentProcessId(), (unsigned long)GetCurrentThreadId(),
+-                    (long long)ended, width, height, maps, complete,
++                    (long long)ended, width, height, maps, complete, batch,
+                     (long long)(ended-started), (long long)sync_ns, (long long)map_ns,
+                     (long long)convert_ns, (long long)unmap_ns, (long long)gdi_ns);
+             fclose(file);

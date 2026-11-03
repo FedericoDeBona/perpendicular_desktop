@@ -14,6 +14,15 @@ import subprocess
 
 REPO = Path(__file__).resolve().parent.parent
 SOURCE_SHA = '9203b15da84d4dfbf7345eb6568a113790c66277adeec8dba0774fd6860f2b76'
+BATCH_SOURCES = {
+    'src/gallium/drivers/zink/zink_public.h': '889ff84eebf7cd7ecbc5ed90ece16d9ffe899248d171bd6a7f9421bf791586f1',
+    'src/gallium/drivers/zink/zink_resource.c': '3c6a672b0a999c7a17c1d14f91a00dc879c9a6d8a21cc6ab9175a36bc1f86987',
+}
+REUSE_SOURCES = {
+    'src/gallium/drivers/zink/zink_resource.c': BATCH_SOURCES['src/gallium/drivers/zink/zink_resource.c'],
+    'src/gallium/drivers/zink/zink_types.h': 'abb94ba28c50549fefd7d3e93649ea0e1c8d0f977af7a62c90980c77387f0463',
+    'src/gallium/drivers/zink/zink_context.c': '0fa7f49a3352827a41affc63679685893315af45cebf3a330798e4a20a104e73',
+}
 
 
 def sha(data):
@@ -30,6 +39,9 @@ def main():
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--meson', type=Path, required=True)
     parser.add_argument('--ninja', type=Path, required=True)
+    experiment = parser.add_mutually_exclusive_group()
+    experiment.add_argument('--batch-readback', action='store_true', help='Reproduce the rejected batch experiment (incorrect window pixels); never deploy')
+    experiment.add_argument('--reuse-readback', action='store_true', help='Build bounded staging reuse; application performance is not yet qualified')
     args = parser.parse_args()
     cache = args.cache.resolve(strict=True)
     output = args.output.absolute()
@@ -38,7 +50,11 @@ def main():
     wgl = source / 'src/gallium/targets/wgl/wgl.c'
     dll = build / 'src/gallium/targets/wgl/libgallium_wgl.dll'
     release = json.loads((REPO / 'graphics/opengl/releases/0.2.31-darwin-arm64.json').read_text())
-    patch = REPO / 'graphics/opengl/windows-zink-present-timing.patch'
+    patches = [REPO / 'graphics/opengl/windows-zink-present-timing.patch']
+    if args.batch_readback:
+        patches.append(REPO / 'graphics/opengl/windows-zink-batch-readback.patch')
+    if args.reuse_readback:
+        patches.append(REPO / 'graphics/opengl/windows-zink-reuse-readback.patch')
     meson, ninja = args.meson.resolve(strict=True), args.ninja.resolve(strict=True)
     if subprocess.check_output([str(meson), '--version'], text=True).strip() != '1.12.1':
         raise ValueError('Use Meson 1.12.1, matching the qualified cache')
@@ -47,27 +63,41 @@ def main():
         original, qualified = wgl.read_bytes(), dll.read_bytes()
         if sha(original) != SOURCE_SHA or sha(qualified) != release['files']['x64/libgallium_wgl.dll']:
             raise ValueError('Local source/DLL differs from the qualified timing baseline')
+        originals = {wgl: original}
+        if args.batch_readback or args.reuse_readback:
+            for name, expected in (BATCH_SOURCES if args.batch_readback else REUSE_SOURCES).items():
+                file = source / name
+                originals[file] = file.read_bytes()
+                if sha(originals[file]) != expected:
+                    raise ValueError('Local Zink source differs: ' + name)
         output.mkdir(parents=True, exist_ok=False)
         (output / 'wgl-before.c').write_bytes(original)
+        for file, data in originals.items():
+            backup = output / 'original' / file.relative_to(source)
+            backup.parent.mkdir(parents=True, exist_ok=True)
+            backup.write_bytes(data)
         (output / 'libgallium_wgl-before.dll').write_bytes(qualified)
         signal.signal(signal.SIGTERM, interrupted)
         env = os.environ.copy()
         env['PATH'] = os.pathsep.join([str(args.meson.absolute().parent), str(args.ninja.absolute().parent), env.get('PATH', '')])
         try:
-            subprocess.run(['patch', '-p1', '--batch', '--forward', '-i', str(patch)], cwd=source, check=True)
+            for patch in patches:
+                subprocess.run(['patch', '-p1', '--batch', '--forward', '-i', str(patch)], cwd=source, check=True)
             with (output / 'build.log').open('w') as log:
-                subprocess.run([str(ninja), '-C', str(build), 'src/gallium/targets/wgl/libgallium_wgl.dll'],
+                subprocess.run([str(ninja), '-j2', '-C', str(build), 'src/gallium/targets/wgl/libgallium_wgl.dll'],
                                env=env, stdout=log, stderr=subprocess.STDOUT, check=True)
             candidate = dll.read_bytes()
             (output / 'libgallium_wgl.dll').write_bytes(candidate)
             (output / 'receipt.json').write_text(json.dumps({
                 'diagnostic_only': True, 'source_sha256': SOURCE_SHA,
-                'patch_sha256': sha(patch.read_bytes()), 'dll_sha256': sha(candidate),
+                'patches': {p.name: sha(p.read_bytes()) for p in patches}, 'dll_sha256': sha(candidate),
                 'baseline_sha256': sha(qualified), 'mesa': '25.1.9', 'meson': '1.12.1',
-                'architecture': 'x64', 'limit': 600,
+                'architecture': 'x64', 'limit': 600, 'batch_readback_opt_in': args.batch_readback,
+                'reuse_readback_opt_in': args.reuse_readback,
             }, indent=2) + '\n')
         finally:
-            wgl.write_bytes(original)
+            for file, data in originals.items():
+                file.write_bytes(data)
             dll.write_bytes(qualified)
         print('Private timing DLL built; qualified source/DLL restored. Windows unchanged.')
 

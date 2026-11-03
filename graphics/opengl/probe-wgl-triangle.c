@@ -1,5 +1,6 @@
 /* A bounded WGL shader/readback check. No installation or user documents.
- * Pass an explicit opengl32.dll, optionally --present, --msaa or --atlas.
+ * Pass an explicit opengl32.dll, optionally --present, --large-present,
+ * --msaa or --atlas.
  * MSAA resolves a four-sample target, reproducing the M1 sampler-name failure. */
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
@@ -43,8 +44,11 @@ static LONG WINAPI report_exception(EXCEPTION_POINTERS *exception)
 
 int main(int argc,char **argv)
 {
-    if(argc<2||argc>3||(argc==3&&strcmp(argv[2],"--present")&&strcmp(argv[2],"--msaa")&&strcmp(argv[2],"--atlas")))return 2;
-    const int present=argc==3&&!strcmp(argv[2],"--present");
+    if(argc<2||argc>3||(argc==3&&strcmp(argv[2],"--present")&&strcmp(argv[2],"--large-present")&&strcmp(argv[2],"--msaa")&&strcmp(argv[2],"--atlas")))return 2;
+    const int large=argc==3&&!strcmp(argv[2],"--large-present");
+    const int present=large||(argc==3&&!strcmp(argv[2],"--present"));
+    const int width=large?1536:128,height=large?1024:128;
+    if(large)SetProcessDPIAware();
     const int msaa=argc==3&&!strcmp(argv[2],"--msaa");
     const int atlas=argc==3&&!strcmp(argv[2],"--atlas");
     int atlas_ok=1;
@@ -62,7 +66,7 @@ int main(int argc,char **argv)
     if(!create||!current||!destroy||!get||!choose||!format){puts("Missing WGL exports");FreeLibrary(library);return 1;}
     WNDCLASSA wc={0};wc.style=CS_OWNDC;wc.lpfnWndProc=DefWindowProcA;wc.hInstance=GetModuleHandleA(NULL);wc.lpszClassName="PerpendicularWGLProbe";
     if(!RegisterClassA(&wc)){FreeLibrary(library);return 1;}
-    HWND window=CreateWindowA(wc.lpszClassName,"Perpendicular WGL probe",WS_POPUP,0,0,128,128,NULL,NULL,wc.hInstance,NULL);
+    HWND window=CreateWindowA(wc.lpszClassName,"Perpendicular WGL probe",WS_POPUP,0,0,width,height,NULL,NULL,wc.hInstance,NULL);
     HDC dc=window?GetDC(window):NULL;HGLRC context=NULL;int success=0;
     if(present&&window){ShowWindow(window,SW_SHOWNOACTIVATE);UpdateWindow(window);}
     PIXELFORMATDESCRIPTOR pf={0};pf.nSize=sizeof(pf);pf.nVersion=1;pf.dwFlags=PFD_DRAW_TO_WINDOW|PFD_SUPPORT_OPENGL|PFD_DOUBLEBUFFER;pf.iPixelType=PFD_TYPE_RGBA;pf.cColorBits=32;pf.cDepthBits=24;pf.cStencilBits=8;
@@ -169,7 +173,7 @@ int main(int argc,char **argv)
     pglBindRenderbuffer(0x8d41,rb[1]);pglRenderbufferStorageMultisample(0x8d41,4,0x88f0,128,128);pglFramebufferRenderbuffer(0x8d40,0x821a,0x8d41,rb[1]);
     GLenum fbo_status=pglCheckFramebufferStatus(0x8d40);printf("MSAA framebuffer=0x%x; GL_ERROR=0x%x\n",fbo_status,pglGetError());if(fbo_status!=0x8cd5)goto done;
     }
-    pglViewport(0,0,128,128);pglEnable(GL_DEPTH_TEST);pglClearColor(1,0,0,1);pglClear(GL_COLOR_BUFFER_BIT|GL_DEPTH_BUFFER_BIT);
+    pglViewport(0,0,width,height);pglEnable(GL_DEPTH_TEST);pglClearColor(1,0,0,1);pglClear(GL_COLOR_BUFFER_BIT|GL_DEPTH_BUFFER_BIT);
     pglUniform4f(color,0,1,0,1);pglDrawArrays(GL_TRIANGLES,0,3);
     pglUniform4f(color,0,0,1,1);pglDrawArrays(GL_TRIANGLES,3,3);pglFinish();
     GLenum draw_error=pglGetError();printf("GL_ERROR after draw=0x%x\n",draw_error);
@@ -177,19 +181,26 @@ int main(int argc,char **argv)
     pglBindFramebuffer(0x8ca9,0);pglBlitFramebuffer(0,0,128,128,0,0,128,128,GL_COLOR_BUFFER_BIT,GL_NEAREST);pglBindFramebuffer(0x8d40,0);pglFinish();
     GLenum resolve_error=pglGetError();printf("MSAA resolve GL_ERROR=0x%x\n",resolve_error);if(resolve_error)goto done;
     }
-    GLubyte center[4]={0},corner[4]={0};pglReadPixels(64,64,1,1,GL_RGBA,GL_UNSIGNED_BYTE,center);pglReadPixels(1,126,1,1,GL_RGBA,GL_UNSIGNED_BYTE,corner);
+    GLubyte center[4]={0},corner[4]={0};pglReadPixels(width/2,height/2,1,1,GL_RGBA,GL_UNSIGNED_BYTE,center);pglReadPixels(1,height-2,1,1,GL_RGBA,GL_UNSIGNED_BYTE,corner);
     success=center[0]<8&&center[1]>247&&center[2]<8&&corner[0]>247&&corner[1]<8&&corner[2]<8;
     printf("Shader/depth triangles=%s; center=%u,%u,%u; background=%u,%u,%u\n",success?"PASS":"FAIL",center[0],center[1],center[2],corner[0],corner[1],corner[2]);
     GLenum error=pglGetError();printf("GL_ERROR after readback=0x%x\n",error);if(error)success=0;
     if(success&&present){
         if(!swap||!swap(dc)){puts("SwapBuffers failed");success=0;goto done;}
         GdiFlush();
-        COLORREF pixel=GetPixel(dc,64,64),outside=GetPixel(dc,1,1),lower=GetPixel(dc,32,96);
+        COLORREF pixel=GetPixel(dc,width/2,height/2),outside=GetPixel(dc,1,1),lower=GetPixel(dc,width/4,3*height/4);
         success=GetRValue(pixel)<8&&GetGValue(pixel)>247&&GetBValue(pixel)<8&&
                 GetRValue(outside)>247&&GetGValue(outside)<8&&GetBValue(outside)<8&&
                 GetRValue(lower)<8&&GetGValue(lower)>247&&GetBValue(lower)<8;
         printf("Window pixels=%s; center=0x%06lx; upper corner=0x%06lx; lower=0x%06lx\n",
                success?"PASS":"FAIL",pixel,outside,lower);
+        if(large){
+            for(int y=1;y<height;y+=height/8){
+                COLORREF edge=GetPixel(dc,width-2,y);
+                if(GetRValue(edge)<248||GetGValue(edge)>7||GetBValue(edge)>7)success=0;
+            }
+            printf("Bounded multi-band window %dx%d=%s\n",width,height,success?"PASS":"FAIL");
+        }
     }
     if(initial_error||shader_error||buffer_error||draw_error||!atlas_ok)success=0;
 done:

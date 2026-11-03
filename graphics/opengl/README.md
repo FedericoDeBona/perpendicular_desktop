@@ -122,3 +122,37 @@ Il binario diagnostico ha un hash distinto, non soddisfa il gate del payload
 ordinario e non viene automaticamente distribuito/installato. Per il controllo
 applicativo serve registrare esattamente DLL caricata, gesto reale e output;
 compilazione riuscita da sola non qualifica la misura né il guadagno.
+
+
+### Candidate readback del3novembre
+
+La misura in Creality reale trova Map/attese dominanti (circa296ms su311ms,
+quattro fasce, campione startup/resize). Non è ancora FPS di movimento né tempo
+GPU puro. Il probe ora dispone di `--large-present`:1536×1024 DPIaware, shader,
+profondità e pixel della finestra su più fasce. È un controllo circoscritto per
+rifiutare errori di presentazione, non un benchmark dell'app.
+
+`--batch-readback` riproduce una candidata **respinta**. Raccoglie le copie in
+buffer≤2MiB e aspetta una volta. V1, variante ordinata e variante con pre-map
+compilano ma sbagliano i pixel della finestra. Il controllo seriale equivalente
+passa. La patch conservata è l'ultima variante respinta, non va installata o
+promossa;43ms di un frame scorretto non sono un miglioramento. Nessuna di queste
+DLL è entrata in Creality o nel payload ordinario. Per riprenderla servono nuova
+evidenza di correttezza/causa, non un altro confronto FPS dello stesso codice.
+
+`--reuse-readback` prepara invece una candidata circoscritta: un solo staging
+colore/coerente≤2MiB percontext, riusato quando non ci sono altri transfer che lo
+possiedono, con copia e fence per ogni fascia conservati. Mapping mantenuto e
+rilasciato con la risorsa alla distruzione del context; percorsi diversi o
+buffer occupato mantengono il comportamento precedente. Opt-in nel solo processo
+con `PERP_ZINK_REUSE_READBACK=true`. Buildx64 e pixel del frame grande PASS;
+log conferma riuso effettivo. Un frame nel probe77ms contro103ms seriale non
+qualifica un guadagno applicativo: Map circa59/58ms, conversione/GDI differenti.
+Prima prova Creality con modulo effettivo A725: mediana69ms contro311ms del riferimento precedente, ma geometria/startup differiscono. Confronto fresco stessoDLL A725/envfalse, stessa geometria1488×1107/cubo:316ms contro69ms con riuso. CostoWGL migliorato; fluidità continua senza trace e distribuzione principale ancora DA FARE. Il requisito è
+fluidità utilizzabile con contenuti corretti, non la sola compatibilità.
+
+La ricetta conserva hash dei sorgenti modificati, lock e backup/ripristino della
+cache; limita il parallelismo per convivere con la VM M1. Le due opzioni sono
+mutuamente esclusive e non cambiano i requisiti/payload della release. Solo una
+correzione qualificata può aggiungere un nuovo profilo e requisito al gate della
+build ordinaria. [Evidenze e fallimenti](../../docs/VERIFICATION.md#3-novembre--costo-readback-creality-e-prime-candidate-respinte).
