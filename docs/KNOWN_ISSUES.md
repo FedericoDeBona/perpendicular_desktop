@@ -2,6 +2,8 @@
 
 **3 novembre — LOK/WARP NON UTILIZZABILE, riscontro utente:** il gioco parte ma va a pochissimi FPS. Il menu software non soddisfa il requisito; GFX-011/TODO-007 IN CORSO per il percorso hardware x86. Preparazione della candidata circoscritta al protocollo, senza promozione video o modifica della main. [Registro](VERIFICATION.md#3-novembre--lok-hardware-dopo-il-riscontro-sulla-fluidita).
 
+**Seguito:** codec Windows32/build PASS e candidata installata nella sola copia LOK; ancora caricata UMD originale fino al cold boot. Arresto normale della copia non completato, consenso al riavvio forzato richiesto e pendente. Nessuna qualifica hardware/FPS né distribuzione main. [Punto di ripresa](VERIFICATION.md#3-novembre--lok-hardware-dopo-il-riscontro-sulla-fluidita).
+
 **3 novembre — LOK: menu raggiunto con WARP, driver x86 ancora APERTO (GFX-011).** Permessi SMB già corretti e componenti effettivi allineati. Log Unity precedente con device removed/crash; nuovo avvio hardware registra errore di protocollo CreateInputLayout. Rendering software Microsoft arriva al menu nell'app principale; collegamento `LOK (compatibilita).lnk` creato e riletto nella cartella del gioco, ricetta condivisa. Nessuna qualifica di partita/FPS/stabilità o correzione generale del driver; nessuna nuova build o promozione video. [Evidenze e limiti](VERIFICATION.md#3-novembre--lok-x86-e-avvio-software).
 
 **2 novembre — avvio main RECUPERATO nel caso corrente.** Dopo consenso, una sola interruzione forzata del boot bloccato echeckqcow2offline PASS. Windows ripartito ma primario4096×2160 oltrelimite: topologia ripristinata con CLI esistente, secondo arresto normale/boot97955 riusciti. Desktop nativo1920×1200 visibile eguest collegato,2schermiMac; appprincipale lasciata aperta. SYS-001/GFX-010 restano aperti per causa/recuperoautomatico, video/Creality in pausa. [Evidenze](VERIFICATION.md#2-novembre--recupero-del-boot-main-senza-collegamento).
@@ -288,6 +290,8 @@ Il ciclo RAM protetto 4→2→4 GiB con dati conservati resta la qualifica prece
 ### GFX-011 — Avvio Unity x86 interrotto sul percorso Direct3D
 
 - **Seguito utente 3 novembre:** WARP avvia il gioco ma la fluidità è inutilizzabile («pochissimi FPS», non misura numerica). Alternativa NON SUPERATA come soluzione d'uso; priorità corrente ripristinare il percorso hardware x86. Implementazione/verifica candidata IN CORSO, clone/main ancora da qualificare.
+
+- **Distribuzione locale 3 novembre:** correzione del codec verificata in Windows32 e DLL fresca50a53b16… compilata con ricetta/pin condivisi, installata nella sola copia LOK con normale consenso UAC. Primo processo carica ancora x86 originale b1581a53… e non qualifica la candidata. Cold boot necessario; arresto normale non termina e consenso al riavvio forzato della sola copia pendente. Nessuna modifica del driver main o promessa di FPS. [Evidenze](VERIFICATION.md#3-novembre--lok-hardware-dopo-il-riscontro-sulla-fluidita).
 
 - **Stato:** APERTO; caso LOK 32 bit nella main M1 del 3 novembre. Servizio, UMD originali, backend effettivo e policy SMB concordi con la distribuzione prevista; nessuna correzione x86 già qualificata mancante identificata.
 - **Evidenza:** Player.log dell'uso precedente contiene DXGI_ERROR_DEVICE_REMOVED e crash UnityPlayer/c0000005. Nuovo avvio hardware registra `cmd_type=0xff005708`/dispatch failed, cioè ID3D11Device::CreateInputLayout; non ancora isolato il parametro che invalida la decodifica. Non attribuire il guasto a un limite texture o alla sola RAM.
