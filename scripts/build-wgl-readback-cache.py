@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Build release WGL readback reuse from a qualified Mesa 25.1.9 cache.
 
-No timing or batch patch. Restores qualified sources and DLLs on every exit.
+Optional cached batch with the same serial fallback. No timing/control patch.
+Restores qualified sources and DLLs on every exit.
 Use the existing host-specific toolchain/cache; this never installs a payload.
 """
 import argparse
@@ -32,6 +33,7 @@ def main():
     parser.add_argument('--meson', type=Path, required=True)
     parser.add_argument('--ninja', type=Path, required=True)
     parser.add_argument('--base-release', type=Path, required=True)
+    parser.add_argument('--batch-readback', action='store_true', help='Build production cached color readback batch, enabled by default in the result')
     args = parser.parse_args()
     cache = args.cache.resolve(strict=True)
     source = cache / 'mesa-25.1.9/mesa-25.1.9'
@@ -41,7 +43,12 @@ def main():
     pins = runpy.run_path(str(REPO / 'scripts/build-wgl-present-timing.py'))
     expected_sources = dict(pins['REUSE_SOURCES'])
     expected_sources['src/gallium/targets/wgl/wgl.c'] = pins['SOURCE_SHA']
+    if args.batch_readback:
+        expected_sources.update(pins['BATCH_SOURCES'])
     patch = REPO / 'graphics/opengl/windows-zink-readback-cache.patch'
+    patches = [patch]
+    if args.batch_readback:
+        patches.append(REPO / 'graphics/opengl/windows-zink-cached-batch-readback.patch')
     meson, ninja = args.meson.resolve(strict=True), args.ninja.resolve(strict=True)
     version = subprocess.check_output([str(meson), '--version'], text=True).strip()
     if version != '1.12.1':
@@ -66,10 +73,12 @@ def main():
         env = os.environ.copy()
         env['PATH'] = os.pathsep.join([str(args.meson.absolute().parent), str(args.ninja.absolute().parent), env.get('PATH', '')])
         receipt = {'mesa': '25.1.9', 'meson': version, 'production': True,
-                   'timing': False, 'batch': False, 'patch_sha256': sha(patch.read_bytes()),
+                   'timing': False, 'control': False, 'batch': args.batch_readback, 'patch_sha256': sha(patch.read_bytes()),
+                   'patches': {p.name: sha(p.read_bytes()) for p in patches},
                    'base_release_sha256': sha(args.base_release.read_bytes()), 'files': {}}
         try:
-            subprocess.run(['patch', '-p1', '--batch', '--forward', '-i', str(patch)], cwd=source, check=True)
+            for patch in patches:
+                subprocess.run(['patch', '-p1', '--batch', '--forward', '-i', str(patch)], cwd=source, check=True)
             for arch in ('arm64', 'x64'):
                 build = cache / ('zink-' + arch)
                 with (output / (arch + '-build.log')).open('w') as log:
