@@ -92,7 +92,7 @@ Build privata verificata con Windows SDK/CRT ARM64 10.0.26100 tramite xwin e hea
 - `probe.ps1`: WGL, disponibilità D3D12/Vulkan e stato Secure Boot; nessuna installazione.
 - `probe-host-vulkan.c`: GPU ed estensioni contro una libreria Vulkan host esplicita.
 - `probe-icd.ps1 -IcdPath <DLL>`: separa il caricamento dell'ICD dall'inizializzazione; logging limitato al processo.
-- `probe-vulkan-buffer.c <DLL>`: trasferimento GPU/lettura4096byte tramite ICD esplicito e GPU hardware. Con `--multi` verifica quattrobuffer premappati (2095104/2095104/2095104/6144byte), marcatori/fill distinti, un submit e confronto completo dopo barrieraHOST/QueueWaitIdle. Non qualifica copie immagine, WSI, OpenGL o fluidità.
+- `probe-vulkan-buffer.c <DLL>`: trasferimento GPU/lettura4096byte tramite ICD esplicito e GPU hardware. Con `--multi` verifica quattrobuffer premappati (2095104/2095104/2095104/6144byte), marcatori/fill distinti, un submit e confronto completo dopo barrieraHOST/QueueWaitIdle. Con `--image` usa gli stessi buffer per quattrocopie di fasce da un’immagineottimale1536×1024/RGBA8 riempita dirosso, verificando tutti i pixel. Non qualifica WSI, OpenGL o fluidità.
 
 Output, DLL, ISO, log e dischi di prova vanno fuori Git. Le prove nel clone non sostituiscono la verifica di una scena nell'app principale. [Diario](../../docs/VERIFICATION.md#28-ottobre--memoria-venus-wddm2-e-primo-trasferimento-gpu-protetto).
 
@@ -231,3 +231,7 @@ errate; registra esito e stato della coda. Non è una modalità produzione o un
 motivo per promuovere un batch dal PASS della sola finestra seriale.
 
 La diagnostica confronto accetta anche `PERP_WGL_COMPARE_QUEUE_IDLE=true`: attende la coda completa dopo la fenceZink e registra l’esito. Sul M1 non corregge i byte errati, come la variante hostread; non è un’ottimizzazione da distribuire. Il probe Vulkan diretto `--multi` invece passa tutti i word: separa il semplice backing multi-buffer dal caso immagine/Zink ancora aperto.
+
+Il confronto registra anche `WGL_COMPARE_COPY` nel punto effettivo `CmdCopyImageToBuffer`: immagine/buffer/comando/layout/offset/area per batch e seriale. La ricetta verifica e ripristina anche `zink_context.c`; le identità dei buffer da sole non dimostrano che i comandi li usino correttamente.
+
+`windows-zink-batch-box.patch` / `--batch-box` corregge gli inizializzatori della variante batch usando `u_box_2d`: nella base Mesa25.1.9 `pipe_box` è ordinato x,width,y,height,z,depth. Le versioni precedenti copiavano aree sbagliate (anche larghezza0); barriere/attese non ne erano la soluzione. La patch resta separata per riprodurre gli esiti negativi. ConfrontoCPU integrale e finestra con batcheffettivo PASS sul M1; performance Creality ancora da qualificare, nessun default/release nuovo.

@@ -44,7 +44,10 @@ def main():
     experiment.add_argument('--reuse-readback', action='store_true', help='Build bounded staging reuse; application performance is not yet qualified')
     parser.add_argument('--compare-readback', action='store_true', help='Compare rejected batch bytes with serial; presents serial, diagnostic only')
     parser.add_argument('--batch-host-read', action='store_true', help='Reproduce rejected host-visibility variant (still incorrect bytes); requires batch')
+    parser.add_argument('--batch-box', action='store_true', help='Correct experimental batch pipe_box areas using u_box_2d; requires batch')
     args = parser.parse_args()
+    if args.batch_box and not args.batch_readback:
+        parser.error('--batch-box requires --batch-readback')
     if args.batch_host_read and not args.batch_readback:
         parser.error('--batch-host-read requires --batch-readback')
     if args.compare_readback and not args.batch_readback:
@@ -61,6 +64,8 @@ def main():
         patches.append(REPO / 'graphics/opengl/windows-zink-batch-readback.patch')
     if args.compare_readback:
         patches.append(REPO / 'graphics/opengl/windows-zink-readback-compare.patch')
+    if args.batch_box:
+        patches.append(REPO / 'graphics/opengl/windows-zink-batch-box.patch')
     if args.reuse_readback:
         patches.append(REPO / 'graphics/opengl/windows-zink-reuse-readback.patch')
     if args.batch_host_read:
@@ -75,7 +80,10 @@ def main():
             raise ValueError('Local source/DLL differs from the qualified timing baseline')
         originals = {wgl: original}
         if args.batch_readback or args.reuse_readback:
-            for name, expected in (BATCH_SOURCES if args.batch_readback else REUSE_SOURCES).items():
+            sources = dict(BATCH_SOURCES if args.batch_readback else REUSE_SOURCES)
+            if args.compare_readback:
+                sources['src/gallium/drivers/zink/zink_context.c'] = REUSE_SOURCES['src/gallium/drivers/zink/zink_context.c']
+            for name, expected in sources.items():
                 file = source / name
                 originals[file] = file.read_bytes()
                 if sha(originals[file]) != expected:
@@ -103,7 +111,7 @@ def main():
                 'patches': {p.name: sha(p.read_bytes()) for p in patches}, 'dll_sha256': sha(candidate),
                 'baseline_sha256': sha(qualified), 'mesa': '25.1.9', 'meson': '1.12.1',
                 'architecture': 'x64', 'limit': 600, 'batch_readback_opt_in': args.batch_readback,
-                'reuse_readback_opt_in': args.reuse_readback, 'readback_compare': args.compare_readback, 'batch_host_read': args.batch_host_read,
+                'reuse_readback_opt_in': args.reuse_readback, 'readback_compare': args.compare_readback, 'batch_host_read': args.batch_host_read, 'batch_box': args.batch_box,
             }, indent=2) + '\n')
         finally:
             for file, data in originals.items():

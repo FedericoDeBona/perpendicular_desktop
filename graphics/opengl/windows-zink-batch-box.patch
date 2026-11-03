@@ -1,0 +1,23 @@
+--- a/src/gallium/drivers/zink/zink_resource.c
++++ b/src/gallium/drivers/zink/zink_resource.c
+@@ -2675,7 +2675,8 @@
+       if (!mapped[i])
+          goto done;
+    }
+-   struct pipe_box whole = {0, 0, 0, pres->width0, pres->height0, 1};
++   struct pipe_box whole;
++   u_box_2d(0, 0, pres->width0, pres->height0, &whole);
+    zink_fb_clears_apply_region(ctx, pres, zink_rect_from_box(&whole), 0, 1);
+    if (zink_resource_usage_is_unflushed_write(res))
+       zink_resource_usage_wait(ctx, res, ZINK_RESOURCE_ACCESS_WRITE);
+@@ -2688,8 +2689,8 @@
+       struct zink_transfer trans = {0};
+       trans.base.b.level = 0;
+       trans.base.b.usage = PIPE_MAP_READ;
+-      trans.base.b.box = (struct pipe_box){0, y, 0, pres->width0,
+-                                         MIN2(rows_per_band, pres->height0 - y), 1};
++      u_box_2d(0, y, pres->width0, MIN2(rows_per_band, pres->height0 - y),
++               &trans.base.b.box);
+       zink_transfer_copy_bufimage(ctx, zink_resource(bands[i]), res, &trans);
+    }
+    ctx->no_reorder = saved_no_reorder;

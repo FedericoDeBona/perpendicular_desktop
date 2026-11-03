@@ -124,3 +124,21 @@
        bool valid = true;
        if (!band->obj->coherent) {
           VkMappedMemoryRange range = zink_resource_init_mem_range(screen, band->obj,
+--- a/src/gallium/drivers/zink/zink_context.c
++++ b/src/gallium/drivers/zink/zink_context.c
+@@ -4979,6 +4979,15 @@
+                                                    region.imageExtent.width,
+                                                    region.imageExtent.height,
+                                                    MAX2(region.imageSubresource.layerCount, region.imageExtent.depth));
++#ifdef _WIN32
++         if (debug_get_bool_option("PERP_WGL_COMPARE_READBACK", false))
++            fprintf(stderr, "WGL_COMPARE_COPY command=%p image=%p buffer=%p layout=%u offset=%llu xy=%d,%d extent=%u,%u level=%u layers=%u format=%u\n",
++                    (void *)cmdbuf, (void *)(uintptr_t)use_img->obj->image,
++                    (void *)(uintptr_t)buf->obj->buffer, use_img->layout,
++                    (unsigned long long)region.bufferOffset, region.imageOffset.x, region.imageOffset.y,
++                    region.imageExtent.width, region.imageExtent.height,
++                    region.imageSubresource.mipLevel, region.imageSubresource.layerCount, img->base.b.format);
++#endif
+          VKCTX(CmdCopyImageToBuffer)(cmdbuf, use_img->obj->image, use_img->layout, buf->obj->buffer, 1, &region);
+       }
+       zink_cmd_debug_marker_end(ctx, cmdbuf, marker);
