@@ -5,6 +5,13 @@ New-Item -ItemType Directory -Force -Path $root | Out-Null
 if ($LASTEXITCODE -ne 0) { throw 'Could not secure the guest installation directory.' }
 Start-Transcript -Path (Join-Path $root 'installation.log') -Append | Out-Null
 try {
+    $x86=Join-Path $PSScriptRoot 'X86Graphics'
+    if(Test-Path (Join-Path $x86 'release.json')) {
+        $release=ConvertFrom-Json ([IO.File]::ReadAllText((Join-Path $x86 'release.json')))
+        $machine=[Guid](Get-CimInstance Win32_ComputerSystemProduct).UUID
+        & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $x86 'install.ps1') -ExpectedMachineID $machine -ExpectedSHA256 $release.files.'neptune_umd_x86.dll' -PayloadRoot $x86
+        if ($LASTEXITCODE -ne 0) { throw 'The Win32 graphics correction could not be installed.' }
+    }
     # Ordinary updates install this bridge; the explicit one-time removal of
     # legacy agents and sharing is handled by remove-legacy.ps1.
     $shared=Join-Path $PSScriptRoot 'SharedFiles'

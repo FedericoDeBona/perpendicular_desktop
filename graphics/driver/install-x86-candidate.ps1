@@ -38,7 +38,18 @@ if((Get-FileHash $payload).Hash -ine $ExpectedSHA256){throw 'Candidate differs'}
 if((Get-Item $payload).VersionInfo.FileVersion -ne '100.6.101.58000'){throw 'Candidate ABI differs'}
 $pe=[IO.File]::ReadAllBytes($payload);$offset=[BitConverter]::ToInt32($pe,0x3c)
 if([BitConverter]::ToUInt16($pe,$offset+4) -ne 0x14c){throw 'Candidate is not Win32'}
-if(Test-Path -LiteralPath $dest){throw 'Fresh protected target required'}
+if(Test-Path -LiteralPath $dest){
+ if((Get-FileHash -LiteralPath $installed).Hash -ine $ExpectedSHA256){throw 'Existing candidate differs; preserved'}
+ $saved=ConvertFrom-Json ([IO.File]::ReadAllText($backup))
+ if($saved.CandidateSHA256 -ine $ExpectedSHA256 -or !$saved.Registry.Count){throw 'Existing backup differs; preserved'}
+ foreach($entry in $saved.Registry){
+  $expected=@($entry.Value|ForEach-Object {if($_ -ieq $original){$installed}else{$_}})
+  $current=@((Get-Item -LiteralPath $entry.Key).GetValue('UserModeDriverNameWoW'))
+  if(($current -join "`0") -cne ($expected -join "`0")){throw 'Registration changed; preserved'}
+ }
+ @{status='already-installed';sha=$ExpectedSHA256;registrations=$saved.Registry.Count;destination=$dest}|ConvertTo-Json -Compress
+ return
+}
 $cls='HKLM:\SYSTEM\CurrentControlSet\Control\Class\{4d36e968-e325-11ce-bfc1-08002be10318}';$entries=@()
 foreach($n in (Get-Item $cls).GetSubKeyNames()){
  if($n -notmatch '^\d{4}$'){continue};$key=Get-Item ($cls+'\'+$n);$value=$key.GetValue('UserModeDriverNameWoW',$null)

@@ -8,6 +8,7 @@ guest="$PWD/guest/target/aarch64-pc-windows-msvc/release/perpendicular-guest.exe
 if [[ "${SKIP_RUNTIME:-0}" != 1 ]]; then
     # Detect a stale payload on another Mac before compiling the frontend.
     python3 scripts/check-opengl-payload.py --app "$runtime_app"
+    python3 scripts/check-x86-payload.py --app "$runtime_app"
 fi
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources/Guest"
 cp macos/Info.plist "$app/Contents/Info.plist"
@@ -50,6 +51,7 @@ if [[ "${SKIP_RUNTIME:-0}" == 1 && -d .build/Native3D ]]; then
     cp -R .build/Native3D "$app/Contents/Resources/Native3D"
 fi
 python3 scripts/check-opengl-payload.py --app "$app"
+python3 scripts/check-x86-payload.py --app "$app"
 python3 scripts/prepare-build-dependencies.py --app "$app"
 rm -rf "$app/Contents/Resources/Display2D"
 python3 scripts/package-network-runtime.py --app "$app"

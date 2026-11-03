@@ -23,7 +23,7 @@
     "sha256": "867c6afd41158c132ef05a8f1ddaecf476a26b91c85def8e124414f9a9ba188d"
   },
   "schema": 1,
-  "status": "experimental Win32 SIZE_T wire correction, not promoted",
+  "status": "Win32 SIZE_T wire fix qualified with LOK hardware/input and user-confirmed improved fluidity in the M1 QA copy; release 0.1.0 packaged; ordinary Windows registration still to verify",
   "patch_sha256": "3bae3b4a9c1f348b0a60439c4ef182aa66f56583835414440788f078367c4aa3",
   "original_header_sha256": "4089064fbb4071d4bbd42f019171f4151adb800f14f1db6350d0ed27f03e085e",
   "tools": {

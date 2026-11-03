@@ -1,0 +1,7 @@
+{
+  "schema": 1,
+  "required_fixes": ["win32-size-t-wire"],
+  "architecture": "i386",
+  "guest_wire_version": 2,
+  "kernel_abi": "100.6.101.58000"
+}

@@ -8,7 +8,7 @@ Le candidate test-signed di scheduler, completamento, compositore e resize KMD s
 
 Non riattivare modalità test o candidate DWM per il normale resize. Per un nuovo intervento partire da un difetto concreto nelle app e mantenere driver, UMD/helper e runtime compatibili. [Piano corrente](../../docs/RESTART_PLAN.md), [indice delle prove ritirate](../../docs/RETIRED_EXPERIMENTS.md).
 
-## Candidata Win32 SIZE_T (3 novembre, non promossa)
+## Correzione Win32 SIZE_T 0.1.0 (3 novembre)
 
 LOK è un player Unity x86. Il codec originale tratta i puntatori `SIZE_T *`
 Windows32 come `uint64_t *`: il controllo Windows reale legge byte adiacenti
@@ -44,8 +44,34 @@ riconosciute. DriverStore/kernel/ARM64/Vulkan/OpenGL conservati; backup e `-Rest
 verificano che i valori appartengano ancora alla candidata prima di ripristinarli.
 Non basta un valore di registro: confermare il modulo caricato dal processo.
 
-La build ordinaria continua a usare la distribuzione qualificata precedente.
-Questa candidata resta privata finché gioco hardware, input e fluidità non
-sono verificati nella copia e poi nella main. Alla promozione occorrono payload
-versionato e controllo build che rifiuti le librerie prive del fix; non copiare
-silenziosamente un output locale. [Stato/evidenze](../../docs/VERIFICATION.md#3-novembre--lok-hardware-dopo-il-riscontro-sulla-fluidita).
+La copia LOK carica la nuova DLL dopo cold boot: menu, livello1-1 e clic sulle
+tessere verificati; l'utente conferma «va molto meglio». È una verifica della
+fluidità d'uso, senza una misura FPS numerica. La VM principale non ha ancora
+ricevuto la registrazione Windows; il bundle canonico contiene il payload per
+il normale aggiornamento dei componenti guest. [Stato/evidenze](../../docs/VERIFICATION.md#3-novembre--lok-hardware-dopo-il-riscontro-sulla-fluidita).
+
+L'autorità condivisa è [x86-requirements.json](x86-requirements.json); la
+[release0.1.0](releases/x86-0.1.0.json) vincola DLL/installer per hash.
+`scripts/check-x86-payload.py` rifiuta payload mancanti, obsoleti, alterati o
+con ABI/wire incompatibili prima della compilazione e durante la copia del runtime.
+Una nuova release può soddisfare gli stessi requisiti; non modificare i pin
+per far passare un componente privo della correzione.
+
+Su un altro Mac conservare il relativo backend host/OpenGL. Ricostruire il solo
+componente Windows32 compatibile con la ricetta, quindi confezionarlo in una
+copia separata dell'app:
+
+```sh
+python3 scripts/package-x86-payload.py --app "$separate_app" \
+  --umd "$fresh_external_output/build/src/virtio/neptune/triton/neptune_umd.dll" \
+  --release-manifest graphics/driver/releases/x86-0.1.0.json
+codesign --force --sign - "$separate_app"
+PERPENDICULAR_RUNTIME_APP="$separate_app" zsh scripts/build-macos.sh
+```
+
+Il normale installer guest applica il payload presente nel bundle. Riapplicare
+la stessa release verifica hash/backup/registro e restituisce `already-installed`
+senza sovrascrivere; una registrazione diversa viene preservata e rifiutata.
+Dopo la prima installazione serve spegnimento/avvio completo di Windows e
+conferma del modulo effettivo: il primo processo prima del reboot usava ancora
+la vecchia DLL. Sorgenti/patch/ricette sono in Git, DLL/dischi/SDK restano fuori.
