@@ -1,5 +1,7 @@
 # Registro dei problemi
 
+**3 novembre — pulizia locale M1 FATTA (TODO-013):** ritirati18 dischi/checkpoint superati,23 bundle,19 runtime inattivi e65 cartelle/supporti/output rigenerabili. Recupero netto filesystem24,806 GB, liberi53,753 GB al controllo finale. Conservati canonica/build correnti, VM principale, copie LOK e video, un checkpoint completo per ciascuna, un rollback app e cache/toolchain utili.107.805 record protetti invariati; gate OpenGL/x86 e firme PASS. Nessun avvio/installazione Windows: sul M1 il fix LOK resta verificato nella copia, registrazione main ancora da aggiornare; video/Creality in pausa. [Evidenze](VERIFICATION.md#3-novembre--pulizia-delle-vecchie-copie-e-base-conservata).
+
 **3 novembre — LOK hardware verificato nella copia; integrazione `main` richiesta.** Cold boot dopo una sola interruzione autorizzata/check immagine PASS; LOK4640 carica realmente x86-50a53b16… e usa VirtIO/D3D11. Menu/livello1-1/input verificati, nessun nuovo errore di protocollo nel segmento; l'utente conferma «va molto meglio». Release0.1.0/ricetta/installer ripetibile e gate build condivisi, build Mac/firma PASS. Bundle canonico include il payload; registrazione nella VM principale ancora DA FARE, nessuna misura FPS numerica. [Evidenze](VERIFICATION.md#3-novembre--lok-hardware-dopo-il-riscontro-sulla-fluidita).
 
 **3 novembre — LOK/WARP NON UTILIZZABILE, riscontro utente:** il gioco parte ma va a pochissimi FPS. Il menu software non soddisfa il requisito; GFX-011/TODO-007 IN CORSO per il percorso hardware x86. Preparazione della candidata circoscritta al protocollo, senza promozione video o modifica della main. [Registro](VERIFICATION.md#3-novembre--lok-hardware-dopo-il-riscontro-sulla-fluidita).
@@ -451,6 +453,8 @@ Il ciclo RAM protetto 4→2→4 GiB con dati conservati resta la qualifica prece
 - **Evidenze:** [diario del ripristino protezioni](VERIFICATION.md#25-ottobre--resize-con-driver-ufficiale-e-protezioni-ripristinate).
 
 ### SYS-002 — Spazio host esaurito durante le scritture VM
+
+- **3 novembre, M1/0795218c:** nuova pulizia esplicita con VM/app spente:28.946.391.040→53.752.737.792 byte liberi, delta24.806.346.752 byte.18 dischi autonomi superati e altri artefatti ritirati; tre VM correnti e un checkpoint completo per ciascuna conservati.107.805 record protetti invariati, gate/firme app PASS; nessuna nuova prova I/O/UI né prevenzione prodotto implementata. SYS-002 resta aperto, TODO-010 non riattivato. [Evidenze](VERIFICATION.md#3-novembre--pulizia-delle-vecchie-copie-e-base-conservata).
 
 - **Seconda pulizia27 ottobre, stesso Mac:** liberi36.468.113.408→77.154.340.864 byte, delta40.686.227.456 byte durante rimozione degli artefatti del vecchio progetto. La misura parte dal nuovo inventario, distinto dal primo recupero e con altri processi attivi; non attribuire ogni variazione di spazio a QEMU. Stesso processo e dischi collegati, nessun nuovo errore I/O riprodotto. Prevenzione nel prodotto ancora aperta. [Evidenze](VERIFICATION.md#27-ottobre--seconda-pulizia-del-vecchio-progetto-e-degli-artefatti).
 

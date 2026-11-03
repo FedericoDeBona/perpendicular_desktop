@@ -5345,3 +5345,35 @@ Evidenze private QA/resize-20261103: user-fullscreen-failure/topology, build-026
 Manutenzione della sola installazione Windows principale, nessuna modifica al prodotto o ripresa grafica. App/Windows già collegati. Identificato esattamente Microsoft.BingWallpaper_1.1.471.0_x86__8wekyb3d8bbwe, nome Microsoft.BingWallpaper/famiglia8wekyb3d8bbwe, InstallLocation coincidente con il percorso WindowsApps indicato; NonRemovablefalse, nessun processo relativo iniziale. Eseguito il normale Remove-AppxPackage sul solo PackageFullName verificato, nell’utente Windows corrente. Risultato exit0; rilettura Get-AppxPackage restituisce0pacchetti, Get-StartApps0voci della famiglia e nessun processo Bing Wallpaper. Nessuna rimozione manuale dei file WindowsApps, modifica di ACL o riavvio.
 
 Richiesta locale FATTA nel perimetro disinstallazione dell’utente corrente; altri profili/provisioning di sistema non modificati o qualificati. Nessun difetto Perpendicular riprodotto, quindi nessuna nuova voce KNOWN_ISSUES o chiusura di compatibilità generale. Evidenze private QA/uninstall-bing-20261103/before.json e removal.json; script/log fuori Git. Nessuna build necessaria, app e VM conservate in esecuzione.
+
+## 3 novembre — pulizia delle vecchie copie e base conservata
+
+**Richiesta:** eliminare vecchi COW/versioni e ripartire dalla base corrente, mantenendo backup/cache necessari al lavoro ancora aperto. Perimetro TODO-013; nessuna ripresa dell'obiettivo video/Creality in pausa e nessuna distribuzione Windows.
+
+**Punto di partenza:** `main`85289de, working tree pulito. VM/frontend/compiler assenti all'inventario e prima/dopo la rimozione; nessuno stop o boot eseguito. Inventario mirato nei supporti Perpendicular, nelle due QA e nelle cache di sviluppo, senza cancellare download/dati dell'utente o sorgenti del repository. Non trovato il vecchio checkout Desktop `perpendicular_desktop_old` su questa macchina.
+
+**Dipendenze dischi:** `qemu-img info --output=json --backing-chain` della distribuzione corrente su tutte24 immagini trovate:24 catene di lunghezza1, qcow2 senza backing file. Nessuna dipendenza COW delle sei immagini conservate dalle18 ritirate; nessun check con riparazione, merge/rebase o compattazione delle VM. Le grandi dimensioni riportate da `du` comprendevano cloni APFS e non sono il recupero effettivo.
+
+**Rimozione conclusa:**125 percorsi radice selezionati, tutti assenti alla fine e nessun errore:
+
+- 17 checkpoint superati (7main/10video) e il vecchio albero Windows del backup ottobre,18 dischi totali. Conservati i piccoli metadati/Launcher del backup storico.
+- 23 bundle vecchi, candidature concluse e copie di packaging;19 runtime inattivi.
+- 14 copie di sorgenti/build rigenerabili e sostituite,35 ISO espulse,14 cartelle staging CD e2 oggetti di probe compilati. Ricette/pin/patch Git e script/log conservati; ricevute degli alberi ritirati copiate nel registro privato prima della rimozione.
+
+**Base conservata:**
+
+- Canonica `/Applications/Perpendicular.app` e `.build/Perpendicular.app` correnti0.2.59, payload Win32 0.1.0/OpenGL0.2.31. Runtime ordinario `b92d73e3…` nella main e nella QA LOK, senza cambio host.
+- Main `Perpendicular Memory IoT/Windows` e checkpoint completo `before-graphics-20261103T061855Z`.
+- `~/.local/share/perp-lok-qa`: Windows verificato con fix x86, checkpoint `before-graphics-20261103T064651Z`, app `Perpendicular LOK QA.app`; una sola copia canonica `Canonical-before-x86-payload.app` per rollback. Build x86 v2 con DLL `50a53b16df567e7f06a609e64a3511a45927b17998c47f77fa3949d3ab744692`, SDK Win32 e cache cargo-xwin richiesta dai wrapper mantenuti.
+- `~/.local/share/perp-video-qa`: Windows in pausa e checkpoint `before-graphics-20261102T211647Z`; app `Perpendicular Video v12 M1.app`, runtime CPUv12 `395ec8a9…`, UMDv14 `80636989563952f8132c25546542c5a73d6b7b43a1129fa81886124e68299416` anche fuori dal disco in `map-v14-media` e sorgenti v14 in `umd-v14-reconstruct`.
+- Cache attive video native/UMD, LLVM15, WDK/SDK, ambiente Meson/Ninja del vecchio Restart, OpenGL e sorgenti/toolchain QEMU mantenuti. Nota di ripresa privata: `native-v12-m1` e `umd-v12-m1` contengono ora gli ultimi esperimenti opzionali (staging/v15), con ricevute iniziali storiche; non scambiarli per i binari default in base al nome. DLL default e app/runtime effettivi sopra conservati separatamente.
+
+**Verifica offline di conservazione PASS:**107.805 record dei percorsi protetti confrontati prima e dopo; nessuna variazione/assenza. Record con inode, dimensione, mtime/mode e link; SHA256 integrale dei membri app/configurazioni/firmware, per i grandi dischi/archivi metadati e tre campioni1MiB (non hash integrale dell'intera immagine). Riferimenti simbolici dei componenti protetti controllati prima della rimozione: nessuna destinazione ritirata. Stato Git invariato dopo la pulizia, prima di questo aggiornamento documentale. Nessuna riscrittura di Windows, EFI/TPM, configurazione o cartelle condivise.
+
+**Qualifica bundle dopo pulizia PASS:** `check-x86-payload.py`, `check-opengl-payload.py` e `codesign --verify --deep --strict` su canonica e build: Win32 0.1.0/patch wire e hash verificati; OpenGL0.2.31/sei DLL conformi; firme valide. Verifica funzionale main/clone/UI NON ESEGUITA: non richiesta per una rimozione di elementi inattivi con componenti protetti invariati. Registrazione del nuovo driver nella Windows principale ancora da aggiornare; non estendere il precedente riscontro LOK alla main. Nessun risultato FPS/video/Creality aggiunto.
+
+**Spazio reale filesystem:** prima28.946.391.040 byte, dopo53.752.737.792 byte; recupero netto24.806.346.752 byte (24,806 GB decimali). Misura del filesystem, non somma di `du`; attività esterne e APFS possono variare successivamente lo spazio libero.
+
+**Registro locale privato:** `Perpendicular Memory IoT/QA/cleanup-20261103/{manifest.json,removed.json,result.json,RETAINED.md,retired-receipts/}` e ricetta puntuale `cleanup.py`; nessun disco/binario/stato privato aggiunto a Git. Criterio di questa pulizia soddisfatto, TODO-013 FATTO nel nuovo perimetro. SYS-002/prevenzione prodotto resta aperto; nessun lavoro ulteriore avviato.
+
+**Sincronizzazione finale del registro:** il primo push è stato rifiutato perché l’altra macchina aveva pubblicato `461a75a`, `1a64f79`, `53c7893`, `b2d6e1d`. Fetch e rebase del solo commit documentale sopra `b2d6e1d`, conservando entrambe le cronache nei conflitti TODO/VERIFICATION. I sorgenti ora includono0.2.61 e la qualifica M4; su questo M1 canonica/build0.2.59 e Windows sono invariati, senza rebuild o dichiarazione di distribuzione dei nuovi commit.
