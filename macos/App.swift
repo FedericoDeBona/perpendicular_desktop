@@ -60,6 +60,9 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
     private var lastCatalogueRefresh:TimeInterval=0
     private var catalogueNotice:String?
     private var catalogueRefreshes=0
+    private var catalogueAutomaticEligible:Bool {
+        NSApp.isActive && !NSApp.isHidden && launcher?.isKeyWindow == true
+    }
     private var visibleIcons:Set<String>=[]
     private var iconVisibility:[String:Int]=[:]
     private var failedIcons:Set<String>=[]
@@ -233,6 +236,8 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
         NSApp.mainMenu=main
         NotificationCenter.default.addObserver(self,selector:#selector(hostDisplaysChanged),
             name:NSApplication.didChangeScreenParametersNotification,object:nil)
+        NotificationCenter.default.addObserver(self,selector:#selector(launcherBecameKey),
+            name:NSWindow.didBecomeKeyNotification,object:launcher)
         let editItem=NSMenuItem();main.addItem(editItem)
         let edit=NSMenu(title:"Edit");editItem.submenu=edit
         edit.addItem(withTitle:"Cut",action:#selector(NSText.cut(_:)),keyEquivalent:"x")
@@ -250,6 +255,8 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
     func applicationShouldTerminateAfterLastWindowClosed(_ sender:NSApplication)->Bool{false}
     func applicationShouldHandleReopen(_ sender:NSApplication,hasVisibleWindows flag:Bool)->Bool{showApplications();return false}
     @objc func showApplications(){launcher.makeKeyAndOrderFront(nil);NSApp.activate(ignoringOtherApps:true);NotificationCenter.default.post(name:.launcherFocusSearch,object:nil)}
+    func applicationDidBecomeActive(_ notification:Notification){refreshCatalogueIfNeeded()}
+    @objc private func launcherBecameKey(_ notification:Notification){refreshCatalogueIfNeeded()}
     @objc func showSettings(){launcher.makeKeyAndOrderFront(nil);NSApp.activate(ignoringOtherApps:true);NotificationCenter.default.post(name:.launcherShowSettings,object:nil)}
     @objc func closeCurrentWindow(){
         if NSApp.sendAction(NSSelectorFromString("closeDocument:"),to:nil,from:self){return}
@@ -674,7 +681,7 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
                 "frameChannel":bridge?.separateFrames ?? false,
                 "windowGPU":NativeWindowFrames.shared.diagnostics,
                 "windowGPUCache":NativeWindowFrames.shared.cacheDiagnostics,
-                "launcher":["cursor":launcher.cursorDiagnostics,"catalogueAutomaticEligible":launcher.isVisible && !launcher.isMiniaturized,"catalogueAgeSeconds":ProcessInfo.processInfo.systemUptime-lastCatalogueRefresh,"catalogueRefreshes":catalogueRefreshes,"statusMessage":launcherStatusMessage as Any? ?? NSNull(),"dragSamples":launcher.dragSamples,"dragPointer":["x":launcher.dragPointer.x,"y":launcher.dragPointer.y],"dragRequested":["x":launcher.dragRequested.x,"y":launcher.dragRequested.y],"frame":["x":launcher.frame.minX,"y":launcher.frame.minY,"width":launcher.frame.width,"height":launcher.frame.height],"screen":launcher.screen?.localizedName ?? "", "apps":apps.map{["id":$0.id,"name":$0.name,"key":$0.key,"essential":$0.essential]},"opening":Array(openingApps).sorted(),"notice":launcherNotice as Any? ?? NSNull(),"iconCacheHits":iconCacheHits,"iconFetches":iconFetches,"cachedIcons":applicationIcons.count,"recent":launcherPreferences.recent(apps).map(\.id),"favorites":launcherPreferences.sections(apps).favorites.map(\.id),"appearance":launcherAppearance.rawValue,"indicator":launcherWindowsStatus.title],
+                "launcher":["cursor":launcher.cursorDiagnostics,"catalogueAutomaticEligible":catalogueAutomaticEligible,"catalogueAgeSeconds":ProcessInfo.processInfo.systemUptime-lastCatalogueRefresh,"catalogueRefreshes":catalogueRefreshes,"statusMessage":launcherStatusMessage as Any? ?? NSNull(),"dragSamples":launcher.dragSamples,"dragPointer":["x":launcher.dragPointer.x,"y":launcher.dragPointer.y],"dragRequested":["x":launcher.dragRequested.x,"y":launcher.dragRequested.y],"frame":["x":launcher.frame.minX,"y":launcher.frame.minY,"width":launcher.frame.width,"height":launcher.frame.height],"screen":launcher.screen?.localizedName ?? "", "apps":apps.map{["id":$0.id,"name":$0.name,"key":$0.key,"essential":$0.essential]},"opening":Array(openingApps).sorted(),"notice":launcherNotice as Any? ?? NSNull(),"iconCacheHits":iconCacheHits,"iconFetches":iconFetches,"cachedIcons":applicationIcons.count,"recent":launcherPreferences.recent(apps).map(\.id),"favorites":launcherPreferences.sections(apps).favorites.map(\.id),"appearance":launcherAppearance.rawValue,"indicator":launcherWindowsStatus.title],
                 "desktop":machine?.desktopState ?? [:],
                 "desktopResize":desktopResizeReport,
                 "lastCommandRTTMilliseconds":bridge?.lastRoundTripMilliseconds ?? 0,
@@ -826,7 +833,9 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
         }
     }
     func refreshCatalogueIfNeeded(){
-        guard launcher?.isVisible == true,launcher?.isMiniaturized == false,
+        // AppsFolder enumeration runs on the Windows command worker. Do not
+        // repeat it while Desktop/another app owns focus; catch up on return.
+        guard catalogueAutomaticEligible,
               ProcessInfo.processInfo.systemUptime-lastCatalogueRefresh>=30 else{return}
         refresh(checkDisplay:false)
     }
