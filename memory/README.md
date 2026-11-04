@@ -119,7 +119,7 @@ nel controllo di virgl_renderer_create_handle_for_scanout deve fermare la
 configurazione. Correggere i percorsi delle librerie e azzerare la cache Meson,
 senza interpretare un risultato negativo memorizzato come assenza della funzione.
 
-**4 novembre, ottimizzazione del controller0.2.63 (QA verificata, main da distribuire):** il timeout20s
+**4 novembre, ottimizzazione del controller0.2.63, inclusa nella0.2.64 consegnata alla main:** il timeout20s
 per il fallback balloon misura il progresso fisico dell'unplug, non i cambi
 del target richiesto. Ridurre ancora una richiesta mentre i blocchi rimangono
 pinned non riavvia l'attesa. Un vero cambiamento dei blocchi o un nuovo ciclo
@@ -165,3 +165,9 @@ non avvia VM. Output e backup restano privati. La ricettaM1/pin è in
 proprio profilo compatibile. Il gate build/copy rifiuta runtimevecchi o metadati
 non coerenti, senza trasferire automaticamente l'intero runtimeM1. Qualifica
 Windows/ciclo/arresto richiesta separatamente nel diario; build sola non basta.
+
+**ConsegnaM1.64:** QA protetta con integrità/ripristino e un arrestoACPI sotto
+balloon attivo PASS; main runtime effettivo/driverfirmati allineati, background
+3GiB→primo piano4GiB verificato. Unplug fisico parziale e hintreusable restano
+distinti da RAMlogica, footprintHVF e memoria fisica unica. Le altre cause
+SYS-001 e i costiCPU/GPU/disco non sono chiusi da questa prova.

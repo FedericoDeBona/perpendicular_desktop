@@ -23,5 +23,5 @@
     "include/hw/virtio/virtio-balloon.h": "574c88b1961cab8784705725401b4187c6f6b4c66a15ae61988d2c6ce3b9bc37",
     "include/hw/virtio/virtio-mem.h": "b666062e8839f4d9db5f589451b4c0f7bb7f4e7cdd40202088bfd8771f250551"
   },
-  "qualification": "M1 protected QA boot, live capability/ownership, data integrity, restore and one normal shutdown with balloon active passed; main delivery pending"
+  "qualification": "M1 protected QA boot, live ownership, integrity, restore and one normal shutdown with balloon active passed; canonical0.2.64/main runtime and drivers aligned, main background-to-foreground restore verified"
 }
