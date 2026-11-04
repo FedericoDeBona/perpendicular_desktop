@@ -171,3 +171,10 @@ balloon attivo PASS; main runtime effettivo/driverfirmati allineati, background
 3GiB→primo piano4GiB verificato. Unplug fisico parziale e hintreusable restano
 distinti da RAMlogica, footprintHVF e memoria fisica unica. Le altre cause
 SYS-001 e i costiCPU/GPU/disco non sono chiusi da questa prova.
+
+Il riferimento del rebuilder deve corrispondere al cache v1: dopo aver salvato
+la candidata il builder ripristina il vecchio unsigned nel cache. Per ripetere
+il build usare il bundle v1 conservato prima dell'aggiornamento (sul M1,
+base unsigned40bee491...), con il suo pin verificato. Il bundle aggiornato
+resta il riferimento per le normali buildMac, che riusano il runtime corretto.
+Un pin non corrispondente deve fermare il rebuilder.
