@@ -48,6 +48,13 @@ class QMP:
         if self.call("query-uuid")["UUID"].lower() != identity.lower():
             raise RuntimeError("QMP belongs to another VM")
 
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_):
+        self.file.close()
+        self.connection.close()
+
     def call(self, command, **arguments):
         self.file.write(json.dumps({"execute": command, "arguments": arguments}).encode() + b"\n")
         while True:
@@ -83,7 +90,7 @@ def main():
         root = Path(info.get("PerpendicularMachineDirectory", str(Path.home() / "Library/Application Support/Perpendicular Memory IoT")))
     configuration = json.loads((root / "machine.json").read_text())
     pid = int((root / "qemu-system-aarch64.pid").read_text())
-    qmp = QMP(f"/tmp/perpendicular-{os.getuid()}-{configuration['id'][:8]}.sock", configuration["id"], pid)
+    qmp_path = f"/tmp/perpendicular-{os.getuid()}-{configuration['id'][:8]}.sock"
     processes = []
     rows = subprocess.check_output(["ps", "-axo", "pid=,ppid=,comm="], text=True)
     table = [row.strip().split(None, 2) for row in rows.splitlines()]
@@ -106,11 +113,14 @@ def main():
         clock = control("pipeline_clock")
         # Frontend BlockBackend accounting is populated by NVMe. The node
         # variant can return all-zero counters even during real I/O.
-        blocks = qmp.call("query-blockstats")
-        try:
-            native = json.loads(qmp.call("qom-get", path="/machine/peripheral/display0/virtio-backend", property="perp-live-stats"))
-        except (RuntimeError, ValueError, TypeError) as error:
-            native = {"unavailable": str(error)}
+        # The monitor accepts one client. Holding it across the sample would
+        # block the product's memory controller and invalidate the observation.
+        with QMP(qmp_path, configuration["id"], pid) as qmp:
+            blocks = qmp.call("query-blockstats")
+            try:
+                native = json.loads(qmp.call("qom-get", path="/machine/peripheral/display0/virtio-backend", property="perp-live-stats"))
+            except (RuntimeError, ValueError, TypeError) as error:
+                native = {"unavailable": str(error)}
         return {"monotonic": time.monotonic(), "processes": {str(p): usage(p) for p, _ in processes},
                 "blocks": [{k: v for k, v in b.items() if k in ("node-name", "stats")} for b in blocks],
                 "memory": status["memory"], "desktop": status["desktop"], "windowCount": status["windowCount"],
