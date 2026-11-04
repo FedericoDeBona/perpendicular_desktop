@@ -5,6 +5,7 @@ app="$PWD/.build/Perpendicular.app"
 runtime_app="${PERPENDICULAR_RUNTIME_APP:-/Applications/Perpendicular.app}"
 guest="$PWD/guest/target/aarch64-pc-windows-msvc/release/perpendicular-guest.exe"
 [[ -f "$guest" ]] || { print -u2 'Build the ARM64 guest first with scripts/build-guest.sh'; exit 1; }
+python3 scripts/check-guest-payload.py --guest "$guest"
 if [[ "${SKIP_RUNTIME:-0}" != 1 ]]; then
     # Detect a stale payload on another Mac before compiling the frontend.
     python3 scripts/check-memory-runtime.py --app "$runtime_app"

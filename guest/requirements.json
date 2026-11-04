@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "architecture": "arm64",
+  "requiredMarkers": ["perpendicular-window-discovery-v1"],
+  "recipe": "scripts/build-guest.sh",
+  "source": "guest/src/windows/worker.rs",
+  "liveProbe": "pipeline_clock.guest.value.windowObservation.policy"
+}

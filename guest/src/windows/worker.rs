@@ -78,6 +78,9 @@ struct Worker {
     activation_serial: u64,
     next_process_scan: Instant,
     next_minimum_scan: Instant,
+    observation_passes: u64,
+    discovery_checked: u64,
+    discovery_skipped: u64,
     serial: u64,
     pressed: HashSet<u16>,
     pending_unicode: Option<u16>,
@@ -188,6 +191,9 @@ pub fn run(path: &Path) -> Result<(), String> {
         activation_serial: 0,
         next_process_scan: Instant::now(),
         next_minimum_scan: Instant::now(),
+        observation_passes: 0,
+        discovery_checked: 0,
+        discovery_skipped: 0,
         serial: 0,
         pressed: HashSet::new(),
         pending_unicode: None,
@@ -285,7 +291,12 @@ impl Worker {
             } else { Duration::from_millis(75) };
             if let Ok(command) = receiver.recv_timeout(interval.saturating_sub(poll.elapsed())) {
                 let request = command["request"].clone();
-                if command["operation"] == "trial_clock" {outbox.control(json!({"type":"reply","request":request,"ok":true,"result":super::gpu::clock()}));continue;}
+                if command["operation"] == "trial_clock" {
+                    let mut clock=super::gpu::clock();
+                    clock["windowObservation"]=json!({"policy":"perpendicular-window-discovery-v1","passes":self.observation_passes,
+                        "discoveryChecked":self.discovery_checked,"discoverySkipped":self.discovery_skipped});
+                    outbox.control(json!({"type":"reply","request":request,"ok":true,"result":clock}));continue;
+                }
                 if command["operation"] == "frame_channel" {
                     let channel = command["channel"].as_str().filter(|s| s.len() == 32 && s.bytes().all(|b| b.is_ascii_hexdigit()));
                     if frame_channel_started || channel.is_none() || command["rowAlignment"] != 256
@@ -1213,6 +1224,7 @@ impl Worker {
         changed
     }
     fn observe(&mut self, outbox: &Arc<Outbox>) {
+        self.observation_passes+=1;
         self.finish_activations(outbox);
         // Desktop-only windows cannot become Mac-owned without a launcher
         // request. Retain process lifecycle bookkeeping, but do not inspect
@@ -1247,6 +1259,21 @@ impl Worker {
                 && catalogue::window_class(raw) != "ApplicationFrameWindow") {
                 continue;
             }
+            // application_for() admits only a requested launch, an owned
+            // descendant, or a transient of the foreground Mac-owned app.
+            // Avoid process/token/geometry queries for unrelated main windows.
+            // Keep the full scan during launch (including hosted/brokered apps).
+            if self.pending.is_empty() {
+                let owner=unsafe {GetWindow(HWND(raw as _),GW_OWNER)}.unwrap_or_default().0 as usize;
+                let owned=self.windows.values().any(|w|w.target.hwnd==owner);
+                let foreground=catalogue::foreground();
+                let foreground_owned=self.windows.values().any(|w|w.mac_owned && w.target.hwnd==foreground);
+                if !owned && (!foreground_owned || !catalogue::may_be_transient(raw)) {
+                    self.discovery_skipped+=1;
+                    continue;
+                }
+            }
+            self.discovery_checked+=1;
             if let Some(details) = catalogue::details(raw, &self.sid, self.session) {
                 if let Some(app) = self.application_for(&details) {
                     changed |= self.add(raw, app, outbox);

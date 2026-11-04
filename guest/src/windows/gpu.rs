@@ -80,9 +80,15 @@ impl Gpu{
 }
 
 pub fn clock()->Value {unsafe{
- unsafe extern "system" {fn GetProcessTimes(h:*mut core::ffi::c_void,creation:*mut u64,exit:*mut u64,kernel:*mut u64,user:*mut u64)->i32;}
+ unsafe extern "system" {
+  fn GetProcessTimes(h:*mut core::ffi::c_void,creation:*mut u64,exit:*mut u64,kernel:*mut u64,user:*mut u64)->i32;
+  fn GetThreadTimes(h:*mut core::ffi::c_void,creation:*mut u64,exit:*mut u64,kernel:*mut u64,user:*mut u64)->i32;
+  fn GetCurrentThreadId()->u32;
+ }
  let (mut qpc,mut frequency)=(0,0);let _=windows::Win32::System::Performance::QueryPerformanceCounter(&mut qpc);
  let _=windows::Win32::System::Performance::QueryPerformanceFrequency(&mut frequency);
  let (mut c,mut e,mut k,mut u)=(0,0,0,0);let ok=GetProcessTimes(-1isize as *mut _,&mut c,&mut e,&mut k,&mut u)!=0;
- json!({"qpc":qpc,"frequency":frequency,"workerCPU100ns":if ok{Some(k+u)}else{None}})
+ let (mut tc,mut te,mut tk,mut tu)=(0,0,0,0);let thread_ok=GetThreadTimes(-2isize as *mut _,&mut tc,&mut te,&mut tk,&mut tu)!=0;
+ json!({"qpc":qpc,"frequency":frequency,"workerCPU100ns":if ok{Some(k+u)}else{None},
+  "workerThreadID":GetCurrentThreadId(),"workerThreadCPU100ns":if thread_ok{Some(tk+tu)}else{None}})
 }}

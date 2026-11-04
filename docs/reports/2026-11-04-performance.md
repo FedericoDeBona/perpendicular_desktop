@@ -106,3 +106,17 @@ Cache GPU finale1risorsa/11.812.864byte. È costo globale dell'intervallo di ape
 non prova che l'I/O, la cattura o una singola funzione ne siano la causa;
 nessun tempo preciso di apertura o miglioramentoFPS dedotto. Finestra propria
 richiusa conCmdW; ritorno al launcher osservato.
+
+
+## Seguito: thread attivo e candidata discovery0.2.66
+
+Main Explorer statico8,0248s: processo6,2307%, thread iniziale5,6466% di un core
+(kernel4,8677%). Il costo osservabile motiva ridurre le interrogazioni delle nuove
+finestre non ammissibili, conservando validazione e scansione completa nei lanci.
+Candidata e gate guest compilati; singolo campione privato esercita1395 controlli
+evitati/93passaggi. Stato ricerca/geometria non controllati: nessun A/B o guadagno
+CPU/FPS qualificato. Due prove temporanee terminano ripristinando il vecchio worker.
+Installazione normale QA ancora senza ricevuta a causa della richiesta UAC non
+visibile; canonica/main restano0.2.65. Prossimo risultato è un Explorer/dialogo reale
+con servizio candidato effettivo, prima di confronto/promozione.
+[Evidenze e limiti](../VERIFICATION.md#4-novembre--attribuzione-cpu-al-thread-worker-e-candidata0266-non-promossa).

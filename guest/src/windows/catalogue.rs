@@ -550,6 +550,20 @@ pub fn transient(metadata: &Value) -> bool {
     matches!(metadata["role"].as_str(), Some("popup" | "tooltip"))
 }
 
+/// Negative discovery hint only, never an ownership or admission check.
+/// Every transient classified by details() either has one of these classes,
+/// or lacks both a full caption and a thick frame. Be conservative for the
+/// latter: dialogs/other borderless surfaces still get the full validation.
+pub fn may_be_transient(raw: usize) -> bool {
+    let style = unsafe { GetWindowLongPtrW(HWND(raw as *mut _), GWL_STYLE) } as u32;
+    if style & WS_CAPTION.0 != WS_CAPTION.0 && style & WS_THICKFRAME.0 == 0 {
+        return true;
+    }
+    let class = window_class(raw);
+    class == "#32768" || class.eq_ignore_ascii_case("tooltips_class32")
+        || class == "MicrosoftWindowsTooltip"
+}
+
 pub fn frame_bounds(hwnd: HWND) -> Option<RECT> {
     unsafe {
         let mut rect = RECT::default();
