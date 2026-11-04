@@ -253,13 +253,7 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
         startWindows()
     }
     func applicationShouldTerminateAfterLastWindowClosed(_ sender:NSApplication)->Bool{false}
-    func applicationShouldHandleReopen(_ sender:NSApplication,hasVisibleWindows flag:Bool)->Bool{
-        // QA controllers can reactivate the app before each input. Let AppKit
-        // retain the current window instead of redirecting that input to the
-        // launcher. Ordinary bundles keep the Dock's launcher behaviour.
-        if flag,Bundle.main.object(forInfoDictionaryKey:"PerpendicularQAReopenNormally") as? Bool == true {return true}
-        showApplications();return false
-    }
+    func applicationShouldHandleReopen(_ sender:NSApplication,hasVisibleWindows flag:Bool)->Bool{showApplications();return false}
     @objc func showApplications(){launcher.makeKeyAndOrderFront(nil);NSApp.activate(ignoringOtherApps:true);NotificationCenter.default.post(name:.launcherFocusSearch,object:nil)}
     func applicationDidBecomeActive(_ notification:Notification){refreshCatalogueIfNeeded()}
     @objc private func launcherBecameKey(_ notification:Notification){refreshCatalogueIfNeeded()}
