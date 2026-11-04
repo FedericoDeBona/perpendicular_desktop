@@ -7,6 +7,7 @@ guest="$PWD/guest/target/aarch64-pc-windows-msvc/release/perpendicular-guest.exe
 [[ -f "$guest" ]] || { print -u2 'Build the ARM64 guest first with scripts/build-guest.sh'; exit 1; }
 if [[ "${SKIP_RUNTIME:-0}" != 1 ]]; then
     # Detect a stale payload on another Mac before compiling the frontend.
+    python3 scripts/check-memory-runtime.py --app "$runtime_app"
     python3 scripts/check-opengl-payload.py --app "$runtime_app"
     python3 scripts/check-x86-payload.py --app "$runtime_app"
     python3 scripts/check-video-payload.py --app "$runtime_app"
@@ -51,6 +52,7 @@ if [[ "${SKIP_RUNTIME:-0}" == 1 && -d .build/Native3D ]]; then
     rm -rf "$app/Contents/Resources/Native3D"
     cp -R .build/Native3D "$app/Contents/Resources/Native3D"
 fi
+python3 scripts/check-memory-runtime.py --app "$app"
 python3 scripts/check-opengl-payload.py --app "$app"
 python3 scripts/check-x86-payload.py --app "$app"
 python3 scripts/check-video-payload.py --app "$app"

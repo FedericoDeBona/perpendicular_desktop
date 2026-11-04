@@ -18,6 +18,7 @@ privato, esterno al repository. Rifiutano sorgenti con anchor differenti:
 ```sh
 python3 scripts/patch-qemu-memory.py /percorso/privato/qemu
 python3 scripts/patch-qemu-virtio-mem.py /percorso/privato/qemu
+python3 scripts/patch-qemu-memory-quiesce.py /percorso/privato/qemu
 ```
 
 Il primo mantiene l'ownership delle sottopagine balloon da 4 KiB tra richieste,
@@ -128,3 +129,39 @@ di sgonfiare tutto il balloon per poi restringerlo di nuovo. Primo piano ed
 emergenza restituiscono sempre la capacità completa. Il controllo mirato è
 `tests/MemoryUnplugProgressChecks.swift`; qualifica reale/main nel
 [diario](../docs/VERIFICATION.md#4-novembre--primo-ciclo-ram-corrente-e-ritardo-del-fallback-balloon).
+
+**Minimo condiviso dopo il blocco4 novembre (SYS-001).**
+Le BH balloon e virtio-mem richiedono lo stop delle vCPU e ricontrollano gli
+ACK con timer realtime2ms, lasciando il mainloop libero di completare resetGPU.
+Nessun descrittore viene consumato o mapping toccato prima di tutti gli ACK.
+Reset/unrealize cancellano timer e richiesta di pausa; ogni callback ricontrolla
+gli ACK anche se un'altra callback RAM ha nel frattempo ripreso le vCPU.
+La sola capacitàRAMv1 non basta: il runtime deve avere
+`hvf_memory_quiesce_version=1`, ricette conformi a `memory/requirements.json`
+e proprietà live `perp-quiesce-stats` su entrambi i device. Il controller.64
+verifica le proprietà una volta perPID prima di cambiare target.
+
+Per aggiornare un cache localev1 già qualificato, leggere source/build/pin dal
+receipt memory-runtime del bundle locale, poi usare:
+
+```sh
+python3 scripts/rebuild-memory-quiesce.py \
+  --source /cache/locale/qemu --build /cache/locale/qemu-build \
+  --reference-app /Applications/Perpendicular.app \
+  --output /nuova/cartella/privata --ninja /toolchain/locale/bin/ninja
+python3 scripts/package-memory-runtime.py --native \
+  --app /nuovo/bundle/privato.app \
+  --qemu /nuova/cartella/privata/qemu-system-aarch64-unsigned \
+  --quiesce-receipt /nuova/cartella/privata/receipt.json \
+  --library-dir /Applications/Perpendicular.app/Contents/Resources/Native3D/lib \
+  --library-dir /Applications/Perpendicular.app/Contents/Frameworks/Runtime/lib
+python3 scripts/check-memory-runtime.py --app /nuovo/bundle/privato.app
+```
+
+Il builder convalida il pinunsigned e i due header del cache qualificato,
+compila con2job e ripristina byte sorgenti/binario originali anche se fallisce;
+non avvia VM. Output e backup restano privati. La ricettaM1/pin è in
+`memory/releases/0.1.0-darwin-arm64-m1.json`; un altroMac deve ricostruire dal
+proprio profilo compatibile. Il gate build/copy rifiuta runtimevecchi o metadati
+non coerenti, senza trasferire automaticamente l'intero runtimeM1. Qualifica
+Windows/ciclo/arresto richiesta separatamente nel diario; build sola non basta.

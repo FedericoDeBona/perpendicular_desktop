@@ -12,6 +12,7 @@ final class RuntimeMemoryController {
     private var connectedAt=ProcessInfo.processInfo.systemUptime
     private var emergencyUntil=0.0
     private var unplugProgress=MemoryUnplugProgress()
+    private var quiesceVerifiedPID:Int32?
     var guestReady=false
     private(set) var state:[String:Any]=["enabled":true,"ready":false]
     private static let MiB:UInt64=1_048_576
@@ -28,7 +29,7 @@ final class RuntimeMemoryController {
             }
         }
     }
-    func stop(){task?.cancel();task=nil;guestReady=false}
+    func stop(){task?.cancel();task=nil;guestReady=false;quiesceVerifiedPID=nil}
     private struct Guest:Sendable {let total:UInt64;let available:UInt64}
     private struct Snapshot:Sendable {
         let actual:UInt64,plugged:UInt64,requested:UInt64,reusable:UInt64,discarded:UInt64
@@ -46,15 +47,20 @@ final class RuntimeMemoryController {
             }
         }
     }
-    private nonisolated static func snapshot(socket:String,id:String,pid:Int32)throws->Snapshot {
-        func stats(_ path:String)throws->[String:Any]{
-            let result=try MachineControl.value(socket:socket,operation:"qom-get",arguments:["path":path,"property":"perp-reclaim-stats"],expectedUUID:id,expectedPID:pid)
+    private nonisolated static func snapshot(socket:String,id:String,pid:Int32,verifyQuiesce:Bool)throws->Snapshot {
+        func stats(_ path:String,property:String="perp-reclaim-stats")throws->[String:Any]{
+            let result=try MachineControl.value(socket:socket,operation:"qom-get",arguments:["path":path,"property":property],expectedUUID:id,expectedPID:pid)
             guard let text=result as? String,let data=text.data(using:.utf8),
                   let value=try JSONSerialization.jsonObject(with:data) as? [String:Any],
-                  value["version"] as? Int == 1,value["enabled"] as? Bool == true else {
+                  value["version"] as? Int == 1,
+                  (property != "perp-reclaim-stats" || value["enabled"] as? Bool == true) else {
                 throw failure("The running VM does not have the qualified RAM support.")
             }
             return value
+        }
+        if verifyQuiesce {
+            _=try stats("/machine/peripheral/balloon0",property:"perp-quiesce-stats")
+            _=try stats("/machine/peripheral/vmem0/virtio-backend",property:"perp-quiesce-stats")
         }
         let balloon=try stats("/machine/peripheral/balloon0")
         let memory=try stats("/machine/peripheral/vmem0/virtio-backend")
@@ -77,7 +83,9 @@ final class RuntimeMemoryController {
         do {
             guard case .running(let pid)=await machine.observedState() else{return}
             let socket=machine.controlSocket,id=machine.configuration.id
-            let observed=try await Task.detached {try Self.snapshot(socket:socket,id:id,pid:pid)}.value
+            let verifyQuiesce=quiesceVerifiedPID != pid
+            let observed=try await Task.detached {try Self.snapshot(socket:socket,id:id,pid:pid,verifyQuiesce:verifyQuiesce)}.value
+            quiesceVerifiedPID=pid
             let guest=try await guestMemory()
             guard !Task.isCancelled else{return}
             let base=UInt64(machine.configuration.memoryMiB)*Self.MiB
@@ -118,7 +126,7 @@ final class RuntimeMemoryController {
                     _=try MachineControl.execute(socket:socket,operation:"qom-set",arguments:["path":"/machine/peripheral/vmem0","property":"requested-size","value":wantedPlugged],expectedUUID:id,expectedPID:pid)
                 }
             }.value
-            state=["enabled":true,"ready":true,"foreground":active,"targetMiB":target/Self.MiB,
+            state=["enabled":true,"ready":true,"quiesceVerified":true,"foreground":active,"targetMiB":target/Self.MiB,
                 "viewForeground":visible,"updatedAt":Date().timeIntervalSince1970,
                 "pressureGraceSeconds":max(0,Int(emergencyUntil-now)),
                 "actualMiB":observed.actual/Self.MiB,"pluggedMiB":observed.plugged/Self.MiB,

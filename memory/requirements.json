@@ -1,0 +1,9 @@
+{
+  "schema": 1,
+  "hvfDynamicMemoryVersion": 1,
+  "hvfMemoryQuiesceVersion": 1,
+  "requiredPatches": [
+    "scripts/patch-qemu-memory-quiesce.py",
+    "memory/qemu/perp-hvf-quiesce.h"
+  ]
+}

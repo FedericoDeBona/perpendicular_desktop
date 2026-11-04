@@ -24,6 +24,7 @@ def main():
     parser.add_argument("--qemu", type=Path, required=True)
     parser.add_argument("--library-dir", type=Path, action="append", default=[])
     parser.add_argument("--native", action="store_true", help="Package a QEMU preserving the current native desktop hooks")
+    parser.add_argument("--quiesce-receipt", type=Path, help="Receipt from rebuild-memory-quiesce.py; required for native RAM")
     args = parser.parse_args()
     app = args.app.resolve(strict=True)
     source = args.qemu.resolve(strict=True)
@@ -40,6 +41,19 @@ def main():
     native_root = app / "Contents/Resources/Native3D"
     native_manifest = (json.loads((native_root / "runtime.json").read_text())
                        if args.native else {})
+    quiesce = None
+    if args.native:
+        if args.quiesce_receipt is None:
+            raise ValueError("Native RAM requires the shared quiesce fix and its build receipt")
+        project = Path(__file__).resolve().parents[1]
+        requirements = json.loads((project / "memory/requirements.json").read_text())
+        patches = {name: hashlib.sha256((project / name).read_bytes()).hexdigest()
+                   for name in requirements["requiredPatches"]}
+        quiesce = json.loads(args.quiesce_receipt.read_text())
+        if (quiesce.get("version") != requirements["hvfMemoryQuiesceVersion"]
+                or quiesce.get("patches") != patches
+                or quiesce.get("outputSHA256") != hashlib.sha256(source.read_bytes()).hexdigest()):
+            raise ValueError("Quiesce build receipt, shared recipe or QEMU output differs")
 
     def compatibility(binary):
         lines = output("otool", "-L", str(binary)).splitlines()
@@ -125,6 +139,8 @@ def main():
         manifest = json.loads(manifest_path.read_text())
         manifest["files"]["bin/qemu-system-aarch64"] = hashlib.sha256(executable.read_bytes()).hexdigest()
         manifest["hvf_dynamic_memory_version"] = 1
+        manifest["hvf_memory_quiesce_version"] = quiesce["version"]
+        manifest["memory_quiesce_patches"] = quiesce["patches"]
         manifest_path.write_text(json.dumps(manifest, indent=2) + "\n")
     (app / ("Contents/Resources/" + resource + "/memory-runtime.json")).write_text(json.dumps({
         "schema": 1, "hvfMemoryVersion": 1, "graphicsQualified": False, "files": receipt,
