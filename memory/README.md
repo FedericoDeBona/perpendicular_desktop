@@ -118,7 +118,7 @@ nel controllo di virgl_renderer_create_handle_for_scanout deve fermare la
 configurazione. Correggere i percorsi delle librerie e azzerare la cache Meson,
 senza interpretare un risultato negativo memorizzato come assenza della funzione.
 
-**4 novembre, ottimizzazione del controller (candidata0.2.63):** il timeout20s
+**4 novembre, ottimizzazione del controller0.2.63 (QA verificata, main da distribuire):** il timeout20s
 per il fallback balloon misura il progresso fisico dell'unplug, non i cambi
 del target richiesto. Ridurre ancora una richiesta mentre i blocchi rimangono
 pinned non riavvia l'attesa. Un vero cambiamento dei blocchi o un nuovo ciclo
