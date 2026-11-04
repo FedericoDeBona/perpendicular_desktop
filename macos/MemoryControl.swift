@@ -11,9 +11,7 @@ final class RuntimeMemoryController {
     private var task:Task<Void,Never>?
     private var connectedAt=ProcessInfo.processInfo.systemUptime
     private var emergencyUntil=0.0
-    private var lastPlugged:UInt64?
-    private var lastRequested:UInt64?
-    private var plugProgressAt=ProcessInfo.processInfo.systemUptime
+    private var unplugProgress=MemoryUnplugProgress()
     var guestReady=false
     private(set) var state:[String:Any]=["enabled":true,"ready":false]
     private static let MiB:UInt64=1_048_576
@@ -94,9 +92,7 @@ final class RuntimeMemoryController {
             let used=usedIncludingBalloon>inflated ? usedIncludingBalloon-inflated:0
             let reserve=UInt64(config.reserveMiB)*Self.MiB
             let now=ProcessInfo.processInfo.systemUptime
-            if lastPlugged != observed.plugged || lastRequested != observed.requested {
-                plugProgressAt=now;lastPlugged=observed.plugged;lastRequested=observed.requested
-            }
+            unplugProgress.observe(plugged:observed.plugged,requested:observed.requested,at:now)
             if guest.available<reserve/2 {emergencyUntil=now+60}
             let visible=foreground()
             let active=visible || now<emergencyUntil || now-connectedAt<15 || !guestTotalConfirmed
@@ -108,10 +104,12 @@ final class RuntimeMemoryController {
             let wantedPlugged=target>base ? target-base:0
             let targetBalloon=min(target,base+observed.plugged)
             let restore=active || target>observed.actual
-            let unplugStalled=observed.plugged>wantedPlugged && now-plugProgressAt>=20
+            let unplugStalled=observed.plugged>wantedPlugged && unplugProgress.stalled(at:now)
             // Restore balloon ownership first. Shrink physical RAM before
             // inflating a balloon, so it cannot pin blocks pending removal.
-            let balloonTarget=restore ? base+observed.plugged:targetBalloon
+            // A small background increase needs only the requested headroom.
+            // Deflating the entire balloon here overshoots, then shrinks again.
+            let balloonTarget=active ? base+observed.plugged:targetBalloon
             try await Task.detached {
                 if (restore || observed.plugged<=wantedPlugged || unplugStalled),balloonTarget != observed.actual {
                     _=try MachineControl.execute(socket:socket,operation:"balloon",arguments:["value":balloonTarget],expectedUUID:id,expectedPID:pid)

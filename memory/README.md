@@ -117,3 +117,14 @@ Il medesimo profilo richiede `native-scanout-required.patch`: un errore di link
 nel controllo di virgl_renderer_create_handle_for_scanout deve fermare la
 configurazione. Correggere i percorsi delle librerie e azzerare la cache Meson,
 senza interpretare un risultato negativo memorizzato come assenza della funzione.
+
+**4 novembre, ottimizzazione del controller (candidata0.2.63):** il timeout20s
+per il fallback balloon misura il progresso fisico dell'unplug, non i cambi
+del target richiesto. Ridurre ancora una richiesta mentre i blocchi rimangono
+pinned non riavvia l'attesa. Un vero cambiamento dei blocchi o un nuovo ciclo
+la riavvia; il limite128MiB/poll e le riserve/emergenze restano conservati.
+Una crescita parziale in background restituisce il target necessario, evitando
+di sgonfiare tutto il balloon per poi restringerlo di nuovo. Primo piano ed
+emergenza restituiscono sempre la capacità completa. Il controllo mirato è
+`tests/MemoryUnplugProgressChecks.swift`; qualifica reale/main nel
+[diario](../docs/VERIFICATION.md#4-novembre--primo-ciclo-ram-corrente-e-ritardo-del-fallback-balloon).
