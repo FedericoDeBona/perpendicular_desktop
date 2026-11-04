@@ -5635,3 +5635,26 @@ Media contiene anche un vecchio player AV1software1080p distrutto prima del trat
 
 
 **Salvataggio finale verificato.** Sei hash/architetturePE e tutti i pinpatch del payload.34 conformi al manifesto; entrambe le nuove libgallium prive delle stringhe diagnostichePERP_WGL_PRESENT_TRACE/PERP_WGL_BATCH_CONTROL/WGL_COMPARE. Il gate rifiuta la canonica.33 per la nuova patch richiesta come previsto. Questi sono controlli di artefatto, non una provaWindows della produzione. CDproprio espulso dopo verificaPID/disco/UUID/file esatto; shutdownQA70114 normale completato (frontend e TPM propri chiusi), nessuna forzatura. Ultima sidecar9118 della prova riuscita conservata nella QA spenta e backup e9ce intatto. Per la richiesta di chiusura rapida, attività fermata al salvataggio verificato: nessuna installazione.34, nuova buildcanonica o prova main eseguita. Riprendere da produzione34-payload/receipt/pin, senza perdere il confronto e il riscontro positivo dell'utente.
+
+
+## 4 novembre — pull senza rebuild e pulizia sul Mac93be6687
+
+Richiesta esplicita: pull, nessun rebuild, pulizia immagini COW/vecchie build preservando il lavoro ancora aperto. Checkout inizialmente pulito su main; fast-forward b2d6e1d→e1fa146. Nessuna compilazione, installazione, riavvio, arresto VM o ripresa della diagnosi grafica.
+
+### Componenti condivisi e distribuzione locale
+
+Il nuovo stato condiviso comprende produzione Creality/OpenGL0.2.34 e video0.1.0; le qualifiche M1 non si trasferiscono al Mac93be6687. Canonica e build locali ancora0.2.61/OpenGL0.2.32. QEMU32895 attivo dal runtime8d61daadd80a3bec9024ae39e7497762599aa84de7d4e79323fb40d1b6b27651. Manifest Native3D verificato nella canonica e nel runtime effettivo:29/29 hash ciascuno,29/29 file effettivi identici tra i due. ServizioWindows PerpendicularRestart Running, eseguibile realmente configurato c43892e628ccd9e6dadf6935128f0f97c8317ffdbeb28fe143d9070291b6855f, uguale al guest incluso nella canonica.
+
+Gate condiviso OpenGL eseguito: rifiuto previsto del payload0.2.32 per windows-zink-readback-cache.patch e windows-zink-cached-batch-readback.patch mancanti. Nessun aggiramento dei requisiti o rebuild, secondo richiesta. Nuova distribuzione e verifica funzionale clone/main NON ESEGUITE. Prima query servizio con filtro malquotato: erroreCIM, poi lettura corretta e hash riusciti. Ricerche nelle radici/chiavi OpenGL generiche non individuano la distribuzione Windows e non la qualificano; nessuna conclusione sul driver effettivamente caricato da una specifica appWindows. Il manifest generico runtime-manifest.json conserva hash di provenienza antecedenti al confezionamento e non è stato usato come prova di integrità del runtime rilocato; il controllo pertinente Native3D/runtime.json e il confronto diretto danno29/29.
+
+### Selezione, dipendenze e conservazione
+
+Inventario qemu-img info --force-share --output=json sui dischi dei percorsi Restart, QA video e clone ibernazione. Main, QA video/ibernazione e checkpoint conservati autonomi. Le tre overlay storiche OpenGL dipendono ancora da Rollback/before-graphics-20261026T095403Z/Windows/system.qcow2: overlay e base conservate. Nessun disco di queste prove OpenGL eliminato.
+
+Eliminati15 checkpoint completi superati: main before-graphics-20261030T085344Z,20261102T110405Z,20261102T161844Z;12 precedenti checkpoint della QA videoM4. Conservati checkpoint main20261103T081239Z e video20261102T162813Z, presenza/dimensione di tutti i file dei rispettivi manifest verificata. Nessuna prova di restore aggiunta.
+
+Rimossi49 bundle storici nei vecchi esperimenti launcher/rebuild/rendering/SMB/virtiofs/rete. Esclusi dalla selezione tutti i workspace OpenGL, ibernazione, resize20261103 e pull-rebuild20261103. Conservati integralmente sorgenti, patch, candidate e compilati videoM4 (incluse appv12), clone ibernazione, cache/toolchain x86, dati utente e VM principale. Nessuna directory di lavoro dubbia ripulita per completismo.
+
+Ricevute private fuoriGit: ~/Library/Application Support/Perpendicular Restart/QA/cleanup-20261104/{plan.json,protected-before.json,receipt.json,execution.log}. Lista esplicita selezionata, catene backing,209.968 record protetti prima/dopo; zero variazioni. Per il disco main vivo verificati inode/dimensione, non hash/mtime dei dati che Windows continua a scrivere. Processi ricontrollati prima delle rimozioni; nessun percorso selezionato usato negli argomenti dei processi.64 selezioni assenti al termine (15checkpoint+49bundle), zero errori. Firme profonde canonica/build PASS; stesso PIDQEMU32895 ancora attivo.
+
+Spazio libero immediatamente prima3.110.621.184byte, dopo12.111.331.328byte: recupero netto9.000.710.144byte (~9,001GB decimali). È la variazione reale del filesystem, non la somma delle dimensioni dei cloniAPFS; VM accesa e altre scritture possono influenzarla. Criterio TODO-013 soddisfatto per questo perimetro. Nessuna chiusura dei difetti grafici o qualifica delle feature appena scaricate. Prossimo passo solo su nuova richiesta: allineamento compatibile locale prima di nuove prove, con lavoro aperto conservato.
