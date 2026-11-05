@@ -20,7 +20,14 @@ typedef int mtx_t;
 #define mtx_destroy(...) ((void)0)
 #define mtx_lock(...) ((void)0)
 #define mtx_unlock(...) ((void)0)
-struct npt_renderer { size_t limit; unsigned calls, live; };
+struct npt_renderer {
+   size_t limit;
+   unsigned calls, live;
+#ifdef PERP_ASYNC_POOL_RETIRE
+   unsigned async_calls, deferred_count;
+   struct npt_renderer_shmem *deferred[8];
+#endif
+};
 struct npt_renderer_shmem { unsigned refs; size_t size; };
 struct npt_shmem_pool {
    mtx_t mutex;
@@ -49,6 +56,31 @@ npt_renderer_shmem_unref(struct npt_renderer *r, struct npt_renderer_shmem *s)
 {
    if (!--s->refs) { --r->live; free(s); }
 }
+#ifdef PERP_ASYNC_POOL_RETIRE
+/* Model the existing reaper's ownership boundary, without timing Windows. */
+#define PERP_POOL_RETIRE_TIMING_H
+struct npt_pool_timing { unsigned unused; };
+#define npt_pool_timing_begin() ((struct npt_pool_timing){0})
+#define npt_pool_timing_created(t) ((void)(t))
+#define npt_pool_timing_end(t, ...) ((void)(t))
+static void
+npt_renderer_shmem_unref_async(struct npt_renderer *r,
+                               struct npt_renderer_shmem *s)
+{
+   ++r->async_calls;
+   if (!--s->refs) {
+      assert(r->deferred_count < 8);
+      r->deferred[r->deferred_count++] = s;
+   }
+}
+static void drain(struct npt_renderer *r)
+{
+   while (r->deferred_count) {
+      free(r->deferred[--r->deferred_count]);
+      --r->live;
+   }
+}
+#endif
 #include PERP_SHMEM_POOL_SOURCE
 
 int main(void)
@@ -73,6 +105,9 @@ int main(void)
    struct npt_renderer_shmem *small = npt_shmem_pool_alloc(&r, &pool, 31920, &off);
    assert(small && small->size == 32768 && off == 0 && r.calls == before + 2);
    assert(first->refs == 1 && pool.size == 32768 && pool.used == 31920);
+#ifdef PERP_ASYNC_POOL_RETIRE
+   assert(r.async_calls == 1 && !r.deferred_count);
+#endif
    npt_renderer_shmem_unref(&r, first);
    /* A request as large as the batch must fail without a pointless retry. */
    before = r.calls;
@@ -82,5 +117,24 @@ int main(void)
    assert(small->refs == 1);
    npt_renderer_shmem_unref(&r, small);
    assert(!r.live);
+#ifdef PERP_ASYNC_POOL_RETIRE
+   /* When only the pool owns an exhausted chunk, growth transfers its last
+    * reference to the reaper. It cannot reuse/free that chunk in the caller. */
+   r.limit = batch;
+   npt_shmem_pool_init(&pool, batch);
+   first = npt_shmem_pool_alloc(&r, &pool, 4096, &off);
+   npt_renderer_shmem_unref(&r, first);
+   assert(first->refs == 1);
+   pool.used = pool.size;
+   small = npt_shmem_pool_alloc(&r, &pool, 4096, &off);
+   assert(small != first && off == 0 && r.live == 2);
+   assert(r.deferred_count == 1 && !first->refs && r.deferred[0] == first);
+   drain(&r);
+   assert(r.live == 1 && small->refs == 2);
+   npt_shmem_pool_fini(&r, &pool);
+   npt_renderer_shmem_unref(&r, small);
+   assert(!r.live && !r.deferred_count);
+   puts("PASS: retained caller refs, deferred last ref, fresh offsets and explicit drain");
+#endif
    puts("PASS: ordinary batching, compact retry, failure retention and large request bound");
 }

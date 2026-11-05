@@ -401,3 +401,26 @@ URL, input o contenutoapp registrato. `observe-dwm-scheduling.ps1
 prima dell'analisi e riporta conteggi/omessi. Servono marker dalla DLL effettiva
 prima di interpretare un campione vuoto; la sola installazione non qualifica
 il punto che precede bitmapcopy.
+
+
+### Candidata M1: ritiro asincrono del pool, sopra v18 diagnostica
+
+`rebuild-video-umd.py --async-pool-retire` richiede `--map-timing` e tutti
+requisiti della v18. `async-pool-retire.patch` sposta soltanto l'ultimo unref
+del vecchio pool durante la crescita sul reaper già esistente. Non ricicla
+regioni, non modifica Map/Unmap, reference counting, drain/destroy del trasporto
+o il drain del reaper prima della distruzione del renderer. Fini rimane
+sincrono; Linux invariato. La creazione di una nuova allocazione resta identica.
+
+`pool-retire-timing.h` separa creazione (incluso l'eventuale fallback compatto)
+e ritiro, usando lo stesso provider/keyword2 e al massimo32record+esaurimento
+perprocesso. È una candidata diagnostica: nessun nuovo minimo di produzione,
+nessuna promessa sul lag. Se gli stalli rimangono nella creazione, la variante
+va respinta e questa misura evita di insistere sul ritiro.
+
+Il controllo ristretto `NativeShmemPoolChecks.c`, compilato contro il vero
+sorgente candidato con `PERP_ASYNC_POOL_RETIRE=1`, verifica fallimenti e
+conservazione dei riferimenti, trasferimento dell'ultimo riferimento al reaper,
+nessun riuso degli offset e drain esplicito; non qualifica GPU, concorrenza o
+prestazioni. Prima di promuovere occorrono coldboot/pixel/protezioni e movimento
+reale nella QA e nell'app principale.

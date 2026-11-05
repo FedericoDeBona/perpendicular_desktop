@@ -1,0 +1,21 @@
+{
+  "schema": 1,
+  "state": "Build and bounded ownership checks PASS; QA install/coldboot/pixels/stalls pending; not production",
+  "revision": "Perpendicular video-resource-v18-map-timing-async-pool",
+  "architecture": "aarch64",
+  "kernel_abi": "100.6.101.58000",
+  "umd_sha256": "01e64f62cd184ba0fa0171f7e7292ac492de55c1f2a213b7a2fab0c2c7eb3361",
+  "baseline_umd_sha256": "bcfb93ac6847726735e2db0c37b641e0049a154f032a3a997978da714352e926",
+  "toolchain_profile": "original",
+  "patches": {
+    "async-pool-retire.patch": "6687b5329832b942a97fa0f294a9995c5f215871b825cc58b43314e70a4ed41c",
+    "pool-retire-timing.h": "41e48da16a8b5c357318be90dc335016b8bd1376079e2e05e250257f36cd6182"
+  },
+  "requirements": {
+    "original_kernel": true,
+    "secure_boot": true,
+    "test_signing": false,
+    "map_timing_diagnostic": true
+  },
+  "qualification": "docs/VERIFICATION.md#5-novembre--ripresa-del-lag-seamless-sul-m1"
+}
