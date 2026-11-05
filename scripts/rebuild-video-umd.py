@@ -36,7 +36,7 @@ def main():
     parser.add_argument('--present-amortization', action='store_true', help='Apply upstream present object cleanup to v16; requires --external-video-discard, Windows qualification required')
     parser.add_argument('--target-independent-coverage', action='store_true', help='Opt in to v18 upstream TIR coverage fixes above v17; requires --present-amortization, Windows qualification required')
     parser.add_argument('--map-timing', action='store_true', help='Opt-in diagnostic Map phase timing above v18; no performance qualification or production promotion')
-    parser.add_argument('--async-pool-retire', action='store_true', help='Candidate-only asynchronous old-pool retirement with bounded timing; requires --map-timing')
+    parser.add_argument('--async-pool-retire', action='store_true', help='Apply old-pool retirement above v18; --map-timing retains the separate diagnostic profile')
     parser.add_argument('--prepare-only', action='store_true', help='Check inputs and reconstruct source without compiling')
     parser.add_argument('--toolchain-profile', default='original',
                         help='Explicit pinned toolchain; profiles do not change the driver/source ABI')
@@ -49,8 +49,8 @@ def main():
         parser.error('--target-independent-coverage requires the qualified --present-amortization baseline')
     if args.map_timing and not args.target_independent_coverage:
         parser.error('--map-timing requires the v18 coverage baseline')
-    if args.async_pool_retire and not args.map_timing:
-        parser.error('--async-pool-retire requires the diagnostic --map-timing baseline')
+    if args.async_pool_retire and not args.target_independent_coverage:
+        parser.error('--async-pool-retire requires the v18 coverage baseline')
     pins = json.loads((REPO / 'graphics/backend/video-umd-inputs.json').read_text())
     if args.bounded_map_growth:
         pins['candidate_revision'] = pins['bounded_map_growth_revision']
@@ -63,7 +63,8 @@ def main():
     if args.map_timing:
         pins['candidate_revision'] = pins['map_timing_revision']
     if args.async_pool_retire:
-        pins['candidate_revision'] = pins['async_pool_retire_revision']
+        pins['candidate_revision'] = pins['async_pool_retire_revision' if args.map_timing
+                                          else 'async_pool_retire_production_revision']
     if args.toolchain_profile != 'original':
         profiles = pins.get('toolchain_profiles', {})
         if args.toolchain_profile not in profiles:
@@ -113,11 +114,14 @@ def main():
         for path, key in ((map_patch, 'map_timing_patch_sha256'), (map_header, 'map_timing_header_sha256')):
             if digest(path) != pins[key]:
                 raise ValueError('Map diagnostic differs from its shared pin: ' + path.name)
-    pool_patch = REPO / 'graphics/backend/async-pool-retire.patch'
+    pool_patch = REPO / 'graphics/backend' / ('async-pool-retire.patch' if args.map_timing
+                                              else 'async-pool-retire-production.patch')
     pool_header = REPO / 'graphics/backend/pool-retire-timing.h'
     if args.async_pool_retire:
-        for path, key in ((pool_patch, 'async_pool_retire_patch_sha256'),
-                          (pool_header, 'pool_retire_timing_header_sha256')):
+        pool_inputs = [(pool_patch, 'async_pool_retire_patch_sha256'),
+                       (pool_header, 'pool_retire_timing_header_sha256')] if args.map_timing else [
+                       (pool_patch, 'async_pool_retire_production_patch_sha256')]
+        for path, key in pool_inputs:
             if digest(path) != pins[key]:
                 raise ValueError('Pool candidate differs from its shared pin: ' + path.name)
     compiler = sdk / 'clang-cl'
@@ -191,7 +195,8 @@ def main():
     if args.async_pool_retire:
         run(['git', 'apply', '--check', pool_patch], cwd=source)
         run(['git', 'apply', pool_patch], cwd=source)
-        shutil.copyfile(pool_header, source / 'src/virtio/neptune/triton/pool-retire-timing.h')
+        if args.map_timing:
+            shutil.copyfile(pool_header, source / 'src/virtio/neptune/triton/pool-retire-timing.h')
     shutil.copyfile(header, source / 'src/virtio/neptune/triton/video-resource-submit.h')
     includes = [wdk / 'c/Include' / pins['wdk']['include_version'] / kind for kind in ('um', 'shared')]
     includes += [sdk / 'xwin' / name for name in ('sdk/include/ucrt', 'sdk/include/shared', 'sdk/include/um', 'sdk/include/winrt', 'crt/include')]
@@ -225,6 +230,7 @@ def main():
                'target_independent_coverage_experiment': args.target_independent_coverage,
                'map_timing_diagnostic': args.map_timing,
                'async_pool_retire_experiment': args.async_pool_retire,
+               'async_pool_retire_without_timing': args.async_pool_retire and not args.map_timing,
                'present_amortization': args.present_amortization, 'toolchain_profile': args.toolchain_profile, 'compiler': version, 'commands': commands,
                'qualification': 'source preparation only; no Windows install or video qualification'}
     if not args.prepare_only:

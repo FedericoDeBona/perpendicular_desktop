@@ -1,0 +1,33 @@
+--- a/src/virtio/neptune/npt_shmem_pool.c
++++ b/src/virtio/neptune/npt_shmem_pool.c
+@@ -70,8 +70,18 @@
+       return false;
+    }
+ 
+-   if (pool->shmem)
++   if (pool->shmem) {
++#if defined(_WIN32)
++      /* Slots retain their own refs. If the pool owns the last one, the
++       * existing reaper keeps the allocation alive through the same
++       * transport drain/destroy instead of parking the Map caller.
++       * npt_device_destroy drains this renderer's reaper before freeing it.
++       * Never recycle offsets or bypass the transport's ordering. */
++      npt_renderer_shmem_unref_async(renderer, pool->shmem);
++#else
+       npt_renderer_shmem_unref(renderer, pool->shmem);
++#endif
++   }
+ 
+    pool->shmem = shmem;
+    pool->size = alloc_size;
+--- a/src/virtio/neptune/triton/neptune_umd.rc
++++ b/src/virtio/neptune/triton/neptune_umd.rc
+@@ -30,7 +30,7 @@
+             VALUE "CompanyName", "Perpendicular experimental build; upstream Turing Software LLC"
+             VALUE "FileDescription", "Experimental Neptune video UMD - Perpendicular"
+             VALUE "FileVersion", NPT_RC_STR(VER)
+-            VALUE "PrivateBuild", "Perpendicular video-resource-v18"
++            VALUE "PrivateBuild", "Perpendicular video-resource-v19"
+             VALUE "InternalName", "neptune_umd"
+             VALUE "OriginalFilename", "neptune_umd.dll"
+             VALUE "ProductName", "Neptune"

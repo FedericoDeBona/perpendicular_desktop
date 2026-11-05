@@ -86,5 +86,7 @@
   "map_timing_header_sha256": "f0a53c3f32a99d2ca0a4cb59e2a1a6ae92070969db60428621ae4248cf2545c6",
   "async_pool_retire_revision": "Perpendicular video-resource-v18-map-timing-async-pool",
   "async_pool_retire_patch_sha256": "6687b5329832b942a97fa0f294a9995c5f215871b825cc58b43314e70a4ed41c",
-  "pool_retire_timing_header_sha256": "41e48da16a8b5c357318be90dc335016b8bd1376079e2e05e250257f36cd6182"
+  "pool_retire_timing_header_sha256": "41e48da16a8b5c357318be90dc335016b8bd1376079e2e05e250257f36cd6182",
+  "async_pool_retire_production_revision": "Perpendicular video-resource-v19",
+  "async_pool_retire_production_patch_sha256": "70a8390718574cbaee7ec7357e2b94a9b01a1867f3f17f4481a61e370e7542f2"
 }

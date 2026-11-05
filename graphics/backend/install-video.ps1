@@ -79,7 +79,8 @@ $previousWrappers=@{}
 foreach($sha in @(
  '10247abc53060de73374a90b9aaf1fdcd9049d512e9696596335a35436f89b18',
  'b7341859d68a7852c14eceda592f72a84128258930b3372281f0837e76e55680',
- '61deaa5b22ba4e0e67ae3fcf2904eb222566e11c1b83b4a063bbedf002dc0538'
+ '61deaa5b22ba4e0e67ae3fcf2904eb222566e11c1b83b4a063bbedf002dc0538',
+ 'aa1a4973446817aeccbc4837e4b6d6e7e642b2cde053623f6626cbda02a4d37b'
 )){
  foreach($folder in 'Perpendicular Video QA','Perpendicular Graphics'){
   $path=Join-Path $env:ProgramFiles ($folder+'\video-'+$sha.Substring(0,12)+'\neptune_umd.dll')

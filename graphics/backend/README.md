@@ -405,8 +405,13 @@ il punto che precede bitmapcopy.
 
 ### Candidata M1: ritiro asincrono del pool, sopra v18 diagnostica
 
-`rebuild-video-umd.py --async-pool-retire` richiede `--map-timing` e tutti
-requisiti della v18. `async-pool-retire.patch` sposta soltanto l'ultimo unref
+`rebuild-video-umd.py --async-pool-retire` richiede tutti i requisiti della
+v18 (`--external-video-discard --present-amortization
+--target-independent-coverage`). Con `--map-timing` riproduce il profilo
+diagnostico già qualificato; senza, applica soltanto
+`async-pool-retire-production.patch`, marker v19, senza registrazione ETW per
+Map o crescita del pool. Le patch/pin diagnostiche restano immutate.
+`async-pool-retire.patch` sposta soltanto l'ultimo unref
 del vecchio pool durante la crescita sul reaper già esistente. Non ricicla
 regioni, non modifica Map/Unmap, reference counting, drain/destroy del trasporto
 o il drain del reaper prima della distruzione del renderer. Fini rimane
@@ -424,3 +429,11 @@ conservazione dei riferimenti, trasferimento dell'ultimo riferimento al reaper,
 nessun riuso degli offset e drain esplicito; non qualifica GPU, concorrenza o
 prestazioni. Prima di promuovere occorrono coldboot/pixel/protezioni e movimento
 reale nella QA e nell'app principale.
+
+
+Il pacchetto M1 `video-0.1.5.json` conserva CPUv12, kernel originale e ABI;
+aggiunge TIR coverage e ritiro del pool v19 senza diagnostica. I minimi condivisi
+rifiutano payload precedenti anche se firmati. Sull'altro Mac si ricostruisce la
+stessa ricetta con il suo profilo compatibile: nessun trasferimento del backend
+M1 o adattamento dei pin per superare il gate. Distribuzione e verifiche locali
+sono registrate separatamente in VERIFICATION.md.

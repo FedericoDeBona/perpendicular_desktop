@@ -6,7 +6,9 @@
     "sdr-video-processor",
     "compact-shmem-map",
     "external-decoder-discard",
-    "present-amortization"
+    "present-amortization",
+    "target-independent-coverage",
+    "async-pool-retire"
   ],
   "architecture": "aarch64",
   "guest_wire_version": 2,
