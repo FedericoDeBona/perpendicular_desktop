@@ -731,6 +731,18 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
         metadata["diagnosticStage"]="received-before-presentation";metadata["transitionAccepted"]=false
         if let bytes=try? JSONSerialization.data(withJSONObject:metadata,options:[.prettyPrinted]){try? bytes.write(to:directory.appendingPathComponent(name+".json"))}
     }
+    /// One explicit snapshot of the immutable image received from Windows,
+    /// before Metal presentation. No periodic capture or caller-selected path.
+    func saveReceivedImage(in directory:URL)throws->[String:Any]{
+        guard let image=content.currentImage else {throw MachineSettings.failure("La finestra non ha ancora un’immagine ricevuta.")}
+        try FileManager.default.createDirectory(at:directory,withIntermediateDirectories:true,attributes:[.posixPermissions:0o700])
+        let path=directory.appendingPathComponent(UUID().uuidString+".png")
+        guard let png=NSBitmapImageRep(cgImage:image).representation(using:.png,properties:[:]) else {throw MachineSettings.failure("Non riesco a salvare l’immagine ricevuta.")}
+        try png.write(to:path,options:.withoutOverwriting)
+        try FileManager.default.setAttributes([.posixPermissions:0o600],ofItemAtPath:path.path)
+        return ["path":path.path,"width":image.width,"height":image.height,
+                "stage":"received-before-presentation","presentation":presentationState]
+    }
     func retire(){sourceClosed=true;window.close()}
     private func requestClose(){if windowShouldClose(window){window.close()}}
     func windowShouldClose(_ sender:NSWindow)->Bool{

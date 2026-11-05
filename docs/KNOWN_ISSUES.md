@@ -599,6 +599,12 @@ Queste voci conservano limiti non risolti, senza richiedere di ripristinare codi
 
 ### GFX-001 — Flicker e cifre mancanti nelle catture WGC
 
+**Precisazione5novembre:** caso principale ora EdgeSeamless con videoYouTube, dopo rettificautente dell'indicazione finestraferma. Diagnostica.68 implementata/distribuita: snapshot singolo prima del renderer,8campioniTaskManager confermano un'immagine già alterata nel caso delle righe, senza identificarne ancora la causa. Non trattare questo come prova del medesimo difettoYouTube. Prossimo passo: riproduzione del video e confronto Desktop/Seamless; GFX-001/TODO-008 restano IN CORSO. [Evidenze](VERIFICATION.md#5-novembre--ripresa-flicker-seamless-edge-e-task-manager).
+
+
+**5 novembre — nuova priorità esplicita Seamless, TODO-001/008 e GFX-001 IN CORSO.** Utente segnala forte flicker Edge/TaskManager/altreapp in Seamless, assente o diverso in Desktop, e ipotizza trasferimentoWindows→Mac. Ipotesi da verificare, non causa già accertata. Prima quattro gatepayload e29componentihostcanonico/runtimeeffettivo conformi. Primo TaskManager incontra geometria9734×2224 e rifiuto risorsa oversized/riconnessioni: limite distinto dal flicker, non aumentare i limiti per aggirarlo. Edge e TaskManager poi catturati; primi hashWGC/export concordi, non prova dei successivi frame difettosi. Prossimo risultato: riproduzione temporale circoscritta della stessa finestra e distinzione tra pixel ricevuti e presentazione, quindi piccolo fix e confronto reale. Nessuna correzione nuova né guadagno dichiarato. [Diario](VERIFICATION.md#5-novembre--ripresa-flicker-seamless-edge-e-task-manager).
+
+
 - **1 novembre, priorità Desktop/Edge:** segnalati dall’utente artefatti durante scroll; elementi parziali Edge ancora osservati nella main. Diagnostica video separata PERF-002: assenza decoder hardware non dimostra la causa degli artefatti, nessuna correzione scroll qualificata. Conservare il caso prima di nuove modifiche driver/presenter. [Misure e limiti](VERIFICATION.md#1-novembre--desktop-mode-edge-e-youtube4k).
 
 - **1 novembre M1 allineato0.2.59:** Task Manager pronta sul display app ma sidebar/parte alta vuote nel campione. OpenGL/host/guest confrontati conformi prima della prova; nessuna nuova correzione grafica o causa comune con input dichiarata. Desktop senza bande è un esito distinto. [Evidenze](VERIFICATION.md#1-novembre--aggiornamento0259-sul-m1-e-prova-task-manager).

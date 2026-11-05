@@ -672,11 +672,11 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
               let command=request["command"] as? String else {
             localResponse(["ok":false,"error":"Expected a JSON command."],reply:reply);return
         }
-        let allowed:Set<String>=["status","memory_status","execute","display_info","display_topology","driver_info","graphics_info","geometry_snapshot","application_status","process_list","process_terminate","pipeline_clock","pipeline_trace_start","pipeline_trace_stop","window_refresh"]
+        let allowed:Set<String>=["status","memory_status","execute","display_info","display_topology","driver_info","graphics_info","geometry_snapshot","application_status","process_list","process_terminate","pipeline_clock","pipeline_trace_start","pipeline_trace_stop","window_refresh","window_image"]
         guard allowed.contains(command) else {
             localResponse(["ok":false,"error":"This local command is not supported."],reply:reply);return
         }
-        let fields:Set<String>=command == "execute" ? ["command","executable","args","timeoutSeconds"]:command == "process_terminate" ? ["command","pid","creation"]:command == "window_refresh" ? ["command","window"]:["command"]
+        let fields:Set<String>=command == "execute" ? ["command","executable","args","timeoutSeconds"]:command == "process_terminate" ? ["command","pid","creation"]:(command == "window_refresh" || command == "window_image") ? ["command","window"]:["command"]
         guard Set(request.keys).isSubset(of:fields) else {
             localResponse(["ok":false,"error":"Unexpected command fields."],reply:reply);return
         }
@@ -770,6 +770,14 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
             bridge.command("execute",values,timeout:.seconds(seconds+5)){[weak self] result in
                 self?.localBridgeResponse(result,reply:reply)
             }
+            return
+        }
+        if command == "window_image" {
+            guard let id=request["window"] as? String,let controller=windows[id],let machine else {
+                localResponse(["ok":false,"error":"Expected an existing window identity."],reply:reply);return
+            }
+            do {localResponse(["ok":true,"result":try controller.saveReceivedImage(in:machine.directory.appendingPathComponent("QA/WindowImages"))],reply:reply)}
+            catch {localResponse(["ok":false,"error":error.localizedDescription],reply:reply)}
             return
         }
         if command == "geometry_snapshot" {

@@ -41,13 +41,15 @@ def main():
     terminate.add_argument("creation")
     refresh = commands.add_parser("window_refresh", help="Request a fresh capture of one active native window, without closing its document.")
     refresh.add_argument("window")
+    capture = commands.add_parser("window_image", help="Save one received window image before Mac presentation, in the private QA directory.")
+    capture.add_argument("window")
     execute = commands.add_parser("execute", help="Run an executable as the connected Windows user, without elevation.")
     execute.add_argument("--timeout-seconds", type=int, default=15, choices=range(1, 61), metavar="1..60")
     execute.add_argument("executable", help="Absolute Windows executable path.")
     execute.add_argument("args", nargs=argparse.REMAINDER)
     options = parser.parse_args()
     request = {"command": options.command}
-    if options.command == "window_refresh":
+    if options.command in ("window_refresh", "window_image"):
         request["window"] = options.window
     if options.command == "execute":
         arguments = options.args[1:] if options.args[:1] == ["--"] else options.args
