@@ -74,5 +74,11 @@
   "external_video_discard_revision": "Perpendicular video-resource-v16",
   "present_amortization_patch_sha256": "ed1f68177101a7ea3276f4acccc20a75fba82fa3fe41664777d892614cb8dd91",
   "present_amortization_revision": "Perpendicular video-resource-v17",
-  "present_amortization_upstream": "https://github.com/osy/virtio-win-mesa/commit/a5987c86f4d920478b968b29b41e124aca8c8668"
+  "present_amortization_upstream": "https://github.com/osy/virtio-win-mesa/commit/a5987c86f4d920478b968b29b41e124aca8c8668",
+  "sample_mask_no_targets_patch_sha256": "236bf7728c1eb76be64b1cc4424505dada9616ba01f2b0fb5320ac2f7386befa",
+  "sample_mask_no_targets_upstream": "https://github.com/osy/virtio-win-mesa/commit/17f8e37763b093365387d6255d1023d1393481b3",
+  "target_independent_coverage_patch_sha256": "b5be9a66a9f8cc00a56c910f04b2274b0a3f67e86b20f91dc42e0c048c469c86",
+  "target_independent_coverage_upstream": "https://github.com/osy/virtio-win-mesa/commit/fc5f1fc8a389e125e7d5f979f7b88a2708d161ee",
+  "target_independent_coverage_version_patch_sha256": "a93d50dbf40b4ff7c3ae187050da0e4b4e867be54567c72d20f0a364f4f899ba",
+  "target_independent_coverage_revision": "Perpendicular video-resource-v18"
 }

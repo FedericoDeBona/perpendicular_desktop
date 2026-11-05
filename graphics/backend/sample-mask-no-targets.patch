@@ -1,0 +1,118 @@
+From 17f8e37763b093365387d6255d1023d1393481b3 Mon Sep 17 00:00:00 2001
+From: osy <osy@turing.llc>
+Date: Sun, 18 Oct 2026 06:47:47 -0700
+Subject: [PATCH] triton: ignore the sample mask while no render target is
+ bound
+
+D3D11 applies the blend state's sample mask to render-target and
+depth-stencil output only; with neither bound (UAV-only rendering) the
+effective mask is 0xffffffff, which is what WGF11Rasterizer's
+ForcedSampleCount UAV cases expect ("Expected Effective Sample Mask is
+0XFFFFFFFF") and what WARP does.  D3DMetal applies the mask to coverage
+regardless, so a UAV-only draw under mask 0 or 4 saw SV_Coverage 0.
+
+Triton now keeps the blend state, factor and mask the runtime last set,
+and whether an RTV or DSV is bound; the mask sent to the host is
+0xffffffff while neither is, and the state is re-sent when that binding
+changes under a non-trivial mask.
+
+A UAV-only probe reading SV_Coverage: masks 0 and 4 gave coverage 0,
+now 1 (= WARP).  WGF11Rasterizer: 4,412 -> 4,414 passes (= CrossOver),
+the two ForcedSampleCount SampleMask 0/4 cases gained, none lost.
+WGF11PixelShader, WGF11Multisample and WGF11Blend reruns: no per-case
+change.
+
+Assisted-by: Claude:claude-opus-5-5
+---
+ src/virtio/neptune/triton/triton.h      | 14 ++++++++++++++
+ src/virtio/neptune/triton/tritonState.c | 15 ++++++++++++++-
+ src/virtio/neptune/triton/tritonView.c  |  9 +++++++++
+ 3 files changed, 37 insertions(+), 1 deletion(-)
+
+diff --git a/src/virtio/neptune/triton/triton.h b/src/virtio/neptune/triton/triton.h
+index a7d5e6cc734..aa49216380e 100644
+--- a/src/virtio/neptune/triton/triton.h
++++ b/src/virtio/neptune/triton/triton.h
+@@ -94,6 +94,17 @@ typedef struct TRITON_DEVICE {
+      * and feed the draw mistyped vertex data. */
+     ID3D11VertexShader             *pBoundReconVS;
+ 
++    /* Blend state as the runtime last set it, and whether a render target or
++     * depth-stencil view is bound.  D3D11 ignores the sample mask while
++     * neither is (UAV-only rendering); D3DMetal applies it to coverage, so
++     * the mask sent to the host follows the binding (tritonApplyBlendState).
++     * pOmBlend is weak: the runtime keeps a bound state alive. */
++    ID3D11BlendState               *pOmBlend;
++    FLOAT                           omBlendFactor[4];
++    UINT                            omSampleMask;
++    BOOL                            omBlendSet;
++    BOOL                            omHasTargets;
++
+     /* Monotonic per-device shader-instance counter. Each shader gets a
+      * unique cookie at create; the input-layout cache keys on it so a
+      * freed VS bytecode pointer reused at the same heap address cannot
+@@ -453,6 +464,9 @@ void tritonResourceLinkView(PTRITON_RESOURCE r, TRITON_VIEWLINK *l,
+ void tritonViewUnlink(TRITON_VIEWLINK *l);
+ HRESULT tritonResourceRecreateViews(PTRITON_DEVICE pD, PTRITON_RESOURCE r);
+ 
++/* Send the tracked blend state to the host (tritonState.c). */
++void tritonApplyBlendState(PTRITON_DEVICE pD);
++
+ /* Fill r's present companion, if any (tritonResource.c). */
+ void tritonResourceSyncPresentCompanion(PTRITON_DEVICE pD, PTRITON_RESOURCE r);
+ 
+diff --git a/src/virtio/neptune/triton/tritonState.c b/src/virtio/neptune/triton/tritonState.c
+index 8027fb8d0b2..126c40d02f4 100644
+--- a/src/virtio/neptune/triton/tritonState.c
++++ b/src/virtio/neptune/triton/tritonState.c
+@@ -66,7 +66,9 @@ tritonCreateBlendState(D3D10DDI_HDEVICE hDevice,
+ void APIENTRY
+ tritonDestroyBlendState(D3D10DDI_HDEVICE hDev, D3D10DDI_HBLENDSTATE hState)
+ {
++    PTRITON_DEVICE pD = (PTRITON_DEVICE)(hDev.pDrvPrivate);
+     PTRITON_BLENDSTATE s = (PTRITON_BLENDSTATE)(hState.pDrvPrivate);
++    if (pD && s && pD->pOmBlend == (ID3D11BlendState *)s->pState) pD->pOmBlend = NULL;
+     if (s && s->pState) { ID3D11BlendState1_Release(s->pState); s->pState = NULL; }
+ }
+ 
+@@ -114,8 +116,19 @@ tritonSetBlendState(D3D10DDI_HDEVICE hDevice,
+     PTRITON_DEVICE pD = (PTRITON_DEVICE)(hDevice.pDrvPrivate);
+     if (!pD) return;
+     PTRITON_BLENDSTATE s = (PTRITON_BLENDSTATE)(hState.pDrvPrivate);
++    pD->pOmBlend = s ? (ID3D11BlendState *)s->pState : NULL;
++    memcpy(pD->omBlendFactor, BlendFactor, sizeof(pD->omBlendFactor));
++    pD->omSampleMask = SampleMask;
++    pD->omBlendSet = TRUE;
++    tritonApplyBlendState(pD);
++}
++
++void
++tritonApplyBlendState(PTRITON_DEVICE pD)
++{
+     ID3D11DeviceContext1_OMSetBlendState(
+-        pD->pCtx1, s ? (ID3D11BlendState *)s->pState : NULL, BlendFactor, SampleMask);
++        pD->pCtx1, pD->pOmBlend, pD->omBlendFactor,
++        pD->omHasTargets ? pD->omSampleMask : 0xFFFFFFFFu);
+ }
+ 
+ /* ---------- Depth-stencil ---------- */
+diff --git a/src/virtio/neptune/triton/tritonView.c b/src/virtio/neptune/triton/tritonView.c
+index 86dd08493ae..9b6089855de 100644
+--- a/src/virtio/neptune/triton/tritonView.c
++++ b/src/virtio/neptune/triton/tritonView.c
+@@ -378,6 +378,15 @@ tritonSetRenderTargets(D3D10DDI_HDEVICE hDevice,
+     ID3D11DeviceContext1_OMSetRenderTargetsAndUnorderedAccessViews(
+         pD->pCtx1, NumRTVs, aRTV, pDSV,
+         UAVStartSlot, NumUAVs, aUAV, NumUAVs ? pUAVInitialCounts : NULL);
++
++    BOOL hasTargets = pDSV != NULL;
++    for (UINT i = 0; i < NumRTVs && !hasTargets; ++i)
++        hasTargets = aRTV[i] != NULL;
++    if (hasTargets != pD->omHasTargets) {
++        pD->omHasTargets = hasTargets;
++        if (pD->omBlendSet && pD->omSampleMask != 0xFFFFFFFFu)
++            tritonApplyBlendState(pD);
++    }
+ }
+ 
+ /* ---------- ShaderResourceView ---------- */

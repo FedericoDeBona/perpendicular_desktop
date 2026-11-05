@@ -1,0 +1,766 @@
+From fc5f1fc8a389e125e7d5f979f7b88a2708d161ee Mon Sep 17 00:00:00 2001
+From: osy <osy@turing.llc>
+Date: Thu, 29 Oct 2026 09:32:02 -0700
+Subject: [PATCH] triton: give pixel shaders full coverage under
+ target-independent rasterization
+
+With a rasterizer ForcedSampleCount of N > 1 and single-sample render
+targets bound, a pixel shader's vCoverage holds the pixel's N-sample
+coverage.  The host backends rasterize such a draw at one sample, so
+vCoverage arrived as 0x1.  DWM builds the window-shape mask it cuts out
+of every drop shadow this way, XORing vCoverage into an R16_UINT target
+so overlapping fan triangles cancel; the mask came out set wherever the
+fan reached, and the cut-out erased the whole shadow.  Windows 11 drew
+no window shadows on either D3DMetal or DXMT.
+
+Under that state, bind in place of a PS that reads vCoverage a copy that
+reads the constant (1 << N) - 1 instead: the coverage resolved at the
+pixel centre, since the PS runs only where that one sample is covered.
+The copy rewrites each vCoverage operand as a one-component immediate in
+the code chunk, which tritonBuildDxbc places last, so the container ahead
+of it is kept as is.  A shader that reads vCoverage inside a relative
+index, or uses an encoding the operand walker does not know, keeps the
+original PS.  One copy is made per ForcedSampleCount on first use and
+kept on the shader, a failed attempt included, and a rasterizer or
+render-target change rebinds the PS only when the one the draw needs
+differs from the one last sent.  Draws without render targets
+(UAV-only rendering) keep the original PS.
+
+triton_dxbc_test gains a ps_5_0 case with an SV_Coverage input and
+double immediates, checked by operand census, fxc disassembly of the
+copy and a second pass that finds nothing left to replace.
+
+Window shadows now render on D3DMetal and DXMT, matching pixel for pixel
+a host-side substitution of DWM's mask shader.  Old/new A/B, GT1 fps:
+Time Spy 29.91/30.06, Fire Strike 78.28/80.44, Fire Strike DXMT
+48.23/48.20.
+
+Assisted-by: Claude:claude-opus-5-5
+Assisted-by: Claude:claude-fable-5-1
+---
+ .../neptune/triton/tests/tritonDxbcTest.c     | 139 +++++++++
+ src/virtio/neptune/triton/triton.h            |  20 ++
+ src/virtio/neptune/triton/tritonDxbc.c        | 265 +++++++++++++++++-
+ src/virtio/neptune/triton/tritonDxbc.h        |   9 +
+ src/virtio/neptune/triton/tritonShader.c      |  97 ++++++-
+ src/virtio/neptune/triton/tritonState.c       |   3 +
+ src/virtio/neptune/triton/tritonView.c        |   1 +
+ 7 files changed, 521 insertions(+), 13 deletions(-)
+
+diff --git a/src/virtio/neptune/triton/tests/tritonDxbcTest.c b/src/virtio/neptune/triton/tests/tritonDxbcTest.c
+index 63ea8ebb651..e44bd770fdc 100644
+--- a/src/virtio/neptune/triton/tests/tritonDxbcTest.c
++++ b/src/virtio/neptune/triton/tests/tritonDxbcTest.c
+@@ -373,6 +373,11 @@ static const char HLSL_PS_COVERAGE[] =
+     "float4 main(float4 p : SV_Position, out uint cov : SV_Coverage)"
+     "    : SV_Target { cov = (uint)p.x; return p; }";
+ 
++static const char HLSL_PS_COVERAGE_IN[] =
++    "float4 main(float4 p : SV_Position, uint cov : SV_Coverage) : SV_Target {"
++    "  double2 d = double2(p.xy) * double2(2.0l, 0.5l) + double2(1.0l, 3.0l);"
++    "  return float4((float)d.x, (float)d.y, (float)countbits(cov), cov & 1); }";
++
+ static const char HLSL_PS_INT_TARGET[] =
+     "uint4 main(float4 p : SV_Position) : SV_Target1 { return (uint4)p; }";
+ 
+@@ -661,6 +666,138 @@ static void testWidenFlag(void)
+     free(b.p);
+ }
+ 
++/* Operand census of a container's code chunk over the instructions the
++ * coverage rewriter walks: vCoverage reads, one-component 32-bit immediates
++ * equal to `value`, and four-component 64-bit immediates. */
++static void countOperands(const void *dxbc, UINT value,
++                          UINT *pCov, UINT *pImm, UINT *pImm64)
++{
++    *pCov = *pImm = *pImm64 = 0;
++    const DXBCHeader *hdr =
++        dxbcCheckContainer(dxbc, ((const DXBCHeader *)dxbc)->cbTotal);
++    uint32_t off = 0, cb = 0;
++    CHECK(hdr && dxbcFindCodeBlob(hdr, &off, &cb), "code chunk");
++    if (!hdr || !cb) return;
++    const UINT *tok = (const UINT *)((const BYTE *)dxbc + off);
++    TritonTokIter it;
++    if (!tritonTokIterInit(&it, tok, cb)) { CHECK(0, "token stream"); return; }
++    UINT opcode, cTok;
++    const UINT *ins;
++    while (tritonTokIterNext(&it, &opcode, &ins, &cTok)) {
++        if (dxbcOpcodeIsDecl(opcode)) continue;
++        const UINT *end = ins + cTok;
++        UINT k = dxbcTokenChainLen(ins, end);
++        CHECK(k != 0, "opcode chain (opcode 0x%x)", opcode);
++        while (k && k < cTok) {
++            const UINT len = dxbcOperandLen(ins + k, end, 0);
++            CHECK(len != 0, "operand length (opcode 0x%x)", opcode);
++            if (!len) break;
++            const UINT type = (ins[k] >> 12) & 0xffu;
++            if (type == SM5_OPTYPE_INPUT_COVERAGE_MASK)
++                ++*pCov;
++            else if (type == SM4_OPTYPE_IMMEDIATE32 && (ins[k] & 3u) == 1u &&
++                     ins[k + len - 1] == value)
++                ++*pImm;
++            else if (type == SM4_OPTYPE_IMMEDIATE64 && (ins[k] & 3u) == 2u)
++                ++*pImm64;
++            k += len;
++        }
++    }
++    CHECK(it.p == it.end, "walked the whole program");
++}
++
++typedef HRESULT (WINAPI *PFN_D3DDisassemble)(const void*, SIZE_T, UINT,
++                                              const char*, void**);
++static PFN_D3DDisassemble s_D3DDisassemble;
++
++/* Occurrences of `needle` in the fxc disassembly of a container, or -1 when
++ * the disassembler rejects it. */
++static int disasmCount(const void *dxbc, SIZE_T cb, const char *needle)
++{
++    typedef struct { void **vtbl; } Obj;
++    void *blob = NULL;
++    if (FAILED(s_D3DDisassemble(dxbc, cb, 0, NULL, &blob)) || !blob)
++        return -1;
++    Obj *b = (Obj *)blob;
++    const char *text = (const char *)((void *(*)(void*))b->vtbl[3])(blob);
++    int n = 0;
++    for (const char *s = strstr(text, needle); s; s = strstr(s + 1, needle))
++        ++n;
++    ((ULONG (*)(void*))b->vtbl[2])(blob);
++    return n;
++}
++
++/* The vCoverage substitution for target-independent rasterization. */
++static void testInputCoverage(void)
++{
++    Blob in, out;
++    if (!compileHlsl(HLSL_PS_COVERAGE_IN, "main", "ps_5_0", &in)) {
++        CHECK(0, "compile coverage-input ps");
++        return;
++    }
++    if (!compileHlsl(HLSL_PS_COVERAGE, "main", "ps_5_0", &out)) {
++        CHECK(0, "compile coverage-output ps");
++        free(in.p);
++        return;
++    }
++    UINT cbIn = 0, cbOut = 0;
++    const UINT *tokIn  = (const UINT *)findChunk(in.p,  DXBC_BLOB_TYPE_SHEX, &cbIn);
++    const UINT *tokOut = (const UINT *)findChunk(out.p, DXBC_BLOB_TYPE_SHEX, &cbOut);
++    CHECK(tokIn && tritonDxbcReadsInputCoverage(tokIn, cbIn),
++          "SV_Coverage input declared");
++    CHECK(tokOut && !tritonDxbcReadsInputCoverage(tokOut, cbOut),
++          "SV_Coverage output is not a read");
++
++    const UINT sentinel = 0x5A5A5A5Au;
++    SIZE_T cb = 0;
++    void *built = rebuild(&in, &cb, 0, 0, 20);
++    if (built) {
++        UINT cov, imm, imm64;
++        countOperands(built, sentinel, &cov, &imm, &imm64);
++        CHECK(cov >= 1, "vCoverage reads in the source (%u)", cov);
++        CHECK(imm == 0, "no sentinel immediates in the source (%u)", imm);
++        CHECK(imm64 >= 1, "double immediates in the source (%u)", imm64);
++
++        SIZE_T cbFix = 0;
++        void *fixed = tritonDxbcFixInputCoverage(built, cb, sentinel, &cbFix);
++        CHECK(fixed != NULL, "fixed-coverage copy");
++        if (fixed) {
++            validateContainer(fixed, cbFix);
++            CHECK(cbFix == cb + cov * sizeof(UINT),
++                  "copy grew by one DWORD per read (%zu vs %zu)", cbFix, cb);
++            UINT cov2, imm2, imm64b;
++            countOperands(fixed, sentinel, &cov2, &imm2, &imm64b);
++            CHECK(cov2 == 0, "no vCoverage read left (%u)", cov2);
++            CHECK(imm2 == cov, "one immediate per read (%u vs %u)", imm2, cov);
++            CHECK(imm64b == imm64, "double immediates kept (%u vs %u)",
++                  imm64b, imm64);
++            CHECK(s_D3DDisassemble != NULL, "D3DDisassemble available");
++            if (s_D3DDisassemble) {
++                CHECK(disasmCount(built, cb, "vCoverage") == 1 + (int)cov,
++                      "fxc disassembly of the source");
++                CHECK(disasmCount(fixed, cbFix, "vCoverage") == 1,
++                      "fxc disassembles the copy with only the declaration");
++            }
++            SIZE_T cbAgain = 0;
++            CHECK(tritonDxbcFixInputCoverage(fixed, cbFix, 0xFu, &cbAgain) == NULL,
++                  "nothing left to replace in the copy");
++            HeapFree(GetProcessHeap(), 0, fixed);
++        }
++        HeapFree(GetProcessHeap(), 0, built);
++    }
++
++    SIZE_T cbOutBuilt = 0;
++    void *builtOut = rebuild(&out, &cbOutBuilt, 0, 0, 20);
++    if (builtOut) {
++        SIZE_T cbNone = 0;
++        CHECK(tritonDxbcFixInputCoverage(builtOut, cbOutBuilt, 0xFu, &cbNone) == NULL,
++              "SV_Coverage output: no copy");
++        HeapFree(GetProcessHeap(), 0, builtOut);
++    }
++    free(in.p);
++    free(out.p);
++}
++
+ int main(void)
+ {
+     HMODULE hCompiler = LoadLibraryA("d3dcompiler_47.dll");
+@@ -673,11 +810,13 @@ int main(void)
+         printf("D3DCompile not found\n");
+         return 2;
+     }
++    s_D3DDisassemble = (PFN_D3DDisassemble)GetProcAddress(hCompiler, "D3DDisassemble");
+ 
+     testHashes();
+     testRebuilds();
+     testMinPrecAndReconcile();
+     testWidenFlag();
++    testInputCoverage();
+ 
+     printf("%d checks, %d failures\n", g_checks, g_fails);
+     return g_fails ? 1 : 0;
+diff --git a/src/virtio/neptune/triton/triton.h b/src/virtio/neptune/triton/triton.h
+index aa49216380e..94a72f49650 100644
+--- a/src/virtio/neptune/triton/triton.h
++++ b/src/virtio/neptune/triton/triton.h
+@@ -94,6 +94,14 @@ typedef struct TRITON_DEVICE {
+      * and feed the draw mistyped vertex data. */
+     ID3D11VertexShader             *pBoundReconVS;
+ 
++    /* Target-independent rasterization (tritonShader.c): the bound PS
++     * (weak, cleared from its destroy path), the bound rasterizer's
++     * ForcedSampleCount, and the host PS the context last received, the
++     * PS's own object or its fixed-coverage copy (weak, compared only). */
++    struct TRITON_SHADER           *pCurrentPS;
++    UINT                            rsForcedSampleCount;
++    ID3D11PixelShader              *pSentPS;
++
+     /* Blend state as the runtime last set it, and whether a render target or
+      * depth-stencil view is bound.  D3D11 ignores the sample mask while
+      * neither is (UAV-only rendering); D3DMetal applies it to coverage, so
+@@ -386,6 +394,7 @@ typedef struct TRITON_DEPTHSTENCILSTATE {
+ 
+ typedef struct TRITON_RASTERIZERSTATE {
+     ID3D11RasterizerState1       *pState;
++    UINT                          ForcedSampleCount;
+ } TRITON_RASTERIZERSTATE, *PTRITON_RASTERIZERSTATE;
+ 
+ typedef struct TRITON_SAMPLER {
+@@ -456,6 +465,13 @@ typedef struct TRITON_SHADER {
+     UINT                   SoRasterizedStream;
+     ID3D11GeometryShader  *pSoOnlyGS;
+     UINT64                 SoSourceCookie;
++    /* A PS that reads vCoverage keeps its bytecode for the copies bound under
++     * target-independent rasterization, one per ForcedSampleCount N in slot
++     * log2(N) - 1 (N = 2, 4, 8, 16).  TirTried marks the slots attempted; a
++     * tried slot left NULL keeps the original PS. */
++    BOOL                   fReadsCoverage;
++    ID3D11PixelShader     *apTirPS[4];
++    UINT                   TirTried;
+ } TRITON_SHADER, *PTRITON_SHADER;
+ 
+ /* View-list plumbing + rotation support (tritonView.c). */
+@@ -467,6 +483,10 @@ HRESULT tritonResourceRecreateViews(PTRITON_DEVICE pD, PTRITON_RESOURCE r);
+ /* Send the tracked blend state to the host (tritonState.c). */
+ void tritonApplyBlendState(PTRITON_DEVICE pD);
+ 
++/* Rebind the PS if a rasterizer-state or render-target change toggled
++ * target-independent rasterization for it (tritonShader.c). */
++void tritonUpdateTirPixelShader(PTRITON_DEVICE pD);
++
+ /* Fill r's present companion, if any (tritonResource.c). */
+ void tritonResourceSyncPresentCompanion(PTRITON_DEVICE pD, PTRITON_RESOURCE r);
+ 
+diff --git a/src/virtio/neptune/triton/tritonDxbc.c b/src/virtio/neptune/triton/tritonDxbc.c
+index bd5032f52d1..b3902c19e71 100644
+--- a/src/virtio/neptune/triton/tritonDxbc.c
++++ b/src/virtio/neptune/triton/tritonDxbc.c
+@@ -432,6 +432,37 @@ static int tritonTokIterNext(TritonTokIter *it, UINT *pOpcode,
+     return 1;
+ }
+ 
++/* Token fields (d3d10tokenizedprogramformat.hpp). */
++#define SM4_TOKEN_EXTENDED             0x80000000u  /* another token follows */
++#define SM4_PROGRAM_MAJOR(v)           (((v) >> 4) & 0xfu)
++#define SM4_INSTR_LEN_SHIFT            24
++#define SM4_INSTR_LEN_MASK             (0x7fu << SM4_INSTR_LEN_SHIFT)
++#define SM4_OPERAND_NCOMP(ot)          ((ot) & 0x3u)
++#define SM4_OPERAND_TYPE_SHIFT         12
++#define SM4_OPERAND_TYPE(ot)           (((ot) >> SM4_OPERAND_TYPE_SHIFT) & 0xffu)
++#define SM4_OPERAND_INDEX_DIM(ot)      (((ot) >> 20) & 0x3u)
++#define SM4_OPERAND_INDEX_REP(ot, d)   (((ot) >> (22u + 3u * (d))) & 0x7u)
++#define SM4_NCOMP_1                    1u
++#define SM4_NCOMP_4                    2u
++#define SM4_INDEX_IMM32                0u
++#define SM4_INDEX_IMM64                1u
++#define SM4_INDEX_RELATIVE             2u
++#define SM4_INDEX_IMM32_PLUS_RELATIVE  3u
++#define SM4_INDEX_IMM64_PLUS_RELATIVE  4u
++
++/* Number of DWORDs in the token chain at p[0]: a token with bit 31 set is
++ * followed by another; 0 if the chain overruns `end`. */
++static UINT dxbcTokenChainLen(const UINT *p, const UINT *end)
++{
++    UINT len = 0;
++    do {
++        if (p + len >= end)
++            return 0;
++        ++len;
++    } while (p[len - 1] & SM4_TOKEN_EXTENDED);
++    return len;
++}
++
+ /* D3D10_SB_OPCODE_TYPE values consumed here. */
+ #define SM4_OP_DCL_INPUT              0x5fu
+ #define SM4_OP_DCL_INPUT_SGV          0x60u
+@@ -549,16 +580,10 @@ static UINT
+ tritonDecodeDeclOperand(const UINT *op, const UINT *end,
+                         UINT *outReg, UINT *outMask, UINT *outType)
+ {
+-    if (op + 1 > end)
++    UINT len = dxbcTokenChainLen(op, end);
++    if (!len)
+         return 0;
+     const UINT ot = op[0];
+-    UINT len = 1;
+-
+-    /* Extended operand token chain (bit 31 -> another token follows). */
+-    if (ot & 0x80000000u) {
+-        while (op + len <= end && (op[len - 1] & 0x80000000u))
+-            ++len;
+-    }
+ 
+     /* Write mask: 4-component operands in mask-selection mode (bits [3:2]==0)
+      * carry a 4-bit mask in bits [7:4]; otherwise treat as all components. */
+@@ -1610,6 +1635,230 @@ void *tritonReconcileVsInputSig(const void *pDxbc, SIZE_T cbDxbc,
+     return pCopy;
+ }
+ 
++/* ---------- Input coverage under target-independent rasterization ----------
++ *
++ * With a rasterizer ForcedSampleCount of N > 1 and single-sample render
++ * targets bound (D3D11.1 target-independent rasterization), a pixel shader's
++ * vCoverage is the N-bit coverage of the pixel.  DWM builds the window-shape
++ * mask it cuts out of every drop shadow this way: it XORs vCoverage into an
++ * R16_UINT target so overlapping fan triangles cancel.  The host backends
++ * rasterize such a draw at one sample, so vCoverage arrives as 0x1, the mask
++ * comes out set wherever the fan reached, and the cut-out erases the shadow.
++ *
++ * A pixel shader runs only where that one sample is covered, so the constant
++ * (1 << N) - 1 in place of every vCoverage read is the N-sample coverage
++ * resolved at the pixel centre: exact inside the shape, empty outside it. */
++
++#define SM4_OPTYPE_IMMEDIATE32         4u
++#define SM4_OPTYPE_IMMEDIATE64         5u
++#define SM5_OPTYPE_INPUT_COVERAGE_MASK 35u
++
++/* D3D10_SB_OPCODE_TYPE ranges and values whose tokens after the opcode are
++ * not all operands. */
++#define SM4_OP_CUSTOMDATA              0x35u
++#define SM4_OP_DCL_RESOURCE            0x58u  /* first SM4 dcl_* */
++#define SM4_OP_DCL_GLOBAL_FLAGS        0x6au  /* last SM4 dcl_* */
++#define SM5_OP_HS_DECLS                0x71u  /* through SM5_OP_HS_JOIN_PHASE */
++#define SM5_OP_INTERFACE_CALL          0x78u  /* fcall */
++#define SM5_OP_DCL_RESOURCE_STRUCTURED 0xa2u  /* last of the SM5 dcl_* run
++                                               * from SM5_OP_DCL_STREAM */
++#define SM5_OP_DCL_GS_INSTANCE_COUNT   0xceu
++
++/* Locates the SHDR/SHEX chunk of a container the caller has bounds-checked
++ * against cbDxbc: its payload offset and payload size. */
++static BOOL dxbcFindCodeBlob(const DXBCHeader *pHdr, uint32_t *pOff, uint32_t *pcb)
++{
++    for (uint32_t i = 0; i < pHdr->cBlob; ++i) {
++        const uint32_t off = pHdr->aBlobOffset[i];
++        if ((size_t)off + sizeof(DXBCBlobHeader) > pHdr->cbTotal)
++            continue;
++        const DXBCBlobHeader *bh =
++            (const DXBCBlobHeader *)((const uint8_t *)pHdr + off);
++        if (bh->u32BlobType != DXBC_BLOB_TYPE_SHDR &&
++            bh->u32BlobType != DXBC_BLOB_TYPE_SHEX)
++            continue;
++        if ((size_t)off + sizeof(DXBCBlobHeader) + bh->cbBlob > pHdr->cbTotal)
++            return FALSE;
++        *pOff = off + (uint32_t)sizeof(DXBCBlobHeader);
++        *pcb  = bh->cbBlob;
++        return TRUE;
++    }
++    return FALSE;
++}
++
++static const DXBCHeader *dxbcCheckContainer(const void *pDxbc, SIZE_T cbDxbc)
++{
++    if (!pDxbc || cbDxbc < sizeof(DXBCHeader))
++        return NULL;
++    const DXBCHeader *pHdr = (const DXBCHeader *)pDxbc;
++    if (pHdr->u32DXBC != DXBC_MAGIC || pHdr->cbTotal > cbDxbc ||
++        (size_t)offsetof(DXBCHeader, aBlobOffset)
++            + (size_t)pHdr->cBlob * sizeof(uint32_t) > pHdr->cbTotal)
++        return NULL;
++    return pHdr;
++}
++
++/* Declarations carry raw DWORDs after their operand, so only the operands of
++ * the other instructions can be walked generically.  fcall is grouped here for
++ * the same reason (a raw function-table index); it never reads vCoverage. */
++static BOOL dxbcOpcodeIsDecl(UINT opcode)
++{
++    return (opcode >= SM4_OP_DCL_RESOURCE && opcode <= SM4_OP_DCL_GLOBAL_FLAGS) ||
++           (opcode >= SM5_OP_HS_DECLS     && opcode <= SM5_OP_HS_JOIN_PHASE)    ||
++           (opcode >= SM5_OP_DCL_STREAM   && opcode <= SM5_OP_DCL_RESOURCE_STRUCTURED) ||
++           opcode == SM5_OP_DCL_GS_INSTANCE_COUNT ||
++           opcode == SM4_OP_CUSTOMDATA ||
++           opcode == SM5_OP_INTERFACE_CALL;
++}
++
++/* DWORD length of the operand at op[0], including extended operand tokens,
++ * immediate values and relative-index operands (`depth` levels down); 0 if
++ * it overruns `end`, uses an encoding this walker does not know, nests
++ * relative indices more than two deep, or reads vCoverage inside a relative
++ * index, where the substitution below cannot put an immediate. */
++static UINT dxbcOperandLen(const UINT *op, const UINT *end, UINT depth)
++{
++    UINT len = dxbcTokenChainLen(op, end);
++    if (!len)
++        return 0;
++    const UINT ot   = op[0];
++    const UINT type = SM4_OPERAND_TYPE(ot);
++    if (depth && type == SM5_OPTYPE_INPUT_COVERAGE_MASK)
++        return 0;
++    if (type == SM4_OPTYPE_IMMEDIATE32 || type == SM4_OPTYPE_IMMEDIATE64) {
++        /* One 32- or 64-bit value, or four 32-bit values; a four-component
++         * 64-bit immediate is two doubles in four DWORDs. */
++        const UINT ncomp = SM4_OPERAND_NCOMP(ot);
++        if (ncomp == SM4_NCOMP_1)
++            len += type == SM4_OPTYPE_IMMEDIATE64 ? 2u : 1u;
++        else if (ncomp == SM4_NCOMP_4)
++            len += 4u;
++        else
++            return 0;
++    }
++    const UINT dim = SM4_OPERAND_INDEX_DIM(ot);
++    for (UINT d = 0; d < dim; ++d) {
++        const UINT rep = SM4_OPERAND_INDEX_REP(ot, d);
++        if (rep == SM4_INDEX_IMM32 || rep == SM4_INDEX_IMM32_PLUS_RELATIVE)
++            len += 1;
++        else if (rep == SM4_INDEX_IMM64 || rep == SM4_INDEX_IMM64_PLUS_RELATIVE)
++            len += 2;
++        else if (rep != SM4_INDEX_RELATIVE)
++            return 0;
++        if (rep >= SM4_INDEX_RELATIVE) {
++            if (depth >= 2u)
++                return 0;
++            const UINT rel = dxbcOperandLen(op + len, end, depth + 1);
++            if (!rel)
++                return 0;
++            len += rel;
++        }
++    }
++    return (op + len <= end) ? len : 0;
++}
++
++BOOL tritonDxbcReadsInputCoverage(const UINT *pTokens, SIZE_T cbTokens)
++{
++    TritonTokIter it;
++    if (!tritonTokIterInit(&it, pTokens, cbTokens) ||
++        programType(pTokens) != PROG_PS || SM4_PROGRAM_MAJOR(pTokens[0]) < 5u)
++        return FALSE;
++    /* The declarations precede the instructions. */
++    UINT opcode, cTok;
++    const UINT *ins;
++    while (tritonTokIterNext(&it, &opcode, &ins, &cTok) && dxbcOpcodeIsDecl(opcode)) {
++        if (opcode == SM4_OP_DCL_INPUT && cTok >= 2 &&
++            SM4_OPERAND_TYPE(ins[1]) == SM5_OPTYPE_INPUT_COVERAGE_MASK)
++            return TRUE;
++    }
++    return FALSE;
++}
++
++void *tritonDxbcFixInputCoverage(const void *pDxbc, SIZE_T cbDxbc, UINT value,
++                                 SIZE_T *pcbOut)
++{
++    if (pcbOut) *pcbOut = 0;
++    const DXBCHeader *pSrc = dxbcCheckContainer(pDxbc, cbDxbc);
++    uint32_t offCode, cbCode;
++    if (!pSrc || !dxbcFindCodeBlob(pSrc, &offCode, &cbCode) ||
++        (size_t)offCode + cbCode != pSrc->cbTotal)
++        return NULL;
++    const UINT *pTok = (const UINT *)((const uint8_t *)pDxbc + offCode);
++    TritonTokIter it;
++    if (!tritonTokIterInit(&it, pTok, cbCode))
++        return NULL;
++
++    /* The container ahead of the code chunk is copied as is and the chunk
++     * rewritten behind it; each substitution grows its operand by the one
++     * immediate DWORD. */
++    const size_t cTokIn = (size_t)(it.end - pTok);
++    uint8_t *pDst = (uint8_t *)HeapAlloc(GetProcessHeap(), 0,
++                                         offCode + cTokIn * 2 * sizeof(UINT));
++    if (!pDst)
++        return NULL;
++    memcpy(pDst, pDxbc, offCode);
++    UINT *pOut = (UINT *)(pDst + offCode);
++    pOut[0] = pTok[0];
++    size_t n = 2;
++    UINT replaced = 0;
++
++    UINT opcode, cTok;
++    const UINT *ins;
++    while (tritonTokIterNext(&it, &opcode, &ins, &cTok)) {
++        if (dxbcOpcodeIsDecl(opcode)) {
++            memcpy(pOut + n, ins, cTok * sizeof(UINT));
++            n += cTok;
++            continue;
++        }
++        const UINT *end = ins + cTok;
++        UINT k = dxbcTokenChainLen(ins, end);     /* opcode + extended tokens */
++        if (!k)
++            goto fail;
++        const size_t nIns = n;
++        memcpy(pOut + n, ins, k * sizeof(UINT));
++        n += k;
++        while (k < cTok) {
++            const UINT len = dxbcOperandLen(ins + k, end, 0);
++            if (!len)
++                goto fail;
++            if (SM4_OPERAND_TYPE(ins[k]) == SM5_OPTYPE_INPUT_COVERAGE_MASK) {
++                /* A one-component immediate replicates like the scalar
++                 * vCoverage it replaces; operand modifiers stay attached. */
++                pOut[n++] = (ins[k] & SM4_TOKEN_EXTENDED) | SM4_NCOMP_1 |
++                            (SM4_OPTYPE_IMMEDIATE32 << SM4_OPERAND_TYPE_SHIFT);
++                for (UINT e = 1; e < len; ++e)
++                    pOut[n++] = ins[k + e];
++                pOut[n++] = value;
++                ++replaced;
++            } else {
++                memcpy(pOut + n, ins + k, len * sizeof(UINT));
++                n += len;
++            }
++            k += len;
++        }
++        const size_t cNew = n - nIns;
++        if (cNew > (SM4_INSTR_LEN_MASK >> SM4_INSTR_LEN_SHIFT))
++            goto fail;
++        pOut[nIns] = (pOut[nIns] & ~SM4_INSTR_LEN_MASK) |
++                     ((UINT)cNew << SM4_INSTR_LEN_SHIFT);
++    }
++    if (!replaced || it.p != it.end)
++        goto fail;
++    pOut[1] = (UINT)n;
++
++    DXBCHeader *pHdr = (DXBCHeader *)pDst;
++    DXBCBlobHeader *pCode = (DXBCBlobHeader *)(pDst + offCode - sizeof(DXBCBlobHeader));
++    pCode->cbBlob = (uint32_t)(n * sizeof(UINT));
++    pHdr->cbTotal = offCode + pCode->cbBlob;
++    dxbcHash(&pHdr->u32Version, pHdr->cbTotal - 0x14u, pHdr->au8Hash);
++    if (pcbOut) *pcbOut = (SIZE_T)pHdr->cbTotal;
++    return pDst;
++
++fail:
++    HeapFree(GetProcessHeap(), 0, pDst);
++    return NULL;
++}
++
+ /* If any of these fire, the container format is misaligned and the
+  * runtime / dxvk will reject every shader. */
+ _Static_assert(sizeof(DXBCBlobHeader)        ==  8, "DXBCBlobHeader");
+diff --git a/src/virtio/neptune/triton/tritonDxbc.h b/src/virtio/neptune/triton/tritonDxbc.h
+index f5caeb8c7eb..7b80b2ec154 100644
+--- a/src/virtio/neptune/triton/tritonDxbc.h
++++ b/src/virtio/neptune/triton/tritonDxbc.h
+@@ -30,6 +30,15 @@ void *tritonBuildInputSigDxbc(const char *const *pNames,
+                               const UINT *pRegisters,
+                               UINT cEntries, SIZE_T *pcbOut);
+ 
++/* Whether a pixel shader program (SM5 token stream) declares the vCoverage
++ * input, and a copy of its tritonBuildDxbc container with every vCoverage
++ * read replaced by `value`: NULL when there is none, or one sits inside a
++ * relative index, where no immediate can go; see tritonDxbc.c for the
++ * target-independent-rasterization use. */
++BOOL tritonDxbcReadsInputCoverage(const UINT *pTokens, SIZE_T cbTokens);
++void *tritonDxbcFixInputCoverage(const void *pDxbc, SIZE_T cbDxbc, UINT value,
++                                 SIZE_T *pcbOut);
++
+ /* VS input-signature reconciler (see tritonDxbc.c for rationale). */
+ void *tritonReconcileVsInputSig(const void *pDxbc, SIZE_T cbDxbc,
+                                 const unsigned char compReg[32],
+diff --git a/src/virtio/neptune/triton/tritonShader.c b/src/virtio/neptune/triton/tritonShader.c
+index 8fcd6545f15..a2852e6c284 100644
+--- a/src/virtio/neptune/triton/tritonShader.c
++++ b/src/virtio/neptune/triton/tritonShader.c
+@@ -100,11 +100,13 @@ static void tritonUnpackSigs(const void *pRaw, BOOL fTess, TritonStageSigs *out)
+     }
+ }
+ 
+-/* Only a VS (input-layout resolution, stream-output-only GS source) and a
+- * DS (stream-output-only GS source) read their DXBC after create. */
++/* Only a VS (input-layout resolution, stream-output-only GS source), a DS
++ * (stream-output-only GS source) and a PS reading vCoverage (its
++ * target-independent-rasterization copy) read their DXBC after create. */
+ static void tritonShaderDropUnusedBytecode(PTRITON_SHADER s)
+ {
+-    if (s->kind == TRITON_SHADER_VS || s->kind == TRITON_SHADER_DS)
++    if (s->kind == TRITON_SHADER_VS || s->kind == TRITON_SHADER_DS ||
++        s->fReadsCoverage)
+         return;
+     if (s->pBytecode)
+         HeapFree(GetProcessHeap(), 0, s->pBytecode);
+@@ -130,6 +132,9 @@ static void tritonCreateShaderCommon(D3D10DDI_HDEVICE hDevice, TRITON_SHADER_KIN
+     s->pSoDecl        = NULL;
+     s->cSoDecl        = 0;
+     s->pSoOnlyGS      = NULL;
++    s->fReadsCoverage = FALSE;
++    memset(s->apTirPS, 0, sizeof(s->apTirPS));
++    s->TirTried       = 0;
+ 
+     const SIZE_T cbTokens = tritonShaderTokenBytes(pShaderCode);
+     /* Compute shaders have no input/output signature; HS/DS carry an
+@@ -173,6 +178,7 @@ static void tritonCreateShaderCommon(D3D10DDI_HDEVICE hDevice, TRITON_SHADER_KIN
+         tritonSetCreateError(pD, hr);
+         return;
+     }
++    s->fReadsCoverage = tritonDxbcReadsInputCoverage(pShaderCode, cbTokens);
+     tritonShaderDropUnusedBytecode(s);
+ }
+ 
+@@ -226,6 +232,9 @@ tritonDestroyShader(D3D10DDI_HDEVICE hDevice, D3D10DDI_HSHADER hShader)
+     if (pD && pD->pCurrentVS == s) pD->pCurrentVS = NULL;
+     if (pD && pD->pCurrentGS == s) pD->pCurrentGS = NULL;
+     if (pD && pD->pCurrentDS == s) pD->pCurrentDS = NULL;
++    if (pD && pD->pCurrentPS == s) { pD->pCurrentPS = NULL; pD->pSentPS = NULL; }
++    for (UINT i = 0; i < 4; ++i)
++        if (s->apTirPS[i]) { ID3D11PixelShader_Release(s->apTirPS[i]); s->apTirPS[i] = NULL; }
+     if (s->u.pDeviceChild) { ID3D11DeviceChild_Release(s->u.pDeviceChild); s->u.pDeviceChild = NULL; }
+     if (s->pSoOnlyGS)      { ID3D11GeometryShader_Release(s->pSoOnlyGS);  s->pSoOnlyGS = NULL; }
+     if (s->pSoDecl)        { HeapFree(GetProcessHeap(), 0, s->pSoDecl);    s->pSoDecl = NULL; }
+@@ -251,14 +260,89 @@ tritonVsSetShader(D3D10DDI_HDEVICE hDevice, D3D10DDI_HSHADER hShader)
+     tritonBindSoOnlyGS(pD);
+ }
+ 
++/* Target-independent rasterization: a ForcedSampleCount N > 1 with render
++ * targets bound (single-sample, by the D3D11.1 rules) gives the pixel shader
++ * an N-bit vCoverage, but the host rasterizes such a draw at one sample, so
++ * under that state a PS reading vCoverage is replaced by a copy reading the
++ * full N-bit mask (tritonDxbcFixInputCoverage).
++ * Without render targets it is UAV-only rendering, which keeps the PS. */
++static BOOL tritonTirActive(const PTRITON_DEVICE pD)
++{
++    return pD->rsForcedSampleCount > 1 && pD->omHasTargets &&
++           pD->pCurrentPS && pD->pCurrentPS->fReadsCoverage;
++}
++
++/* The fixed-coverage copy of s for the bound ForcedSampleCount, made on the
++ * first request for that count; NULL when it could not be made, or for a
++ * count D3D11 does not allow. */
++static ID3D11PixelShader *tritonTirPixelShader(PTRITON_DEVICE pD, PTRITON_SHADER s)
++{
++    const UINT n = pD->rsForcedSampleCount;
++    if (n < 2 || n > 16 || (n & (n - 1)))
++        return NULL;
++    UINT slot = 0;
++    while ((2u << slot) != n)
++        ++slot;
++    if (s->TirTried & (1u << slot))
++        return s->apTirPS[slot];
++    s->TirTried |= 1u << slot;
++    SIZE_T cb = 0;
++    void *p = tritonDxbcFixInputCoverage(s->pBytecode, s->cbBytecode,
++                                         (1u << n) - 1u, &cb);
++    if (!p) {
++        TR_LOG("TIR: fixed-coverage copy of PS failed (ForcedSampleCount %u)", n);
++        return NULL;
++    }
++    HRESULT hr = ID3D11Device1_CreatePixelShader(pD->pDev1, p, cb, NULL,
++                                                 &s->apTirPS[slot]);
++    HeapFree(GetProcessHeap(), 0, p);
++    if (FAILED(hr)) {
++        TR_LOG("TIR: CreatePixelShader for the fixed-coverage copy failed 0x%08lx", hr);
++        s->apTirPS[slot] = NULL;
++    }
++    return s->apTirPS[slot];
++}
++
++/* The host PS the next draw needs: the tracked PS, or its fixed-coverage
++ * copy under TIR. */
++static ID3D11PixelShader *tritonWantedPixelShader(PTRITON_DEVICE pD)
++{
++    PTRITON_SHADER s = pD->pCurrentPS;
++    if (!s)
++        return NULL;
++    if (tritonTirActive(pD)) {
++        ID3D11PixelShader *tir = tritonTirPixelShader(pD, s);
++        if (tir)
++            return tir;
++    }
++    return s->u.pPS;
++}
++
++static void tritonSendPixelShader(PTRITON_DEVICE pD, ID3D11PixelShader *ps)
++{
++    pD->pSentPS = ps;
++    ID3D11DeviceContext1_PSSetShader(pD->pCtx1, ps, NULL, 0);
++}
++
++/* After the rasterizer state or render targets change: rebind only when that
++ * changes which form of the PS the draw needs. */
++void tritonUpdateTirPixelShader(PTRITON_DEVICE pD)
++{
++    ID3D11PixelShader *ps = tritonWantedPixelShader(pD);
++    if (ps != pD->pSentPS)
++        tritonSendPixelShader(pD, ps);
++}
++
+ void APIENTRY
+ tritonPsSetShader(D3D10DDI_HDEVICE hDevice, D3D10DDI_HSHADER hShader)
+ {
+     PTRITON_DEVICE pD = (PTRITON_DEVICE)(hDevice.pDrvPrivate);
+     PTRITON_SHADER s  = (PTRITON_SHADER)(hShader.pDrvPrivate);
+     if (!pD) return;
+-    ID3D11PixelShader *ps = (s && s->u.pPS) ? s->u.pPS : NULL;
+-    ID3D11DeviceContext1_PSSetShader(pD->pCtx1, ps, NULL, 0);
++    pD->pCurrentPS = s;
++    /* Always sent: the DXGI blit binds its own PS on the context and has the
++     * runtime replay this DDI to restore the app's. */
++    tritonSendPixelShader(pD, tritonWantedPixelShader(pD));
+ }
+ 
+ void APIENTRY
+@@ -460,6 +544,9 @@ tritonCreateGSWithSO_11(D3D10DDI_HDEVICE hDevice,
+     s->pSoDecl        = NULL;
+     s->cSoDecl        = 0;
+     s->pSoOnlyGS      = NULL;
++    s->fReadsCoverage = FALSE;
++    memset(s->apTirPS, 0, sizeof(s->apTirPS));
++    s->TirTried       = 0;
+     if (pArgs->NumEntries > D3D11_SO_STREAM_COUNT * D3D11_SO_OUTPUT_COMPONENT_COUNT) {
+         TR_LOG("CreateGSWithSO: NumEntries %u exceeds SO decl cap", pArgs->NumEntries);
+         tritonSetCreateError(pD, E_INVALIDARG);
+diff --git a/src/virtio/neptune/triton/tritonState.c b/src/virtio/neptune/triton/tritonState.c
+index 126c40d02f4..4b206769f09 100644
+--- a/src/virtio/neptune/triton/tritonState.c
++++ b/src/virtio/neptune/triton/tritonState.c
+@@ -221,6 +221,7 @@ tritonCreateRasterizerCommon(PTRITON_DEVICE pD, PTRITON_RASTERIZERSTATE s,
+ {
+     if (!pD || !s) return;
+     s->pState = NULL;
++    s->ForcedSampleCount = a->ForcedSampleCount;
+ 
+     D3D11_RASTERIZER_DESC2 d = {};
+     d.FillMode              = (D3D11_FILL_MODE)a->FillMode;
+@@ -335,6 +336,8 @@ tritonSetRasterizerState(D3D10DDI_HDEVICE hDevice, D3D10DDI_HRASTERIZERSTATE hSt
+     PTRITON_RASTERIZERSTATE s = (PTRITON_RASTERIZERSTATE)(hState.pDrvPrivate);
+     ID3D11DeviceContext1_RSSetState(
+         pD->pCtx1, s ? (ID3D11RasterizerState *)s->pState : NULL);
++    pD->rsForcedSampleCount = s ? s->ForcedSampleCount : 0;
++    tritonUpdateTirPixelShader(pD);
+ }
+ 
+ /* ---------- Sampler ---------- */
+diff --git a/src/virtio/neptune/triton/tritonView.c b/src/virtio/neptune/triton/tritonView.c
+index 9b6089855de..79705647a38 100644
+--- a/src/virtio/neptune/triton/tritonView.c
++++ b/src/virtio/neptune/triton/tritonView.c
+@@ -387,6 +387,7 @@ tritonSetRenderTargets(D3D10DDI_HDEVICE hDevice,
+         if (pD->omBlendSet && pD->omSampleMask != 0xFFFFFFFFu)
+             tritonApplyBlendState(pD);
+     }
++    tritonUpdateTirPixelShader(pD);
+ }
+ 
+ /* ---------- ShaderResourceView ---------- */

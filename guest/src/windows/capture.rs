@@ -477,7 +477,30 @@ unsafe fn run(target: &Target, outbox: &Outbox, stop: &AtomicBool, driver:D3D_DR
             let mut sequence = target.capture_frames.load(Ordering::Acquire);
             let mut generation = target.geometry.lock().unwrap().0.max(1);
             let mut previous = [0; 6];
+            // Completed-iteration sums distinguish time inside capture calls
+            // from gaps between frames. Empty-pool/minimized/resize-retry loops
+            // remain in wall/residual time, not attributed to a later frame.
+            // Allocate this bounded object once per session; update its scalar
+            // values in place instead of retaining a per-frame history.
+            const TIMING_FIELDS:[&str;7]=["validationMilliseconds","dequeueMilliseconds",
+                "surfaceMilliseconds","geometryMilliseconds","gpuPrepareMilliseconds",
+                "gpuSubmitMilliseconds","closeRecreateMilliseconds"];
+            let mut timing_totals=[0.0f64;7];
+            let mut completed_frames=0u64;
+            let timing_started=Instant::now();
+            let mut last_completed=timing_started;
+            if let Some(description)=target.capture_device.lock().unwrap().as_mut() {
+                description["completedCaptureTotals"]=json!({
+                    "sessionStarts":target.progress.starts.load(Ordering::Relaxed),
+                    "sequence":sequence,"completedFrames":0,"wallMilliseconds":0.0,
+                    "lastIntervalMilliseconds":0.0,"residualMilliseconds":0.0,
+                    "validationMilliseconds":0.0,"dequeueMilliseconds":0.0,
+                    "surfaceMilliseconds":0.0,"geometryMilliseconds":0.0,
+                    "gpuPrepareMilliseconds":0.0,"gpuSubmitMilliseconds":0.0,
+                    "closeRecreateMilliseconds":0.0});
+            }
             while !stop.load(Ordering::Acquire) && outbox.connected.load(Ordering::Acquire) {
+                let validation_started=Instant::now();
                 target.set_phase(Phase::Validating);
                 if !target.valid() {
                     target.set_phase(Phase::Invalidated);
@@ -498,6 +521,7 @@ unsafe fn run(target: &Target, outbox: &Outbox, stop: &AtomicBool, driver:D3D_DR
                     // No timer restarts an otherwise healthy capture.
                     restart_session=true;break;
                 }
+                let validation_ms=validation_started.elapsed().as_secs_f64()*1000.0;
                 target.set_phase(Phase::Waiting);
                 let dequeue_started=Instant::now();
                 let _ = ready.recv_timeout(Duration::from_millis(100));
@@ -554,6 +578,8 @@ unsafe fn run(target: &Target, outbox: &Outbox, stop: &AtomicBool, driver:D3D_DR
                         "dequeueMilliseconds":dequeue_started.elapsed().as_secs_f64()*1000.0,
                         "systemRelativeTime100ns":system_relative_time});
                 }
+                let dequeue_ms=dequeue_started.elapsed().as_secs_f64()*1000.0;
+                let surface_started=Instant::now();
                 let current = frame.ContentSize().map_err(error)?;
                 if current.Width <= 0
                     || current.Height <= 0
@@ -574,6 +600,7 @@ unsafe fn run(target: &Target, outbox: &Outbox, stop: &AtomicBool, driver:D3D_DR
                 let texture: ID3D11Texture2D = access.GetInterface().map_err(error)?;
                 let mut desc = D3D11_TEXTURE2D_DESC::default();
                 texture.GetDesc(&mut desc);
+                let surface_ms=surface_started.elapsed().as_secs_f64()*1000.0;
                 // ContentSize can precede the resized backing texture during restore.
                 // Never read rows outside that texture, or end a healthy capture for it.
                 if desc.Width < current.Width as u32 || desc.Height < current.Height as u32 {
@@ -589,6 +616,7 @@ unsafe fn run(target: &Target, outbox: &Outbox, stop: &AtomicBool, driver:D3D_DR
                     .map_err(error)?;
                     continue;
                 }
+                let geometry_started=Instant::now();
                 let hwnd = HWND(target.hwnd as *mut _);
                 let (x, y, width, height) = if let Some(monitor)=capture_monitor {
                     // Read only the authenticated app's rectangle on its reserved
@@ -629,20 +657,48 @@ unsafe fn run(target: &Target, outbox: &Outbox, stop: &AtomicBool, driver:D3D_DR
                     generation += 1;
                     previous = geometry;
                 }
+                let geometry_ms=geometry_started.elapsed().as_secs_f64()*1000.0;
+                let gpu_prepare_started=Instant::now();
                 if !outbox.gpu_enabled.load(Ordering::Acquire) || software_recovery {
                     return Err("Solo GPU: questa superficie non è supportata. Nessun fallback TCP.".into());
                 }
                 if native_gpu.as_ref().is_none_or(|g|!g.matches(width as u32,height as u32)) {
                     native_gpu=Some(super::gpu::Gpu::new(&device,width as u32,height as u32)?);
                 }
+                let gpu_prepare_ms=gpu_prepare_started.elapsed().as_secs_f64()*1000.0;
                 target.set_phase(Phase::Publishing);sequence+=1;
+                let submit_started=Instant::now();
                 native_gpu.as_mut().unwrap().submit(&device,&context,&texture,x,y,&target,&outbox,generation,sequence.into(),gpu_selected_qpc)?;
+                let submit_ms=submit_started.elapsed().as_secs_f64()*1000.0;
                 let close_started=Instant::now();
                 frame.Close().map_err(error)?;
                 if let Some(description)=target.capture_device.lock().unwrap().as_mut() {
                     description["wgcFrame"]["closeMilliseconds"]=json!(close_started.elapsed().as_secs_f64()*1000.0);
                 }
                 if resize_pool {pool.Recreate(&runtime,DirectXPixelFormat::B8G8R8A8UIntNormalized,2,size).map_err(error)?;}
+                let close_recreate_ms=close_started.elapsed().as_secs_f64()*1000.0;
+                let completed_at=Instant::now();
+                let interval_ms=completed_at.duration_since(last_completed).as_secs_f64()*1000.0;
+                last_completed=completed_at;
+                completed_frames+=1;
+                for (total,value) in timing_totals.iter_mut().zip([validation_ms,dequeue_ms,
+                    surface_ms,geometry_ms,gpu_prepare_ms,submit_ms,close_recreate_ms]) {
+                    *total+=value;
+                }
+                let wall_ms=completed_at.duration_since(timing_started).as_secs_f64()*1000.0;
+                if let Some(totals)=target.capture_device.lock().unwrap().as_mut()
+                    .and_then(|description|description.get_mut("completedCaptureTotals")) {
+                    for (name,value) in TIMING_FIELDS.iter().zip(timing_totals) {
+                        if let Some(slot)=totals.get_mut(*name) {*slot=Value::from(value);}
+                    }
+                    for (name,value) in [("sequence",Value::from(sequence)),
+                        ("completedFrames",Value::from(completed_frames)),
+                        ("wallMilliseconds",Value::from(wall_ms)),
+                        ("lastIntervalMilliseconds",Value::from(interval_ms)),
+                        ("residualMilliseconds",Value::from(wall_ms-timing_totals.iter().sum::<f64>()))] {
+                        if let Some(slot)=totals.get_mut(name) {*slot=value;}
+                    }
+                }
             }
             Ok(())
         })();

@@ -34,6 +34,7 @@ def main():
     parser.add_argument('--bounded-map-growth', action='store_true', help='Opt in to v15 pressure cap experiment; browser performance is not qualified')
     parser.add_argument('--external-video-discard', action='store_true', help='Opt in to v16 shared input storage on decoder DISCARD; browser performance is not qualified')
     parser.add_argument('--present-amortization', action='store_true', help='Apply upstream present object cleanup to v16; requires --external-video-discard, Windows qualification required')
+    parser.add_argument('--target-independent-coverage', action='store_true', help='Opt in to v18 upstream TIR coverage fixes above v17; requires --present-amortization, Windows qualification required')
     parser.add_argument('--prepare-only', action='store_true', help='Check inputs and reconstruct source without compiling')
     parser.add_argument('--toolchain-profile', default='original',
                         help='Explicit pinned toolchain; profiles do not change the driver/source ABI')
@@ -42,6 +43,8 @@ def main():
         parser.error('Choose one driver experiment at a time')
     if args.present_amortization and not args.external_video_discard:
         parser.error('--present-amortization requires the deployed --external-video-discard baseline')
+    if args.target_independent_coverage and not args.present_amortization:
+        parser.error('--target-independent-coverage requires the qualified --present-amortization baseline')
     pins = json.loads((REPO / 'graphics/backend/video-umd-inputs.json').read_text())
     if args.bounded_map_growth:
         pins['candidate_revision'] = pins['bounded_map_growth_revision']
@@ -49,6 +52,8 @@ def main():
         pins['candidate_revision'] = pins['external_video_discard_revision']
     if args.present_amortization:
         pins['candidate_revision'] = pins['present_amortization_revision']
+    if args.target_independent_coverage:
+        pins['candidate_revision'] = pins['target_independent_coverage_revision']
     if args.toolchain_profile != 'original':
         profiles = pins.get('toolchain_profiles', {})
         if args.toolchain_profile not in profiles:
@@ -79,6 +84,16 @@ def main():
     present_patch = REPO / 'graphics/backend/present-amortization.patch'
     if digest(present_patch) != pins['present_amortization_patch_sha256']:
         raise ValueError('Shared fix differs from the pinned input: ' + present_patch.name)
+    coverage_patches = []
+    if args.target_independent_coverage:
+        for name, key in (
+                ('sample-mask-no-targets.patch', 'sample_mask_no_targets_patch_sha256'),
+                ('target-independent-coverage.patch', 'target_independent_coverage_patch_sha256'),
+                ('target-independent-coverage-version.patch', 'target_independent_coverage_version_patch_sha256')):
+            coverage_patch = REPO / 'graphics/backend' / name
+            if digest(coverage_patch) != pins[key]:
+                raise ValueError('Shared fix differs from the pinned input: ' + coverage_patch.name)
+            coverage_patches.append(coverage_patch)
     for name, expected in pins['sdk_files'].items():
         if digest(sdk / name) != expected:
             raise ValueError('SDK/tool input differs: ' + name)
@@ -143,6 +158,9 @@ def main():
     if args.present_amortization:
         run(['git', 'apply', '--check', present_patch], cwd=source)
         run(['git', 'apply', present_patch], cwd=source)
+    for coverage_patch in coverage_patches:
+        run(['git', 'apply', '--check', coverage_patch], cwd=source)
+        run(['git', 'apply', coverage_patch], cwd=source)
     shutil.copyfile(header, source / 'src/virtio/neptune/triton/video-resource-submit.h')
     includes = [wdk / 'c/Include' / pins['wdk']['include_version'] / kind for kind in ('um', 'shared')]
     includes += [sdk / 'xwin' / name for name in ('sdk/include/ucrt', 'sdk/include/shared', 'sdk/include/um', 'sdk/include/winrt', 'crt/include')]
@@ -173,6 +191,7 @@ def main():
                      '\ncpp_link_args = '+repr(link_args)+"\nb_vscrt = 'mt'\n")
     receipt = {'inputs': pins, 'bounded_map_growth_experiment': args.bounded_map_growth,
                'external_video_discard_experiment': args.external_video_discard,
+               'target_independent_coverage_experiment': args.target_independent_coverage,
                'present_amortization': args.present_amortization, 'toolchain_profile': args.toolchain_profile, 'compiler': version, 'commands': commands,
                'qualification': 'source preparation only; no Windows install or video qualification'}
     if not args.prepare_only:
@@ -185,6 +204,8 @@ def main():
         run([meson, 'setup', build, source, '--cross-file', cross, '--buildtype=release', *['-D'+option for option in options]])
         run([ninja, '-C', build, '-j1', 'src/virtio/neptune/triton/neptune_umd.dll'])
         library = build / 'src/virtio/neptune/triton/neptune_umd.dll'
+        if args.target_independent_coverage and pins['candidate_revision'].encode('utf-16-le') not in library.read_bytes():
+            raise ValueError('Built candidate does not contain the pinned PrivateBuild marker')
         receipt.update(umd_sha256=digest(library), qualification='build only; unsigned candidate, no Windows video qualification')
         print(library)
     (output / 'build-receipt.json').write_text(json.dumps(receipt, indent=2)+'\n')
