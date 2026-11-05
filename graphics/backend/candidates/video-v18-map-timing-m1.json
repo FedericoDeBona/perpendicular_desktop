@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "state": "Diagnostic build only; QA loading/pixels and Map events pending; no lag fix or production promotion",
+  "state": "QA coldboot/loading/pixels and bounded DWM Map events PASS; ensure-shmem stalls observed, no lag fix or production promotion",
   "revision": "Perpendicular video-resource-v18-map-timing",
   "architecture": "aarch64",
   "kernel_abi": "100.6.101.58000",
@@ -17,5 +17,13 @@
     "level": 4,
     "maxEventsPerProcess": 65,
     "pixels": false
+  },
+  "qualification": {
+    "machine": "Mac M1",
+    "boot": "2026-11-05T21:19:37.6377030+01:00",
+    "evidence": "docs/VERIFICATION.md#5-novembre--ripresa-del-lag-seamless-sul-m1",
+    "dwmMapRecords": 64,
+    "slowShmemRecords": 16,
+    "boundedAndBiased": true
   }
 }
