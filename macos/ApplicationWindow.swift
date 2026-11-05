@@ -744,6 +744,13 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
                 "stage":"received-before-presentation","presentation":presentationState]
     }
     func setPrivateSurfaceCopy(_ enabled:Bool){content.setPrivateSurfaceCopy(enabled)}
+    func setOpaquePresentation(_ enabled:Bool)->Bool {
+        guard role == .main else{return false}
+        window.isOpaque=enabled
+        window.backgroundColor=enabled ? .black:.clear
+        content.setOpaquePresentation(enabled)
+        return true
+    }
     func retire(){sourceClosed=true;window.close()}
     private func requestClose(){if windowShouldClose(window){window.close()}}
     func windowShouldClose(_ sender:NSWindow)->Bool{

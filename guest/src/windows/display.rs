@@ -242,7 +242,7 @@ pub fn snapshot() -> Value {
             displays.push(json!({"device":text(&device.DeviceName),"adapter":text(&device.DeviceString),
                 "primary":device.StateFlags.contains(DISPLAY_DEVICE_PRIMARY_DEVICE),
                 "x":position.x,"y":position.y,"width":current.dmPelsWidth,"height":current.dmPelsHeight,
-                "dpi":dpi,"workArea":work_area,
+                "dpi":dpi,"workArea":work_area,"reportedRefreshHz":current.dmDisplayFrequency,
                 "modes":modes.into_iter().map(|(w,h)|json!({"width":w,"height":h})).collect::<Vec<_>>()}));
         }
     }

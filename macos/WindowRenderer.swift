@@ -32,7 +32,7 @@ final class WindowRenderer {
     private var external:NativeDisplayFrame?
     private var shared:GuestFrameSurface?
     private var nativeCache=false
-    private let opaque:Bool
+    private var opaque:Bool
     private let fillBounds:Bool
     private var pixels=Data()
     private var pixelStride=0
@@ -56,6 +56,10 @@ final class WindowRenderer {
     private var copySharedSurface=false
     func setPrivateSurfaceCopy(_ enabled:Bool){
         copySharedSurface=enabled;dirty=true;draw()
+    }
+    func setOpaquePresentation(_ enabled:Bool){
+        opaque=enabled;layer.isOpaque=enabled
+        dirty=true;draw()
     }
 
     // Device and pipeline are immutable and shared by all window presenters.

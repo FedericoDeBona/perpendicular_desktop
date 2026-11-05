@@ -430,6 +430,7 @@ unsafe fn run(target: &Target, outbox: &Outbox, stop: &AtomicBool, driver:D3D_DR
         if let Some(description)=target.capture_device.lock().unwrap().as_mut() {
             description["wgcSession"]=json!({"originalDirtyRegionMode":original_dirty_mode.map(|mode|mode.0),
                 "dirtyRegionMode":dirty_mode.map(|mode|mode.0),
+                "minUpdateInterval100ns":session.MinUpdateInterval().ok().map(|value|value.Duration),
                 "includeSecondaryWindows":session.IncludeSecondaryWindows().ok()});
             if std::env::var("PERP_CAPTURE_PIXEL_HASH").as_deref()==Ok("1") {
                 description["diagnosticDriverTrial"]=json!({
@@ -473,19 +474,14 @@ unsafe fn run(target: &Target, outbox: &Outbox, stop: &AtomicBool, driver:D3D_DR
                     continue;
                 }
                 if target.refresh_requested.swap(false,Ordering::AcqRel) {
-                    // A session that has never delivered a frame can remain
-                    // stuck after Recreate. Close it on its owning thread and
-                    // start a fresh session for the same authenticated HWND.
-                    // This is request-driven; no retry loop on a timer.
-                    if target.progress.acquired.load(Ordering::Relaxed)==0 {
-                        restart_session=true;break;
-                    }
-                    // Recreate on this capture thread, after any prior packet's
-                    // ACK, rather than racing a second producer for the HWND.
-                    pool.Recreate(&runtime,DirectXPixelFormat::B8G8R8A8UIntNormalized,2,size).map_err(error)?;
-                    target.progress.recreates.fetch_add(1,Ordering::Relaxed);
-                    generation=generation.saturating_add(1);previous=[0;6];native_gpu=None;
-                    let _=RedrawWindow(Some(hwnd),None,None,RDW_INVALIDATE|RDW_ALLCHILDREN|RDW_FRAME);
+                    // Recreate can also stop delivering after a session has
+                    // already produced frames (observed after a resize).
+                    // An explicit retry must renew the session, not only its
+                    // buffers. Teardown stays on this owning capture thread,
+                    // after the preceding packet's ACK, with the same HWND
+                    // identity and monotonically increasing frame sequence.
+                    // No timer restarts an otherwise healthy capture.
+                    restart_session=true;break;
                 }
                 target.set_phase(Phase::Waiting);
                 let _ = ready.recv_timeout(Duration::from_millis(100));

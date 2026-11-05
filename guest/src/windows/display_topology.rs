@@ -134,6 +134,8 @@ impl Topology {
                 "adapterLuid":{"high":path.sourceInfo.adapterId.HighPart,"low":path.sourceInfo.adapterId.LowPart},
                 "sourceId":path.sourceInfo.id,"targetId":path.targetInfo.id,
                 "targetAvailable":path.targetInfo.targetAvailable.as_bool(),
+                "refreshRate":{"numerator":path.targetInfo.refreshRate.Numerator,
+                    "denominator":path.targetInfo.refreshRate.Denominator},
                 "x":source.position.x,"y":source.position.y,
                 "width":source.width,"height":source.height}));
         }

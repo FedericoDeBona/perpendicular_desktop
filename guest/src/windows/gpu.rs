@@ -75,7 +75,14 @@ impl Gpu{
   let deadline=Instant::now();while !acknowledged.load(Ordering::Acquire){
    if !outbox.connected.load(Ordering::Acquire)||deadline.elapsed()>Duration::from_secs(4){return Err("GPU consumer acknowledgement missing".into());}
    std::thread::sleep(Duration::from_millis(1));
-  }Ok(())
+  }
+  if let Some(description)=target.capture_device.lock().unwrap().as_mut() {
+   description["lastGpuFrame"]=json!({"sequence":sequence,"selectedQPC":selected_qpc,
+    "submitMilliseconds":submitted,"queryWaitMilliseconds":gpu_wait,
+    "consumerAckMilliseconds":deadline.elapsed().as_secs_f64()*1000.0,
+    "referenceReadback":reference,"totalMilliseconds":started.elapsed().as_secs_f64()*1000.0});
+  }
+  Ok(())
  }}
 }
 

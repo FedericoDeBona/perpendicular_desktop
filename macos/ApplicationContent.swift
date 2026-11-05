@@ -27,6 +27,7 @@ final class ApplicationContent:NSView {
     }
     private var source=NSSize.zero
     func setPrivateSurfaceCopy(_ enabled:Bool){renderer?.setPrivateSurfaceCopy(enabled)}
+    func setOpaquePresentation(_ enabled:Bool){renderer?.setOpaquePresentation(enabled)}
     private var modifiers:Set<Int>=[]
     private var virtualKeys:Set<UInt16>=[]
     private var pendingText=""
