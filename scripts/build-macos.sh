@@ -54,6 +54,7 @@ if [[ "${SKIP_RUNTIME:-0}" == 1 && -d .build/Native3D ]]; then
     cp -R .build/Native3D "$app/Contents/Resources/Native3D"
 fi
 python3 scripts/check-memory-runtime.py --app "$app"
+python3 scripts/check-qemu-transfer-2d.py --app "$app"
 python3 scripts/check-opengl-payload.py --app "$app"
 python3 scripts/check-x86-payload.py --app "$app"
 python3 scripts/check-video-payload.py --app "$app"

@@ -1,0 +1,18 @@
+{
+  "schema": 1,
+  "state": "Experimental, default off; no performance or main qualification yet",
+  "qemuVersion": "10.0.12",
+  "sourceBefore": {
+    "hw/display/virtio-gpu.c": "c60e4a331567d2d9c2bf9effa74716532771383ba2bc3f086131de558e10df0f",
+    "include/hw/virtio/virtio-gpu.h": "7e804deaf4ad4f477aa61300221686982a9c69e8d1c5bd0ef891d0b3739991a2"
+  },
+  "recipe": {
+    "scripts/patch-qemu-transfer-2d.py": "2338174cc3277d7f8c163818a7872f0b5acff735e441c542e96dae31dd391e53",
+    "graphics/qemu/transfer-2d-cursor.h": "b998267016f2c51c34bd566c561a70606b794028930ac5e00a61bbebad143d7d"
+  },
+  "capability": {
+    "version": 1,
+    "property": "perp-2d-stats",
+    "switch": "perp-2d-cursor"
+  }
+}

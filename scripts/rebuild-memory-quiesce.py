@@ -28,6 +28,10 @@ def main():
     parser.add_argument("--reference-app", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--ninja", default="ninja")
+    parser.add_argument("--transfer-2d-cursor", action="store_true",
+                        help="Build the opt-in row-copy QA candidate, preserving the shared RAM fix")
+    parser.add_argument("--base-quiesce-receipt", type=Path,
+                        help="Provenance for the retained pre-quiesce cache when the reference already has that fix")
     args = parser.parse_args()
     ninja = shutil.which(args.ninja)
     if not ninja:
@@ -48,7 +52,21 @@ def main():
     pins = [f["sourceSHA256"] for f in receipt["files"]
             if f["file"] == "Contents/Resources/Native3D/bin/qemu-system-aarch64"]
     binary = build / "qemu-system-aarch64-unsigned"
-    if len(pins) != 1 or binary.is_symlink() or sha(binary) != pins[0]:
+    base_pin = pins[0] if len(pins) == 1 else None
+    prior = None
+    if args.base_quiesce_receipt:
+        if not args.transfer_2d_cursor:
+            raise ValueError("A retained baseline receipt is only supported for the explicit 2D candidate")
+        prior = json.loads(args.base_quiesce_receipt.read_text())
+        expected = {name: sha(ROOT / name) for name in PATCHES}
+        if (prior.get("version") != 1 or prior.get("patches") != expected
+                or prior.get("outputSHA256") != base_pin):
+            raise ValueError("Retained quiesce receipt differs from the installed reference")
+        for name, expected in prior["sourceBefore"].items():
+            if sha(source / name) != expected:
+                raise ValueError("Retained pre-quiesce source differs: " + name)
+        base_pin = prior["baseUnsignedSHA256"]
+    if len(pins) != 1 or binary.is_symlink() or sha(binary) != base_pin:
         raise ValueError("Build output does not match the qualified local QEMU pin")
     for name in ("perp-balloon-reclaim.h", "perp-virtio-mem-hvf.h"):
         if sha(source / "hw/virtio" / name) != sha(ROOT / "memory/qemu" / name):
@@ -61,6 +79,16 @@ def main():
     out.mkdir(parents=True)
     names = ["hw/virtio/virtio-balloon.c", "hw/virtio/virtio-mem.c",
              "include/hw/virtio/virtio-balloon.h", "include/hw/virtio/virtio-mem.h"]
+    transfer_header = source / "hw/display/perp-transfer-2d.h"
+    transfer_recipe = None
+    if args.transfer_2d_cursor:
+        transfer_recipe = json.loads((ROOT / "graphics/qemu/transfer-2d.json").read_text())
+        for name, expected in transfer_recipe["recipe"].items():
+            if sha(ROOT / name) != expected:
+                raise ValueError("Shared 2D recipe differs: " + name)
+        if transfer_header.exists():
+            raise ValueError("Preserve existing 2D source")
+        names += list(transfer_recipe["sourceBefore"])
     originals = {name: (source / name).read_bytes() for name in names}
     shutil.copy2(binary, out / "qualified-before-unsigned")
     for name in names:
@@ -69,18 +97,23 @@ def main():
         backup.write_bytes(originals[name])
     try:
         subprocess.run(["python3", str(ROOT / PATCHES[0]), str(source)], check=True)
+        if args.transfer_2d_cursor:
+            subprocess.run(["python3", str(ROOT / "scripts/patch-qemu-transfer-2d.py"), str(source)], check=True)
         with (out / "build.log").open("w") as log:
             subprocess.run([ninja, "-C", str(build), "-j2", binary.name],
                            stdout=log, stderr=subprocess.STDOUT, check=True)
         target = out / binary.name
         shutil.copy2(binary, target)
         result = {"schema": 1, "version": 1,
-                  "baseUnsignedSHA256": pins[0], "outputSHA256": sha(target),
+                  "baseUnsignedSHA256": base_pin, "outputSHA256": sha(target),
                   "patches": {name: sha(ROOT / name) for name in PATCHES},
                   "sourceBefore": {name: hashlib.sha256(data).hexdigest()
                                    for name, data in originals.items()},
                   "sourceAfter": {name: sha(source / name) for name in names},
                   "runtimeQualified": False}
+        if transfer_recipe:
+            result["transfer2D"] = transfer_recipe
+            result["qualifiedReferenceUnsignedSHA256"] = pins[0]
         (out / "receipt.json").write_text(json.dumps(result, indent=2) + "\n")
     finally:
         for name, data in originals.items():
@@ -90,8 +123,10 @@ def main():
             os.utime(source / name, None)
         if helper.exists():
             helper.unlink()
+        if args.transfer_2d_cursor and transfer_header.exists():
+            transfer_header.unlink()
         shutil.copy2(out / "qualified-before-unsigned", binary)
-        if sha(binary) != pins[0] or any((source / n).read_bytes() != d
+        if sha(binary) != base_pin or any((source / n).read_bytes() != d
                                        for n, d in originals.items()):
             raise RuntimeError("Qualified cache restoration failed")
         lock.close()

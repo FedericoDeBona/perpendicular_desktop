@@ -54,6 +54,17 @@ def main():
                 or quiesce.get("patches") != patches
                 or quiesce.get("outputSHA256") != hashlib.sha256(source.read_bytes()).hexdigest()):
             raise ValueError("Quiesce build receipt, shared recipe or QEMU output differs")
+        transfer = quiesce.get("transfer2D")
+        if b"perp-2d-stats\0" in source.read_bytes():
+            shared = json.loads((project / "graphics/qemu/transfer-2d.json").read_text())
+            if not transfer or any(transfer.get(k) != shared[k]
+                                   for k in ("recipe", "sourceBefore", "capability")):
+                raise ValueError("2D candidate lacks the pinned shared recipe receipt")
+            if any(hashlib.sha256((project / n).read_bytes()).hexdigest() != h
+                   for n, h in shared["recipe"].items()):
+                raise ValueError("2D candidate recipe changed after compilation")
+        elif transfer:
+            raise ValueError("2D receipt does not match the QEMU capability")
 
     def compatibility(binary):
         lines = output("otool", "-L", str(binary)).splitlines()
@@ -141,6 +152,13 @@ def main():
         manifest["hvf_dynamic_memory_version"] = 1
         manifest["hvf_memory_quiesce_version"] = quiesce["version"]
         manifest["memory_quiesce_patches"] = quiesce["patches"]
+        if quiesce.get("transfer2D"):
+            manifest["transfer_2d_candidate"] = quiesce["transfer2D"]
+            destination = native_root / "Notices/Perpendicular/transfer-2d-build.json"
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_text(json.dumps(quiesce, indent=2) + "\n")
+        else:
+            manifest.pop("transfer_2d_candidate", None)
         manifest_path.write_text(json.dumps(manifest, indent=2) + "\n")
     (app / ("Contents/Resources/" + resource + "/memory-runtime.json")).write_text(json.dumps({
         "schema": 1, "hvfMemoryVersion": 1, "graphicsQualified": False, "files": receipt,
