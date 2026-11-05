@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "state": "Build and bounded ownership checks PASS; QA install/coldboot/pixels/stalls pending; not production",
+  "state": "QA coldboot/loading/pixels PASS; bounded trace shows shorter Map/shmem stalls; browser/WGC gap remains, main/production pending",
   "revision": "Perpendicular video-resource-v18-map-timing-async-pool",
   "architecture": "aarch64",
   "kernel_abi": "100.6.101.58000",
@@ -17,5 +17,16 @@
     "test_signing": false,
     "map_timing_diagnostic": true
   },
-  "qualification": "docs/VERIFICATION.md#5-novembre--ripresa-del-lag-seamless-sul-m1"
+  "qualification": "docs/VERIFICATION.md#5-novembre--ripresa-del-lag-seamless-sul-m1",
+  "qa_measurement": {
+    "dwm_map_records": 64,
+    "pool_growth_records": 30,
+    "map_max_ms": 9.430041666666666,
+    "ensure_shmem_max_ms": 4.170333333333334,
+    "pool_creation_max_ms": 4.085041666666666,
+    "caller_retirement_max_ms": 0.07829166666666666,
+    "selected_bounded_sample": true,
+    "controlled_ab": false,
+    "main_qualified": false
+  }
 }
