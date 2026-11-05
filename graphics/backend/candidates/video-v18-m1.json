@@ -1,0 +1,18 @@
+{
+  "architecture": "aarch64",
+  "revision": "Perpendicular video-resource-v18",
+  "umdSHA256": "79908a8e026c0f69a61cf9c9b6b090fcd750b8991a939ed72e82bcd85446a2d5",
+  "hostBackendSHA256": "ff8f596ad31402c9592d649420324ab72faa5f3b78b879ed528b84d18fd510be",
+  "recipe": "scripts/rebuild-video-umd.py --external-video-discard --present-amortization --target-independent-coverage",
+  "toolchainProfile": "original",
+  "state": "candidate; isolated M1 QA protected coldboot, SDR/three hardware 4K frames and installed ARM64/x64 OpenGL PASS; browser lag, visual correctness and main promotion pending",
+  "schema": 1,
+  "sourceInputs": "graphics/backend/video-umd-inputs.json",
+  "nativeInputs": "graphics/backend/video-inputs.json",
+  "kernelABI": "100.6.101.58000",
+  "guestWireVersion": 2,
+  "originalKernelSHA256": "cfbc713754c7f0dcae4803017af3a0ebfc781d37fd57604f8ee8f2cfdad306c4",
+  "secureBoot": true,
+  "testSigning": false,
+  "verification": "docs/VERIFICATION.md#5-novembre--ripresa-del-lag-seamless-sul-m1"
+}
