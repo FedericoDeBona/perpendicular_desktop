@@ -247,3 +247,11 @@ Il confronto registra anche `WGL_COMPARE_COPY` nel punto effettivo `CmdCopyImage
 `windows-zink-batch-control.patch` / `--batch-control` è solo diagnostica e richiede `--cached-batch`: il file indicato da `PERP_WGL_BATCH_CONTROL` contiene un byte ASCII `0` (seriale.33) o `1` (batch/cache). Il processo lo legge tra le presentazioni; file assente/illeggibile o altro valore conserva l'opzioneprocesso. Nessun comando viene eseguito. Consente un confronto nella stessa sessione senza cambiare DLL/viewport o riavviare Creality; trace`batch` identifica il percorso effettivo. Sul M1 entrambi i valori passano i tre frame diversi1536×1024 e il trace conferma0/1. Questo qualifica lo strumento, non FPS/Creality; non includere controllo/trace nella release ordinaria.
 
 Perimetro dei tempi: `total_ns` copre il corpo della presentazione GDI in `wgl.c`, non tutto SwapBuffers. Flush del contesto, eventuale attesa swap-interval e altro lavoro a monte possono precederlo. Gli intervalli tra record non sono automaticamente FPS Mac o tempoCPU dell'applicazione; richiedono input continuo correlato e, per attribuire il residuo, misura del confine appropriato.
+
+
+La cache M4 della release0.2.32 registra Meson1.11.2. Per applicare le stesse
+patch produzione con `build-wgl-readback-cache.py` selezionare esplicitamente
+`--meson-version 1.11.2` e il relativo `--base-release`; la ricetta controlla
+anche i log di entrambi i cache, oltre ai pin dei sorgenti e DLL. Il default
+M1 rimane1.12.1. I nuovi outputM4 compilati il5novembre restano privati e
+non qualificati per Windows: build riuscita non autorizza nuovi pin payload.

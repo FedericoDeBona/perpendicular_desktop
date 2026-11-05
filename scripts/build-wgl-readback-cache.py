@@ -33,6 +33,7 @@ def main():
     parser.add_argument('--meson', type=Path, required=True)
     parser.add_argument('--ninja', type=Path, required=True)
     parser.add_argument('--base-release', type=Path, required=True)
+    parser.add_argument('--meson-version', choices=('1.12.1', '1.11.2'), default='1.12.1', help='Version recorded by the qualified host cache')
     parser.add_argument('--batch-readback', action='store_true', help='Build production cached color readback batch, enabled by default in the result')
     args = parser.parse_args()
     cache = args.cache.resolve(strict=True)
@@ -51,8 +52,12 @@ def main():
         patches.append(REPO / 'graphics/opengl/windows-zink-cached-batch-readback.patch')
     meson, ninja = args.meson.resolve(strict=True), args.ninja.resolve(strict=True)
     version = subprocess.check_output([str(meson), '--version'], text=True).strip()
-    if version != '1.12.1':
-        raise ValueError('Use Meson 1.12.1 matching the qualified cache')
+    if version != args.meson_version:
+        raise ValueError('Use the selected Meson version matching the qualified cache')
+    for arch in ('arm64', 'x64'):
+        log = (cache / ('zink-' + arch) / 'meson-logs/meson-log.txt').read_text()
+        if ('Version: ' + version + '\n') not in log:
+            raise ValueError('Meson version differs from the recorded cache: ' + arch)
     with (cache / 'wgl-diagnostic-build.lock').open('a') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         originals = {}
