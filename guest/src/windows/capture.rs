@@ -478,15 +478,17 @@ unsafe fn run(target: &Target, outbox: &Outbox, stop: &AtomicBool, driver:D3D_DR
             let mut generation = target.geometry.lock().unwrap().0.max(1);
             let mut previous = [0; 6];
             // Completed-iteration sums distinguish time inside capture calls
-            // from gaps between frames. Empty-pool/minimized/resize-retry loops
-            // remain in wall/residual time, not attributed to a later frame.
+            // from gaps between frames. Dequeue time from abandoned iterations
+            // is separate; their other work and idle time remain residual.
             // Allocate this bounded object once per session; update its scalar
             // values in place instead of retaining a per-frame history.
-            const TIMING_FIELDS:[&str;7]=["validationMilliseconds","dequeueMilliseconds",
+            const TIMING_FIELDS:[&str;8]=["validationMilliseconds","dequeueMilliseconds",
                 "surfaceMilliseconds","geometryMilliseconds","gpuPrepareMilliseconds",
-                "gpuSubmitMilliseconds","closeRecreateMilliseconds"];
-            let mut timing_totals=[0.0f64;7];
+                "gpuSubmitMilliseconds","closeRecreateMilliseconds","releaseMilliseconds"];
+            let mut timing_totals=[0.0f64;8];
             let mut completed_frames=0u64;
+            let (mut empty_initial_polls,mut failed_initial_polls,mut drain_misses,mut undersized_frames)=(0u64,0u64,0u64,0u64);
+            let mut abandoned_dequeue_ms=0.0f64;
             let timing_started=Instant::now();
             let mut last_completed=timing_started;
             if let Some(description)=target.capture_device.lock().unwrap().as_mut() {
@@ -497,7 +499,9 @@ unsafe fn run(target: &Target, outbox: &Outbox, stop: &AtomicBool, driver:D3D_DR
                     "validationMilliseconds":0.0,"dequeueMilliseconds":0.0,
                     "surfaceMilliseconds":0.0,"geometryMilliseconds":0.0,
                     "gpuPrepareMilliseconds":0.0,"gpuSubmitMilliseconds":0.0,
-                    "closeRecreateMilliseconds":0.0});
+                    "closeRecreateMilliseconds":0.0,"releaseMilliseconds":0.0,
+                    "emptyInitialPolls":0,"failedInitialPolls":0,"drainMisses":0,
+                    "undersizedFrames":0,"abandonedDequeueMilliseconds":0.0});
             }
             while !stop.load(Ordering::Acquire) && outbox.connected.load(Ordering::Acquire) {
                 let validation_started=Instant::now();
@@ -532,6 +536,8 @@ unsafe fn run(target: &Target, outbox: &Outbox, stop: &AtomicBool, driver:D3D_DR
                     Ok(frame)=>{target.progress.acquired.fetch_add(1,Ordering::Relaxed);frame},
                     Err(error)=>{
                         target.progress.dequeue_hresult.store(error.code().0 as u32,Ordering::Relaxed);
+                        if error.code().0==0 {empty_initial_polls+=1;}else{failed_initial_polls+=1;}
+                        abandoned_dequeue_ms+=dequeue_started.elapsed().as_secs_f64()*1000.0;
                         continue;
                     }
                 };
@@ -540,7 +546,7 @@ unsafe fn run(target: &Target, outbox: &Outbox, stop: &AtomicBool, driver:D3D_DR
                 // rather than spending readback and network time on an old one.
                 let drain_started=Instant::now();
                 for _ in 0..2 {
-                    let Ok(newer) = pool.TryGetNextFrame() else {break};
+                    let Ok(newer) = pool.TryGetNextFrame() else {drain_misses+=1;break};
                     target.progress.acquired.fetch_add(1,Ordering::Relaxed);
                     let _ = frame.Close(); frame = newer;
                 }
@@ -557,7 +563,7 @@ unsafe fn run(target: &Target, outbox: &Outbox, stop: &AtomicBool, driver:D3D_DR
                 let slot_wait_ms=slot_started.elapsed().as_secs_f64()*1000.0;
                 let final_drain_started=Instant::now();
                 for _ in 0..2 {
-                    let Ok(newer) = pool.TryGetNextFrame() else {break};
+                    let Ok(newer) = pool.TryGetNextFrame() else {drain_misses+=1;break};
                     target.progress.acquired.fetch_add(1,Ordering::Relaxed);
                     let _ = frame.Close(); frame = newer;
                 }
@@ -604,6 +610,8 @@ unsafe fn run(target: &Target, outbox: &Outbox, stop: &AtomicBool, driver:D3D_DR
                 // ContentSize can precede the resized backing texture during restore.
                 // Never read rows outside that texture, or end a healthy capture for it.
                 if desc.Width < current.Width as u32 || desc.Height < current.Height as u32 {
+                    undersized_frames+=1;
+                    abandoned_dequeue_ms+=dequeue_ms;
                     frame.Close().map_err(error)?;
                     target.set_phase(Phase::Recreating);
                     target.progress.recreates.fetch_add(1,Ordering::Relaxed);
@@ -677,12 +685,17 @@ unsafe fn run(target: &Target, outbox: &Outbox, stop: &AtomicBool, driver:D3D_DR
                 }
                 if resize_pool {pool.Recreate(&runtime,DirectXPixelFormat::B8G8R8A8UIntNormalized,2,size).map_err(error)?;}
                 let close_recreate_ms=close_started.elapsed().as_secs_f64()*1000.0;
+                // Match the previous implicit scope-exit order (reverse
+                // declaration). Close/ACK still precede all three releases.
+                let release_started=Instant::now();
+                drop(texture);drop(access);drop(frame);
+                let release_ms=release_started.elapsed().as_secs_f64()*1000.0;
                 let completed_at=Instant::now();
                 let interval_ms=completed_at.duration_since(last_completed).as_secs_f64()*1000.0;
                 last_completed=completed_at;
                 completed_frames+=1;
                 for (total,value) in timing_totals.iter_mut().zip([validation_ms,dequeue_ms,
-                    surface_ms,geometry_ms,gpu_prepare_ms,submit_ms,close_recreate_ms]) {
+                    surface_ms,geometry_ms,gpu_prepare_ms,submit_ms,close_recreate_ms,release_ms]) {
                     *total+=value;
                 }
                 let wall_ms=completed_at.duration_since(timing_started).as_secs_f64()*1000.0;
@@ -695,7 +708,12 @@ unsafe fn run(target: &Target, outbox: &Outbox, stop: &AtomicBool, driver:D3D_DR
                         ("completedFrames",Value::from(completed_frames)),
                         ("wallMilliseconds",Value::from(wall_ms)),
                         ("lastIntervalMilliseconds",Value::from(interval_ms)),
-                        ("residualMilliseconds",Value::from(wall_ms-timing_totals.iter().sum::<f64>()))] {
+                        ("emptyInitialPolls",Value::from(empty_initial_polls)),
+                        ("failedInitialPolls",Value::from(failed_initial_polls)),
+                        ("drainMisses",Value::from(drain_misses)),
+                        ("undersizedFrames",Value::from(undersized_frames)),
+                        ("abandonedDequeueMilliseconds",Value::from(abandoned_dequeue_ms)),
+                        ("residualMilliseconds",Value::from(wall_ms-timing_totals.iter().sum::<f64>()-abandoned_dequeue_ms))] {
                         if let Some(slot)=totals.get_mut(name) {*slot=value;}
                     }
                 }
