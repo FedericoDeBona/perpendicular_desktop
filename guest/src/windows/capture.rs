@@ -90,6 +90,8 @@ pub struct Target {
     pub readback_device_lost: AtomicBool,
     pub refresh_requested: AtomicBool,
     pub monitor_source: AtomicBool,
+    // Explicit, bounded late-frame diagnostics; never a pixel transport fallback.
+    pub transport_checks: AtomicU8,
     // Generation, dimensions, and image origin relative to the Windows client origin.
     pub geometry: Mutex<(u64, i32, i32, i32, i32)>,
 }
@@ -109,6 +111,7 @@ impl Target {
             readback_device_lost: AtomicBool::new(false),
             refresh_requested: AtomicBool::new(false),
             monitor_source: AtomicBool::new(self.monitor_source.load(Ordering::Acquire)),
+            transport_checks: AtomicU8::new(0),
             geometry: Mutex::new((self.geometry.lock().unwrap().0.saturating_add(1), 0, 0, 0, 0)),
         }
     }

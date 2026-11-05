@@ -19,6 +19,19 @@ impl Gpu{
   Ok(Self{texture,query:query.ok_or("No GPU query")?,width,height,nonce,checks_left:3})
  }}
  pub fn matches(&self,w:u32,h:u32)->bool{self.width==w&&self.height==h}
+ unsafe fn reference_hash(context:&ID3D11DeviceContext,staging:&ID3D11Texture2D,
+  source:&ID3D11Texture2D,region:&D3D11_BOX,w:u32,h:u32)->Result<String,String>{unsafe{
+  context.CopySubresourceRegion(staging,0,0,0,0,source,0,Some(region));context.Flush();
+  let mut mapped=D3D11_MAPPED_SUBRESOURCE::default();
+  context.Map(staging,0,D3D11_MAP_READ,0,Some(&mut mapped)).map_err(error)?;
+  if mapped.pData.is_null() || mapped.RowPitch<w*4 {
+   context.Unmap(staging,0);return Err("Invalid reference image mapping".into());
+  }
+  let mut digest=Sha256::new();for row in 0..h as usize{
+   digest.update(std::slice::from_raw_parts((mapped.pData as *const u8).add(row*mapped.RowPitch as usize),w as usize*4));
+  }
+  context.Unmap(staging,0);Ok(format!("{:x}",digest.finalize()))
+ }}
  pub unsafe fn submit(&mut self,device:&ID3D11Device,context:&ID3D11DeviceContext,source:&ID3D11Texture2D,x:i32,y:i32,
   target:&Target,outbox:&Outbox,generation:u64,sequence:u64,selected_qpc:i64)->Result<(),String>{unsafe{
   let started=Instant::now();let (w,h)=(self.width,self.height);
@@ -38,21 +51,41 @@ impl Gpu{
   // Compare transport with the owned export allocation, which stays immutable
   // until this packet's ACK. A second read of the WGC source is a different
   // observation; keep it as diagnostics, not as the export's pixel identity.
-  let reference=self.checks_left>0;
+  // Do not alter the existing first three allocation references. Requested
+  // checks begin afterwards and leave the ordinary export/QUERY order intact.
+  let requested=self.checks_left==0 && target.transport_checks.load(Ordering::Acquire)>0;
+  let reference=self.checks_left>0 || requested;
   let hash=if reference{
-   self.checks_left-=1;
+   if self.checks_left>0 {self.checks_left-=1;}
    let mut desc=D3D11_TEXTURE2D_DESC::default();source.GetDesc(&mut desc);desc.Width=w;desc.Height=h;desc.MipLevels=1;desc.ArraySize=1;
    desc.Usage=D3D11_USAGE_STAGING;desc.BindFlags=0;desc.CPUAccessFlags=D3D11_CPU_ACCESS_READ.0 as u32;desc.MiscFlags=0;
    let mut staging=None;device.CreateTexture2D(&desc,None,Some(&mut staging)).map_err(error)?;let staging=staging.ok_or("No reference staging")?;
-   context.CopySubresourceRegion(&staging,0,0,0,0,source,0,Some(&region));context.Flush();let mut mapped=D3D11_MAPPED_SUBRESOURCE::default();
-   context.Map(&staging,0,D3D11_MAP_READ,0,Some(&mut mapped)).map_err(error)?;
-   let mut digest=Sha256::new();for row in 0..h as usize{digest.update(std::slice::from_raw_parts((mapped.pData as *const u8).add(row*mapped.RowPitch as usize),w as usize*4));}
-   context.Unmap(&staging,0);let source_hash=format!("{:x}",digest.finalize());
    let exported_region=D3D11_BOX{left:0,top:0,front:0,right:w,bottom:h,back:1};
-   context.CopySubresourceRegion(&staging,0,0,0,0,&self.texture,0,Some(&exported_region));context.Flush();
-   context.Map(&staging,0,D3D11_MAP_READ,0,Some(&mut mapped)).map_err(error)?;
-   let mut digest=Sha256::new();for row in 0..h as usize{digest.update(std::slice::from_raw_parts((mapped.pData as *const u8).add(row*mapped.RowPitch as usize),w as usize*4));}
-   context.Unmap(&staging,0);let exported_hash=format!("{:x}",digest.finalize());
+   let (source_hash,exported_hash)=if requested {
+    // Three ordered observations while the caller still owns the WGC frame.
+    // Equal late source reads do not prove stability at the earlier export copy.
+    let exported=Self::reference_hash(context,&staging,&self.texture,&exported_region,w,h)?;
+    let first=Self::reference_hash(context,&staging,source,&region,w,h)?;
+    let second=Self::reference_hash(context,&staging,source,&region,w,h)?;
+    if let Ok(mut description)=target.capture_device.lock() {
+     if let Some(fields)=description.as_mut().and_then(Value::as_object_mut) {
+      let records=fields.entry("transportChecks").or_insert_with(||json!([]));
+      if let Some(records)=records.as_array_mut() {
+       if records.len()>=3 {records.remove(0);}
+       records.push(json!({"sequence":sequence,"generation":generation,"width":w,"height":h,
+        "readOrder":"export-source-first-source-second","exportedSHA256":exported,
+        "sourceFirstSHA256":first,"sourceSecondSHA256":second,
+        "lateSourceReadsMatch":first==second,"exportMatchesFirstSourceRead":exported==first,
+        "exportMatchesSecondSourceRead":exported==second,"hostAcknowledged":false}));
+      }
+     }
+    }
+    (first,exported)
+   }else{
+    let source_hash=Self::reference_hash(context,&staging,source,&region,w,h)?;
+    let exported_hash=Self::reference_hash(context,&staging,&self.texture,&exported_region,w,h)?;
+    (source_hash,exported_hash)
+   };
    if let Some(description)=target.capture_device.lock().unwrap().as_mut() {
     description["transportReference"]=json!({"image":"owned-export-allocation","sourceSHA256":source_hash,
      "exportedSHA256":exported_hash,"sourceMatchesExport":source_hash==exported_hash});
@@ -75,6 +108,27 @@ impl Gpu{
   let deadline=Instant::now();while !acknowledged.load(Ordering::Acquire){
    if !outbox.connected.load(Ordering::Acquire)||deadline.elapsed()>Duration::from_secs(4){return Err("GPU consumer acknowledgement missing".into());}
    std::thread::sleep(Duration::from_millis(1));
+  }
+  if requested {
+   // The host sends this packet's ACK only after its immutable copy matches
+   // exportedSHA256. Keep an explicit receipt alongside each diagnostic.
+   if let Ok(mut description)=target.capture_device.lock() {
+    if let Some(fields)=description.as_mut().and_then(Value::as_object_mut) {
+     if let Some(records)=fields.get_mut("transportChecks").and_then(Value::as_array_mut) {
+      for record in records.iter_mut() {
+       if let Some(record)=record.as_object_mut() {
+        if record.get("sequence").and_then(Value::as_u64)==Some(sequence)
+            && record.get("generation").and_then(Value::as_u64)==Some(generation) {
+         record.insert("hostAcknowledged".into(),json!(true));
+        }
+       }
+      }
+     }
+     let pending=target.transport_checks.load(Ordering::Acquire).saturating_sub(1);
+     fields.insert("transportCheckPending".into(),json!(pending));
+    }
+   }
+   target.transport_checks.fetch_sub(1,Ordering::AcqRel);
   }
   if let Some(description)=target.capture_device.lock().unwrap().as_mut() {
    description["lastGpuFrame"]=json!({"sequence":sequence,"selectedQPC":selected_qpc,

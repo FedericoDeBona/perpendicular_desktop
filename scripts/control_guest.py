@@ -52,6 +52,8 @@ def main():
     capture_source = commands.add_parser("window_capture_source", help="Compare window capture with a crop of its reserved Windows app display.")
     capture_source.add_argument("window")
     capture_source.add_argument("--mode", choices=("window", "monitor"), required=True)
+    transport = commands.add_parser("window_transport_check", help="Check three late GPU frames against their immutable export, without restarting capture.")
+    transport.add_argument("window")
     geometry = commands.add_parser("window_geometry", help="Place one admitted main window for a bounded display comparison. Acceptance is not completion.")
     geometry.add_argument("window")
     for name in ("x", "y", "width", "height"):
@@ -62,7 +64,7 @@ def main():
     execute.add_argument("args", nargs=argparse.REMAINDER)
     options = parser.parse_args()
     request = {"command": options.command}
-    if options.command in ("window_refresh", "window_image"):
+    if options.command in ("window_refresh", "window_image", "window_transport_check"):
         request["window"] = options.window
     if options.command == "window_geometry":
         request.update(window=options.window, x=options.x, y=options.y, width=options.width, height=options.height)

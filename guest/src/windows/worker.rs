@@ -625,6 +625,23 @@ impl Worker {
                 log(format!("Application transferred to Seamless app={app} hwnd={raw}"));
                 Ok(json!({"accepted":true}))
             }
+            "window_transport_check" => {
+                let id=value["window"].as_str().ok_or("Missing window identity")?;
+                let window=self.windows.get(id).ok_or("Window retired")?;
+                if !window.target.valid() || window.parent.is_some() || window.metadata["role"]!="main"
+                    || window.stop.as_ref().is_none_or(|s|s.load(Ordering::Acquire)) {
+                    return Err("Transport checks require an active authenticated main window".into());
+                }
+                // Publish the budget while holding the history lock, so the
+                // capture cannot append a result before the old history clears.
+                let mut description=window.target.capture_device.lock().map_err(|_|"Capture diagnostics unavailable")?;
+                let fields=description.as_mut().and_then(Value::as_object_mut).ok_or("Capture is not ready")?;
+                window.target.transport_checks.compare_exchange(0,3,Ordering::AcqRel,Ordering::Acquire)
+                    .map_err(|_|"Transport checks are already pending")?;
+                fields.insert("transportChecks".into(),json!([]));
+                fields.insert("transportCheckPending".into(),json!(3));
+                Ok(json!({"requested":true,"frames":3}))
+            }
             "window_capture_source" => {
                 let id=value["window"].as_str().ok_or("Missing window identity")?;
                 let monitor=match value["mode"].as_str(){Some("window")=>false,Some("monitor")=>true,_=>return Err("Expected window/monitor source".into())};
@@ -1489,6 +1506,7 @@ impl Worker {
             readback_device_lost: AtomicBool::new(false),
             refresh_requested: AtomicBool::new(false),
             monitor_source: AtomicBool::new(false),
+            transport_checks: AtomicU8::new(0),
             geometry: Mutex::new((0, 0, 0, 0, 0)),
         });
         if let Some(process)=self.applications.get(&app)
@@ -1647,6 +1665,7 @@ impl Worker {
             readback_device_lost: AtomicBool::new(false),
                 refresh_requested: AtomicBool::new(false),
             monitor_source: AtomicBool::new(false),
+            transport_checks: AtomicU8::new(0),
                 geometry: Mutex::new((0, 0, 0, 0, 0)),
             });
             self.windows.insert(

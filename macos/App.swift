@@ -672,11 +672,11 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
               let command=request["command"] as? String else {
             localResponse(["ok":false,"error":"Expected a JSON command."],reply:reply);return
         }
-        let allowed:Set<String>=["status","memory_status","execute","display_info","display_topology","driver_info","graphics_info","geometry_snapshot","application_status","process_list","process_terminate","pipeline_clock","pipeline_trace_start","pipeline_trace_stop","window_refresh","window_image","window_copy_mode","window_presentation_mode","window_capture_source","window_geometry"]
+        let allowed:Set<String>=["status","memory_status","execute","display_info","display_topology","driver_info","graphics_info","geometry_snapshot","application_status","process_list","process_terminate","pipeline_clock","pipeline_trace_start","pipeline_trace_stop","window_refresh","window_image","window_copy_mode","window_presentation_mode","window_capture_source","window_geometry","window_transport_check"]
         guard allowed.contains(command) else {
             localResponse(["ok":false,"error":"This local command is not supported."],reply:reply);return
         }
-        let fields:Set<String>=command == "execute" ? ["command","executable","args","timeoutSeconds"]:command == "process_terminate" ? ["command","pid","creation"]:command == "window_geometry" ? ["command","window","x","y","width","height"]:(command == "window_copy_mode" || command == "window_presentation_mode" || command == "window_capture_source") ? ["command","window","mode"]:(command == "window_refresh" || command == "window_image") ? ["command","window"]:["command"]
+        let fields:Set<String>=command == "execute" ? ["command","executable","args","timeoutSeconds"]:command == "process_terminate" ? ["command","pid","creation"]:command == "window_geometry" ? ["command","window","x","y","width","height"]:(command == "window_copy_mode" || command == "window_presentation_mode" || command == "window_capture_source") ? ["command","window","mode"]:(command == "window_refresh" || command == "window_image" || command == "window_transport_check") ? ["command","window"]:["command"]
         guard Set(request.keys).isSubset(of:fields) else {
             localResponse(["ok":false,"error":"Unexpected command fields."],reply:reply);return
         }
@@ -755,6 +755,13 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
                 localResponse(["ok":false,"error":"Expected an active native window, window/monitor mode and current guest tools."],reply:reply);return
             }
             bridge.command(command,["window":id,"mode":mode],timeout:.seconds(5)){[weak self] result in self?.localBridgeResponse(result,reply:reply)}
+            return
+        }
+        if command == "window_transport_check" {
+            guard let id=request["window"] as? String,let controller=windows[id],controller.role == .main else {
+                localResponse(["ok":false,"error":"Expected an active main window."],reply:reply);return
+            }
+            bridge.command(command,["window":id],timeout:.seconds(3)){[weak self] result in self?.localBridgeResponse(result,reply:reply)}
             return
         }
         if command == "window_refresh" {
