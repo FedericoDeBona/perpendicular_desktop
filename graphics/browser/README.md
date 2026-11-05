@@ -88,3 +88,50 @@ Per il controllo guest con risposta limitata a64KiB, usare `-CompressOutput` e u
 Per la UMD diagnostica v12, `capture-video-faults.ps1 -Action Start -TracePath <nuovo-file.etl>` avvia una sessione ETW dedicata, circolare e limitata a4MiB. Eseguire prima un controllo Windows e verificare il marker CreateDevice della candidata effettiva; poi usare un nuovo file/sessione per il breve caso Edge. `-Action Stop` chiude la sessione (`-Action Read` rilegge una ETL già chiusa) e restituisce timestamp/PID/TID e messaggi dei primi120eventi, con conteggio degli omessi. Non abilita altri provider o protezioni ridotte. Un report vuoto è inconcludente senza marker della UMD. [API Microsoft EventRegister](https://learn.microsoft.com/en-us/windows/win32/api/evntprov/nf-evntprov-eventregister).
 
 Per CD QA ISO/Joliet su Mac, assegnare entrambe le etichette con `hdiutil makehybrid -iso -joliet -default-volume-name <etichetta>`: il solo `-iso-volume-name` lascia a Windows la diversa etichetta Joliet. Verificare Get-Volume prima di modificare registrazioni.
+
+
+## Cadenza del compositore browser
+
+`observe-compositor-cadence.js` restituisce una Promise risolta dopo6secondi:
+registra soltanto callback e metadati del video esistente, massimo512record,
+poi cancella la registrazione. Non naviga, avvia/ferma, cambia qualità o disegna.
+Eseguire sulla pagina QA già pronta tramite `Runtime.evaluate` con
+`awaitPromise=true` e `returnByValue=true`, salvando il risultato fuori Git;
+verificare URL, stato, dimensioni e `omitted` prima di interpretarlo.
+
+La [specifica dell'API](https://wicg.github.io/video-rvfc/) distingue
+`presentedFrames` (invii del browser alla composizione) dal numero di callback:
+un callback può mancare sotto carico. Usare la differenza del contatore e i
+suoi timestamp, senza chiamarli FPS Mac o pixel fisicamente mostrati.
+`processingDuration` comprende decodifica e possibile conversione/staging,
+quindi non è tempoCPU del solo codec. Correlare con geometria/sessione WGC e
+intervalli effettivamente sovrapposti; UTC di due processi non prova sincronia
+perfetta. Questo osservatore non misura direttamente il tempo interno DWM.
+
+
+## Scheduling DWM, sola QA
+
+`observe-dwm-scheduling.ps1 -TracePath <file.etl nuovo> -Seconds 4` richiede
+il normale contesto amministrativo per il provider Microsoft DWM. Nessuna
+riduzione delle protezioni: usare il consenso UAC ordinario, senza cambiare
+permessi provider o gruppi. [Logman -ets](https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/logman-create-trace)
+crea una sessione temporanea, circolare8MiB, con soli keyword0x8b del provider
+DWM; dopo2–6secondi la ferma nel finally prima di leggere il risultato.
+Conserva ETL/contesto fuori Git e restituisce report gzip+base64 con dimensione
+ed SHA256 da verificare. Non installa driver, task o servizi.
+
+Le coppie start/stop sono separate per TID e task; unmatched/pending sono
+espliciti. Rendering/presentazione/processFrame possono essere annidati:
+non sommare i tempi, non sono tempoCPU o FPS. Il report distingue i conteggi
+dei diversi eventi dai framevideo, e l'ETL permette di rileggere un intervallo
+lento senza ripetere la prova. Verificare il manifesto effettivo della build
+Windows prima di dare un significato a nuovi ID. Query della sessione durante
+la raccolta conservata: un BuffersLost0 in quel momento non prova da solo
+assenza di ogni evento perso fino alla chiusura.
+
+Se per il consenso viene aperto Desktop Mode, annotarne la presenza durante
+il campione e la geometria/RAM: quella prova serve all'attribuzione interna,
+non è automaticamente una baseline della sola finestra Seamless. Chiudere
+il proprio video e il Desktop diagnostico dopo la raccolta. Qualsiasi wrapper
+QA con task temporaneo deve poi controllare Ready/LastTaskResult e rimuovere
+solo quel task esatto. Il collector condiviso non contiene quel wrapper.
