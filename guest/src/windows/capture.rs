@@ -498,7 +498,9 @@ unsafe fn run(target: &Target, outbox: &Outbox, stop: &AtomicBool, driver:D3D_DR
                 target.set_phase(Phase::Waiting);
                 let dequeue_started=Instant::now();
                 let _ = ready.recv_timeout(Duration::from_millis(100));
+                let notification_wait_ms=dequeue_started.elapsed().as_secs_f64()*1000.0;
                 target.set_phase(Phase::Reading);
+                let acquire_started=Instant::now();
                 let mut frame = match pool.TryGetNextFrame() {
                     Ok(frame)=>{target.progress.acquired.fetch_add(1,Ordering::Relaxed);frame},
                     Err(error)=>{
@@ -506,34 +508,48 @@ unsafe fn run(target: &Target, outbox: &Outbox, stop: &AtomicBool, driver:D3D_DR
                         continue;
                     }
                 };
+                let acquire_ms=acquire_started.elapsed().as_secs_f64()*1000.0;
                 // The pool has two slots. Prefer its newest available frame,
                 // rather than spending readback and network time on an old one.
+                let drain_started=Instant::now();
                 for _ in 0..2 {
                     let Ok(newer) = pool.TryGetNextFrame() else {break};
                     target.progress.acquired.fetch_add(1,Ordering::Relaxed);
                     let _ = frame.Close(); frame = newer;
                 }
+                let initial_drain_ms=drain_started.elapsed().as_secs_f64()*1000.0;
                 // Keep this GPU frame until the replaceable network slot is
                 // available. Do not read back images just to replace pending
                 // pixels, and never discard the final update of a static window.
                 target.set_phase(Phase::Backpressure);
+                let slot_started=Instant::now();
                 if !outbox.wait_for_frame_slot(&target.id, stop) {
                     let _ = frame.Close();
                     break;
                 }
+                let slot_wait_ms=slot_started.elapsed().as_secs_f64()*1000.0;
+                let final_drain_started=Instant::now();
                 for _ in 0..2 {
                     let Ok(newer) = pool.TryGetNextFrame() else {break};
                     target.progress.acquired.fetch_add(1,Ordering::Relaxed);
                     let _ = frame.Close(); frame = newer;
                 }
+                let final_drain_ms=final_drain_started.elapsed().as_secs_f64()*1000.0;
                 target.set_phase(Phase::Reading);
                 let mut gpu_selected_qpc=0;let _=windows::Win32::System::Performance::QueryPerformanceCounter(&mut gpu_selected_qpc);
+                let attributes_started=Instant::now();
                 let frame_dirty_mode=frame.DirtyRegionMode().ok().map(|mode|mode.0);
                 let dirty_regions=frame.DirtyRegions().ok().and_then(|regions|regions.Size().ok());
+                let system_relative_time=frame.SystemRelativeTime().ok().map(|t|t.Duration);
+                let attributes_ms=attributes_started.elapsed().as_secs_f64()*1000.0;
                 if let Some(description)=target.capture_device.lock().unwrap().as_mut() {
                     description["wgcFrame"]=json!({"dirtyRegionMode":frame_dirty_mode,"dirtyRegionCount":dirty_regions,
+                        "sequence":sequence+1,"notificationWaitMilliseconds":notification_wait_ms,
+                        "acquireMilliseconds":acquire_ms,"initialDrainMilliseconds":initial_drain_ms,
+                        "slotWaitMilliseconds":slot_wait_ms,"finalDrainMilliseconds":final_drain_ms,
+                        "attributesMilliseconds":attributes_ms,
                         "dequeueMilliseconds":dequeue_started.elapsed().as_secs_f64()*1000.0,
-                        "systemRelativeTime100ns":frame.SystemRelativeTime().ok().map(|t|t.Duration)});
+                        "systemRelativeTime100ns":system_relative_time});
                 }
                 let current = frame.ContentSize().map_err(error)?;
                 if current.Width <= 0
@@ -618,7 +634,11 @@ unsafe fn run(target: &Target, outbox: &Outbox, stop: &AtomicBool, driver:D3D_DR
                 }
                 target.set_phase(Phase::Publishing);sequence+=1;
                 native_gpu.as_mut().unwrap().submit(&device,&context,&texture,x,y,&target,&outbox,generation,sequence.into(),gpu_selected_qpc)?;
+                let close_started=Instant::now();
                 frame.Close().map_err(error)?;
+                if let Some(description)=target.capture_device.lock().unwrap().as_mut() {
+                    description["wgcFrame"]["closeMilliseconds"]=json!(close_started.elapsed().as_secs_f64()*1000.0);
+                }
                 if resize_pool {pool.Recreate(&runtime,DirectXPixelFormat::B8G8R8A8UIntNormalized,2,size).map_err(error)?;}
             }
             Ok(())

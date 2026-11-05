@@ -672,11 +672,11 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
               let command=request["command"] as? String else {
             localResponse(["ok":false,"error":"Expected a JSON command."],reply:reply);return
         }
-        let allowed:Set<String>=["status","memory_status","execute","display_info","display_topology","driver_info","graphics_info","geometry_snapshot","application_status","process_list","process_terminate","pipeline_clock","pipeline_trace_start","pipeline_trace_stop","window_refresh","window_image","window_copy_mode","window_presentation_mode","window_capture_source"]
+        let allowed:Set<String>=["status","memory_status","execute","display_info","display_topology","driver_info","graphics_info","geometry_snapshot","application_status","process_list","process_terminate","pipeline_clock","pipeline_trace_start","pipeline_trace_stop","window_refresh","window_image","window_copy_mode","window_presentation_mode","window_capture_source","window_geometry"]
         guard allowed.contains(command) else {
             localResponse(["ok":false,"error":"This local command is not supported."],reply:reply);return
         }
-        let fields:Set<String>=command == "execute" ? ["command","executable","args","timeoutSeconds"]:command == "process_terminate" ? ["command","pid","creation"]:(command == "window_copy_mode" || command == "window_presentation_mode" || command == "window_capture_source") ? ["command","window","mode"]:(command == "window_refresh" || command == "window_image") ? ["command","window"]:["command"]
+        let fields:Set<String>=command == "execute" ? ["command","executable","args","timeoutSeconds"]:command == "process_terminate" ? ["command","pid","creation"]:command == "window_geometry" ? ["command","window","x","y","width","height"]:(command == "window_copy_mode" || command == "window_presentation_mode" || command == "window_capture_source") ? ["command","window","mode"]:(command == "window_refresh" || command == "window_image") ? ["command","window"]:["command"]
         guard Set(request.keys).isSubset(of:fields) else {
             localResponse(["ok":false,"error":"Unexpected command fields."],reply:reply);return
         }
@@ -729,6 +729,25 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
                 case .failure(let error):self?.localResponse(["ok":false,"error":error.localizedDescription],reply:reply)
                 }
             };return
+        }
+        if command == "window_geometry" {
+            // Bounded placement of an already admitted app, using the same
+            // authenticated guest operation as native drag/resize. This also
+            // permits comparing the identical WGC window on primary 3D and
+            // reserved DOD displays; normal frontend placement/input gates stay.
+            guard let id=request["window"] as? String,let controller=windows[id],controller.role == .main,
+                  let x=request["x"] as? Int,(-1_000_000...1_000_000).contains(x),
+                  let y=request["y"] as? Int,(-1_000_000...1_000_000).contains(y),
+                  let width=request["width"] as? Int,(160...4096).contains(width),
+                  let height=request["height"] as? Int,(100...4096).contains(height),
+                  width*height<=8_388_608 else {
+                localResponse(["ok":false,"error":"Expected an active main window and bounded geometry."],reply:reply);return
+            }
+            bridge.command("set_geometry",["window":id,"gesture":UUID().uuidString,"serial":1,
+                "x":x,"y":y,"width":width,"height":height],timeout:.seconds(3)){[weak self] result in
+                    self?.localBridgeResponse(result,reply:reply)
+                }
+            return
         }
         if command == "window_capture_source" {
             guard guestCapabilities["windowCaptureSource"] == true,let id=request["window"] as? String,windows[id] != nil,

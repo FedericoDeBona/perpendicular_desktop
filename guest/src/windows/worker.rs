@@ -1310,6 +1310,19 @@ impl Worker {
             if let Some(window) = self.windows.get_mut(&id) {
                 let app_display=window_control::native_app_input_allowed(HWND(window.target.hwnd as _));
                 let transient=catalogue::transient(&details);
+                // Native app displays provide isolation by placement. Once a
+                // window leaves them, restore its Windows visibility, matching
+                // the admission rule below. Converting the existing scope to
+                // legacy DWM cloaking would hide it on the primary desktop and
+                // can stop WGC during the same cross-display transition.
+                if window_control::native_app_input_configured() && !app_display {
+                    window.isolation_attempts=0;
+                    window.isolation_retry_after=Instant::now();
+                    if window.cloak.take().is_some() {
+                        window.cloak_error=Some("App left its reserved display; restored in Windows".into());
+                        changed=true;
+                    }
+                }
                 if window.mac_owned && !transient && window.cloak.is_none()
                     && window.isolation_attempts<3 && Instant::now()>=window.isolation_retry_after
                     && (!window_control::native_app_input_configured()

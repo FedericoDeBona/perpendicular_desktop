@@ -186,13 +186,22 @@ final class DesktopWindow:NSObject,NSWindowDelegate {
     private var visible=false
     private var fullScreenTransition=false
     private var pendingResolution:NSSize?
+    private var nativeReceivedFrames:UInt64=0
+    private var presentedDrawables:UInt64=0
+    private var lastNativeReceiveSeconds=0.0
+    private var lastPresentationSeconds=0.0
     private let resized:(NSSize)->Void
 
-    var state:[String:Any] {["visible":visible,"fullScreen":window.styleMask.contains(.fullScreen),"fullScreenTransition":fullScreenTransition,"resolutionPending":pendingResolution != nil,"viewWidth":Int(surface.bounds.width),"viewHeight":Int(surface.bounds.height),"backingScale":window.backingScaleFactor,"nativeActive":nativeActive,"width":Int(surface.source.width),"height":Int(surface.source.height)]}
+    var state:[String:Any] {["visible":visible,"fullScreen":window.styleMask.contains(.fullScreen),"fullScreenTransition":fullScreenTransition,"resolutionPending":pendingResolution != nil,"viewWidth":Int(surface.bounds.width),"viewHeight":Int(surface.bounds.height),"backingScale":window.backingScaleFactor,"nativeActive":nativeActive,"width":Int(surface.source.width),"height":Int(surface.source.height),"nativeReceivedFrames":nativeReceivedFrames,"presentedDrawables":presentedDrawables,"lastNativeReceiveHostSeconds":lastNativeReceiveSeconds,"lastPresentationHostSeconds":lastPresentationSeconds]}
     init(socket:String,endpoint:@escaping ()->NativeDisplayEndpoint?,resized:@escaping (NSSize)->Void = {_ in},input:@escaping ()->Void = {})throws{
         self.socket=socket;self.endpoint=endpoint;self.resized=resized;surface=DesktopSurface(renderer:try WindowRenderer(opaque:true,fillBounds:true))
         window=NSWindow(contentRect:NSRect(x:140,y:120,width:960,height:640),styleMask:[.titled,.closable,.miniaturizable,.resizable],backing:.buffered,defer:false)
         super.init()
+        surface.renderer.onPresented={ [weak self] _ in
+            guard let self else{return}
+            self.presentedDrawables &+= 1
+            self.lastPresentationSeconds=ProcessInfo.processInfo.systemUptime
+        }
         surface.onUserInput=input
         window.title="Desktop Mode";window.isReleasedWhenClosed=false;window.contentView=surface;window.delegate=self
         surface.onResize={ [weak self] in self?.publishSize() }
@@ -245,6 +254,8 @@ final class DesktopWindow:NSObject,NSWindowDelegate {
                     frame.finishReading();return
                 }
                 self.nativeActive=true;self.desktop?.requestPixels(false)
+                self.nativeReceivedFrames &+= 1
+                self.lastNativeReceiveSeconds=ProcessInfo.processInfo.systemUptime
                 self.surface.source=NSSize(width:frame.texture.width,height:frame.texture.height)
                 self.surface.inputScreen=DesktopScreen(id:0,x:0,y:0,width:frame.texture.width,height:frame.texture.height)
                 self.surface.renderer.present(frame);self.window.title="Desktop Mode"

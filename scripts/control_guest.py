@@ -52,6 +52,10 @@ def main():
     capture_source = commands.add_parser("window_capture_source", help="Compare window capture with a crop of its reserved Windows app display.")
     capture_source.add_argument("window")
     capture_source.add_argument("--mode", choices=("window", "monitor"), required=True)
+    geometry = commands.add_parser("window_geometry", help="Place one admitted main window for a bounded display comparison. Acceptance is not completion.")
+    geometry.add_argument("window")
+    for name in ("x", "y", "width", "height"):
+        geometry.add_argument(name, type=int)
     execute = commands.add_parser("execute", help="Run an executable as the connected Windows user, without elevation.")
     execute.add_argument("--timeout-seconds", type=int, default=15, choices=range(1, 61), metavar="1..60")
     execute.add_argument("executable", help="Absolute Windows executable path.")
@@ -60,6 +64,8 @@ def main():
     request = {"command": options.command}
     if options.command in ("window_refresh", "window_image"):
         request["window"] = options.window
+    if options.command == "window_geometry":
+        request.update(window=options.window, x=options.x, y=options.y, width=options.width, height=options.height)
     if options.command in ("window_copy_mode", "window_presentation_mode", "window_capture_source"):
         request.update(window=options.window, mode=options.mode)
     if options.command == "execute":
