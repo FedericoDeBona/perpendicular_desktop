@@ -293,6 +293,8 @@ Il ciclo RAM protetto 4→2→4 GiB con dati conservati resta la qualifica prece
 
 ### FS-005 — Scadenza backend durante il consenso macOS alle cartelle
 
+**5 novembre, primo certificato persistente M1:** QA privata completa; main.78 ferma prima di QEMU in SharedFolderExport.requestAccess/opendir, con UserNotificationCenter appena avviato. Nessuna nuova causa grafica attribuita: transizione dalla firma ad hoc richiede i normali consensi cartelle. Il tool CUA rifiuta questa app di sistema per sicurezza; richiesta azione utente, senza cambiare TCC o disattivare condivisioni. Continuità fra due build diverse su questo Mac ancora NON VERIFICATA. Guest/main ancora da aggiornare. [Diario](VERIFICATION.md#5-novembre--pull-rebuild-e-guest-tools-0278-sul-m1).
+
 **5 novembre, verifica successiva.69 — continuità consensi NON CONFERMATA.** Nuova build con stesso certificato/requisito, ma avvio fermo in requestAccess/opendir prima diQEMU. Utente conferma di aver dovuto approvare gliavvisi per sbloccare ilboot; CUA nonconsente UserNotificationCenter. L'evidenza precedente di dueboot senza azioniCUA non provava assenza di clicesterni o persistenza generale. Conservare la firma implementata, ma non dichiarare risolto una volta per tutte il requisito dei consensi finché il nuovo ciclo non è chiarito. [Diario](VERIFICATION.md#5-novembre--ripresa-flicker-seamless-edge-e-task-manager).
 
 
@@ -546,6 +548,8 @@ Il ciclo RAM protetto 4→2→4 GiB con dati conservati resta la qualifica prece
 - **Evidenze:** [semplificazione RAM e accesso](VERIFICATION.md#25-ottobre--ram-semplificata-e-accesso-windows).
 
 ### SYS-005 — Aggiornamento del servizio guest interrotto dalla propria chiusura
+
+**5 novembre, aggiornamento M1.78 IN CORSO:** installer indipendente con consenso normale verificato nella QA (installed/hash1404a6e5/task0 e coldboot/pixel PASS). Primo tentativo rifiutava la vecchia registrazione videoQA10247abc rimasta dopo Restore; corretta la migrazione delle sole versioni v16/v17 già pinnate, con hash sia wrapper sia UMD e backup del valore effettivo. ReleaseM1.1.3/M4.1.4 e ricetta condivise; consegna Windows/main M1 ancora in corso, M4 non eseguita qui. L’updater generale resta aperto, senza chiusura dalla sola provaQA. [Evidenze](VERIFICATION.md#5-novembre--pull-rebuild-e-guest-tools-0278-sul-m1).
 
 - **29 ottobre, IoT0795218c/0.2.46:** reinstallazione indipendente verificata, ricevuta installed/Running/hash f3a894a8… concorde, riconnessione e task0. I tentativi preparatori oltre16KiB, con quoting errato e scadenza del consenso non hanno aggiornato il servizio; dispatch corretto con consenso entro la finestra completa la consegna. Nessuna correzione generale dell’updater. [Evidenze](VERIFICATION.md#29-ottobre--pull-rebuild-e-guest-tools0246-sulla-iot0795218c).
 

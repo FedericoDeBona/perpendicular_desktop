@@ -73,6 +73,19 @@ $pe=[IO.File]::ReadAllBytes($payload);$offset=[BitConverter]::ToInt32($pe,0x3c)
 if([BitConverter]::ToUInt16($pe,$offset+4) -ne 0xaa64){throw 'Video payload is not ARM64'}
 $originalWrapper=Join-Path $driver 'neptune_umd.dll'
 $qaWrapper=Join-Path $env:ProgramFiles ('Perpendicular Video QA\video-'+$ExpectedSHA256.Substring(0,12).ToLowerInvariant()+'\neptune_umd.dll')
+# Previously qualified releases can retain either their QA or production path.
+# Match only these exact locations and both pinned DLLs; preserve unknown values.
+$previousWrappers=@{}
+foreach($sha in @(
+ '10247abc53060de73374a90b9aaf1fdcd9049d512e9696596335a35436f89b18',
+ 'b7341859d68a7852c14eceda592f72a84128258930b3372281f0837e76e55680',
+ '61deaa5b22ba4e0e67ae3fcf2904eb222566e11c1b83b4a063bbedf002dc0538'
+)){
+ foreach($folder in 'Perpendicular Video QA','Perpendicular Graphics'){
+  $path=Join-Path $env:ProgramFiles ($folder+'\video-'+$sha.Substring(0,12)+'\neptune_umd.dll')
+  $previousWrappers[$path]=$sha
+ }
+}
 $cls='HKLM:\SYSTEM\CurrentControlSet\Control\Class\{4d36e968-e325-11ce-bfc1-08002be10318}';$entries=@()
 foreach($n in (Get-Item $cls).GetSubKeyNames()){
  if($n -notmatch '^\d{4}$'){continue};$key=Get-Item ($cls+'\'+$n);$value=@($key.GetValue('UserModeDriverName',$null))
@@ -82,6 +95,14 @@ foreach($n in (Get-Item $cls).GetSubKeyNames()){
   $qa=Split-Path $qaWrapper
   if((Get-FileHash $qaWrapper).Hash -ine $originals['neptune_umd.dll'] -or (Get-FileHash (Join-Path $qa 'neptune_umd_arm64.dll')).Hash -ine $ExpectedSHA256){throw 'Previous QA payload differs; preserved'}
   $matched=$qaWrapper
+ }
+ else {
+  foreach($path in $previousWrappers.Keys){
+   if(@($value|Where-Object {$_ -ieq $path}).Count){
+    if((Get-FileHash $path).Hash -ine $originals['neptune_umd.dll'] -or (Get-FileHash (Join-Path (Split-Path $path) 'neptune_umd_arm64.dll')).Hash -ine $previousWrappers[$path]){throw 'Previous qualified video payload differs; preserved'}
+    $matched=$path;break
+   }
+  }
  }
  if($matched){$entries+=@{Key=$key.PSPath;Kind=$key.GetValueKind('UserModeDriverName').ToString();Value=$value;MatchedWrapper=$matched}}
 }

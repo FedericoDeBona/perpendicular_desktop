@@ -357,3 +357,20 @@ v17 con SHA/revisione esatti; conserva backup separati. Riavvio normale
 necessario per rinnovare anche DWM. Il minimo condiviso richiede present-amortization dopo la qualifica
 protetta/pixel QA e main; la qualifica Seamless resta distinta e aperta.
 Vedere il [diario](../../docs/VERIFICATION.md#5-novembre--ripresa-flicker-seamless-edge-e-task-manager).
+
+Il profilo M1 della stessa v17 è fissato nella release `0.1.3`, ricostruita
+con la toolchain originale e il backend CPUv12 M1 già qualificato. Non trasferire
+il backend M4. Questa release aggiorna anche il passaggio dalle registrazioni
+v16/v17 note: ammette soltanto i percorsi QA/produzione esatti e verifica SHA256
+sia del wrapper originale sia della UMD precedente. Una registrazione estranea
+rimane rifiutata; il backup conserva il percorso realmente sostituito, anche
+quando era una vecchia QA. Le release precedenti conservano il proprio installer
+e pin. Firma del riferimento prima della copia del runtime e firma finale del
+bundle sono entrambe necessarie. La verifica locale M1 è distinta dalle prove
+M4 e dalla fluidità Seamless nel [diario](../../docs/VERIFICATION.md#5-novembre--pull-rebuild-e-guest-tools-0278-sul-m1).
+
+Per la base M4 esiste `0.1.4`: stessi hash UMD/backend della `0.1.2`, con
+il solo installer aggiornato e pinnato. Dopo il pull il gate rifiuta il vecchio
+installer; confezionare il profilo `m4-cpu-v12` dalla coppia locale già
+qualificata, firmare il riferimento e ricostruire normalmente. Non è una nuova
+build grafica né una distribuzione M4 già eseguita dal M1.
