@@ -241,7 +241,7 @@ impl Worker {
         outbox.control(
             json!({"type":"hello","protocol":1,"token":config.token,"epoch":self.epoch,
             "sid":self.sid,"session":self.session,"version":env!("CARGO_PKG_VERSION"),
-            "capabilities":{"capture":"wgc-hardware-readback-with-software-recovery","windows":4,"transients":12,"windowRoles":true,"input":true,"catalogue":true,"appIcon":true,"frameChannel":true,"windowRefresh":true,"nativeAppInput":true,"modeFocus":true,"deviceFocus":true,"devicePlacement":true,"gpuFramesOnly":true,"frameEncodings":[],"displayInfo":true,"displayTopology":true,"driverInfo":true,"graphicsInfo":true,"displayConfigure":true,"sharedGeometry":true,"processControl":true,"clipboard":true,"clipboardTextBytes":262144,"applicationStatus":true,"memoryStatus":true,"execute":true,"executeTimeoutSeconds":60,"executeOutputBytes":65536,"displayEvents":self.display_observer.is_some()}}),
+            "capabilities":{"capture":"wgc-hardware-readback-with-software-recovery","windows":4,"transients":12,"windowRoles":true,"input":true,"catalogue":true,"appIcon":true,"frameChannel":true,"windowRefresh":true,"windowCaptureSource":true,"nativeAppInput":true,"modeFocus":true,"deviceFocus":true,"devicePlacement":true,"gpuFramesOnly":true,"frameEncodings":[],"displayInfo":true,"displayTopology":true,"driverInfo":true,"graphicsInfo":true,"displayConfigure":true,"sharedGeometry":true,"processControl":true,"clipboard":true,"clipboardTextBytes":262144,"applicationStatus":true,"memoryStatus":true,"execute":true,"executeTimeoutSeconds":60,"executeOutputBytes":65536,"displayEvents":self.display_observer.is_some()}}),
         );
         let (sender, receiver) = mpsc::sync_channel(128);
         let state = outbox.clone();
@@ -624,6 +624,24 @@ impl Worker {
                 self.save();self.snapshot(outbox);
                 log(format!("Application transferred to Seamless app={app} hwnd={raw}"));
                 Ok(json!({"accepted":true}))
+            }
+            "window_capture_source" => {
+                let id=value["window"].as_str().ok_or("Missing window identity")?;
+                let monitor=match value["mode"].as_str(){Some("window")=>false,Some("monitor")=>true,_=>return Err("Expected window/monitor source".into())};
+                let window=self.windows.get_mut(id).ok_or("Window retired")?;
+                if !window.target.valid() || window.parent.is_some() || window.metadata["role"]!="main" {
+                    return Err("Capture source requires an authenticated main window".into());
+                }
+                if monitor && !window_control::native_app_input_allowed(HWND(window.target.hwnd as _)) {
+                    return Err("The window is not on its reserved app display".into());
+                }
+                window.target.monitor_source.store(monitor,Ordering::Release);
+                if window.stop.as_ref().is_none_or(|s|s.load(Ordering::Acquire)) {
+                    outbox.retire(id);window.target=Arc::new(window.target.fresh_capture());
+                    window.stop=Some(capture::spawn(window.target.clone(),outbox.clone()));
+                    window.capture_unavailable_since=None;
+                }else{window.target.refresh_requested.store(true,Ordering::Release);}
+                self.snapshot(outbox);Ok(json!({"requested":true,"source":if monitor {"monitor-crop"}else{"window"}}))
             }
             "window_refresh" => {
                 let id=value["window"].as_str().ok_or("Missing window identity")?;
@@ -1457,6 +1475,7 @@ impl Worker {
             capture_device: Mutex::new(None),
             readback_device_lost: AtomicBool::new(false),
             refresh_requested: AtomicBool::new(false),
+            monitor_source: AtomicBool::new(false),
             geometry: Mutex::new((0, 0, 0, 0, 0)),
         });
         if let Some(process)=self.applications.get(&app)
@@ -1614,6 +1633,7 @@ impl Worker {
                 capture_device: Mutex::new(None),
             readback_device_lost: AtomicBool::new(false),
                 refresh_requested: AtomicBool::new(false),
+            monitor_source: AtomicBool::new(false),
                 geometry: Mutex::new((0, 0, 0, 0, 0)),
             });
             self.windows.insert(

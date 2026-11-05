@@ -21,7 +21,7 @@ use windows::{
             Direct3D11::*,
             Dwm::{DWMWA_CLOAKED, DWMWA_EXTENDED_FRAME_BOUNDS, DwmGetWindowAttribute, DwmIsCompositionEnabled},
             Dxgi::{Common::DXGI_FORMAT_B8G8R8A8_UNORM, IDXGIDevice},
-            Gdi::{ClientToScreen, RedrawWindow, RDW_INVALIDATE, RDW_ERASE, RDW_ALLCHILDREN, RDW_FRAME},
+            Gdi::{GetMonitorInfoW, MonitorFromWindow, MONITORINFO, MONITOR_DEFAULTTONULL, ClientToScreen, RedrawWindow, RDW_INVALIDATE, RDW_ERASE, RDW_ALLCHILDREN, RDW_FRAME},
         },
         System::WinRT::{
             Direct3D11::{CreateDirect3D11DeviceFromDXGIDevice, IDirect3DDxgiInterfaceAccess},
@@ -89,6 +89,7 @@ pub struct Target {
     pub capture_device: Mutex<Option<Value>>,
     pub readback_device_lost: AtomicBool,
     pub refresh_requested: AtomicBool,
+    pub monitor_source: AtomicBool,
     // Generation, dimensions, and image origin relative to the Windows client origin.
     pub geometry: Mutex<(u64, i32, i32, i32, i32)>,
 }
@@ -107,6 +108,7 @@ impl Target {
             capture_device: Mutex::new(None),
             readback_device_lost: AtomicBool::new(false),
             refresh_requested: AtomicBool::new(false),
+            monitor_source: AtomicBool::new(self.monitor_source.load(Ordering::Acquire)),
             geometry: Mutex::new((self.geometry.lock().unwrap().0.saturating_add(1), 0, 0, 0, 0)),
         }
     }
@@ -358,7 +360,16 @@ unsafe fn run(target: &Target, outbox: &Outbox, stop: &AtomicBool, driver:D3D_DR
             std::thread::sleep(Duration::from_millis(75));
         }
         target.set_phase(Phase::Starting);
-        let item = create_item(target, &interop)?;
+        let monitor_source=target.monitor_source.load(Ordering::Acquire);
+        let capture_monitor=if monitor_source {
+            if !target.full_frame || !super::window_control::native_app_input_allowed(hwnd) {
+                return Err("Monitor capture requires an isolated main app window".into());
+            }
+            Some(MonitorFromWindow(hwnd,MONITOR_DEFAULTTONULL))
+        }else{None};
+        let item = if let Some(monitor)=capture_monitor {
+            interop.CreateForMonitor::<GraphicsCaptureItem>(monitor).map_err(error)?
+        }else{create_item(target, &interop)?};
         if stop.load(Ordering::Acquire) || !outbox.connected.load(Ordering::Acquire) || !target.valid() {
             return Ok(false);
         }
@@ -388,6 +399,7 @@ unsafe fn run(target: &Target, outbox: &Outbox, stop: &AtomicBool, driver:D3D_DR
         }
         let mut description = super::display::device_description(&device).map_err(error)?;
         description["multithreadProtected"]=json!(true);
+        description["captureSource"]=json!(if monitor_source {"monitor-crop"}else{"window"});
         if driver==D3D_DRIVER_TYPE_HARDWARE && description["hardwareDevice"] != true {
             return Err("The capture device is a software adapter, not the Windows GPU".into());
         }
@@ -484,6 +496,7 @@ unsafe fn run(target: &Target, outbox: &Outbox, stop: &AtomicBool, driver:D3D_DR
                     restart_session=true;break;
                 }
                 target.set_phase(Phase::Waiting);
+                let dequeue_started=Instant::now();
                 let _ = ready.recv_timeout(Duration::from_millis(100));
                 target.set_phase(Phase::Reading);
                 let mut frame = match pool.TryGetNextFrame() {
@@ -518,7 +531,9 @@ unsafe fn run(target: &Target, outbox: &Outbox, stop: &AtomicBool, driver:D3D_DR
                 let frame_dirty_mode=frame.DirtyRegionMode().ok().map(|mode|mode.0);
                 let dirty_regions=frame.DirtyRegions().ok().and_then(|regions|regions.Size().ok());
                 if let Some(description)=target.capture_device.lock().unwrap().as_mut() {
-                    description["wgcFrame"]=json!({"dirtyRegionMode":frame_dirty_mode,"dirtyRegionCount":dirty_regions});
+                    description["wgcFrame"]=json!({"dirtyRegionMode":frame_dirty_mode,"dirtyRegionCount":dirty_regions,
+                        "dequeueMilliseconds":dequeue_started.elapsed().as_secs_f64()*1000.0,
+                        "systemRelativeTime100ns":frame.SystemRelativeTime().ok().map(|t|t.Duration)});
                 }
                 let current = frame.ContentSize().map_err(error)?;
                 if current.Width <= 0
@@ -556,7 +571,28 @@ unsafe fn run(target: &Target, outbox: &Outbox, stop: &AtomicBool, driver:D3D_DR
                     continue;
                 }
                 let hwnd = HWND(target.hwnd as *mut _);
-                let (x, y, width, height) = if target.full_frame {
+                let (x, y, width, height) = if let Some(monitor)=capture_monitor {
+                    // Read only the authenticated app's rectangle on its reserved
+                    // display. Do not admit the desktop or export the whole monitor.
+                    if !super::window_control::native_app_input_allowed(hwnd) {
+                        return Err("The app left its reserved capture display".into());
+                    }
+                    if MonitorFromWindow(hwnd,MONITOR_DEFAULTTONULL)!=monitor {
+                        frame.Close().map_err(error)?;restart_session=true;break;
+                    }
+                    let mut info=MONITORINFO{cbSize:size_of::<MONITORINFO>() as u32,..Default::default()};
+                    if !GetMonitorInfoW(monitor,&mut info).as_bool() || info.dwFlags&1!=0 {
+                        return Err("Reserved capture display unavailable".into());
+                    }
+                    let bounds=catalogue::frame_bounds(hwnd).ok_or("Window bounds unavailable")?;
+                    let (x,y,w,h)=(bounds.left-info.rcMonitor.left,bounds.top-info.rcMonitor.top,
+                        bounds.right-bounds.left,bounds.bottom-bounds.top);
+                    if x<0 || y<0 || w<=0 || h<=0 || i64::from(x)+i64::from(w)>i64::from(current.Width)
+                        || i64::from(y)+i64::from(h)>i64::from(current.Height) {
+                        return Err("App crop outside its reserved display".into());
+                    }
+                    (x,y,w,h)
+                }else if target.full_frame {
                     // WGC can round an odd DWM extent up by one pixel. That
                     // trailing row/column is not part of the window described
                     // to the host; exporting it leaves the geometry gate stuck.

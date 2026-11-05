@@ -672,11 +672,11 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
               let command=request["command"] as? String else {
             localResponse(["ok":false,"error":"Expected a JSON command."],reply:reply);return
         }
-        let allowed:Set<String>=["status","memory_status","execute","display_info","display_topology","driver_info","graphics_info","geometry_snapshot","application_status","process_list","process_terminate","pipeline_clock","pipeline_trace_start","pipeline_trace_stop","window_refresh","window_image","window_copy_mode","window_presentation_mode"]
+        let allowed:Set<String>=["status","memory_status","execute","display_info","display_topology","driver_info","graphics_info","geometry_snapshot","application_status","process_list","process_terminate","pipeline_clock","pipeline_trace_start","pipeline_trace_stop","window_refresh","window_image","window_copy_mode","window_presentation_mode","window_capture_source"]
         guard allowed.contains(command) else {
             localResponse(["ok":false,"error":"This local command is not supported."],reply:reply);return
         }
-        let fields:Set<String>=command == "execute" ? ["command","executable","args","timeoutSeconds"]:command == "process_terminate" ? ["command","pid","creation"]:(command == "window_copy_mode" || command == "window_presentation_mode") ? ["command","window","mode"]:(command == "window_refresh" || command == "window_image") ? ["command","window"]:["command"]
+        let fields:Set<String>=command == "execute" ? ["command","executable","args","timeoutSeconds"]:command == "process_terminate" ? ["command","pid","creation"]:(command == "window_copy_mode" || command == "window_presentation_mode" || command == "window_capture_source") ? ["command","window","mode"]:(command == "window_refresh" || command == "window_image") ? ["command","window"]:["command"]
         guard Set(request.keys).isSubset(of:fields) else {
             localResponse(["ok":false,"error":"Unexpected command fields."],reply:reply);return
         }
@@ -729,6 +729,14 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
                 case .failure(let error):self?.localResponse(["ok":false,"error":error.localizedDescription],reply:reply)
                 }
             };return
+        }
+        if command == "window_capture_source" {
+            guard guestCapabilities["windowCaptureSource"] == true,let id=request["window"] as? String,windows[id] != nil,
+                  let mode=request["mode"] as? String,["window","monitor"].contains(mode) else {
+                localResponse(["ok":false,"error":"Expected an active native window, window/monitor mode and current guest tools."],reply:reply);return
+            }
+            bridge.command(command,["window":id,"mode":mode],timeout:.seconds(5)){[weak self] result in self?.localBridgeResponse(result,reply:reply)}
+            return
         }
         if command == "window_refresh" {
             guard bridge.windowRefreshAvailable,let id=request["window"] as? String,windows[id] != nil else {
@@ -1465,7 +1473,7 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
             displayEpoch=value["epoch"] as? String
             invalidateDisplay("Checking Windows display…")
             let capabilities=value["capabilities"] as? [String:Any] ?? [:]
-            guestCapabilities=Dictionary(uniqueKeysWithValues:["nativeAppInput","modeFocus","memoryStatus","execute","displayInfo","displayTopology","driverInfo","graphicsInfo","sharedGeometry","appIcon","applicationStatus","processControl","clipboard"].map{($0,capabilities[$0] as? Bool == true)})
+            guestCapabilities=Dictionary(uniqueKeysWithValues:["windowCaptureSource","nativeAppInput","modeFocus","memoryStatus","execute","displayInfo","displayTopology","driverInfo","graphicsInfo","sharedGeometry","appIcon","applicationStatus","processControl","clipboard"].map{($0,capabilities[$0] as? Bool == true)})
             network.connectionChanged(guestCapabilities["execute"] == true)
             memoryController?.guestReady=guestCapabilities["memoryStatus"] == true
             prepareSharedFolders()

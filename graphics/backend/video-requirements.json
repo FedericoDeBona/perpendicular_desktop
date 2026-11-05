@@ -5,7 +5,8 @@
     "shared-nv12",
     "sdr-video-processor",
     "compact-shmem-map",
-    "external-decoder-discard"
+    "external-decoder-discard",
+    "present-amortization"
   ],
   "architecture": "aarch64",
   "guest_wire_version": 2,

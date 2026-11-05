@@ -49,6 +49,9 @@ def main():
     presentation_mode = commands.add_parser("window_presentation_mode", help="Compare alpha compositing with an opaque main window.")
     presentation_mode.add_argument("window")
     presentation_mode.add_argument("--mode", choices=("alpha", "opaque"), required=True)
+    capture_source = commands.add_parser("window_capture_source", help="Compare window capture with a crop of its reserved Windows app display.")
+    capture_source.add_argument("window")
+    capture_source.add_argument("--mode", choices=("window", "monitor"), required=True)
     execute = commands.add_parser("execute", help="Run an executable as the connected Windows user, without elevation.")
     execute.add_argument("--timeout-seconds", type=int, default=15, choices=range(1, 61), metavar="1..60")
     execute.add_argument("executable", help="Absolute Windows executable path.")
@@ -57,7 +60,7 @@ def main():
     request = {"command": options.command}
     if options.command in ("window_refresh", "window_image"):
         request["window"] = options.window
-    if options.command in ("window_copy_mode", "window_presentation_mode"):
+    if options.command in ("window_copy_mode", "window_presentation_mode", "window_capture_source"):
         request.update(window=options.window, mode=options.mode)
     if options.command == "execute":
         arguments = options.args[1:] if options.args[:1] == ["--"] else options.args

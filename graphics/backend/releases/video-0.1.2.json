@@ -42,9 +42,9 @@
   "hosts": {
     "m4-cpu-v12": {
       "backend_sha256": "b6f4cc9e9307ba63c29ac3357227378a29c5d09fbcca9e0aadb143e8062722e9",
-      "qualification": "QA protected coldboot, DWM load, SDR processor and three exact hardware4K frames PASS on 5 November; Seamless browser qualification pending"
+      "qualification": "QA and main protected coldboot, DWM load, SDR processor and three exact hardware4K frames PASS on 5 November; Seamless visual correctness and browser performance remain open"
     }
   },
   "verification": "docs/VERIFICATION.md#5-novembre--ripresa-flicker-seamless-edge-e-task-manager",
-  "deployment": "Candidate only: QA and main installed for Seamless verification; minimum shared requirement remains v16 pending user result"
+  "deployment": "Shared present object cleanup fix qualified for protected loading/pixels in QA and main; no claim of Seamless flicker/fluidity qualification"
 }

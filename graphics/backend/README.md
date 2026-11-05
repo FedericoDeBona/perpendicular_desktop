@@ -348,12 +348,12 @@ callback di elaborazione differita dopo Present1, fuori dai lock Triton.
 il marcatore PrivateBuild da v16 a v17. Sorgenti, toolchain, ABI e kernel
 restano quelli pinnati; non richiede il KMD v0.5.
 
-**Candidata, non correzione Seamless qualificata.** Prima distribuzione QA
+**Fix condiviso di rilascio oggetti; non correzione Seamless qualificata.** Prima distribuzione QA
 5 novembre: DLL61deaa5b, coldboot e caricamento DWM/protezioni/pixel PASS nella
 QA e nella main; video Seamless e riscontro utente pendenti. Release0.1.2
 confezionata soltanto nel riferimento privato, bundle canonico ancora v16. L’installer esistente permette il passaggio esplicito e
 ripristinabile: `-Restore` della release v16 verificata, poi installazione
 v17 con SHA/revisione esatti; conserva backup separati. Riavvio normale
-necessario per rinnovare anche DWM. Il minimo condiviso rimane v16 finché
-la prova non è conclusa; nessun pin o requisito forzato per aggirare i gate.
+necessario per rinnovare anche DWM. Il minimo condiviso richiede present-amortization dopo la qualifica
+protetta/pixel QA e main; la qualifica Seamless resta distinta e aperta.
 Vedere il [diario](../../docs/VERIFICATION.md#5-novembre--ripresa-flicker-seamless-edge-e-task-manager).
