@@ -71,5 +71,8 @@
   "bounded_map_growth_patch_sha256": "017a8e4fd7ba2c5062be7c4f454c758d78092edd4939bb502ce89f663e05cf90",
   "bounded_map_growth_revision": "Perpendicular video-resource-v15",
   "external_video_discard_patch_sha256": "dc4dc0f46fd3bcdf4611c676b02788a5bf98a41ff3bb0a82e78c0941011ed550",
-  "external_video_discard_revision": "Perpendicular video-resource-v16"
+  "external_video_discard_revision": "Perpendicular video-resource-v16",
+  "present_amortization_patch_sha256": "ed1f68177101a7ea3276f4acccc20a75fba82fa3fe41664777d892614cb8dd91",
+  "present_amortization_revision": "Perpendicular video-resource-v17",
+  "present_amortization_upstream": "https://github.com/osy/virtio-win-mesa/commit/a5987c86f4d920478b968b29b41e124aca8c8668"
 }

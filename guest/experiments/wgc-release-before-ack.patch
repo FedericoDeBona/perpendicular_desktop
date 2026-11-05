@@ -1,0 +1,93 @@
+diff --git a/guest/src/windows/capture.rs b/guest/src/windows/capture.rs
+index a041b35..ff50326 100644
+--- a/guest/src/windows/capture.rs
++++ b/guest/src/windows/capture.rs
+@@ -543,6 +543,7 @@ unsafe fn run(target: &Target, outbox: &Outbox, stop: &AtomicBool, driver:D3D_DR
+                 // ContentSize can precede the resized backing texture during restore.
+                 // Never read rows outside that texture, or end a healthy capture for it.
+                 if desc.Width < current.Width as u32 || desc.Height < current.Height as u32 {
++                    drop(texture);drop(access);
+                     frame.Close().map_err(error)?;
+                     target.set_phase(Phase::Recreating);
+                     target.progress.recreates.fetch_add(1,Ordering::Relaxed);
+@@ -581,8 +582,15 @@ unsafe fn run(target: &Target, outbox: &Outbox, stop: &AtomicBool, driver:D3D_DR
+                     native_gpu=Some(super::gpu::Gpu::new(&device,width as u32,height as u32)?);
+                 }
+                 target.set_phase(Phase::Publishing);sequence+=1;
+-                native_gpu.as_mut().unwrap().submit(&device,&context,&texture,x,y,&target,&outbox,generation,sequence.into(),gpu_selected_qpc)?;
++                let pending=native_gpu.as_mut().unwrap().submit(&device,&context,&texture,x,y,&target,&outbox,generation,sequence.into(),gpu_selected_qpc)?;
++                // The query completed every read of the WGC source. Return
++                // both its interfaces and its pool slot now, rather than
++                // holding the compositor's frame across the Mac round trip.
++                // The separate export stays immutable/borrowed until ACK.
++                drop(texture);drop(access);
+                 frame.Close().map_err(error)?;
++                drop(frame);
++                pending.wait(&target,&outbox)?;
+                 if resize_pool {pool.Recreate(&runtime,DirectXPixelFormat::B8G8R8A8UIntNormalized,2,size).map_err(error)?;}
+             }
+             Ok(())
+diff --git a/guest/src/windows/gpu.rs b/guest/src/windows/gpu.rs
+index 33130a6..230fa66 100644
+--- a/guest/src/windows/gpu.rs
++++ b/guest/src/windows/gpu.rs
+@@ -2,9 +2,15 @@
+ use super::{capture::Target,wire::Outbox,error,catalogue};
+ use serde_json::{Value,json};
+ use sha2::{Digest,Sha256};
+-use std::{sync::atomic::Ordering,time::{Instant,Duration,SystemTime,UNIX_EPOCH}};
++use std::{sync::{Arc,atomic::{AtomicBool,Ordering}},time::{Instant,Duration,SystemTime,UNIX_EPOCH}};
+ use windows::{core::Interface,Win32::{Foundation::{HWND,POINT},Graphics::{Direct3D11::*,Dxgi::IDXGIResource,Gdi::ClientToScreen}}};
+ pub struct Gpu{texture:ID3D11Texture2D,query:ID3D11Query,width:u32,height:u32,nonce:[u8;24],checks_left:u8}
++// Keep the owned export borrowed until its exact consumer ACK. The WGC
++// source is independent and can be returned to its pool before this wait.
++pub struct PendingFrame<'a>{
++ _export:&'a mut Gpu,acknowledged:Arc<AtomicBool>,started:Instant,published:Instant,
++ submitted:f64,gpu_wait:f64,reference:bool,sequence:u64,selected_qpc:i64,
++}
+ impl Gpu{
+  pub unsafe fn new(device:&ID3D11Device,width:u32,height:u32)->Result<Self,String>{unsafe{
+   if width<32||height==0||width>4096||height>=4096||u64::from(width)*u64::from(height)>8_388_608{return Err("Window exceeds the GPU image limit".into());}
+@@ -20,7 +26,7 @@ impl Gpu{
+  }}
+  pub fn matches(&self,w:u32,h:u32)->bool{self.width==w&&self.height==h}
+  pub unsafe fn submit(&mut self,device:&ID3D11Device,context:&ID3D11DeviceContext,source:&ID3D11Texture2D,x:i32,y:i32,
+-  target:&Target,outbox:&Outbox,generation:u64,sequence:u64,selected_qpc:i64)->Result<(),String>{unsafe{
++  target:&Target,outbox:&Outbox,generation:u64,sequence:u64,selected_qpc:i64)->Result<PendingFrame<'_>,String>{unsafe{
+   let started=Instant::now();let (w,h)=(self.width,self.height);
+   let mut source_desc=D3D11_TEXTURE2D_DESC::default();source.GetDesc(&mut source_desc);
+   if x<0||y<0||i64::from(x)+i64::from(w)>i64::from(source_desc.Width)||i64::from(y)+i64::from(h)>i64::from(source_desc.Height){return Err("GPU crop outside source".into());}
+@@ -72,18 +78,26 @@ impl Gpu{
+    "guestCaptureSelectedQPC":selected_qpc,"guestGpuSubmitMilliseconds":submitted,"guestGpuWaitMilliseconds":gpu_wait,
+    "guestReferenceReadback":reference,"guestReadbackMilliseconds":if reference{Value::Null}else{json!(0)},"guestEncodeMilliseconds":0});
+   let acknowledged=outbox.frame(&target.id,header,Vec::new(),None);
+-  let deadline=Instant::now();while !acknowledged.load(Ordering::Acquire){
+-   if !outbox.connected.load(Ordering::Acquire)||deadline.elapsed()>Duration::from_secs(4){return Err("GPU consumer acknowledgement missing".into());}
++  Ok(PendingFrame{_export:self,acknowledged,started,published:Instant::now(),submitted,gpu_wait,reference,sequence,selected_qpc})
++ }}
++}
++impl PendingFrame<'_>{
++ // Called only after the source texture, interface and frame were released.
++ pub fn wait(self,target:&Target,outbox:&Outbox)->Result<(),String>{
++  let source_held=self.started.elapsed().as_secs_f64()*1000.0;
++  while !self.acknowledged.load(Ordering::Acquire){
++   if !outbox.connected.load(Ordering::Acquire)||self.published.elapsed()>Duration::from_secs(4){return Err("GPU consumer acknowledgement missing".into());}
+    std::thread::sleep(Duration::from_millis(1));
+   }
+   if let Some(description)=target.capture_device.lock().unwrap().as_mut() {
+-   description["lastGpuFrame"]=json!({"sequence":sequence,"selectedQPC":selected_qpc,
+-    "submitMilliseconds":submitted,"queryWaitMilliseconds":gpu_wait,
+-    "consumerAckMilliseconds":deadline.elapsed().as_secs_f64()*1000.0,
+-    "referenceReadback":reference,"totalMilliseconds":started.elapsed().as_secs_f64()*1000.0});
++   description["lastGpuFrame"]=json!({"sequence":self.sequence,"selectedQPC":self.selected_qpc,
++    "submitMilliseconds":self.submitted,"queryWaitMilliseconds":self.gpu_wait,
++    "sourceHeldMilliseconds":source_held,"sourceReleasedBeforeAck":true,
++    "consumerAckMilliseconds":self.published.elapsed().as_secs_f64()*1000.0,
++    "referenceReadback":self.reference,"totalMilliseconds":self.started.elapsed().as_secs_f64()*1000.0});
+   }
+   Ok(())
+- }}
++ }
+ }
+ 
+ pub fn clock()->Value {unsafe{

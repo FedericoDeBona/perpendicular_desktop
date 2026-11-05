@@ -336,3 +336,23 @@ e nuova applicazione dopo restore. Stati esterni diversi vengono preservati
 e rifiutati, senza sovrascrivere registrazioni ignote. Il coldboot e il controllo
 dei moduli effettivi restano necessari per evitare di provare una UMD precedente
 ancora nella cache WDDM. Gli altri payload e i dati della VM restano separati.
+
+
+## Present e rilascio degli oggetti D3D11 (candidata v17)
+
+`rebuild-video-umd.py --external-video-discard --present-amortization`
+ricostruisce la base v16 con il solo fix upstream
+[a5987c86](https://github.com/osy/virtio-win-mesa/commit/a5987c86f4d920478b968b29b41e124aca8c8668):
+callback di elaborazione differita dopo Present1, fuori dai lock Triton.
+`present-amortization.patch` conserva il codice upstream e cambia soltanto
+il marcatore PrivateBuild da v16 a v17. Sorgenti, toolchain, ABI e kernel
+restano quelli pinnati; non richiede il KMD v0.5.
+
+**Candidata, non correzione Seamless qualificata.** Prima distribuzione QA
+5 novembre: DLL61deaa5b…, riavvio/caricamento protetto e pixel ancora da
+verificare. L’installer esistente permette il passaggio esplicito e
+ripristinabile: `-Restore` della release v16 verificata, poi installazione
+v17 con SHA/revisione esatti; conserva backup separati. Riavvio normale
+necessario per rinnovare anche DWM. Il minimo condiviso rimane v16 finché
+la prova non è conclusa; nessun pin o requisito forzato per aggirare i gate.
+Vedere il [diario](../../docs/VERIFICATION.md#5-novembre--ripresa-flicker-seamless-edge-e-task-manager).
