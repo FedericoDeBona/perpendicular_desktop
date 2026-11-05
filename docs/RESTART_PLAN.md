@@ -1,5 +1,8 @@
 # Piano di lavoro — desktop Windows su Mac
 
+**5 novembre, confronto GPUSeamless.69 IN CORSO:** utente conferma il videoYouTube come riproduzione corretta. .68 ricevutaPixel diagnostica verificata; .69 build/firma/installazione PASS, candidato opt-in su una sola finestra per copiaGPUprivata prima del draw (come Desktop), defaultdirect invariato. Normale arresto/nuovoavvio; confrontoA/B sulla stessa istanza ancora DA FARE. Criterio: cambiamento osservabile del flicker nel video confermato, senza confondere screenshotisolati con risultato fisico. [Diario](VERIFICATION.md#5-novembre--ripresa-flicker-seamless-edge-e-task-manager).
+
+
 **Precisazione5novembre:** caso principale ora EdgeSeamless con videoYouTube, dopo rettificautente dell'indicazione finestraferma. Diagnostica.68 implementata/distribuita: snapshot singolo prima del renderer,8campioniTaskManager confermano un'immagine già alterata nel caso delle righe, senza identificarne ancora la causa. Non trattare questo come prova del medesimo difettoYouTube. Prossimo passo: riproduzione del video e confronto Desktop/Seamless; GFX-001/TODO-008 restano IN CORSO. [Evidenze](VERIFICATION.md#5-novembre--ripresa-flicker-seamless-edge-e-task-manager).
 
 

@@ -43,6 +43,9 @@ def main():
     refresh.add_argument("window")
     capture = commands.add_parser("window_image", help="Save one received window image before Mac presentation, in the private QA directory.")
     capture.add_argument("window")
+    copy_mode = commands.add_parser("window_copy_mode", help="Compare direct linear sampling with a private GPU texture on one window.")
+    copy_mode.add_argument("window")
+    copy_mode.add_argument("--mode", choices=("direct", "private"), required=True)
     execute = commands.add_parser("execute", help="Run an executable as the connected Windows user, without elevation.")
     execute.add_argument("--timeout-seconds", type=int, default=15, choices=range(1, 61), metavar="1..60")
     execute.add_argument("executable", help="Absolute Windows executable path.")
@@ -51,6 +54,8 @@ def main():
     request = {"command": options.command}
     if options.command in ("window_refresh", "window_image"):
         request["window"] = options.window
+    if options.command == "window_copy_mode":
+        request.update(window=options.window, mode=options.mode)
     if options.command == "execute":
         arguments = options.args[1:] if options.args[:1] == ["--"] else options.args
         request.update(executable=options.executable, args=arguments, timeoutSeconds=options.timeout_seconds)

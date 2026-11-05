@@ -1,5 +1,8 @@
 # TODO — feature e correzioni
 
+**5 novembre, confronto GPUSeamless.69 IN CORSO:** utente conferma il videoYouTube come riproduzione corretta. .68 ricevutaPixel diagnostica verificata; .69 build/firma/installazione PASS, candidato opt-in su una sola finestra per copiaGPUprivata prima del draw (come Desktop), defaultdirect invariato. Normale arresto/nuovoavvio; confrontoA/B sulla stessa istanza ancora DA FARE. Criterio: cambiamento osservabile del flicker nel video confermato, senza confondere screenshotisolati con risultato fisico. [Diario](VERIFICATION.md#5-novembre--ripresa-flicker-seamless-edge-e-task-manager).
+
+
 **Precisazione5novembre:** caso principale ora EdgeSeamless con videoYouTube, dopo rettificautente dell'indicazione finestraferma. Diagnostica.68 implementata/distribuita: snapshot singolo prima del renderer,8campioniTaskManager confermano un'immagine già alterata nel caso delle righe, senza identificarne ancora la causa. Non trattare questo come prova del medesimo difettoYouTube. Prossimo passo: riproduzione del video e confronto Desktop/Seamless; GFX-001/TODO-008 restano IN CORSO. [Evidenze](VERIFICATION.md#5-novembre--ripresa-flicker-seamless-edge-e-task-manager).
 
 
@@ -414,6 +417,9 @@ Conservare dimensione percepita 1:1, controlli Windows sulle finestre principali
 **Fatto quando:** breve percorso reale sulla main con spostamento, resize, click su bordi/controlli e apertura di dialogo corretti, poi trasferimento fra scale diverse appena disponibili due uscite. Nessuna modalità segnalata pronta prima di conferma Windows e frame pertinente. Evidenze collegate alle singole voci WIN/GFX.
 
 ## TODO-003 — Gli stessi file Mac anche in Windows
+
+**5 novembre, verifica successiva.69 — continuità consensi NON CONFERMATA.** Nuova build con stesso certificato/requisito, ma avvio fermo in requestAccess/opendir prima diQEMU. Possibile consensoTCC pendente, non ancora osservato; CUA nonconsente UserNotificationCenter, richiesto controllo manualeutente. L'evidenza precedente di dueboot senza azioniCUA non provava assenza di clicesterni o persistenza generale. Conservare la firma implementata, ma non dichiarare risolto una volta per tutte il requisito dei consensi finché il nuovo ciclo non è chiarito. [Diario](VERIFICATION.md#5-novembre--ripresa-flicker-seamless-edge-e-task-manager).
+
 
 **5 novembre — priorità consensi macOS ripetuti, incremento locale FATTO.** Implementazione firma persistente e installer anti-backupapp FATTE/buildPASS; distribuzione.67 FATTA, primo bootmain firma nuova3cartellecollegate, verifica successivo rebuildmain FATTA nel perimetro dei due avvii. Clone NON ESEGUITO (problema identitàMac, non payloadWindows). Verifica: .66firmatacert→.67stessocert, avvio e accesso3cartelle senza interventiCUA sui consensi. Prossimo passo: conservare la chiave e usare la ricetta per tutte le build future; eventuali popup residui richiedono riscontro nell’uso ordinario. FS-004 e obiettivo filesystem generale restano aperti. [Evidenze](VERIFICATION.md#5-novembre--firma-locale-persistente-e-backup-non-avviabili0267), [procedura traMac](LOCAL_SIGNING.md).
 

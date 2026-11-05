@@ -288,6 +288,9 @@ Il ciclo RAM protetto 4→2→4 GiB con dati conservati resta la qualifica prece
 
 ### FS-005 — Scadenza backend durante il consenso macOS alle cartelle
 
+**5 novembre, verifica successiva.69 — continuità consensi NON CONFERMATA.** Nuova build con stesso certificato/requisito, ma avvio fermo in requestAccess/opendir prima diQEMU. Possibile consensoTCC pendente, non ancora osservato; CUA nonconsente UserNotificationCenter, richiesto controllo manualeutente. L'evidenza precedente di dueboot senza azioniCUA non provava assenza di clicesterni o persistenza generale. Conservare la firma implementata, ma non dichiarare risolto una volta per tutte il requisito dei consensi finché il nuovo ciclo non è chiarito. [Diario](VERIFICATION.md#5-novembre--ripresa-flicker-seamless-edge-e-task-manager).
+
+
 **5 novembre — ripetizione consensi dopo rebuild, correzione firma verificata localmente (TODO-003).** La canonica.66 e la build usavano firma ad hoc/requisito cdhash, quindi identità diversa al rebuild; nessuna identitàcodesigning persistente presente sul Mac. La precedente correzione dell'attesa non risolveva la continuità dei consensi. Nuova ricetta firma locale con certificato privato fuoriGit, requisito bundleID+certificato e rifiuto della build senza identità; installer rifiuta frontendaperto e conserva rollback `.bundle-backup`. `Before-full-rebuild.app` trovato registrato con lo stessoID e ritirato dalla registrazione senza cancellare il backup. Due eseguibili diversi e buildreali.66→.67 mantengono lo stesso requisito; firmaad hoc estranea rifiutata. Primo bootmain con firma nuova:3cartellecollegate. Secondo boot.67 completato:3cartellecollegate/failedfalse e percorsiWindows esistenti, nessuna azioneCUA di consenso nei due avvii; nessuna chiusura generale FS-004 o affidabilità. [Ricetta](LOCAL_SIGNING.md), [verifiche](VERIFICATION.md#5-novembre--firma-locale-persistente-e-backup-non-avviabili0267).
 
 **3 novembre, integrazione0.2.62:** Dopo frontend0.2.62 il nuovo avvio main attende nuovamente requestAccess/opendir prima di lanciareQEMU. Nessuna scadenza/kill applicata, controllo automatico non attiva la richiesta. Chiesto clicDock/eventuale consenso; verifica finale della consegna in attesa. [Evidenze](VERIFICATION.md#3-novembre--build-unica-resize-e-video0262-sul-m1).
@@ -598,6 +601,9 @@ Il ciclo RAM protetto 4→2→4 GiB con dati conservati resta la qualifica prece
 Queste voci conservano limiti non risolti, senza richiedere di ripristinare codice, dischi o protezioni delle prove eliminate. Il percorso individuale è ripreso dalla nuova richiesta di launcher; i vecchi esperimenti kernel e IVSHMEM restano ritirati. Riprendere una prova tecnica soltanto per una necessità concreta del percorso attivo.
 
 ### GFX-001 — Flicker e cifre mancanti nelle catture WGC
+
+**5 novembre, confronto GPUSeamless.69 IN CORSO:** utente conferma il videoYouTube come riproduzione corretta. .68 ricevutaPixel diagnostica verificata; .69 build/firma/installazione PASS, candidato opt-in su una sola finestra per copiaGPUprivata prima del draw (come Desktop), defaultdirect invariato. Normale arresto/nuovoavvio; confrontoA/B sulla stessa istanza ancora DA FARE. Criterio: cambiamento osservabile del flicker nel video confermato, senza confondere screenshotisolati con risultato fisico. [Diario](VERIFICATION.md#5-novembre--ripresa-flicker-seamless-edge-e-task-manager).
+
 
 **Precisazione5novembre:** caso principale ora EdgeSeamless con videoYouTube, dopo rettificautente dell'indicazione finestraferma. Diagnostica.68 implementata/distribuita: snapshot singolo prima del renderer,8campioniTaskManager confermano un'immagine già alterata nel caso delle righe, senza identificarne ancora la causa. Non trattare questo come prova del medesimo difettoYouTube. Prossimo passo: riproduzione del video e confronto Desktop/Seamless; GFX-001/TODO-008 restano IN CORSO. [Evidenze](VERIFICATION.md#5-novembre--ripresa-flicker-seamless-edge-e-task-manager).
 

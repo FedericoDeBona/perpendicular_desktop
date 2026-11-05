@@ -743,6 +743,7 @@ final class ApplicationWindow:NSObject,NSWindowDelegate {
         return ["path":path.path,"width":image.width,"height":image.height,
                 "stage":"received-before-presentation","presentation":presentationState]
     }
+    func setPrivateSurfaceCopy(_ enabled:Bool){content.setPrivateSurfaceCopy(enabled)}
     func retire(){sourceClosed=true;window.close()}
     private func requestClose(){if windowShouldClose(window){window.close()}}
     func windowShouldClose(_ sender:NSWindow)->Bool{

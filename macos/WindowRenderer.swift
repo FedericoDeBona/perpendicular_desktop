@@ -53,6 +53,10 @@ final class WindowRenderer {
     private var traceSource=""
     var onError:((String)->Void)?
     var onPresented:((UInt64)->Void)?
+    private var copySharedSurface=false
+    func setPrivateSurfaceCopy(_ enabled:Bool){
+        copySharedSurface=enabled;dirty=true;draw()
+    }
 
     // Device and pipeline are immutable and shared by all window presenters.
     // Keep command queues per presenter so a slow window does not change the
@@ -118,7 +122,7 @@ final class WindowRenderer {
         PipelineTrace.record("renderer-receive",traceSource,["renderer":traceRenderer,"presentationID":presentationID])
         self.presentationID=presentationID
         guard surface.texture.device.registryID == device.registryID else{onError?("The graphics devices do not match.");return}
-        external=nil;nativeCache=false;pixels=Data();texture=nil;shared=surface
+        external=nil;nativeCache=false;pixels=Data();shared=surface
         size=NSSize(width:surface.width,height:surface.height)
         dirty=true;draw()
     }
@@ -183,15 +187,16 @@ final class WindowRenderer {
         let drawableSize=CGSize(width:drawable.texture.width,height:drawable.texture.height)
         let lease=external
         let frameSurface=shared
+        let privateSurface=frameSurface != nil && copySharedSurface
         let nativeSurface=lease != nil || nativeCache
-        let sourceKind=nativeSurface ? "native-surface":frameSurface != nil ? "shared-buffer":"cpu"
+        let sourceKind=nativeSurface ? "native-surface":privateSurface ? "shared-buffer-private-copy":frameSurface != nil ? "shared-buffer":"cpu"
         let sourceID=traceSource
         PipelineTrace.record("render-select",requestID,["sourceID":sourceID,"sourceKind":sourceKind,"width":width,"height":height,"drawableWidth":drawable.texture.width,"drawableHeight":drawable.texture.height])
         let sampledTexture:any MTLTexture
-        if let frameSurface {
+        if let frameSurface,!privateSurface {
             sampledTexture=frameSurface.texture
         }else{
-            let storage:MTLStorageMode=nativeSurface ? .private:.shared
+            let storage:MTLStorageMode=(nativeSurface || privateSurface) ? .private:.shared
             if texture?.width != width || texture?.height != height || texture?.storageMode != storage {
                 let descriptor=MTLTextureDescriptor.texture2DDescriptor(pixelFormat:.bgra8Unorm,width:width,height:height,mipmapped:false)
                 descriptor.storageMode=storage;descriptor.usage = .shaderRead
@@ -207,6 +212,12 @@ final class WindowRenderer {
             // the broker must release that old budget before starting a writer.
             guard let copy=command.makeBlitCommandEncoder() else{return}
             copy.copy(from:lease.texture,sourceSlice:0,sourceLevel:0,sourceOrigin:MTLOrigin(x:0,y:0,z:0),
+                      sourceSize:MTLSize(width:width,height:height,depth:1),to:sampledTexture,destinationSlice:0,
+                      destinationLevel:0,destinationOrigin:MTLOrigin(x:0,y:0,z:0))
+            copy.endEncoding()
+        }else if let frameSurface,privateSurface {
+            guard let copy=command.makeBlitCommandEncoder() else{return}
+            copy.copy(from:frameSurface.texture,sourceSlice:0,sourceLevel:0,sourceOrigin:MTLOrigin(x:0,y:0,z:0),
                       sourceSize:MTLSize(width:width,height:height,depth:1),to:sampledTexture,destinationSlice:0,
                       destinationLevel:0,destinationOrigin:MTLOrigin(x:0,y:0,z:0))
             copy.endEncoding()

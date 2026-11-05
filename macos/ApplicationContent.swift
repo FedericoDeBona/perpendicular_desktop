@@ -26,6 +26,7 @@ final class ApplicationContent:NSView {
             provider:provider,decode:nil,shouldInterpolate:true,intent:.defaultIntent)
     }
     private var source=NSSize.zero
+    func setPrivateSurfaceCopy(_ enabled:Bool){renderer?.setPrivateSurfaceCopy(enabled)}
     private var modifiers:Set<Int>=[]
     private var virtualKeys:Set<UInt16>=[]
     private var pendingText=""
