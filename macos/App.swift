@@ -74,6 +74,7 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
     private var cancelledOpeningApps:Set<String>=[]
     private var windowApps:[String:String]=[:]
     private var focusWarnedWindows:Set<String>=[]
+    private var statusItem:NSStatusItem?
     private var launcher:LauncherWindow!
     private var machine:VirtualMachineController!
     private var bridge:GuestBridge!
@@ -234,6 +235,7 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
         let force=NSMenuItem(title:"Arresta Windows forzatamente…",action:#selector(forceStopWindows),keyEquivalent:"");force.target=self;menu.addItem(force)
         menu.addItem(.separator());menu.addItem(withTitle:"Quit",action:#selector(NSApplication.terminate(_:)),keyEquivalent:"q")
         NSApp.mainMenu=main
+        installMenuBarItem()
         NotificationCenter.default.addObserver(self,selector:#selector(hostDisplaysChanged),
             name:NSApplication.didChangeScreenParametersNotification,object:nil)
         NotificationCenter.default.addObserver(self,selector:#selector(launcherBecameKey),
@@ -254,6 +256,25 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
     }
     func applicationShouldTerminateAfterLastWindowClosed(_ sender:NSApplication)->Bool{false}
     func applicationShouldHandleReopen(_ sender:NSApplication,hasVisibleWindows flag:Bool)->Bool{showApplications();return false}
+    private func installMenuBarItem(){
+        let item=NSStatusBar.system.statusItem(withLength:NSStatusItem.squareLength)
+        item.autosaveName="PerpendicularStatusItem"
+        let image=NSImage(systemSymbolName:WindowsIcon.systemName,accessibilityDescription:"Perpendicular")?
+            .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize:16,weight:.regular))
+        image?.isTemplate=true
+        item.button?.image=image
+        item.button?.toolTip="Perpendicular"
+        item.button?.setAccessibilityLabel("Perpendicular")
+        item.button?.setAccessibilityIdentifier("perpendicular-menu-bar")
+        let menu=NSMenu(title:"Perpendicular")
+        let open=NSMenuItem(title:"Apri Perpendicular",action:#selector(showApplications),keyEquivalent:"")
+        open.target=self;menu.addItem(open)
+        menu.addItem(.separator())
+        let shutdown=NSMenuItem(title:"Spegni Windows",action:#selector(shutdownWindows),keyEquivalent:"")
+        shutdown.target=self;menu.addItem(shutdown)
+        item.menu=menu
+        statusItem=item
+    }
     @objc func showApplications(){launcher.makeKeyAndOrderFront(nil);NSApp.activate(ignoringOtherApps:true);NotificationCenter.default.post(name:.launcherFocusSearch,object:nil)}
     func applicationDidBecomeActive(_ notification:Notification){refreshCatalogueIfNeeded()}
     @objc private func launcherBecameKey(_ notification:Notification){refreshCatalogueIfNeeded()}

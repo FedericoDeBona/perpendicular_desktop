@@ -5,6 +5,10 @@ extension Notification.Name {
     static let launcherFocusSearch=Notification.Name("PerpendicularLauncherFocusSearch")
 }
 
+enum WindowsIcon {
+    static let systemName="square.grid.2x2.fill"
+}
+
 enum LauncherAppearance:String,CaseIterable,Identifiable {
     case system,light,dark
     var id:Self {self}
@@ -231,7 +235,7 @@ struct Launcher:View {
                     .buttonStyle(LauncherChromeButtonStyle()).modifier(LauncherHandPointer()).accessibilityLabel("Cancella ricerca")
             }
             Button(action:model.showWindows){
-                Image(systemName:"square.grid.2x2.fill").font(.system(size:17)).frame(width:40,height:36).contentShape(Rectangle())
+                Image(systemName:WindowsIcon.systemName).font(.system(size:17)).frame(width:40,height:36).contentShape(Rectangle())
             }.buttonStyle(LauncherChromeButtonStyle(prominent:true)).modifier(LauncherHandPointer())
                 .help("Desktop Windows").accessibilityLabel("Desktop Windows").accessibilityIdentifier("launcher-open-desktop")
                 .disabled(!model.desktopAvailable || model.machineOperation != nil)
