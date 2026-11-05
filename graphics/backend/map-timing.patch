@@ -1,0 +1,86 @@
+--- a/src/virtio/neptune/npt_overrides_d3d11_context.c
++++ b/src/virtio/neptune/npt_overrides_d3d11_context.c
+@@ -21,6 +21,7 @@
+ #include "npt_overrides.h"
+ #include "npt_resource.h"
+ #include "npt_ring.h"
++#include "triton/map-timing.h"
+ 
+ #include "neptune-protocol/npt_protocol_client_id3d11devicecontext.h"
+ #include "neptune-protocol/npt_protocol_guest_id3d11devicecontext.h"
+@@ -308,14 +309,16 @@
+  * the next fast-path Map.
+  */
+ static HRESULT
+-ctx_Map_texture(void *self, struct npt_d3d11_texture *t, UINT Subresource,
++ctx_Map_texture_impl(void *self, struct npt_d3d11_texture *t, UINT Subresource,
+                 D3D11_MAP MapType, UINT MapFlags,
+-                D3D11_MAPPED_SUBRESOURCE *pMappedResource)
++                D3D11_MAPPED_SUBRESOURCE *pMappedResource,
++                struct npt_map_timing *timing)
+ {
+    if (!npt_d3d11_texture_is_mappable(t))
+       return NPT_E_NOTIMPL;
+    if (!npt_d3d11_texture_ensure_map_shmem(t))
+       return NPT_E_OUTOFMEMORY;
++   npt_map_timing_mark(timing, 0);
+ 
+    const void *key = self;
+    const uint32_t per_slot    = npt_d3d11_texture_get_slot_size(t);
+@@ -357,6 +360,7 @@
+                                    &slot))
+       return NPT_E_OUTOFMEMORY;
+ 
++   npt_map_timing_mark(timing, 1);
+    uint64_t context_id  = ((struct npt_com_base *)self)->base.id;
+    uint64_t resource_id = ((struct npt_com_base *)t)->base.id;
+ 
+@@ -367,6 +371,7 @@
+ 
+    struct npt_ring *ring = npt_com_self_ring(self);
+    npt_d3d11_texture_slot_visible(t, slot, ring);
++   npt_map_timing_mark(timing, 2);
+    uint32_t row_pitch = 0, depth_pitch = 0;
+    HRESULT hr = npt_dispatch_resource_map(
+       ring, context_id, resource_id, Subresource,
+@@ -376,6 +381,7 @@
+       mip_rows, mip_d,
+       /*shmem_offset=*/npt_d3d11_texture_slot_offset(t, slot),
+       &row_pitch, &depth_pitch, NULL);
++   npt_map_timing_mark(timing, 3);
+ 
+    /* Bound Unmap memcpy at the host-pitch footprint.  Refuse if the
+     * host's pitches imply a region larger than per_slot, or one that
+@@ -405,6 +411,21 @@
+    pMappedResource->RowPitch = row_pitch;
+    pMappedResource->DepthPitch = depth_pitch;
+    return NPT_S_OK;
++}
++
++static HRESULT
++ctx_Map_texture(void *self, struct npt_d3d11_texture *t, UINT Subresource,
++                D3D11_MAP MapType, UINT MapFlags,
++                D3D11_MAPPED_SUBRESOURCE *pMappedResource)
++{
++   struct npt_map_timing timing = npt_map_timing_begin();
++   HRESULT hr = ctx_Map_texture_impl(self, t, Subresource, MapType, MapFlags,
++                                    pMappedResource, &timing);
++   D3D11_TEXTURE2D_DESC desc = {0};
++   npt_d3d11_texture_fill_desc2d(t, &desc);
++   npt_map_timing_end(&timing, t, Subresource, MapType, MapFlags, hr,
++                     desc.Width, desc.Height, npt_d3d11_texture_get_format(t));
++   return hr;
+ }
+ 
+ static void
+--- a/src/virtio/neptune/triton/neptune_umd.rc
++++ b/src/virtio/neptune/triton/neptune_umd.rc
+@@ -30,7 +30,7 @@
+             VALUE "CompanyName", "Perpendicular experimental build; upstream Turing Software LLC"
+             VALUE "FileDescription", "Experimental Neptune video UMD - Perpendicular"
+             VALUE "FileVersion", NPT_RC_STR(VER)
+-            VALUE "PrivateBuild", "Perpendicular video-resource-v18"
++            VALUE "PrivateBuild", "Perpendicular video-resource-v18-map-timing"
+             VALUE "InternalName", "neptune_umd"
+             VALUE "OriginalFilename", "neptune_umd.dll"
+             VALUE "ProductName", "Neptune"

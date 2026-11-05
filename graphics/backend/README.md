@@ -374,3 +374,30 @@ il solo installer aggiornato e pinnato. Dopo il pull il gate rifiuta il vecchio
 installer; confezionare il profilo `m4-cpu-v12` dalla coppia locale già
 qualificata, firmare il riferimento e ricostruire normalmente. Non è una nuova
 build grafica né una distribuzione M4 già eseguita dal M1.
+
+
+## Diagnostica Map sopra v18, opt-in
+
+`rebuild-video-umd.py --external-video-discard --present-amortization
+--target-independent-coverage --map-timing` conserva la baseline v18 e aggiunge
+soltanto misura al Map delle texture NPT. Header/patch/revisione sono pinnati
+in `video-umd-inputs.json`; marker `Perpendicular video-resource-v18-map-timing`.
+È una build diagnostica, senza promozione o nuovo minimo di produzione.
+
+Provider ETW già usato per i fault, keyword2/livello4 separati dai faultkeyword1.
+Solo con sessione abilitata: prime3Map come marker, poi chiamate >=2ms, massimo64
+per processo e un messaggio di budget esaurito. Ogni chiamata possiede e rilascia
+il proprio handleEventRegister, senza callback persistenti durante unload.
+Anche con tracing spento la build diagnostica esegue la registrazione temporanea:
+non usarla per dichiarare un guadagno prestazionale o distribuirla nella main.
+
+Il messaggio conserva tipo/flag/HRESULT, dimensioni/formato e QPC/frequenza:
+inizio, fineensure-shmem, fineslot-sync, finevisibilità della risorsa, fineRPCMap,
+finefunzione. Una fase0 non è stata eseguita (per esempio fastpath o errore):
+non inventarne la durata. Ordine e parametri delle chiamate grafiche, copia,
+Map/Unmap e relativi risultati restano quelli della baseline. Nessun pixel,
+URL, input o contenutoapp registrato. `observe-dwm-scheduling.ps1
+-IncludeMapTiming` aggiunge la sola keyword2 alla stessa sessione DWM, la ferma
+prima dell'analisi e riporta conteggi/omessi. Servono marker dalla DLL effettiva
+prima di interpretare un campione vuoto; la sola installazione non qualifica
+il punto che precede bitmapcopy.

@@ -1,0 +1,21 @@
+{
+  "schema": 1,
+  "state": "Diagnostic build only; QA loading/pixels and Map events pending; no lag fix or production promotion",
+  "revision": "Perpendicular video-resource-v18-map-timing",
+  "architecture": "aarch64",
+  "kernel_abi": "100.6.101.58000",
+  "umd_sha256": "bcfb93ac6847726735e2db0c37b641e0049a154f032a3a997978da714352e926",
+  "toolchain_profile": "original",
+  "baseline_umd_sha256": "79908a8e026c0f69a61cf9c9b6b090fcd750b8991a939ed72e82bcd85446a2d5",
+  "patches": {
+    "map-timing.patch": "c1e16d2c155466f1e762e4a14d7217c6abe8c4d827bfed854420c811b8cd05b6",
+    "map-timing.h": "f0a53c3f32a99d2ca0a4cb59e2a1a6ae92070969db60428621ae4248cf2545c6"
+  },
+  "etw": {
+    "provider": "48dce1b6-e965-4e8a-b5fa-d9cb52657212",
+    "keyword": 2,
+    "level": 4,
+    "maxEventsPerProcess": 65,
+    "pixels": false
+  }
+}
