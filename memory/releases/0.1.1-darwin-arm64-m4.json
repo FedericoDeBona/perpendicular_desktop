@@ -1,0 +1,35 @@
+{
+  "schema": 1,
+  "version": "0.1.1",
+  "platform": "darwin-arm64-m4",
+  "qemuVersion": "10.0.12-utm",
+  "quiesceVersion": 1,
+  "recipe": "scripts/rebuild-memory-quiesce-local.py",
+  "builderSHA256": "99a22645c77d6269101373a23ef7954cd5477da5e43144884f3150d273c81031",
+  "basePackagedSHA256": "96bf6e719f235ef489198a10fe9462a655861d20d41c5d171b0bb3a24a9878d1",
+  "rebuiltUnsignedSHA256": "a9d73c4a5c77fa9059aec01f70467808d176dcd87a8d31f16462287dcaa90542",
+  "packagedQEMUSHA256": "e81d4fa6246f7d93530bb5074c318db85da3d3cc7c43f92a3bc326e275b06031",
+  "patches": {
+    "scripts/patch-qemu-memory-quiesce.py": "73de60e367a8ef1f10aa5db7c12b15fc04da1fe1e7cc6ec68f544671ae64a1e0",
+    "memory/qemu/perp-hvf-quiesce.h": "5e3c36bbdf2ac87117ebde971251f144c8ff6b886e5c2882156d3e29675af4a8"
+  },
+  "sourceBefore": {
+    "hw/virtio/virtio-balloon.c": "fa0ad64547e7331d3dc4bfe35141ab5f67ef193fcdb9ca2454cd646e55a726b6",
+    "hw/virtio/virtio-mem.c": "cd229c87ef8607a160c52bc10d5021ab7335d5d4dfe50296d958f11d983e7f23",
+    "include/hw/virtio/virtio-balloon.h": "0bbaed800b231a12be793ea716b115ebbeb5d71885bd940e6807a3bc1bd7c78c",
+    "include/hw/virtio/virtio-mem.h": "a06be9f14f9d8a4677429f66da3657b42763a93261bad3c9c67b9d29557019ed"
+  },
+  "sourceAfter": {
+    "hw/virtio/virtio-balloon.c": "7772a5fa67a5a9b2ad9151b47b4e1c2425c7f0305b3dcc35f3bfae11431dfe73",
+    "hw/virtio/virtio-mem.c": "73f7b1a9f06767514a68b44ac7a60d63f3273c1ec76227a1eb2f99ccd0203608",
+    "include/hw/virtio/virtio-balloon.h": "574c88b1961cab8784705725401b4187c6f6b4c66a15ae61988d2c6ce3b9bc37",
+    "include/hw/virtio/virtio-mem.h": "b666062e8839f4d9db5f589451b4c0f7bb7f4e7cdd40202088bfd8771f250551"
+  },
+  "recompiledHeaderUsers": [
+    "libqemu-aarch64-softmmu.a.p/hw_virtio_virtio-balloon-pci.c.o",
+    "libqemu-aarch64-softmmu.a.p/hw_virtio_virtio-balloon.c.o",
+    "libqemu-aarch64-softmmu.a.p/hw_virtio_virtio-mem-pci.c.o",
+    "libqemu-aarch64-softmmu.a.p/hw_virtio_virtio-mem.c.o"
+  ],
+  "qualification": "M4 QA protected boot, live capability on both devices, 128 MiB retained data and normal ACPI shutdown pass; canonical0.2.65/main29hash, signed Running RAM drivers, normal shutdown/coldboot and foreground restore8192MiB/balloon0 verified; general SYS-001/performance open"
+}

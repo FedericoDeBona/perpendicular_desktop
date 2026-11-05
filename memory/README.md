@@ -178,3 +178,33 @@ il build usare il bundle v1 conservato prima dell'aggiornamento (sul M1,
 base unsigned40bee491...), con il suo pin verificato. Il bundle aggiornato
 resta il riferimento per le normali buildMac, che riusano il runtime corretto.
 Un pin non corrispondente deve fermare il rebuilder.
+
+
+### Cache con overlay monitor successivo alla ricevuta RAM
+
+Il vecchio `memory-runtime.json` può descrivere l'unsigned prima dell'overlay
+`app-monitor-mode.patch`, mentre `runtime.json` identifica il QEMU effettivo.
+In quel caso non ricostruire o forzare il vecchio pin. Usare la ricevuta di link
+che identifica il QEMU **attualmente installato**, con tutti gli oggetti locali:
+
+```sh
+python3 scripts/rebuild-memory-quiesce-local.py \
+  --source /cache/locale/source --build /cache/locale/build \
+  --link-receipt /ricevuta/locale/monitor/receipt.json \
+  --reference-app /Applications/Perpendicular.app \
+  --ninja /toolchain/locale/ninja --output /nuova/cartella/privata
+```
+
+L'adattatore rifiuta una ricevuta appartenente a un QEMU diverso. Ricostruisce
+prima la base e richiede identità di **tutte** le sezioni codice/dati e delle
+dipendenze con la canonica firmata, controlla i quattro sorgenti RAM condivisi
+e i due helper di ownership. Applica la patch esistente soltanto a una copia,
+ricompila tutti gli utilizzatori degli header individuati dalle dipendenze
+Ninja (sul M4 quattro unità, incluse le due classi PCI), conserva e ricontrolla
+l'inventario degli input di link. Non cambia sorgenti, oggetti o binari del
+cache e non richiede di rigenerare Meson. Il pacchetto usa poi la stessa ricetta
+`package-memory-runtime.py --quiesce-receipt .../receipt.json` e lo stesso gate.
+La firma/UUID del relink possono differire: non si accetta una differenza nelle
+sezioni eseguibili o nei dati. Qualifica runtime/Windows e distribuzione restano
+passaggi distinti. La ricevuta RAM storica non prova l'assenza dei materiali del
+QEMU successivamente distribuito.
