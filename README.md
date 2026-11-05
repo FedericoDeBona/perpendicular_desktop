@@ -37,7 +37,7 @@ Il diario e Git conservano la storia delle prove. Le descrizioni dei vecchi pacc
 
 ## Build e aggiornamento completi
 
-Eseguire `zsh scripts/build-guest.sh`, poi `zsh scripts/build-macos.sh`.
+Prima del primo rebuild su ciascun Mac eseguire `python3 scripts/sign-macos.py --setup` per la [firma locale persistente](docs/LOCAL_SIGNING.md). Eseguire `zsh scripts/build-guest.sh`, poi `zsh scripts/build-macos.sh`. Installare con `python3 scripts/install-macos.py` soltanto dopo arresto normale di Windows e uscita dall’app.
 Su ogni macchina, prima di una nuova diagnosi o consegna, allineare sorgenti,
 bundle canonico, runtime effettivo e componenti Windows alle correzioni già
 condivise: è una regola obbligatoria in [AGENTS.md](AGENTS.md). Il pull e la sola

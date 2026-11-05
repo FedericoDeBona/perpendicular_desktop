@@ -1,6 +1,7 @@
 #!/bin/zsh
 set -eu
 cd "${0:A:h:h}"
+python3 scripts/sign-macos.py --check
 app="$PWD/.build/Perpendicular.app"
 runtime_app="${PERPENDICULAR_RUNTIME_APP:-/Applications/Perpendicular.app}"
 guest="$PWD/guest/target/aarch64-pc-windows-msvc/release/perpendicular-guest.exe"
@@ -59,7 +60,7 @@ python3 scripts/check-video-payload.py --app "$app"
 python3 scripts/prepare-build-dependencies.py --app "$app"
 rm -rf "$app/Contents/Resources/Display2D"
 python3 scripts/package-network-runtime.py --app "$app"
-codesign --force --sign - "$app"
+python3 scripts/sign-macos.py --app "$app"
 "$app/Contents/Resources/QEMU/bin/qemu-system-aarch64" --version | head -1
 "$app/Contents/Resources/QEMU/bin/swtpm" --version | head -1
 print "$app"
