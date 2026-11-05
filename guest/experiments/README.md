@@ -10,7 +10,7 @@ ma non ha dato un miglioramento utile: circa 5,35 catture/s contro 5,9
 nel campione precedente, con istanza e geometria diverse (nessun A/B
 causale). `sourceReleasedBeforeAck` significa prima dell’attesa locale,
 non misura l’istante dell’ACK remoto. I sorgenti di produzione restano
-quelli della 0.2.70; ripristinare anche il servizio installato prima di
-considerare allineata l’app principale. Non ripetere la prova senza una
+quelli della 0.2.70; il servizio principale e stato riportato a7962004 dopo la prova, identico
+al bundle0.2.70. Non ripetere la prova senza una
 nuova domanda precisa. Evidenze e limiti in
 [VERIFICATION](../../docs/VERIFICATION.md#5-novembre--ripresa-flicker-seamless-edge-e-task-manager).
