@@ -233,7 +233,9 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
         let start=NSMenuItem(title:"Avvia Windows",action:#selector(startWindows),keyEquivalent:"");start.target=self;menu.addItem(start)
         let shutdown=NSMenuItem(title:"Spegni Windows",action:#selector(shutdownWindows),keyEquivalent:"");shutdown.target=self;menu.addItem(shutdown)
         let force=NSMenuItem(title:"Arresta Windows forzatamente…",action:#selector(forceStopWindows),keyEquivalent:"");force.target=self;menu.addItem(force)
-        menu.addItem(.separator());menu.addItem(withTitle:"Quit",action:#selector(NSApplication.terminate(_:)),keyEquivalent:"q")
+        menu.addItem(.separator())
+        menu.addItem(withTitle:"Nascondi Perpendicular",action:#selector(NSApplication.hide(_:)),keyEquivalent:"h")
+        menu.addItem(withTitle:"Quit",action:#selector(NSApplication.terminate(_:)),keyEquivalent:"q")
         NSApp.mainMenu=main
         installMenuBarItem()
         NotificationCenter.default.addObserver(self,selector:#selector(hostDisplaysChanged),
@@ -696,7 +698,7 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
                 "displayChecks":mixedDisplayChecks,"displayApplies":mixedDisplayApplies,"displayInvalidations":displayInvalidations,
                 "mappedDisplays":sharedDisplays.count,"displaySetupComplete":machine?.mixedDisplaysEnabled == true ? sharedDisplays.count==HostDisplay.current().count:sharedDisplay != nil,
                 "appLaunchReady":machine?.mixedDisplaysEnabled != true || !sharedDisplays.isEmpty,
-                "memory":memoryState,"sharedDownloads":sharedDownloads,"sharedFolders":folderState,
+                "memory":memoryState,"networkObservation":network.observationDiagnostics,"sharedDownloads":sharedDownloads,"sharedFolders":folderState,
                 "vmSettings":["pending":settingsPending,"initialMemoryMiB":vmSettings?.initialMemoryMiB ?? 0,"maximumMemoryMiB":vmSettings?.maximumMemoryMiB ?? 0,"cpus":vmSettings?.cpus ?? 0],
                 "windowCount":windows.count,"capabilities":guestCapabilities,
                 "frameChannel":bridge?.separateFrames ?? false,

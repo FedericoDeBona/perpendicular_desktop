@@ -23,6 +23,8 @@ final class NetworkSettings:ObservableObject {
     private var guestBusy:()->Bool = {false}
     private var operation:Task<Void,Never>?
     private var observation:Task<Void,Never>?
+    private var observing=false
+    private var probesStarted=0
     private var checking=false
     private var runtimeStamp=""
     private var guestVerified=false
@@ -76,7 +78,17 @@ final class NetworkSettings:ObservableObject {
         }
     }
     func observe(){
+        observing=true
+        observationActiveChanged(true)
+    }
+    // The pane is a status viewer, not the tunnel supervisor. Do not repeatedly
+    // start PowerShell/CIM while another Mac app is in use. Recheck immediately
+    // on activation; forwarding and boot recovery have their own lifecycle.
+    func observationActiveChanged(_ active:Bool){
         observation?.cancel()
+        observation=nil
+        guard observing,active,NSApp.isActive,NSApp.keyWindow?.isVisible == true,
+              NSApp.keyWindow?.isMiniaturized == false else{return}
         refresh()
         observation=Task{@MainActor [weak self] in
             while !Task.isCancelled {
@@ -86,7 +98,10 @@ final class NetworkSettings:ObservableObject {
             }
         }
     }
-    func stopObserving(){observation?.cancel();observation=nil}
+    func stopObserving(){observing=false;observation?.cancel();observation=nil}
+    var observationDiagnostics:[String:Any] {
+        ["paneVisible":observing,"automaticPolling":observation != nil,"probesStarted":probesStarted]
+    }
     func stop(){stopObserving();recovery?.cancel();operation?.cancel()}
     func add(_ input:String)throws {
         let next=try Self.normalized(addresses+[input]);guard next.count<=64 else{throw Self.failure("Puoi inoltrare fino a 64 indirizzi.")}
@@ -309,13 +324,16 @@ final class NetworkSettings:ObservableObject {
     }
     private func probe()async throws {
         guard installed else{title="Non installato";return}
+        probesStarted+=1
         try verifyRuntime();tunnelActive=try await tunnel()
         let checkHash=guestVerified ? "$hash='verified'":"$hash=(Get-FileHash \"$d\\sing-box.exe\").Hash.ToLowerInvariant()"
         let script=#"""
         $d='C:\ProgramData\Perpendicular\HostVPN';$ok=Test-Path "$d\sing-box.exe";$hash='';if($ok){\#(checkHash)};
-        $a=Get-NetAdapter -Name 'LinkManager Adapter' -ErrorAction SilentlyContinue;
-        $t=Get-ScheduledTask -TaskName 'PerpendicularHostVPN' -ErrorAction SilentlyContinue;
-        @{installed=$ok;hash=$hash;running=($t -and $t.State -eq 'Running');listening=([bool](Get-NetTCPConnection -LocalPort 10884 -State Listen -ErrorAction SilentlyContinue) -and [bool](Get-NetUDPEndpoint -LocalPort 10884 -ErrorAction SilentlyContinue));vpn=($a -and $a.Status -eq 'Up')}|ConvertTo-Json -Compress
+        $a=@([System.Net.NetworkInformation.NetworkInterface]::GetAllNetworkInterfaces() | Where-Object Name -eq 'LinkManager Adapter');
+        $running=$false;try{$scheduler=New-Object -ComObject 'Schedule.Service';$scheduler.Connect();$running=($scheduler.GetFolder('\').GetTask('PerpendicularHostVPN').State -eq 4)}catch{};
+        $ip=[System.Net.NetworkInformation.IPGlobalProperties]::GetIPGlobalProperties();
+        $tcp=@($ip.GetActiveTcpListeners() | Where-Object Port -eq 10884);$udp=@($ip.GetActiveUdpListeners() | Where-Object Port -eq 10884);
+        @{installed=$ok;hash=$hash;running=$running;listening=($tcp.Count -gt 0 -and $udp.Count -gt 0);vpn=(@($a | Where-Object OperationalStatus -eq ([System.Net.NetworkInformation.OperationalStatus]::Up)).Count -gt 0)}|ConvertTo-Json -Compress
         """#
         let text=try await ps(script)
         guard let data=text.data(using:.utf8),let state=try JSONSerialization.jsonObject(with:data) as? [String:Any] else{throw Self.failure("Windows non ha comunicato lo stato del collegamento.")}

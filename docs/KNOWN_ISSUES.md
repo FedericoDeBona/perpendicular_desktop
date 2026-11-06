@@ -380,6 +380,10 @@ Il ciclo RAM protetto 4→2→4 GiB con dati conservati resta la qualifica prece
 - **Limite distinto:** primo arresto ordinario non completato entro60s; QMP poi chiuso con processo ancora vivo. Uscita forzata solo dopo consenso esplicito, successivi due arresti ordinari riusciti. Non dichiarata risolta l'affidabilità di arresto SYS-001/TODO-009.
 - **Evidenze:** [diario](VERIFICATION.md#26-ottobre--ripristino-del-desktop-nativo-sul-secondo-mac).
 
+### PERF-003 — Controlli Rete costosi con la VM inutilizzata
+
+**6 novembre, IN CORSO (TODO-006/007/012).** Main M4 .81 collegata, zero Seamless/Desktop: il pannello Rete avviava PowerShell/CIM ogni 5s anche in background. Campioni QEMU ~86% di un core con Rete contro ~25–31% nel pannello Generali; build concomitante e RAM diversa impediscono un A/B isolato. Candidata .82: osservazione solo con app/finestra attiva, ripresa immediata al ritorno e probe .NET/Task Scheduler COM. Stesso stato reale; corpo 1618,74→127,32ms, CPU processo 1,609→0,391s e picco working set 165,06→85,48MiB, non risparmio stabile fisico Mac. Nascondi→16s zero nuovi probe verificato sullo stesso boot. GPU VM quasi ferma nei contatori AGX; footprint HVF non è RAM unica (SYS-003). **Incremento .82 corretto e distribuito nel perimetro verificato:** stop in background e ripresa al ritorno, stati reali off/on, console con input/chiusura e Desktop/Start PASS nella canonica. Clone NON ESEGUITO. Obiettivo risorse generale ancora IN CORSO per confronto idle finale e rilascio RAM lento (SYS-003); nessuna qualifica del carico GPU fisico o affidabilità prolungata. [Misure e tentativi](VERIFICATION.md#6-novembre--risorse-vm-inutilizzata).
+
 ### PERF-002 — Frame persi nei video 4K in Desktop Mode
 
 **3 novembre, integrazione0.2.62:** CPUv12/UMDv16 integrati nella0.2.62 su richiesta. QA pixel/4K/resize PASS, main driver aggiornati ma nuovo boot e4K reale in attesa del consenso cartelle; fluidità generale non chiusa. [Evidenze](VERIFICATION.md#3-novembre--build-unica-resize-e-video0262-sul-m1).
@@ -537,6 +541,8 @@ Il ciclo RAM protetto 4→2→4 GiB con dati conservati resta la qualifica prece
 - **Evidenze:** [incidente e recupero](VERIFICATION.md#24-ottobre--driver-per-risoluzioni-personalizzate-preparazione-e-installazione-nel-clone), [pulizia autorizzata](VERIFICATION.md#25-ottobre--pulizia-delle-vecchie-prove-e-base-corrente).
 
 ### SYS-003 — RAM della VM non restituita al Mac a runtime
+
+**6 novembre, nuovo rilievo .82:** capacità completa8192MiB/balloon0/pendingfalse ripristinata al Desktop. Dopo chiusura, la discesa fissa128MiB/poll lascia ancora~5,0GiB con~2,4GiB disponibiliWindows dopo diversi minuti; release effettivo osservato, non deadlock né fix quiesce mancante. Controller/runtime/driver/protezioni allineati. Valutare un passo maggiore solo con surplus libero misurato e riserva conservata; implementazione nuova DA FARE, criterio rilascio più rapido e ritorno/integri verificati. Riduzione RAM fisica unica non dedotta dal footprintHVF. [Diario](VERIFICATION.md#6-novembre--risorse-vm-inutilizzata).
 
 **Seguito.65:** stessi componentiRAM qualificati, verificati nel runtime effettivo e nei driverWindows dopo il nuovo avvio main. Nel campione di aperturaExplorer4GiB/pendingfalse ai due estremi. Compressione/swap del Mac elevati in altri intervalli sono globali: non dimostrano da soli RAMunica della VM o difetto del balloon; nessuna nuova correzioneRAM implicata dal fixcatalogo. [Evidenze](VERIFICATION.md#4-novembre--cpu-osservabile-e-catalogo-sospeso-fuori-dal-launcher0265).
 

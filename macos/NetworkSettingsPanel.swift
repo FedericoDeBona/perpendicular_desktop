@@ -66,6 +66,10 @@ struct NetworkSettingsPanel:View {
             }
             if let error=network.error {Text(error).font(.system(size:12)).foregroundStyle(.orange).fixedSize(horizontal:false,vertical:true).textSelection(.enabled)}
         }.onAppear{network.observe()}.onDisappear{network.stopObserving()}
+        .onReceive(NotificationCenter.default.publisher(for:NSApplication.didBecomeActiveNotification)){_ in network.observationActiveChanged(true)}
+        .onReceive(NotificationCenter.default.publisher(for:NSApplication.willResignActiveNotification)){_ in network.observationActiveChanged(false)}
+        .onReceive(NotificationCenter.default.publisher(for:NSWindow.didBecomeKeyNotification)){_ in network.observationActiveChanged(true)}
+        .onReceive(NotificationCenter.default.publisher(for:NSWindow.didResignKeyNotification)){_ in network.observationActiveChanged(false)}
     }
     private func add(){
         do{try network.add(address);address="";inputError=nil}
