@@ -208,3 +208,14 @@ La firma/UUID del relink possono differire: non si accetta una differenza nelle
 sezioni eseguibili o nei dati. Qualifica runtime/Windows e distribuzione restano
 passaggi distinti. La ricevuta RAM storica non prova l'assenza dei materiali del
 QEMU successivamente distribuito.
+
+**6 novembre, controller 0.2.83:** dopo la chiusura delle finestre, il passo di
+rilascio usa il surplus misurato oltre due riserve: rimane 128 MiB vicino alla
+pressione e cresce fino a 512 MiB quando Windows ha ampia memoria disponibile.
+Con riserva 512 MiB, il massimo si applica da 1536 MiB disponibili. Target finale,
+minimo/massimo, emergenza, attesa ACK e ripristino completo in primo piano non
+cambiano. Il budget non è un ACK: blocchi pinned e avanzamento Windows possono
+limitare il rilascio fisico. Verifiche mirate delle soglie e prova reale con hash
+64 MiB, nuova allocazione e ritorno automatico a 8 GiB sono nel diario del
+6 novembre; non è una riduzione qualificata del footprint fisico unico o del
+minimo stabile. `releaseBudgetMiB` rende osservabile la decisione del controller.

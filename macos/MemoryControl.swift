@@ -107,8 +107,10 @@ final class RuntimeMemoryController {
             let quantum=UInt64(128)*Self.MiB
             let needed=min(capacity,((used+reserve+quantum-1)/quantum)*quantum)
             var target=active ? capacity:max(UInt64(config.backgroundMiB)*Self.MiB,needed)
-            // Release gradually; restore immediately when needed or visible.
-            if target<observed.actual {target=max(target,observed.actual>quantum ? observed.actual-quantum:0)}
+            // Keep the gradual step near pressure, but return a larger measured
+            // surplus while idle. Needed/reserve and immediate restore are unchanged.
+            let releaseBudget=MemoryReleaseBudget.step(available:guest.available,reserve:reserve)
+            if target<observed.actual {target=max(target,observed.actual>releaseBudget ? observed.actual-releaseBudget:0)}
             let wantedPlugged=target>base ? target-base:0
             let targetBalloon=min(target,base+observed.plugged)
             let restore=active || target>observed.actual
@@ -128,6 +130,7 @@ final class RuntimeMemoryController {
             }.value
             state=["enabled":true,"ready":true,"quiesceVerified":true,"foreground":active,"targetMiB":target/Self.MiB,
                 "viewForeground":visible,"updatedAt":Date().timeIntervalSince1970,
+                "releaseBudgetMiB":releaseBudget/Self.MiB,
                 "pressureGraceSeconds":max(0,Int(emergencyUntil-now)),
                 "actualMiB":observed.actual/Self.MiB,"pluggedMiB":observed.plugged/Self.MiB,
                 "requestedPluggedMiB":wantedPlugged/Self.MiB,"balloonMiB":inflated/Self.MiB,
