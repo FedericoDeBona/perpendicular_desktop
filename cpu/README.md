@@ -40,4 +40,6 @@ assenti o hash QEMU non coincidenti. Il packaging prova la provenienza;
 misura del beneficio, scadenza del lease e riapertura normale devono essere
 qualificate nella copia e poi nell'app principale. Confrontare sempre anche
 gli artefatti del runtime effettivo: il frontend aggiornato non li sostituisce
-finché una VM esistente resta viva. [Evidenze e limiti](../docs/VERIFICATION.md#ritorno-al-riferimento-e-scelta-della-sola-modalità-idle).
+finché una VM esistente resta viva. Qualifica QA e consegna M4 nella canonica
+0.2.84 completate nel perimetro documentato; un altro Mac richiede la propria
+compilazione e verifica locale. [Evidenze e limiti](../docs/VERIFICATION.md#consegna-84-nellapp-principale-e-misura-finale).

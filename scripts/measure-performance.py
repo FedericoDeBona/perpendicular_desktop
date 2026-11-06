@@ -152,6 +152,10 @@ def main():
                 native = json.loads(qmp.call("qom-get", path="/machine/peripheral/display0/virtio-backend", property="perp-live-stats"))
             except (RuntimeError, ValueError, TypeError) as error:
                 native = {"unavailable": str(error)}
+            try:
+                cpu_waiting = json.loads(qmp.call("qom-get", path="/machine", property="perp-idle-wfi-stats"))
+            except (RuntimeError, ValueError, TypeError) as error:
+                cpu_waiting = {"unavailable": str(error)}
         gpu = {}
         if options.gpu:
             try:
@@ -164,7 +168,8 @@ def main():
                 "networkObservation": status.get("networkObservation", {}),
                 "catalogue": {key: status.get("launcher", {}).get(key) for key in ("catalogueAutomaticEligible", "catalogueRefreshes")},
                 "guestClock": clock,
-                "nativeGraphics": native,
+                "nativeGraphics": native, "cpuWaiting": cpu_waiting,
+                "cpuIdle": status.get("cpuIdle"),
                 "gpuCache": status["windowGPUCache"],
                 "vmStat": subprocess.check_output(["vm_stat"], text=True),
                 "swap": subprocess.check_output(["sysctl", "-n", "vm.swapusage"], text=True)}
@@ -216,7 +221,7 @@ def main():
         delta = {k: v - prior[name][k] for k, v in block["stats"].items()
                  if k in prior[name] and isinstance(v, int) and not isinstance(v, bool) and k.endswith(("_bytes", "_operations", "_total_time_ns"))}
         summary["blocks"].append({"node": name, "delta": delta})
-    result = {"version": 3, "machTimebase": [timebase.numer, timebase.denom], "summary": summary, "before": before, "after": after}
+    result = {"version": 4, "machTimebase": [timebase.numer, timebase.denom], "summary": summary, "before": before, "after": after}
     # Never overwrite an earlier measurement or follow an output symlink.
     fd = os.open(options.output, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
     with os.fdopen(fd, "w") as out:
