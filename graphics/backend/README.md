@@ -374,3 +374,64 @@ il solo installer aggiornato e pinnato. Dopo il pull il gate rifiuta il vecchio
 installer; confezionare il profilo `m4-cpu-v12` dalla coppia locale già
 qualificata, firmare il riferimento e ricostruire normalmente. Non è una nuova
 build grafica né una distribuzione M4 già eseguita dal M1.
+
+## Diagnostica del pixel di origine degli atlanti condivisi
+
+`rebuild-native-video.py --shared-origin-trace` applica la patch pinnata
+`native-shared-origin-trace.patch`, separatamente dagli esperimenti video. Il
+default resta invariato. È una diagnostica QA del testo Desktop incompleto,
+non una correzione né una qualifica di prestazioni; non promuoverne il binario
+nei pin di produzione.
+
+Prima del processo da osservare, creare il solo marker privato regolare
+`/tmp/perp-shared-origin-<uid>.on`, proprietario utente corrente e permessi0600.
+Senza marker il registro è spento. Il controllo è memorizzato per processo:
+per disabilitarlo rimuovere il marker e riavviare normalmente il worker/VM QA.
+Non cambiare protezioni o impostazioni del Mac per avviare la diagnostica.
+
+Il registro scrive su stderr al massimo192righe per processo, mantiene riferimenti
+al massimo a due atlanti BGRA condivisi entro16MiB ciascuno e legge il solo
+pixelCPU di origine. Registra creazione/esportazione, clear/draw/copie/aggiornamenti
+e cambiamenti del pixel al completamento GPU già previsto dalla coda. Per le
+sorgenti staging registra descrittore e primo pixelCPU senza nuove Map. Non
+aggiunge copie o atteseGPU e non salva immagini; riferimenti e logging possono
+alterare tempi/lifetime, quindi i campioni non sono misure di risorse o FPS.
+
+Conservare patch/ricevuta nel runtime QA esplicitamente diagnostico e verificare
+l'hash della libreria realmente caricata e gli altri componenti. La canonica e i
+pin qualificati restano il ripristino; il controllo video di produzione deve
+continuare a respingere un backend diagnostico non qualificato. [Domanda ed
+esiti](../../docs/VERIFICATION.md#registro-nativo-dellorigine-condivisa).
+
+
+## Candidata: dipendenze delle texture con caricamento iniziale separato
+
+`rebuild-native-video.py --late-texture-initialization-fences` applica
+`native-late-texture-initialization.patch` e registra l'opzione nella ricevuta.
+Default e release di produzione restano invariati finché manca la verifica main.
+La candidata non include il registro diagnostico e non richiede il marker.
+
+Neptune crea le texture native senza `pInitialData`, poi trasporta i dati iniziali
+con RESOURCE_UPDATE/UpdateSubresource. Anche una risorsa dichiarata IMMUTABLE
+può quindi ricevere una scrittura GPU prima del primo uso. Il backend evita
+la scorciatoia GpuReadonly quando la creazione non ha fornito i dati: conserva
+le dipendenze write/read già previste, senza attese CPU, colori speciali o
+eccezioni per Settings. Le texture inizializzate direttamente mantengono
+la scorciatoia. La correzione riguarda qui il percorso DeviceTexture non condiviso;
+non attribuirle automaticamente copertura di buffer o altre allocazioni.
+
+Il piccolo caso nativo crea/carica una texture immutabile 1×1 e la copia
+in una BGRA condivisa: nella raccolta limitata, base B6F4 con 4/8 esiti vuoti,
+candidata 5DA8 con 0/8. Non è una garanzia statistica, una misura di prestazioni
+o una verifica dell'app principale. La prova reale di Settings è separata
+nel [diario](../../docs/VERIFICATION.md#dipendenze-della-texture-immutabile-caricata-dopo-la-creazione).
+
+Il controllo condiviso `tests/NativeLateTextureUploadChecks.cpp` usa gli header
+`include/native/{windows,directx}` e `src/dxmt-native` della sorgente qualificata,
+C++20/`-DDXMT_NATIVE=1 -fms-extensions -fblocks`, link alla libreria candidata
+con rpath privato. Include i controlli upload/staging/creazione e legge direttamente
+l'allocazione condivisa al completamento, senza readback GPU aggiuntivo. Il caso
+condiviso finale usa solo BIND_SHADER_RESOURCE sulla sorgente: passa sulla
+candidata e in quattro esecuzioni base. I conteggi 4/8→0/8 sopra appartengono
+al fixture privato precedente con BIND_RENDER_TARGET; non estenderli alla variante
+SRV o presentarli come prova della causa unica in Windows.

@@ -65,9 +65,13 @@ def main():
     parser.add_argument('--gpu-output', action='store_true', help='Opt in to the pixel-qualified GPU transfer experiment; browser performance is not qualified')
     parser.add_argument('--reuse-bitstream-staging', action='store_true', help='Opt in to bounded per-decoder input staging reuse; browser performance must be qualified')
     parser.add_argument('--cpu-video-input', action='store_true', help='Opt in to the pixel-qualified CPU input experiment; no browser gain qualified')
+    parser.add_argument('--shared-origin-trace', action='store_true', help='QA-only bounded CPU origin trace for shared BGRA atlases; not a graphics fix or performance qualification')
+    parser.add_argument('--late-texture-initialization-fences', action='store_true', help='QA candidate: retain GPU dependencies for textures created before their initial upload')
     args = parser.parse_args()
     if args.cpu_video_input and args.reuse_bitstream_staging:
         raise ValueError('CPU video input and the rejected staging reuse experiment must be qualified separately')
+    if (args.shared_origin_trace or args.late_texture_initialization_fences) and (args.gpu_output or args.reuse_bitstream_staging or args.cpu_video_input):
+        raise ValueError('Qualify the Desktop diagnostic/candidate separately from video experiments')
     pins = json.loads((REPO / 'graphics/backend/video-inputs.json').read_text())
     output = args.output.resolve()
     if output.exists() or output.is_relative_to(REPO):
@@ -86,6 +90,8 @@ def main():
         ('video-named-errors.patch', 'named_errors_patch_sha256'),
         ('video-processor-format-support.patch', 'processor_formats_patch_sha256'),
         ('video-processor-native.patch', 'processor_patch_sha256'),
+        ('native-shared-origin-trace.patch', 'shared_origin_trace_patch_sha256'),
+        ('native-late-texture-initialization.patch', 'late_texture_initialization_patch_sha256'),
         ('vp9-gpu-output.patch', 'vp9_gpu_output_patch_sha256'),
         ('video-staging-reuse.patch', 'staging_reuse_patch_sha256'),
         ('video-staging-input.patch', 'staging_input_patch_sha256'),
@@ -94,6 +100,10 @@ def main():
                if (name != 'vp9-gpu-output.patch' or args.gpu_output)
                and (name != 'video-staging-reuse.patch' or args.reuse_bitstream_staging)
                and (name != 'video-staging-input.patch' or args.cpu_video_input)]
+    patches = [patch for patch in patches
+               if patch.name != 'native-shared-origin-trace.patch' or args.shared_origin_trace]
+    patches = [patch for patch in patches
+               if patch.name != 'native-late-texture-initialization.patch' or args.late_texture_initialization_fences]
     for name, key in patch_inputs:
         if digest(REPO / 'graphics/backend' / name) != pins[key]:
             raise ValueError('Patch differs from the pinned input: ' + name)
@@ -126,6 +136,8 @@ def main():
     run([ninja, '-C', build, '-j1', 'src/dxmt-native/libdxmt-native.dylib'])
     library = build / 'src/dxmt-native/libdxmt-native.dylib'
     receipt = {'inputs': pins, 'gpu_output_experiment': args.gpu_output,
+               'shared_origin_trace_experiment': args.shared_origin_trace,
+               'late_texture_initialization_fences_experiment': args.late_texture_initialization_fences,
                'staging_reuse_experiment': args.reuse_bitstream_staging,
                'cpu_video_input_experiment': args.cpu_video_input, 'commands': commands, 'backend_sha256': digest(library),
                'qualification': 'build-only; qualify processor pixels, decoder, ordinary/shared NV12 and BGRA, then Windows/Edge separately'}

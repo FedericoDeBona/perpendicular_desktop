@@ -1,0 +1,13 @@
+--- a/src/d3d11/d3d11_texture_device.cpp
++++ b/src/d3d11/d3d11_texture_device.cpp
+@@ -530,7 +530,9 @@
+   flags.set(finalDesc.CPUAccessFlags ? TextureAllocationFlag::GpuManaged : TextureAllocationFlag::GpuPrivate);
+   if (!(finalDesc.BindFlags & (D3D11_BIND_UNORDERED_ACCESS | D3D11_BIND_RENDER_TARGET | D3D11_BIND_DEPTH_STENCIL)))
+     flags.set(TextureAllocationFlag::ShaderReadonly);
+-  if (finalDesc.Usage == D3D11_USAGE_IMMUTABLE)
++  // Neptune creates first and uploads initial data in a later command.
++  // Keep write dependencies until creation itself supplied the contents.
++  if (finalDesc.Usage == D3D11_USAGE_IMMUTABLE && pInitialData)
+     flags.set(TextureAllocationFlag::GpuReadonly);
+   if (single_subresource && (finalDesc.BindFlags & D3D11_BIND_DEPTH_STENCIL)) {
+     Rc<RenamableTexturePool> renamable = new RenamableTexturePool(texture.ptr(), 32, flags);

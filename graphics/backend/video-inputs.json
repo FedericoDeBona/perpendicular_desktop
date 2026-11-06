@@ -28,5 +28,7 @@
   "processor_patch_sha256": "a0e9f490908322b143487af549ab941958b04113db6490d571cac9c7ffa5bed5",
   "vp9_gpu_output_patch_sha256": "f686ec1ea36d39dc3c63e40ef834c1df147c8fbc390f6b323db324c568ca90a3",
   "staging_reuse_patch_sha256": "fa2b0211d92ddb07492e3df73785b984bfc2b5c1129c7cead82cbc1b2e87c74b",
-  "staging_input_patch_sha256": "056618041bbd0bb3bf918128980097d3f113b1de8f4064bf223dcde8620e99df"
+  "staging_input_patch_sha256": "056618041bbd0bb3bf918128980097d3f113b1de8f4064bf223dcde8620e99df",
+  "shared_origin_trace_patch_sha256": "9d306da2105001bfbb470b25246e8edc1a1ab5d32b8a26fa33aa62aed73b94b1",
+  "late_texture_initialization_patch_sha256": "900107884c2f91bfc405a0486aec8e0900eeb4d8d0f28f91937f0f222c51e122"
 }

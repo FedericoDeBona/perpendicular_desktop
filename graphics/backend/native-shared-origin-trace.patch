@@ -1,0 +1,179 @@
+--- /dev/null
++++ b/src/dxmt/dxmt_origin_trace.hpp
+@@ -0,0 +1,61 @@
++#pragma once
++// Private opt-in diagnostic: CPU-visible origin of two shared BGRA atlases.
++// No GPU copies or extra waits. Bounded references live until this QA process exits.
++#include "dxmt_texture.hpp"
++#include <mutex>
++#include <cstdio>
++#include <cstring>
++#include <chrono>
++#include <sys/stat.h>
++#include <unistd.h>
++namespace dxmt::origin_trace {
++inline bool enabled() {
++  static const bool value=[] {
++    char name[96];std::snprintf(name,sizeof(name),"/tmp/perp-shared-origin-%u.on",unsigned(getuid()));
++    struct stat s={};return lstat(name,&s)==0&&S_ISREG(s.st_mode)&&s.st_uid==getuid()&&(s.st_mode&077)==0;
++  }();return value;
++}
++struct Entry {Rc<Texture> texture;Rc<TextureAllocation> allocation;const void* queue;uint32_t last;};
++struct State {std::mutex mutex;Entry entries[2];unsigned count=0,records=0;};
++inline State& state(){static auto* s=new State;return *s;}
++inline bool line(State&s){return s.records++<192;}
++inline long long now(){return std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();}
++inline uint32_t pixel(TextureAllocation*a){uint32_t v=0;std::memcpy(&v,a->mappedMemory,4);return v;}
++inline Entry* find(State&s,const Texture*t){for(unsigned i=0;i<s.count;i++)if(s.entries[i].texture.ptr()==t)return &s.entries[i];return nullptr;}
++inline void watch(const Rc<Texture>&t,const void*q,int fd,const void*data,unsigned pitch) {
++  if(!enabled()||t->pixelFormat()!=WMTPixelFormatBGRA8Unorm||t->width()<1024||t->height()<512||uint64_t(t->width())*t->height()>4194304||!t->current()->mappedMemory)return;
++  auto&s=state();std::lock_guard<std::mutex>l(s.mutex);if(s.count==2||find(s,t.ptr()))return;
++  uint32_t v=pixel(t->current()),input=0;if(data&&pitch>=4)std::memcpy(&input,data,4);
++  s.entries[s.count++]={t,Rc<TextureAllocation>(t->current()),q,v};
++  if(line(s))fprintf(stderr,"origin-trace pid=%u us=%lld create tex=%p alloc=%p queue=%p fd=%d size=%ux%u initial=%d input=%08x pixel=%08x\n",getpid(),now(),t.ptr(),t->current(),q,fd,t->width(),t->height(),data!=nullptr,input,v);
++}
++inline void tiny(Texture*t,const void*data,unsigned pitch){
++  if(!enabled()||t->pixelFormat()!=WMTPixelFormatBGRA8Unorm||t->width()!=1||t->height()!=1||!data||pitch<4)return;
++  auto&s=state();std::lock_guard<std::mutex>l(s.mutex);uint32_t v;memcpy(&v,data,4);if(line(s))fprintf(stderr,"origin-trace pid=%u us=%lld tiny-source tex=%p input=%08x\n",getpid(),now(),t,v);
++}
++inline void publish(Texture*t){
++  if(!enabled())return;auto&s=state();std::lock_guard<std::mutex>l(s.mutex);auto*e=find(s,t);if(!e)return;
++  if(line(s))fprintf(stderr,"origin-trace pid=%u us=%lld publish tex=%p pixel=%08x\n",getpid(),now(),t,pixel(e->allocation.ptr()));
++}
++inline bool watched(const Texture*t){if(!enabled()||!t)return false;auto&s=state();std::lock_guard<std::mutex>l(s.mutex);return find(s,t)!=nullptr;}
++inline void copy(Texture*t,const void*src,unsigned sub,unsigned x,unsigned y,unsigned z,unsigned srcSub,const uint32_t*box,unsigned flags,const uint32_t*srcdesc,bool known,uint32_t first){
++  if(!enabled()||!t)return;auto&s=state();std::lock_guard<std::mutex>l(s.mutex);if(!find(s,t))return;uint32_t b[6]={};if(box)memcpy(b,box,sizeof(b));
++  uint32_t d[11]={};if(srcdesc)memcpy(d,srcdesc,sizeof(d));
++  if(line(s))fprintf(stderr,"origin-trace pid=%u us=%lld copy tex=%p src=%p sub=%u dst=%u,%u,%u srcSub=%u box=%d:%u,%u,%u,%u,%u,%u flags=%u srcDesc=%ux%u:fmt%u:usage%u:cpu%u stagingPixel=%d:%08x\n",getpid(),now(),t,src,sub,x,y,z,srcSub,box!=nullptr,b[0],b[1],b[2],b[3],b[4],b[5],flags,d[0],d[1],d[4],d[7],d[9],known,first);
++}
++inline void update(Texture*t,unsigned sub,const uint32_t*box,const void*data,unsigned row,unsigned flags){
++  if(!enabled()||!t)return;auto&s=state();std::lock_guard<std::mutex>l(s.mutex);if(!find(s,t))return;uint32_t b[6]={},v=0;if(box)memcpy(b,box,sizeof(b));if(data&&row>=4)memcpy(&v,data,4);
++  if(line(s))fprintf(stderr,"origin-trace pid=%u us=%lld update tex=%p sub=%u box=%d:%u,%u,%u,%u,%u,%u row=%u first=%08x flags=%u\n",getpid(),now(),t,sub,box!=nullptr,b[0],b[1],b[2],b[3],b[4],b[5],row,v,flags);
++}
++inline void clear(Texture*t,const float*rgba,const int32_t*rect,unsigned n){
++  if(!enabled()||!t)return;auto&s=state();std::lock_guard<std::mutex>l(s.mutex);if(!find(s,t))return;int32_t b[4]={};if(rect&&n)memcpy(b,rect,sizeof(b));
++  if(line(s))fprintf(stderr,"origin-trace pid=%u us=%lld clear tex=%p rgba=%g,%g,%g,%g rects=%u first=%d,%d,%d,%d\n",getpid(),now(),t,rgba[0],rgba[1],rgba[2],rgba[3],n,b[0],b[1],b[2],b[3]);
++}
++inline void draw(Texture*t,bool indexed,unsigned count,unsigned start,int base,const int32_t*rect,unsigned n){
++  if(!enabled()||!t)return;auto&s=state();std::lock_guard<std::mutex>l(s.mutex);if(!find(s,t))return;int32_t b[4]={};if(rect&&n)memcpy(b,rect,sizeof(b));
++  if(line(s))fprintf(stderr,"origin-trace pid=%u us=%lld draw tex=%p indexed=%d count=%u start=%u base=%d rawScissors=%u first=%d,%d,%d,%d\n",getpid(),now(),t,indexed,count,start,base,n,b[0],b[1],b[2],b[3]);
++}
++inline void completed(const void*q,uint64_t seq){
++  if(!enabled())return;auto&s=state();std::lock_guard<std::mutex>l(s.mutex);for(unsigned i=0;i<s.count;i++){auto&e=s.entries[i];if(e.queue!=q)continue;uint32_t v=pixel(e.allocation.ptr());if(v==e.last)continue;if(line(s))fprintf(stderr,"origin-trace pid=%u us=%lld completed tex=%p queue=%p seq=%llu old=%08x pixel=%08x\n",getpid(),now(),e.texture.ptr(),q,(unsigned long long)seq,e.last,v);e.last=v;}
++}
++}
+--- a/src/dxmt/dxmt_command_queue.cpp
++++ b/src/dxmt/dxmt_command_queue.cpp
+@@ -1,3 +1,4 @@
++#include "dxmt_origin_trace.hpp"
+ /*
+  * Copyright 2026 Feifan He for CodeWeavers
+  * Copyright 2026 Marc-Aurel Zent for CodeWeavers
+@@ -209,6 +210,7 @@
+     if (chunk.signal_frame_latency_fence_ != ~0ull)
+       frame_latency_fence_.signal(chunk.signal_frame_latency_fence_);
+ 
++    origin_trace::completed(this, internal_seq);
+     chunk.reset();
+     cpu_coherent.signal(internal_seq);
+     chunk_ongoing.fetch_sub(1, std::memory_order_release);
+--- a/src/d3d11/d3d11_texture_device.cpp
++++ b/src/d3d11/d3d11_texture_device.cpp
+@@ -1,3 +1,4 @@
++#include "../dxmt/dxmt_origin_trace.hpp"
+ /*
+  * Copyright 2026 Feifan He for CodeWeavers
+  * Copyright 2026 Marc-Aurel Zent for CodeWeavers
+@@ -333,6 +334,7 @@
+         ERR("GetSharedHandle: shared texture initialization did not complete");
+         return E_FAIL;
+       }
++      origin_trace::publish(this->texture_.ptr());
+       *pSharedHandle = reinterpret_cast<HANDLE>(&shm_pod_);
+       return S_OK;
+     }
+@@ -432,6 +434,8 @@
+     }
+   };
+ 
++  origin_trace::tiny(texture.ptr(), pInitialData ? pInitialData[0].pSysMem : nullptr, pInitialData ? pInitialData[0].SysMemPitch : 0);
++
+   auto shared_flag =
+       D3D11_RESOURCE_MISC_SHARED | D3D11_RESOURCE_MISC_SHARED_NTHANDLE | D3D11_RESOURCE_MISC_SHARED_KEYEDMUTEX;
+ #ifndef _WIN32
+@@ -456,6 +460,7 @@
+         return hr;
+       texture = std::move(shm_texture);
+       initialize(std::move(shm_allocation));
++      origin_trace::watch(texture, &pDevice->GetDXMTDevice().queue(), pod.fd, pInitialData ? pInitialData[0].pSysMem : nullptr, pInitialData ? pInitialData[0].SysMemPitch : 0);
+       *ppTexture = reinterpret_cast<typename tag::COM_IMPL *>(
+           ref(new DeviceTexture<tag>(&finalDesc, std::move(texture), pod, pDevice))
+       );
+--- a/src/d3d11/d3d11_context_impl.cpp
++++ b/src/d3d11/d3d11_context_impl.cpp
+@@ -1,3 +1,4 @@
++#include "../dxmt/dxmt_origin_trace.hpp"
+ /*
+  * This file is included by d3d11_context_{imm|def}.cpp
+  * and should be not used as a compilation unit
+@@ -890,6 +891,7 @@
+ 
+     while (auto expected = com_cast<ID3D11RenderTargetView>(pView)) {
+       auto rtv = static_cast<D3D11RenderTargetView *>(expected.ptr());
++      origin_trace::clear(rtv->texture().ptr(), Color, reinterpret_cast<const int32_t*>(pRect), NumRects);
+       // d3d11 spec: ClearView doesn’t support 3D textures.
+       if (rtv->texture()->textureType(rtv->viewId()) == WMTTextureType3D)
+         return;
+@@ -1179,6 +1181,17 @@
+ 
+     BlitObject Dst(device, pDstResource);
+     BlitObject Src(device, pSrcResource);
++    if (origin_trace::watched(GetTexture(pDstResource).ptr())) {
++      D3D11_TEXTURE2D_DESC source_description = {};
++      if (Src.Dimension == D3D11_RESOURCE_DIMENSION_TEXTURE2D)
++        static_cast<ID3D11Texture2D*>(pSrcResource)->GetDesc(&source_description);
++      uint32_t source_pixel = 0;
++      auto source_staging = GetStagingResource(pSrcResource, SrcSubresource);
++      const bool source_pixel_known = source_staging && source_staging->length >= 4;
++      if (source_pixel_known)
++        std::memcpy(&source_pixel, source_staging->mappedImmediateMemory(), 4);
++      origin_trace::copy(GetTexture(pDstResource).ptr(), pSrcResource, DstSubresource, DstX, DstY, DstZ, SrcSubresource, reinterpret_cast<const uint32_t*>(pSrcBox), CopyFlags, reinterpret_cast<const uint32_t*>(&source_description), source_pixel_known, source_pixel);
++    }
+ 
+     switch (Dst.Dimension) {
+     case D3D11_RESOURCE_DIMENSION_UNKNOWN:
+@@ -1261,6 +1274,7 @@
+       return;
+ 
+     BlitObject Dst(device, pDstResource);
++    origin_trace::update(GetTexture(pDstResource).ptr(), DstSubresource, reinterpret_cast<const uint32_t*>(pDstBox), pSrcData, SrcRowPitch, CopyFlags);
+ 
+     if (Dst.Dimension == D3D11_RESOURCE_DIMENSION_BUFFER) {
+       D3D11_BUFFER_DESC desc;
+@@ -1369,6 +1383,8 @@
+     if (unlikely(!VertexCount))
+       return;
+     std::lock_guard<mutex_t> lock(mutex);
++    for (unsigned i=0; i<state_.OutputMerger.NumRTVs; ++i) if(auto rtv=state_.OutputMerger.RTVs[i]) origin_trace::draw(rtv->texture().ptr(), false, VertexCount, StartVertexLocation, 0, reinterpret_cast<const int32_t*>(state_.Rasterizer.scissor_rects), state_.Rasterizer.NumScissorRects);
++
+ 
+     WMTPrimitiveType Primitive;
+     uint32_t ControlPointCount;
+@@ -1402,6 +1418,8 @@
+     if (unlikely(!IndexCount))
+       return;
+     std::lock_guard<mutex_t> lock(mutex);
++    for (unsigned i=0; i<state_.OutputMerger.NumRTVs; ++i) if(auto rtv=state_.OutputMerger.RTVs[i]) origin_trace::draw(rtv->texture().ptr(), true, IndexCount, StartIndexLocation, BaseVertexLocation, reinterpret_cast<const int32_t*>(state_.Rasterizer.scissor_rects), state_.Rasterizer.NumScissorRects);
++
+ 
+     WMTPrimitiveType Primitive;
+     uint32_t ControlPointCount;
+@@ -4829,7 +4847,8 @@
+   void
+   ClearRenderTargetView(D3D11RenderTargetView *pRenderTargetView, const FLOAT ColorRGBA[4]) {
+     InvalidateCurrentPass();
++    origin_trace::clear(pRenderTargetView->texture().ptr(), ColorRGBA, nullptr, 0);
+     auto clear_color = WMTClearColor{ColorRGBA[0], ColorRGBA[1], ColorRGBA[2], ColorRGBA[3]};
+     auto &props = pRenderTargetView->description();
+ 
+     EmitOP([texture = pRenderTargetView->texture(), view = pRenderTargetView->viewId(),
