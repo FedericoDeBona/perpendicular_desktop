@@ -32,6 +32,7 @@ La percentuale globale del driver, i contatori cumulativi AGX e gli intervalli d
 | --- | ---: | --- |
 | VM collegata, nessuna finestra Seamless, Desktop chiuso | 8,811 s | WindowServer 157,473 ms; Chrome GPU 52,449 ms; non attribuiti 0,083 ms; nessuna riga QEMU/renderer/Perpendicular |
 | Desktop aperto con interazione nella shell Windows | 10,877 s | Renderer VM principale 285,734 ms; altri renderer presenti; Perpendicular 160,634 ms; WindowServer 5371,129 ms |
+| Secondo riposo, stato verificato prima/durante/dopo la cattura | 10,827 s | Nessuna riga QEMU/renderer/Perpendicular, contatori immagini fermi; WindowServer 3605,110 ms, Codex Service 160,037 ms, Creality Print Mac 137,324 ms; app Mac diverse dal primo campione |
 
 Il controllo positivo rileva quindi gli stessi processi assenti nel campione a riposo. Non è un confronto di prestazioni a parità di carico, né prova di zero consumo fisico della VM. Evidenze, tentativi non riusciti e limiti: [VERIFICATION.md](VERIFICATION.md#6-novembre--gpu-per-processo-e-schermi-non-usati).
 
