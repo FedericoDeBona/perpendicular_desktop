@@ -1,0 +1,9 @@
+{
+  "schema": 1,
+  "deferredScanoutSelectionVersion": 1,
+  "waitMilliseconds": 3000,
+  "requiredPatches": [
+    "graphics/monitor/consumer-demand.patch",
+    "graphics/monitor/deferred-scanout-selection.patch"
+  ]
+}

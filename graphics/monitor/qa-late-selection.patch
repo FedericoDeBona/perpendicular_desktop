@@ -1,0 +1,35 @@
+--- a/qemu-native-sync.m
++++ b/qemu-native-sync.m
+@@ -33,6 +33,8 @@
+ static id<MTLSharedEvent> held_event;
+ static bool hold_read, hold_gpu, delay_done;
+ static NativeRead *delayed;
++static bool qa_delayed_selection;
++static int64_t qa_selection_until;
+ static uint64_t selection_waits,selection_resumed,selection_timeouts;
+ static uint64_t generations, copies, cancelled, mappings_released, blocked_flushes,external_submitted,external_acked,external_abandoned;
+ 
+@@ -144,7 +146,7 @@
+      * proxy pumps its ordered creation. Keep the bounded wait non-blocking. */
+     perp_live_scanout_pump();
+     if (display.selection_pending && !display.failed) {
+-        if (perp_live_scanout_select(display.resource)) {
++        if (qemu_clock_get_ms(QEMU_CLOCK_REALTIME) >= qa_selection_until && perp_live_scanout_select(display.resource)) {
+             display.selection_pending = false;
+             display.update_pending = true;
+             selection_resumed++;
+@@ -190,6 +192,14 @@
+     admitted = perp_live_scanout_select(resource);
+     bool changed = display.resource != resource || display.width != width || display.height != height || display.x != x ||
+         display.y != y || display.crop_width != crop_width || display.crop_height != crop_height;
++    /* QA-only failure injection: one replacement after real frames, without
++     * altering resource data or admitting a source the broker rejected. */
++    if (changed && admitted && external_submitted >= 20 && !qa_delayed_selection) {
++        qa_delayed_selection = true;
++        qa_selection_until = qemu_clock_get_ms(QEMU_CLOCK_REALTIME) + 120;
++        admitted = false;
++        fprintf(stderr,"perp-native: QA delaying selection admission resource=%u for120ms\n",resource);
++    }
+     if (changed) {
+         display.generation = ++generations; display.current = NULL;
+         display.update_pending = true;

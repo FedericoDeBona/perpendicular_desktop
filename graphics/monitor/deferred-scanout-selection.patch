@@ -1,0 +1,112 @@
+--- a/qemu-native-sync.m
++++ b/qemu-native-sync.m
+@@ -25,13 +25,15 @@
+     uint32_t resource,width,height,x,y,crop_width,crop_height;
+     uint64_t generation;
+     NativeRead *current;
+-    bool failed,refresh_requested,update_pending;
++    bool failed,refresh_requested,update_pending,selection_pending;
++    uint64_t selection_deadline;
+ } display;
+ static QEMUTimer *timer;
+ static id<MTLCommandQueue> queue;
+ static id<MTLSharedEvent> held_event;
+ static bool hold_read, hold_gpu, delay_done;
+ static NativeRead *delayed;
++static uint64_t selection_waits,selection_resumed,selection_timeouts;
+ static uint64_t generations, copies, cancelled, mappings_released, blocked_flushes,external_submitted,external_acked,external_abandoned;
+ 
+ static void completed(void *opaque) {
+@@ -137,18 +139,34 @@
+ }
+ static void tick(void *opaque) {
+     (void)opaque;
++    /* Resource creation and scanout selection arrive on separate channels.
++     * An unknown selection is never admitted, but may become known after the
++     * proxy pumps its ordered creation. Keep the bounded wait non-blocking. */
++    perp_live_scanout_pump();
++    if (display.selection_pending && !display.failed) {
++        if (perp_live_scanout_select(display.resource)) {
++            display.selection_pending = false;
++            display.update_pending = true;
++            selection_resumed++;
++        } else if (qemu_clock_get_ms(QEMU_CLOCK_REALTIME) >= display.selection_deadline) {
++            display.selection_pending = false;
++            display.failed = true;
++            selection_timeouts++;
++            fprintf(stderr,"perp-native: selection timed out resource=%u\n",display.resource);
++        }
++    }
+     bool refresh=perp_native_display_needs_refresh();
+     /* Capacity also becomes false while the consumer holds both slots.
+      * Keep one latest update through no consumer/full capacity; ACK handling
+      * and old producer work still run below. Never discard a static update. */
+-    if(display.resource && !display.failed && perp_native_display_can_capture() &&
++    if(display.resource && !display.failed && !display.selection_pending && perp_native_display_can_capture() &&
+        (display.update_pending || (refresh && !display.refresh_requested))) {
+         perp_live_scanout_refresh(display.resource,!display.update_pending);
+         display.update_pending=false;
+     }
+     display.refresh_requested=refresh;
+     perp_live_scanout_pump();
+-    if (display.resource && !display.current && !display.failed && !hold_read && perp_native_display_can_capture()) {
++    if (display.resource && !display.current && !display.failed && !display.selection_pending && !hold_read && perp_native_display_can_capture()) {
+         PerpLiveLease lease;
+         if (perp_live_scanout_take(display.resource, &lease)) {
+             if (!publish(&lease)) { perp_live_scanout_done(&lease, false); display.failed = true; }
+@@ -161,18 +179,30 @@
+     uint32_t width, uint32_t height, uint32_t x, uint32_t y, uint32_t crop_width, uint32_t crop_height) {
+     const char *enabled = getenv("PERP_NEPTUNE_SCANOUT_BROKER");
+     if (!enabled || strcmp(enabled, "1")) return false;
+-    bool admitted = perp_live_scanout_select(resource);
+-    if (!admitted || output || (display.owner && display.owner != owner)) {
++    /* Reject incompatible owners/outputs immediately. Missing resource
++     * registration is retried only through the broker's normal admission. */
++    bool admitted = false;
++    if (output || (display.owner && display.owner != owner)) {
+         if (!display.failed) fprintf(stderr,"perp-native: selection rejected resource=%u output=%u admitted=%u owner_match=%u previous=%u\n",
+             resource,output,admitted,!display.owner || display.owner==owner,display.resource);
+         display.failed = true; return true;
+     }
+-    if (display.resource != resource || display.width != width || display.height != height || display.x != x ||
+-        display.y != y || display.crop_width != crop_width || display.crop_height != crop_height) {
++    admitted = perp_live_scanout_select(resource);
++    bool changed = display.resource != resource || display.width != width || display.height != height || display.x != x ||
++        display.y != y || display.crop_width != crop_width || display.crop_height != crop_height;
++    if (changed) {
+         display.generation = ++generations; display.current = NULL;
+         display.update_pending = true;
+         if (!display.generation) { display.failed = true; return true; }
+     }
++    if (!admitted && (changed || !display.selection_pending)) {
++        /* Stop selecting the old source while waiting. Retiring its exact
++         * leases/epochs still follows the existing completion callbacks. */
++        perp_live_scanout_select(0);
++        display.selection_deadline = qemu_clock_get_ms(QEMU_CLOCK_REALTIME) + 3000;
++        selection_waits++;
++    }
++    display.selection_pending = !admitted;
+     display.owner = owner; display.console = console; display.resource = resource;
+     display.width = width; display.height = height; display.x = x; display.y = y;
+     display.crop_width = crop_width; display.crop_height = crop_height;
+@@ -204,7 +234,8 @@
+     if (display.owner != owner) return;
+     display.generation = ++generations; display.current = NULL;
+     display.owner = NULL; display.console = NULL; display.resource = 0;
+-    display.failed = display.refresh_requested = display.update_pending = false;
++    display.failed = display.refresh_requested = display.update_pending = display.selection_pending = false;
++    display.selection_deadline = 0;
+     perp_native_display_reset();
+     perp_live_scanout_select(0);
+     if (timer) timer_del(timer);
+@@ -217,5 +248,8 @@
+         ",\"blocked_flushes\":%"PRIu64",\"failed\":%s,\"active\":%s,\"publisher_can_capture\":%s,\"update_pending\":%s,\"renderer\":%s,\"publisher\":%s}",
+         copies,external_submitted,external_acked,external_abandoned,cancelled, qatomic_read(&mappings_released), blocked_flushes, display.failed ? "true" : "false", display.current ? "true" : "false",
+         perp_native_display_can_capture() ? "true" : "false", display.update_pending ? "true" : "false", renderer, publisher);
+-    free(renderer); free(publisher); return result;
+-}
++    free(renderer); free(publisher);
++    char *stats = g_strdup_printf("%.*s,\"selection_pending\":%s,\"selection_waits\":%"PRIu64",\"selection_resumed\":%"PRIu64",\"selection_timeouts\":%"PRIu64"}",
++        (int)strlen(result)-1,result,display.selection_pending ? "true" : "false",selection_waits,selection_resumed,selection_timeouts);
++    g_free(result);return stats;
++}

@@ -1,0 +1,17 @@
+{
+  "schema": 1,
+  "sourceBefore": "6a86d0064dc4fcdc58eafebd26463885fe2933b7c935a84452d988adaf89a401",
+  "patches": {
+    "graphics/monitor/consumer-demand.patch": "c669845d2d94fef72911861801abaafc1e400aafdc8f661b7fec2858a6d50a4f",
+    "graphics/monitor/deferred-scanout-selection.patch": "88151c66ce708c940dac5d963d10c530683ed3386b1a9d87ce9e24afeb792d52"
+  },
+  "minimumCandidate": {
+    "deferred_scanout_selection_version": 1,
+    "waitMilliseconds": 3000
+  },
+  "qualification": "QA candidate only; not a production release requirement until runtime verification",
+  "qaOnlyPatch": {
+    "path": "graphics/monitor/qa-late-selection.patch",
+    "sha256": "2ee4b20e7d441d226afa5bc128eead5bfc5da24688505f1eecdba2de40437ae0"
+  }
+}
