@@ -1,0 +1,18 @@
+--- a/target/arm/hvf/hvf.c
++++ b/target/arm/hvf/hvf.c
+@@ -2031,11 +2031,11 @@
+     nanos = ticks_to_sleep * cntfrq;
+ 
+     /*
+-     * Don't sleep for less than the time a context switch would take,
+-     * so that we can satisfy fast timer requests on the same CPU.
+-     * Measurements on M1 show the sweet spot to be ~2ms.
++     * Avoid repeated VM entries while the guest's idle loop waits for a
++     * short timer. Keep a small busy window, but sleep for longer waits.
++     * Interrupts still wake pselect immediately; the timer deadline is kept.
+      */
+-    if (!seconds && nanos < (2 * SCALE_MS)) {
++    if (!seconds && nanos < 250000) {
+         return;
+     }
+ 
