@@ -121,6 +121,7 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
     private var desktopReadRequest:UUID?
     private var desktopReadAgain=false
     private var desktopResizeRequest:UUID?
+    private var desktopResizeRead:DesktopResizeRead?
     private var desktopResizeChangedAt:TimeInterval=0
     private var desktopResizeReport:[String:Any]=[:]
     private var desktopAttempted=NSSize.zero
@@ -162,6 +163,7 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
                     self.mixedDisplayConfiguring=false
                     self.mixedDisplayInsets=[:];self.mixedDisplayInsetScale=0
                     self.desktopResizeTask?.cancel();self.desktopResizeTask=nil
+                    self.desktopResizeRead?.finish(false);self.desktopResizeRead=nil
                     self.desktopReadRequest=nil;self.desktopReadAgain=false
                     self.machine?.finishDesktopResolution()
                     self.desktopResizeRequest=nil;self.desktopAttempted = .zero;self.desktopConfirmed = .zero
@@ -394,7 +396,17 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
         network.configure(machine:machine,bridge:bridge,guestBusy:{[weak self] in self?.folderIntegrationBusy ?? true})
         memoryController?.stop();memoryController=nil;vmMemoryState=[:]
         machine.desktopClipboardBridge=bridge
-        machine.onDesktopSize={ [weak self] size in self?.desktopSize=size;self?.scheduleDesktopResize() }
+        machine.onDesktopSize={ [weak self] size in
+            guard let self else{return}
+            if self.desktopSize != size {
+                self.desktopSize=size
+                if let read=self.desktopResizeRead,read.pending {
+                    self.desktopResizeReport["supersededReads"]=(self.desktopResizeReport["supersededReads"] as? Int ?? 0)+1
+                    self.desktopResizeRead=nil;read.finish(false)
+                }
+            }
+            self.scheduleDesktopResize()
+        }
         machine.onDesktopInput={ [weak self] in
             self?.desktopRecoveryTask?.cancel()
             self?.followDesktopFocus()
@@ -1420,7 +1432,9 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
             // Keep one transaction pending and verify actual Windows geometry.
             var checks=0
             var slowRetry=false
-            let deadline=ProcessInfo.processInfo.systemUptime+12
+            var applyUnconfirmed=false
+            var targetStarted=started
+            var deadline=started+12
             while checks<10 && ProcessInfo.processInfo.systemUptime<deadline {
                 try? await Task.sleep(for:.milliseconds(150))
                 guard !Task.isCancelled,self.connected,self.displayEpoch == epoch,self.desktopResizeRequest == request else{return}
@@ -1437,10 +1451,11 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
                 // latest view now, before waiting for obsolete Windows geometry
                 // and repairing N+1 for a mode the user has already replaced.
                 let latest=raster(self.desktopSize)
-                if latest != mode {
+                if latest != mode,!applyUnconfirmed {
                     mode=latest;self.desktopAttempted=mode;checks=0
                     framesBeforeRequest=self.machine?.desktopState["nativeReceivedFrames"] as? UInt64 ?? 0
                     self.desktopResizeChangedAt=ProcessInfo.processInfo.systemUptime
+                    targetStarted=self.desktopResizeChangedAt;deadline=targetStarted+12
                     self.desktopResizeReport["targetWidth"]=Int(mode.width)
                     self.desktopResizeReport["targetHeight"]=Int(mode.height)
                     self.desktopResizeReport["retargets"]=(self.desktopResizeReport["retargets"] as? Int ?? 0)+1
@@ -1450,12 +1465,23 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
                 }
                 self.desktopResizeReport["phase"]="confirming"
                 checks+=1
-                let matched=await withCheckedContinuation { continuation in
+                let matched:Bool=await withCheckedContinuation { continuation in
+                    let read=DesktopResizeRead {continuation.resume(returning:$0)}
+                    // Reads have no display side effects. A newer view can
+                    // supersede this wait; its late reply must retire once.
+                    // A timed-out mode set, however, must finish before we
+                    // publish another monitor mode.
+                    if !applyUnconfirmed {self.desktopResizeRead=read}
+                    let readStarted=ProcessInfo.processInfo.systemUptime
+                    self.desktopResizeReport["phase"]="readingGeometry"
                     self.bridge.command("display_info",["currentOnly":true],timeout:.seconds(5)){result in
-                        guard self.displayEpoch == epoch,self.desktopResizeRequest == request else{continuation.resume(returning:false);return}
+                        guard read.pending else{return}
+                        guard self.displayEpoch == epoch,self.desktopResizeRequest == request else{read.finish(false);return}
+                        self.desktopResizeReport["lastReadMilliseconds"]=(ProcessInfo.processInfo.systemUptime-readStarted)*1000
+                        if case .success=result {applyUnconfirmed=false}
                         guard self.machine?.desktopState["visible"] as? Bool == true,
                               self.machine?.desktopState["fullScreenTransition"] as? Bool != true,
-                              raster(self.desktopSize) == mode else{continuation.resume(returning:false);return}
+                              raster(self.desktopSize) == mode else{read.finish(false);return}
                         if case .success(let reply)=result,let snapshot=reply["value"] as? [String:Any],
                            let primary=(snapshot["displays"] as? [[String:Any]])?.first(where:{$0["primary"] as? Bool == true}),
                            primary["width"] as? Int == Int(mode.width),primary["height"] as? Int == Int(mode.height) {
@@ -1465,54 +1491,71 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
                                 || self.machine?.desktopState["height"] as? Int != Int(mode.height)
                                 || (self.machine?.desktopState["presentedNativeFrame"] as? UInt64 ?? 0)<=framesBeforeRequest {
                                 self.desktopResizeReport["phase"]="waitingFrame"
-                                continuation.resume(returning:false);return
+                                read.finish(false);return
                             }
                             // Notifications during reconnect describe temporary
                             // topology. Let the exact raster settle before N+1
                             // can repair the app outputs, once, from a fresh read.
                             guard ProcessInfo.processInfo.systemUptime-self.desktopResizeChangedAt>=0.3 else {
-                                continuation.resume(returning:false);return
+                                read.finish(false);return
                             }
                             self.machine?.finishDesktopResolution();self.desktopResizeRequest=nil
                             self.desktopReadAgain=false
                             self.desktopResizeReport["phase"]="confirmed"
                             self.desktopResizeReport["milliseconds"]=(ProcessInfo.processInfo.systemUptime-started)*1000
+                            self.desktopResizeReport["targetMilliseconds"]=(ProcessInfo.processInfo.systemUptime-targetStarted)*1000
                             if self.launcherNotice=="Windows non ha confermato la risoluzione richiesta." {self.launcherNotice=nil}
-                            if self.machine?.mixedDisplaysEnabled == true {
-                                self.desktopConfirmed=mode;self.readMixedDisplay()
-                            }else{self.acceptDisplay(snapshot)}
-                            continuation.resume(returning:true)
+                            self.desktopConfirmed=mode
+                            if self.machine?.mixedDisplaysEnabled == true {self.readMixedDisplay()}
+                            else{self.readDesktopDisplay()}
+                            read.finish(true)
                         }else if case .success=result {
                             // The monitor notification may complete after the
                             // driver's helper first tries the mode. Apply the
                             // exact raster once its mode set becomes available;
                             // the next read still confirms Windows' actual size.
+                            if self.desktopResizeRead === read {self.desktopResizeRead=nil}
+                            self.desktopResizeReport["phase"]="applyingMode"
                             let applyStarted=ProcessInfo.processInfo.systemUptime
                             self.bridge.command("display_configure",["width":Int(mode.width),"height":Int(mode.height),"currentOnly":true],timeout:.seconds(3)){result in
-                                guard self.connected,self.displayEpoch == epoch,self.desktopResizeRequest == request,
-                                      self.machine?.desktopState["visible"] as? Bool == true,
-                                      self.machine?.desktopState["fullScreenTransition"] as? Bool != true,
-                                      raster(self.desktopSize) == mode else{continuation.resume(returning:false);return}
+                                guard read.pending else{return}
+                                guard self.connected,self.displayEpoch == epoch,self.desktopResizeRequest == request else{read.finish(false);return}
                                 self.desktopResizeReport["lastApplyMilliseconds"]=(ProcessInfo.processInfo.systemUptime-applyStarted)*1000
+                                if case .success=result {applyUnconfirmed=false}
                                 if case .failure(let error)=result {
                                     self.desktopResizeReport["lastApplyError"]=error.localizedDescription
+                                    applyUnconfirmed=error.localizedDescription == "Windows took too long to respond."
+                                        || error.localizedDescription == "Diagnostics already running"
+                                }
+                                guard self.machine?.desktopState["visible"] as? Bool == true,
+                                      self.machine?.desktopState["fullScreenTransition"] as? Bool != true,
+                                      raster(self.desktopSize) == mode else{read.finish(false);return}
+                                if case .failure=result {
                                     // A timed-out mode set can still complete.
                                     // An advertised mode needs no EDID refresh;
                                     // read its actual outcome before another apply.
-                                    if !slowRetry,self.machine?.nativeGraphicsEnabled == true,
+                                    if !applyUnconfirmed,!slowRetry,self.machine?.nativeGraphicsEnabled == true,
                                        self.desktopResizeReport["advertisedMode"] as? Bool != true {
                                         slowRetry=true
                                         self.desktopResizeReport["fallback"]=true
                                         self.machine?.requestDesktopResolution(mode,reconnectDelay:1)
                                     }
                                 }
-                                continuation.resume(returning:false)
+                                read.finish(false)
                             }
-                        }else {continuation.resume(returning:false)}
+                        }else {
+                            if case .failure(let error)=result {
+                                self.desktopResizeReport["lastReadError"]=error.localizedDescription
+                                if error.localizedDescription == "Diagnostics already running" {checks=max(0,checks-1)}
+                            }
+                            read.finish(false)
+                        }
                     }
                 }
                 if matched {return}
+                guard !Task.isCancelled,self.connected,self.displayEpoch == epoch,self.desktopResizeRequest == request else{return}
             }
+            guard !Task.isCancelled,self.connected,self.displayEpoch == epoch,self.desktopResizeRequest == request else{return}
             self.machine?.finishDesktopResolution();self.desktopResizeRequest=nil
             self.desktopResizeReport["phase"]="failed"
             self.desktopResizeReport["milliseconds"]=(ProcessInfo.processInfo.systemUptime-started)*1000

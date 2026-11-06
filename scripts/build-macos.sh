@@ -38,7 +38,7 @@ xcrun clang -O2 -target arm64-apple-macosx14.0 -c macos/NativeTransport/ndt.c -o
 xcrun clang -O2 -target arm64-apple-macosx14.0 -c macos/NativeTransport/gpu-receiver.c -o .build/gpu-receiver.o
 xcrun swiftc -swift-version 6 -O -parse-as-library -target arm64-apple-macosx14.0 \
     -import-objc-header macos/NativeTransport/bridge.h .build/native-transport.o .build/gpu-receiver.o \
-    macos/RuntimeStore.swift macos/NativeWindowFrames.swift macos/NativeGraphics.swift macos/NativeDisplay.swift macos/DesktopConnection.swift macos/DesktopWindow.swift \
+    macos/RuntimeStore.swift macos/NativeWindowFrames.swift macos/NativeGraphics.swift macos/NativeDisplay.swift macos/DesktopConnection.swift macos/DesktopWindow.swift macos/DesktopResizeRead.swift \
     macos/VirtualMachine.swift macos/SharedFolders.swift macos/SambaServer.swift macos/SharedFolderIntegration.swift macos/MachineControl.swift macos/MachineSettings.swift macos/MachineSettingsPanel.swift macos/NetworkSettings.swift macos/NetworkSettingsPanel.swift macos/MemoryUnplugProgress.swift macos/MemoryReleaseBudget.swift macos/MemoryControl.swift macos/GuestBridge.swift macos/GuestFrameSurface.swift macos/MacLocalControl.swift macos/DisplayTopology.swift macos/SharedDisplay.swift \
     macos/CPUControl.swift macos/WindowGeometry.swift macos/WindowRenderer.swift macos/WindowTransitionView.swift macos/ApplicationContent.swift macos/ApplicationWindow.swift macos/LauncherLibrary.swift macos/LauncherStatus.swift macos/Launcher.swift macos/GuestApplicationState.swift macos/App.swift \
     -o "$app/Contents/MacOS/Perpendicular"
