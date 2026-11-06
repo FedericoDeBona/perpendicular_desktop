@@ -53,8 +53,9 @@ la canonica. Un rollback alla vecchia identità può richiedere nuovo consenso.
 
 La verifica .79 ha eliminato gli avvisi del backup secondo l’utente, ma ha ancora
 richiesto quelli di Perpendicular nel primo passaggio. Due successive build.80/.81 hanno mantenuto i requisiti e collegato le cartelle.
-La continuità dei consensi richiede il riscontro reale dell’utente sui dialoghi,
-non l’assenza di clic CUA.
+Nel successivo avvio.81 l’utente conferma «Nessun avviso né password»: continuità
+verificata in questo ciclo main fra build diverse. L’altro Mac e l’uso prolungato
+restano da qualificare. Non sostituire il riscontro reale con l’assenza di clic CUA.
 
 Riferimenti Apple: [requisiti di firma](https://developer.apple.com/documentation/technotes/tn3127-inside-code-signing-requirements),
 [certificati locali e identità](https://developer.apple.com/library/archive/documentation/Security/Conceptual/CodeSigningGuide/Procedures/Procedures.html).
