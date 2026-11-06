@@ -18,18 +18,20 @@
              display.selection_pending = false;
              display.update_pending = true;
              selection_resumed++;
-@@ -190,6 +192,14 @@
+@@ -190,6 +192,16 @@
      admitted = perp_live_scanout_select(resource);
      bool changed = display.resource != resource || display.width != width || display.height != height || display.x != x ||
          display.y != y || display.crop_width != crop_width || display.crop_height != crop_height;
-+    /* QA-only failure injection: one replacement after real frames, without
-+     * altering resource data or admitting a source the broker rejected. */
-+    if (changed && admitted && external_submitted >= 20 && !qa_delayed_selection) {
++    /* QA only: hold admission across all replacement resource IDs for one
++     * raster change after real frames. Never alter resource data or bypass
++     * the broker when the bounded injection expires. */
++    if (admitted && external_submitted >= 20 && !qa_delayed_selection &&
++        (display.width != width || display.height != height)) {
 +        qa_delayed_selection = true;
 +        qa_selection_until = qemu_clock_get_ms(QEMU_CLOCK_REALTIME) + 120;
-+        admitted = false;
 +        fprintf(stderr,"perp-native: QA delaying selection admission resource=%u for120ms\n",resource);
 +    }
++    if (qemu_clock_get_ms(QEMU_CLOCK_REALTIME) < qa_selection_until) admitted = false;
      if (changed) {
          display.generation = ++generations; display.current = NULL;
          display.update_pending = true;

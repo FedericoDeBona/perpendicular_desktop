@@ -12,6 +12,6 @@
   "qualification": "QA candidate only; not a production release requirement until runtime verification",
   "qaOnlyPatch": {
     "path": "graphics/monitor/qa-late-selection.patch",
-    "sha256": "2ee4b20e7d441d226afa5bc128eead5bfc5da24688505f1eecdba2de40437ae0"
+    "sha256": "6131df3dadf3474d5aec18affe9c8adc12c89b2f03c2193bb997cd8d280e0947"
   }
 }
