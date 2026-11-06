@@ -34,7 +34,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--socket", type=Path, default=Path.home() / "Library/Application Support/Perpendicular Memory IoT/Control/control.sock")
     commands = parser.add_subparsers(dest="command", required=True)
-    for name in ("status", "memory_status", "display_info", "display_topology", "driver_info", "graphics_info", "geometry_snapshot", "application_status", "process_list", "pipeline_clock", "pipeline_trace_start", "pipeline_trace_stop"):
+    for name in ("status", "desktop_reconnect", "memory_status", "display_info", "display_topology", "driver_info", "graphics_info", "geometry_snapshot", "application_status", "process_list", "pipeline_clock", "pipeline_trace_start", "pipeline_trace_stop"):
         command_parser = commands.add_parser(name)
         if name == "display_info":
             command_parser.add_argument("--current-only", action="store_true", help="Read current geometry without enumerating supported modes.")

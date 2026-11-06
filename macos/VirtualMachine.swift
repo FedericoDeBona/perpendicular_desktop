@@ -251,6 +251,7 @@ final class VirtualMachineController {
         });client.start()
     }
     func finishDesktopResolution(){displayRequest=nil;desktopResolutionPending=false;displayControl?.stop();displayControl=nil;desktop?.finishResolutionChange()}
+    func reconnectDesktopGraphics()->Bool {desktop?.reconnectNativeDisplay() ?? false}
     func closeDesktop(){finishDesktopResolution();desktop?.stop();desktop?.window.close();desktop=nil}
     func closeForegroundApplication(notAfter:Double) async throws {
         try await sendApplicationChord(["alt","f4"],notAfter:notAfter)

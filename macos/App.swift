@@ -691,7 +691,7 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
               let command=request["command"] as? String else {
             localResponse(["ok":false,"error":"Expected a JSON command."],reply:reply);return
         }
-        let allowed:Set<String>=["status","memory_status","execute","display_info","display_topology","driver_info","graphics_info","geometry_snapshot","application_status","process_list","process_terminate","pipeline_clock","pipeline_trace_start","pipeline_trace_stop","window_refresh","window_image","window_copy_mode","window_presentation_mode","window_capture_source","window_geometry","window_transport_check"]
+        let allowed:Set<String>=["status","desktop_reconnect","memory_status","execute","display_info","display_topology","driver_info","graphics_info","geometry_snapshot","application_status","process_list","process_terminate","pipeline_clock","pipeline_trace_start","pipeline_trace_stop","window_refresh","window_image","window_copy_mode","window_presentation_mode","window_capture_source","window_geometry","window_transport_check"]
         guard allowed.contains(command) else {
             localResponse(["ok":false,"error":"This local command is not supported."],reply:reply);return
         }
@@ -730,6 +730,12 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
         }
         guard connected,let bridge else {
             localResponse(["ok":false,"error":"Windows is not connected."],reply:reply);return
+        }
+        if command == "desktop_reconnect" {
+            guard machine?.reconnectDesktopGraphics() == true else{
+                localResponse(["ok":false,"error":"The native Desktop connection is not available."],reply:reply);return
+            }
+            localResponse(["ok":true,"result":["requested":true,"desktop":machine?.desktopState ?? [:]]],reply:reply);return
         }
         if command == "pipeline_trace_start" {
             guard let value=PipelineTrace.restart() else {

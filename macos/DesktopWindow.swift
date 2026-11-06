@@ -189,11 +189,12 @@ final class DesktopWindow:NSObject,NSWindowDelegate {
     private var nativeReceivedFrames:UInt64=0
     private var presentedDrawables:UInt64=0
     private var presentedNativeFrame:UInt64=0
+    private var nativeReconnects=0
     private var lastNativeReceiveSeconds=0.0
     private var lastPresentationSeconds=0.0
     private let resized:(NSSize)->Void
 
-    var state:[String:Any] {["visible":visible,"fullScreen":window.styleMask.contains(.fullScreen),"fullScreenTransition":fullScreenTransition,"resolutionPending":pendingResolution != nil,"viewWidth":Int(surface.bounds.width),"viewHeight":Int(surface.bounds.height),"backingScale":window.backingScaleFactor,"nativeActive":nativeActive,"width":Int(surface.source.width),"height":Int(surface.source.height),"nativeReceivedFrames":nativeReceivedFrames,"presentedDrawables":presentedDrawables,"presentedNativeFrame":presentedNativeFrame,"lastNativeReceiveHostSeconds":lastNativeReceiveSeconds,"lastPresentationHostSeconds":lastPresentationSeconds]}
+    var state:[String:Any] {["visible":visible,"fullScreen":window.styleMask.contains(.fullScreen),"fullScreenTransition":fullScreenTransition,"resolutionPending":pendingResolution != nil,"viewWidth":Int(surface.bounds.width),"viewHeight":Int(surface.bounds.height),"backingScale":window.backingScaleFactor,"nativeActive":nativeActive,"width":Int(surface.source.width),"height":Int(surface.source.height),"nativeReceivedFrames":nativeReceivedFrames,"presentedDrawables":presentedDrawables,"presentedNativeFrame":presentedNativeFrame,"nativeReconnects":nativeReconnects,"lastNativeReceiveHostSeconds":lastNativeReceiveSeconds,"lastPresentationHostSeconds":lastPresentationSeconds]}
     init(socket:String,endpoint:@escaping ()->NativeDisplayEndpoint?,resized:@escaping (NSSize)->Void = {_ in},input:@escaping ()->Void = {})throws{
         self.socket=socket;self.endpoint=endpoint;self.resized=resized;surface=DesktopSurface(renderer:try WindowRenderer(opaque:true,fillBounds:true))
         window=NSWindow(contentRect:NSRect(x:140,y:120,width:960,height:640),styleMask:[.titled,.closable,.miniaturizable,.resizable],backing:.buffered,defer:false)
@@ -229,6 +230,17 @@ final class DesktopWindow:NSObject,NSWindowDelegate {
         visible=false;timer?.invalidate();timer=nil;surface.cancelClipboard();surface.releaseInput()
         connectionID=nil;readerID=nil;surface.connection=nil
         desktop?.stop();desktop=nil;native?.stop();native=nil;nativeActive=false;surface.renderer.clear()
+    }
+    /// Explicit diagnostic recovery: preserve the owned image, input channel,
+    /// monitor configuration and VM. Acceptance does not prove a new frame.
+    func reconnectNativeDisplay()->Bool {
+        guard visible,let current=native,endpoint() != nil else{return false}
+        readerID=nil;native=nil;nativeReconnects+=1
+        current.stop{[weak self] in
+            guard let self,self.visible,self.native == nil else{return}
+            self.connect()
+        }
+        return true
     }
     private func connect(){
         guard visible else{return}

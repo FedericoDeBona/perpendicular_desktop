@@ -63,6 +63,12 @@ final class NativeDisplayReader:@unchecked Sendable {
     }
     func start(){queue.async{[self] in begin()}}
     func stop(){queue.async{[self] in close(nil)}}
+    func stop(completed:@escaping @MainActor @Sendable ()->Void){
+        queue.async{[self] in
+            close(nil)
+            FrameDelivery.main{completed()}
+        }
+    }
     private func begin(){
         guard !started else{return};started=true;active=true
         deadline=ProcessInfo.processInfo.systemUptime+3
