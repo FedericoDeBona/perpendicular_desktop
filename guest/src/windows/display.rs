@@ -264,6 +264,12 @@ fn snapshot_with_modes(include_modes: bool) -> Value {
 /// Apply a mode advertised by the current primary display. RFB updates the
 /// virtual monitor's preferred size; Windows still needs an explicit mode set.
 pub fn configure(value: &Value) -> Result<Value, String> {
+    // Validate scaling before changing a mode. A monitor reconnect can change
+    // Windows' recommended DPI even though the user only resized a Mac view.
+    let dpi = value.get("dpi").map(|v| v.as_u64()
+        .and_then(|v| u32::try_from(v).ok())
+        .filter(|v| [96,120,144,168,192,216,240,288,336,384,432,480].contains(v))
+        .ok_or("Unsupported display DPI")).transpose()?;
     let width = value["width"]
         .as_u64()
         .filter(|v| (640..=4096).contains(v))
@@ -310,6 +316,9 @@ pub fn configure(value: &Value) -> Result<Value, String> {
             ).as_bool() && saved.dmPelsWidth == width && saved.dmPelsHeight == height;
             if mode.dmPelsWidth == width && mode.dmPelsHeight == height && saved_matches {
                 configure_work_area(value)?;
+                if let Some(dpi) = dpi {
+                    super::display_topology::set_primary_dpi(&text(&display.DeviceName), dpi)?;
+                }
                 return Ok(if value["currentOnly"] == true { current_snapshot() } else { snapshot() });
             }
             mode.dmPelsWidth = width;
@@ -333,6 +342,9 @@ pub fn configure(value: &Value) -> Result<Value, String> {
                 ));
             }
             configure_work_area(value)?;
+            if let Some(dpi) = dpi {
+                super::display_topology::set_primary_dpi(&text(&display.DeviceName), dpi)?;
+            }
             return Ok(if value["currentOnly"] == true { current_snapshot() } else { snapshot() });
         }
     }

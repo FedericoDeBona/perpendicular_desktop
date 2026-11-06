@@ -330,6 +330,26 @@ fn set_dpi(path: &DISPLAYCONFIG_PATH_INFO, dpi: u32) -> Result<(), String> {
     Ok(())
 }
 
+/// Restore only the primary source's scale after its monitor mode changes.
+/// App outputs and their private work areas are independent of this operation.
+pub fn set_primary_dpi(device: &str, dpi: u32) -> Result<(), String> {
+    let monitors = super::display::current_snapshot();
+    let primary = monitors["displays"].as_array()
+        .and_then(|displays| displays.iter().find(|d| d["primary"] == true))
+        .ok_or("Primary display disappeared during DPI update")?;
+    if !primary["device"].as_str().is_some_and(|name| name.eq_ignore_ascii_case(device)) {
+        return Err("Primary display changed during DPI update".into());
+    }
+    // Reconnection can briefly expose an unsettled private DPI packet even
+    // when the normal monitor API already reports the requested scale.
+    if primary["dpi"].as_u64() == Some(u64::from(dpi)) { return Ok(()); }
+    let topology = Topology::read()?;
+    let path = topology.paths.iter()
+        .find(|p| Topology::source_name(p).is_ok_and(|name| name.eq_ignore_ascii_case(device)))
+        .ok_or("Primary display source disappeared during DPI update")?;
+    set_dpi(path, dpi)
+}
+
 fn matches(description: &Value, layout: &[Layout], include_dpi: bool) -> bool {
     description["monitors"]["displays"].as_array().is_some_and(|displays|
         displays.len()==layout.len() && layout.iter().all(|m| displays.iter().any(|d|

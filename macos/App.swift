@@ -1433,6 +1433,51 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
             var framesBeforeRequest=self.machine?.desktopState["nativeReceivedFrames"] as? UInt64 ?? 0
             self.desktopResizeReport=["targetWidth":Int(mode.width),"targetHeight":Int(mode.height),"phase":"publishing","fallback":false,"events":0,"retargets":0]
             self.displayReadTask?.cancel();self.displayReadTask=nil
+            // Read the user's current scale before publishing an EDID change.
+            // Keep that value for every retarget in this transaction; reading
+            // it after reconnect would accept Windows' new recommendation.
+            self.desktopResizeReport["phase"]="readingScale"
+            let scaleReadStarted=ProcessInfo.processInfo.systemUptime
+            let originalScale:(width:Int,height:Int,dpi:Int)?=await withCheckedContinuation { continuation in
+                self.bridge.command("display_info",["currentOnly":true],timeout:.seconds(5)){result in
+                    if case .success(let reply)=result,let snapshot=reply["value"] as? [String:Any],
+                       let primary=(snapshot["displays"] as? [[String:Any]])?.first(where:{$0["primary"] as? Bool == true}),
+                       let width=primary["width"] as? Int,let height=primary["height"] as? Int,
+                       let dpi=primary["dpi"] as? Int {
+                        continuation.resume(returning:(width,height,dpi))
+                    }else {continuation.resume(returning:nil)}
+                }
+            }
+            guard !Task.isCancelled,self.connected,self.displayEpoch == epoch,self.desktopResizeRequest == request else{return}
+            self.desktopResizeReport["scaleReadMilliseconds"]=(ProcessInfo.processInfo.systemUptime-scaleReadStarted)*1000
+            guard self.guestCapabilities["displayConfigureDPI"] == true,
+                  let scale=originalScale,[96,120,144,168,192,216,240,288,336,384,432,480].contains(scale.dpi) else {
+                self.desktopResizeRequest=nil;self.desktopResizeReport["phase"]="failed"
+                self.launcherNotice="Non riesco a conservare la scala Windows. Verifica il collegamento e aggiorna i Guest Tools."
+                return
+            }
+            let dpi=scale.dpi
+            self.desktopResizeReport["targetDPI"]=dpi
+            if self.machine?.desktopState["visible"] as? Bool != true ||
+               self.machine?.desktopState["fullScreenTransition"] as? Bool == true {
+                self.desktopResizeRequest=nil;self.desktopAttempted = .zero
+                self.desktopResizeReport["phase"]="cancelled"
+                return
+            }
+            let latest=raster(self.desktopSize)
+            if latest != mode {
+                mode=latest;self.desktopAttempted=mode
+                self.desktopResizeReport["targetWidth"]=Int(mode.width)
+                self.desktopResizeReport["targetHeight"]=Int(mode.height)
+                self.desktopResizeReport["retargets"]=1
+            }
+            // The view can return to its confirmed raster during the read.
+            // There is then no monitor change to apply or input to release.
+            if mode == self.desktopConfirmed,scale.width == Int(mode.width),scale.height == Int(mode.height) {
+                self.desktopResizeRequest=nil;self.desktopResizeReport["phase"]="unchanged"
+                return
+            }
+            framesBeforeRequest=self.machine?.desktopState["nativeReceivedFrames"] as? UInt64 ?? 0
             publish(mode)
             // The driver's resolution event and application are asynchronous.
             // Keep one transaction pending and verify actual Windows geometry.
@@ -1490,7 +1535,8 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
                               raster(self.desktopSize) == mode else{read.finish(false);return}
                         if case .success(let reply)=result,let snapshot=reply["value"] as? [String:Any],
                            let primary=(snapshot["displays"] as? [[String:Any]])?.first(where:{$0["primary"] as? Bool == true}),
-                           primary["width"] as? Int == Int(mode.width),primary["height"] as? Int == Int(mode.height) {
+                           primary["width"] as? Int == Int(mode.width),primary["height"] as? Int == Int(mode.height),
+                           primary["dpi"] as? Int == dpi {
                             if self.machine?.nativeGraphicsEnabled == true,
                                self.machine?.desktopState["nativeActive"] as? Bool != true
                                 || self.machine?.desktopState["width"] as? Int != Int(mode.width)
@@ -1510,7 +1556,8 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
                             self.desktopResizeReport["phase"]="confirmed"
                             self.desktopResizeReport["milliseconds"]=(ProcessInfo.processInfo.systemUptime-started)*1000
                             self.desktopResizeReport["targetMilliseconds"]=(ProcessInfo.processInfo.systemUptime-targetStarted)*1000
-                            if self.launcherNotice=="Windows non ha confermato la risoluzione richiesta." {self.launcherNotice=nil}
+                            if self.launcherNotice=="Windows non ha confermato la risoluzione richiesta." ||
+                               self.launcherNotice=="Non riesco a conservare la scala Windows. Verifica il collegamento e aggiorna i Guest Tools." {self.launcherNotice=nil}
                             self.desktopConfirmed=mode
                             if self.machine?.mixedDisplaysEnabled == true {self.readMixedDisplay()}
                             else{self.readDesktopDisplay()}
@@ -1523,7 +1570,7 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
                             if self.desktopResizeRead === read {self.desktopResizeRead=nil}
                             self.desktopResizeReport["phase"]="applyingMode"
                             let applyStarted=ProcessInfo.processInfo.systemUptime
-                            self.bridge.command("display_configure",["width":Int(mode.width),"height":Int(mode.height),"currentOnly":true],timeout:.seconds(3)){result in
+                            self.bridge.command("display_configure",["width":Int(mode.width),"height":Int(mode.height),"dpi":dpi,"currentOnly":true],timeout:.seconds(3)){result in
                                 guard read.pending else{return}
                                 guard self.connected,self.displayEpoch == epoch,self.desktopResizeRequest == request else{read.finish(false);return}
                                 self.desktopResizeReport["lastApplyMilliseconds"]=(ProcessInfo.processInfo.systemUptime-applyStarted)*1000
@@ -1617,7 +1664,7 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
             displayEpoch=value["epoch"] as? String
             invalidateDisplay("Checking Windows display…")
             let capabilities=value["capabilities"] as? [String:Any] ?? [:]
-            guestCapabilities=Dictionary(uniqueKeysWithValues:["windowCaptureSource","nativeAppInput","modeFocus","memoryStatus","execute","displayInfo","displayTopology","driverInfo","graphicsInfo","sharedGeometry","appIcon","applicationStatus","processControl","clipboard"].map{($0,capabilities[$0] as? Bool == true)})
+            guestCapabilities=Dictionary(uniqueKeysWithValues:["windowCaptureSource","nativeAppInput","modeFocus","memoryStatus","execute","displayInfo","displayConfigureDPI","displayTopology","driverInfo","graphicsInfo","sharedGeometry","appIcon","applicationStatus","processControl","clipboard"].map{($0,capabilities[$0] as? Bool == true)})
             network.connectionChanged(guestCapabilities["execute"] == true)
             memoryController?.guestReady=guestCapabilities["memoryStatus"] == true
             prepareSharedFolders()
