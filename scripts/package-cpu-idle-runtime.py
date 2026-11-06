@@ -37,7 +37,8 @@ def main():
     patch = ROOT / "cpu/hvf-wfi-sleep.patch"
     if (receipt.get("qemu") != sha(native / "bin/qemu-system-aarch64")
             or receipt.get("patchSHA256") != sha(patch)
-            or len(receipt.get("linkInputs", {})) < 1000
+            or len(receipt.get("linkInputs", {})) < 500
+            or not any(name.endswith("target_arm_hvf_hvf.c.o") for name in receipt.get("linkInputs", {}))
             or "__TEXT,__text" not in receipt.get("baselineSections", {})):
         raise ValueError("Receipt does not prove the packaged local CPU recipe")
     candidate = manifest.get("hvf_idle_wfi_candidate", {})

@@ -46,7 +46,7 @@ def main():
     reference_names = [line.strip().split(" (", 1)[0] for line in expected_dependencies]
     inputs = {name: sha(Path(name) if Path(name).is_absolute() else build / name)
               for name in link if name.endswith((".o", ".a")) and not name.startswith("-")}
-    if len(inputs) < 1000:
+    if len(inputs) < 500:
         raise ValueError("Incomplete local link command")
     out.mkdir(parents=True, mode=0o700)
 

@@ -43,3 +43,20 @@ gli artefatti del runtime effettivo: il frontend aggiornato non li sostituisce
 finché una VM esistente resta viva. Qualifica QA e consegna M4 nella canonica
 0.2.84 completate nel perimetro documentato; un altro Mac richiede la propria
 compilazione e verifica locale. [Evidenze e limiti](../docs/VERIFICATION.md#consegna-84-nellapp-principale-e-misura-finale).
+
+### Cache M1 dopo le prove GPU ritirate
+
+Il link M1 qualificato contiene758 input oggetto/archivio, contro oltre1000 del
+profilo M4. Il controllo ammette il grafo più piccolo; restano obbligatori
+ricompilazione HVF originale, uguaglianza di tutte le sezioni codice/dati e
+chiusura delle dipendenze prima della candidata. Non basta abbassare una soglia
+per qualificare un binario.
+
+Se Ninja conserva gli oggetti di una prova `virtio-gpu.h` mentre i sorgenti sono
+stati ripristinati, usare `reconstruct-local-qemu-gpu-link.py` con `--source`,
+`--build`, `--ninja`, `--link-command` e un nuovo `--output` privato. La ricetta
+ricompila gli utilizzatori registrati di quel solo header fuori dalla cache,
+conserva comandi/input/ricevuta e produce `link.command.json`. Passare quel link
+al builder CPU ordinario: la successiva uguaglianza con il riferimento
+installato resta vincolante. Sul M1 sono stati ricostruiti11 utilizzatori;
+nessun oggetto della cache, sorgente o VM è stato modificato.

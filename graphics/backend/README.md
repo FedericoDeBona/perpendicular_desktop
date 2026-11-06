@@ -448,3 +448,23 @@ condiviso finale usa solo BIND_SHADER_RESOURCE sulla sorgente: passa sulla
 candidata e in quattro esecuzioni base. I conteggi 4/8→0/8 sopra appartengono
 al fixture privato precedente con BIND_RENDER_TARGET; non estenderli alla variante
 SRV o presentarli come prova della causa unica in Windows.
+
+### Profilo M1 composto con la UMD v19 già distribuita
+
+La release `0.1.6`, profilo `m1-cpu-v12-late-init-v19`, conserva la UMDv19
+`74d6cd43…` già qualificata sul ramo Seamless e aggiunge il backend locale
+CPUv12 con `late-texture-initialization-fences`. Non sostituire quella UMD con
+v17 durante un normale pull. Sorgenti/patch/ricetta v19 sono riportati su main;
+`rebuild-video-umd.py --external-video-discard --present-amortization
+--target-independent-coverage --async-pool-retire` ricostruisce il profilo
+senza diagnostica. Gli esperimenti di timing rimangono opt-in, separati.
+
+L'installer condiviso riusa anche il percorso M1v17 già noto `aa1a4973…`, con
+verifica esatta delle due DLL. I vecchi manifesti rimangono immutati: `0.1.7`
+prepara la stessa coppia M4 di `0.1.5` con il solo installer aggiornato. Nessuna
+nuova compilazione o distribuzione M4 è stata eseguita da questo Mac. Per
+confezionare M4 usare ora `--release 0.1.7`, mantenendo il suo profilo
+`m4-cpu-v12-late-init`; per M1 usare `--release 0.1.6` con la coppia pinnata
+locale. La collisione storica del numero0.1.5 fra i due rami non viene risolta
+riscrivendo un vecchio manifesto. Verifiche locali e limiti nel
+[diario](../../docs/VERIFICATION.md#6-novembre--pull-rebuild-e-guest-tools-0285-sul-m1).

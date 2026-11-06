@@ -1,0 +1,70 @@
+--- a/src/virtio/neptune/npt_shmem_pool.c
++++ b/src/virtio/neptune/npt_shmem_pool.c
+@@ -5,6 +5,7 @@
+ 
+ #if defined(_WIN32)
+ #include "triton/tritonFaultTrace.h"
++#include "triton/pool-retire-timing.h"
+ #define NPT_ALLOC_TRACE(...) tritonTraceAllocation(__VA_ARGS__)
+ #else
+ #define NPT_ALLOC_TRACE(...) ((void)0)
+@@ -43,6 +44,9 @@
+          return false;
+    }
+ 
++#if defined(_WIN32)
++   struct npt_pool_timing timing = npt_pool_timing_begin();
++#endif
+    struct npt_renderer_shmem *shmem =
+       npt_renderer_shmem_create(renderer, alloc_size);
+ #if defined(_WIN32)
+@@ -64,18 +68,37 @@
+       }
+    }
+ #endif
++#if defined(_WIN32)
++   npt_pool_timing_created(&timing);
++#endif
+    if (!shmem) {
++#if defined(_WIN32)
++      npt_pool_timing_end(&timing, size, alloc_size, false);
++#endif
+       NPT_ALLOC_TRACE("shmem pool create", alloc_size, 0x8007000eu, size);
+       npt_log("shmem pool: failed to allocate %zu bytes", alloc_size);
+       return false;
+    }
+ 
+-   if (pool->shmem)
++   if (pool->shmem) {
++#if defined(_WIN32)
++      /* Slots retain their own refs. If the pool owns the last one, the
++       * existing reaper keeps the allocation alive through the same
++       * transport drain/destroy instead of parking the Map caller.
++       * npt_device_destroy drains this renderer's reaper before freeing it.
++       * Never recycle offsets or bypass the transport's ordering. */
++      npt_renderer_shmem_unref_async(renderer, pool->shmem);
++#else
+       npt_renderer_shmem_unref(renderer, pool->shmem);
++#endif
++   }
+ 
+    pool->shmem = shmem;
+    pool->size = alloc_size;
+    pool->used = 0;
++#if defined(_WIN32)
++   npt_pool_timing_end(&timing, size, alloc_size, true);
++#endif
+    return true;
+ }
+ 
+--- a/src/virtio/neptune/triton/neptune_umd.rc
++++ b/src/virtio/neptune/triton/neptune_umd.rc
+@@ -30,7 +30,7 @@
+             VALUE "CompanyName", "Perpendicular experimental build; upstream Turing Software LLC"
+             VALUE "FileDescription", "Experimental Neptune video UMD - Perpendicular"
+             VALUE "FileVersion", NPT_RC_STR(VER)
+-            VALUE "PrivateBuild", "Perpendicular video-resource-v18-map-timing"
++            VALUE "PrivateBuild", "Perpendicular video-resource-v18-map-timing-async-pool"
+             VALUE "InternalName", "neptune_umd"
+             VALUE "OriginalFilename", "neptune_umd.dll"
+             VALUE "ProductName", "Neptune"
