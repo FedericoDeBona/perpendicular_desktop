@@ -130,8 +130,9 @@ final class WindowRenderer {
         size=NSSize(width:surface.width,height:surface.height)
         dirty=true;draw()
     }
-    func present(_ frame:NativeDisplayFrame){
+    func present(_ frame:NativeDisplayFrame,presentationID:UInt64=0){
         traceSource=frame.traceID
+        self.presentationID=presentationID
         PipelineTrace.record("renderer-receive",traceSource,["renderer":traceRenderer])
         guard frame.texture.device.registryID == device.registryID else{onError?("The graphics devices do not match.");return}
         external=frame;shared=nil;pixels=Data();size=NSSize(width:frame.texture.width,height:frame.texture.height)

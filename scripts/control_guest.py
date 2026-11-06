@@ -35,7 +35,9 @@ def main():
     parser.add_argument("--socket", type=Path, default=Path.home() / "Library/Application Support/Perpendicular Memory IoT/Control/control.sock")
     commands = parser.add_subparsers(dest="command", required=True)
     for name in ("status", "memory_status", "display_info", "display_topology", "driver_info", "graphics_info", "geometry_snapshot", "application_status", "process_list", "pipeline_clock", "pipeline_trace_start", "pipeline_trace_stop"):
-        commands.add_parser(name)
+        command_parser = commands.add_parser(name)
+        if name == "display_info":
+            command_parser.add_argument("--current-only", action="store_true", help="Read current geometry without enumerating supported modes.")
     terminate = commands.add_parser("process_terminate", help="Terminate one process using its exact identity from process_list.")
     terminate.add_argument("pid", type=int)
     terminate.add_argument("creation")
@@ -64,6 +66,8 @@ def main():
     execute.add_argument("args", nargs=argparse.REMAINDER)
     options = parser.parse_args()
     request = {"command": options.command}
+    if options.command == "display_info" and options.current_only:
+        request["currentOnly"] = True
     if options.command in ("window_refresh", "window_image", "window_transport_check"):
         request["window"] = options.window
     if options.command == "window_geometry":

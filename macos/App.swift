@@ -683,7 +683,7 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
         guard allowed.contains(command) else {
             localResponse(["ok":false,"error":"This local command is not supported."],reply:reply);return
         }
-        let fields:Set<String>=command == "execute" ? ["command","executable","args","timeoutSeconds"]:command == "process_terminate" ? ["command","pid","creation"]:command == "window_geometry" ? ["command","window","x","y","width","height"]:(command == "window_copy_mode" || command == "window_presentation_mode" || command == "window_capture_source") ? ["command","window","mode"]:(command == "window_refresh" || command == "window_image" || command == "window_transport_check") ? ["command","window"]:["command"]
+        let fields:Set<String>=command == "display_info" ? ["command","currentOnly"]:command == "execute" ? ["command","executable","args","timeoutSeconds"]:command == "process_terminate" ? ["command","pid","creation"]:command == "window_geometry" ? ["command","window","x","y","width","height"]:(command == "window_copy_mode" || command == "window_presentation_mode" || command == "window_capture_source") ? ["command","window","mode"]:(command == "window_refresh" || command == "window_image" || command == "window_transport_check") ? ["command","window"]:["command"]
         guard Set(request.keys).isSubset(of:fields) else {
             localResponse(["ok":false,"error":"Unexpected command fields."],reply:reply);return
         }
@@ -844,7 +844,8 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
         guard let capability=capabilities[command],guestCapabilities[capability] == true else {
             localResponse(["ok":false,"error":"The connected guest does not support this query."],reply:reply);return
         }
-        bridge.command(command,timeout:.seconds(command == "driver_info" ? 35:6)){[weak self] result in
+        let queryFields:[String:Any]=command == "display_info" && request["currentOnly"] as? Bool == true ? ["currentOnly":true]:[:]
+        bridge.command(command,queryFields,timeout:.seconds(command == "driver_info" ? 35:6)){[weak self] result in
             self?.localBridgeResponse(result,reply:reply)
         }
     }
@@ -1390,19 +1391,31 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
             guard !Task.isCancelled,let self,self.desktopResizeRequest == nil,self.desktopReadRequest == nil,self.connected,
                   let epoch=self.displayEpoch,self.machine?.desktopState["visible"] as? Bool == true,
                   self.machine?.desktopState["fullScreenTransition"] as? Bool != true else{return}
-            let desired=self.desktopSize
             // Resize Windows to the view's backing raster, rather than fitting
             // an unrelated advertised mode into the user's Mac window.
-            let scale=min(1,4096/desired.width,4096/desired.height,sqrt(8_388_608/(desired.width*desired.height)))
-            let mode=NSSize(width:max(640,(desired.width*scale).rounded()),height:max(480,(desired.height*scale).rounded()))
+            func raster(_ desired:NSSize)->NSSize {
+                let scale=min(1,4096/desired.width,4096/desired.height,sqrt(8_388_608/(desired.width*desired.height)))
+                return NSSize(width:max(640,(desired.width*scale).rounded()),height:max(480,(desired.height*scale).rounded()))
+            }
+            var mode=raster(self.desktopSize)
+            @MainActor func publish(_ mode:NSSize){
+                let primary=self.launcherDisplays.first(where:{$0["primary"] as? Bool == true})
+                let advertised=self.machine?.nativeGraphicsEnabled == true &&
+                    (primary?["modes"] as? [[String:Any]] ?? []).contains {
+                        $0["width"] as? Int == Int(mode.width) && $0["height"] as? Int == Int(mode.height)
+                    }
+                self.desktopResizeReport["advertisedMode"]=advertised
+                self.machine?.requestDesktopResolution(mode,advertisedMode:advertised)
+            }
             guard mode != self.desktopConfirmed,mode != self.desktopAttempted else{return}
             self.desktopAttempted=mode
             let request=UUID();self.desktopResizeRequest=request
             self.desktopResizeChangedAt=ProcessInfo.processInfo.systemUptime
             let started=self.desktopResizeChangedAt
-            self.desktopResizeReport=["targetWidth":Int(mode.width),"targetHeight":Int(mode.height),"phase":"publishing","fallback":false,"events":0]
+            var framesBeforeRequest=self.machine?.desktopState["nativeReceivedFrames"] as? UInt64 ?? 0
+            self.desktopResizeReport=["targetWidth":Int(mode.width),"targetHeight":Int(mode.height),"phase":"publishing","fallback":false,"events":0,"retargets":0]
             self.displayReadTask?.cancel();self.displayReadTask=nil
-            self.machine?.requestDesktopResolution(mode)
+            publish(mode)
             // The driver's resolution event and application are asynchronous.
             // Keep one transaction pending and verify actual Windows geometry.
             var checks=0
@@ -1411,20 +1424,46 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
             while checks<10 && ProcessInfo.processInfo.systemUptime<deadline {
                 try? await Task.sleep(for:.milliseconds(150))
                 guard !Task.isCancelled,self.connected,self.displayEpoch == epoch,self.desktopResizeRequest == request else{return}
+                guard self.machine?.desktopState["visible"] as? Bool == true else {
+                    self.machine?.finishDesktopResolution();self.desktopResizeRequest=nil;self.desktopAttempted = .zero
+                    self.desktopResizeReport["phase"]="cancelled"
+                    return
+                }
                 // Keep this transaction until the monitor is reattached. A
                 // newer request must not race the previous final host raster.
                 if self.machine?.desktopResolutionPending == true {continue}
+                if self.machine?.desktopState["fullScreenTransition"] as? Bool == true {continue}
+                // The serial writer has completed its reconnect. Follow the
+                // latest view now, before waiting for obsolete Windows geometry
+                // and repairing N+1 for a mode the user has already replaced.
+                let latest=raster(self.desktopSize)
+                if latest != mode {
+                    mode=latest;self.desktopAttempted=mode;checks=0
+                    framesBeforeRequest=self.machine?.desktopState["nativeReceivedFrames"] as? UInt64 ?? 0
+                    self.desktopResizeChangedAt=ProcessInfo.processInfo.systemUptime
+                    self.desktopResizeReport["targetWidth"]=Int(mode.width)
+                    self.desktopResizeReport["targetHeight"]=Int(mode.height)
+                    self.desktopResizeReport["retargets"]=(self.desktopResizeReport["retargets"] as? Int ?? 0)+1
+                    self.desktopResizeReport["phase"]="publishing"
+                    publish(mode)
+                    continue
+                }
                 self.desktopResizeReport["phase"]="confirming"
                 checks+=1
                 let matched=await withCheckedContinuation { continuation in
-                    self.bridge.command("display_info",timeout:.seconds(5)){result in
+                    self.bridge.command("display_info",["currentOnly":true],timeout:.seconds(5)){result in
                         guard self.displayEpoch == epoch,self.desktopResizeRequest == request else{continuation.resume(returning:false);return}
+                        guard self.machine?.desktopState["visible"] as? Bool == true,
+                              self.machine?.desktopState["fullScreenTransition"] as? Bool != true,
+                              raster(self.desktopSize) == mode else{continuation.resume(returning:false);return}
                         if case .success(let reply)=result,let snapshot=reply["value"] as? [String:Any],
                            let primary=(snapshot["displays"] as? [[String:Any]])?.first(where:{$0["primary"] as? Bool == true}),
                            primary["width"] as? Int == Int(mode.width),primary["height"] as? Int == Int(mode.height) {
                             if self.machine?.nativeGraphicsEnabled == true,
-                               self.machine?.desktopState["width"] as? Int != Int(mode.width)
-                                || self.machine?.desktopState["height"] as? Int != Int(mode.height) {
+                               self.machine?.desktopState["nativeActive"] as? Bool != true
+                                || self.machine?.desktopState["width"] as? Int != Int(mode.width)
+                                || self.machine?.desktopState["height"] as? Int != Int(mode.height)
+                                || (self.machine?.desktopState["presentedNativeFrame"] as? UInt64 ?? 0)<=framesBeforeRequest {
                                 self.desktopResizeReport["phase"]="waitingFrame"
                                 continuation.resume(returning:false);return
                             }
@@ -1448,11 +1487,24 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
                             // driver's helper first tries the mode. Apply the
                             // exact raster once its mode set becomes available;
                             // the next read still confirms Windows' actual size.
-                            self.bridge.command("display_configure",["width":Int(mode.width),"height":Int(mode.height)],timeout:.seconds(3)){result in
-                                if case .failure=result,!slowRetry,self.machine?.nativeGraphicsEnabled == true {
-                                    slowRetry=true
-                                    self.desktopResizeReport["fallback"]=true
-                                    self.machine?.requestDesktopResolution(mode,reconnectDelay:1)
+                            let applyStarted=ProcessInfo.processInfo.systemUptime
+                            self.bridge.command("display_configure",["width":Int(mode.width),"height":Int(mode.height),"currentOnly":true],timeout:.seconds(3)){result in
+                                guard self.connected,self.displayEpoch == epoch,self.desktopResizeRequest == request,
+                                      self.machine?.desktopState["visible"] as? Bool == true,
+                                      self.machine?.desktopState["fullScreenTransition"] as? Bool != true,
+                                      raster(self.desktopSize) == mode else{continuation.resume(returning:false);return}
+                                self.desktopResizeReport["lastApplyMilliseconds"]=(ProcessInfo.processInfo.systemUptime-applyStarted)*1000
+                                if case .failure(let error)=result {
+                                    self.desktopResizeReport["lastApplyError"]=error.localizedDescription
+                                    // A timed-out mode set can still complete.
+                                    // An advertised mode needs no EDID refresh;
+                                    // read its actual outcome before another apply.
+                                    if !slowRetry,self.machine?.nativeGraphicsEnabled == true,
+                                       self.desktopResizeReport["advertisedMode"] as? Bool != true {
+                                        slowRetry=true
+                                        self.desktopResizeReport["fallback"]=true
+                                        self.machine?.requestDesktopResolution(mode,reconnectDelay:1)
+                                    }
                                 }
                                 continuation.resume(returning:false)
                             }

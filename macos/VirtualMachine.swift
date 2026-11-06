@@ -231,11 +231,14 @@ final class VirtualMachineController {
             }
         }.value
     }
-    func requestDesktopResolution(_ size:NSSize,reconnectDelay:TimeInterval=0.25){
+    func requestDesktopResolution(_ size:NSSize,reconnectDelay:TimeInterval=0.25,advertisedMode:Bool=false){
         guard let launch=desktopLaunch() else{return}
         displayControl?.stop()
         let request=UUID();displayRequest=request;desktopResolutionPending=true
         desktop?.beginResolutionChange(size)
+        // An already advertised mode can be applied by Windows directly. Do
+        // not change EDID or disconnect the monitor just to select that mode.
+        if advertisedMode {displayControl=nil;desktopResolutionPending=false;return}
         // This publishes the custom mode to virtio-gpu. The guest's driver
         // helper applies it; RFB's framebuffer acknowledgement is not proof
         // of the Windows mode, which ApplicationModel reads back separately.

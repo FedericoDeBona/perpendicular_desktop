@@ -172,6 +172,16 @@ pub fn device_description(device: &ID3D11Device) -> windows::core::Result<Value>
 }
 
 pub fn snapshot() -> Value {
+    snapshot_with_modes(true)
+}
+
+/// Resize confirmation needs current geometry, not every supported mode of
+/// every adapter while Windows is rebuilding those mode lists.
+pub fn current_snapshot() -> Value {
+    snapshot_with_modes(false)
+}
+
+fn snapshot_with_modes(include_modes: bool) -> Value {
     let mut displays = Vec::new();
     unsafe {
         SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
@@ -222,7 +232,7 @@ pub fn snapshot() -> Value {
                     "height":info.rcWork.bottom-info.rcWork.top})
             });
             let mut modes = BTreeSet::new();
-            for mode_index in 0..512 {
+            for mode_index in 0..if include_modes { 512 } else { 0 } {
                 let mut mode = DEVMODEW {
                     dmSize: size_of::<DEVMODEW>() as u16,
                     ..Default::default()
@@ -300,7 +310,7 @@ pub fn configure(value: &Value) -> Result<Value, String> {
             ).as_bool() && saved.dmPelsWidth == width && saved.dmPelsHeight == height;
             if mode.dmPelsWidth == width && mode.dmPelsHeight == height && saved_matches {
                 configure_work_area(value)?;
-                return Ok(snapshot());
+                return Ok(if value["currentOnly"] == true { current_snapshot() } else { snapshot() });
             }
             mode.dmPelsWidth = width;
             mode.dmPelsHeight = height;
@@ -323,7 +333,7 @@ pub fn configure(value: &Value) -> Result<Value, String> {
                 ));
             }
             configure_work_area(value)?;
-            return Ok(snapshot());
+            return Ok(if value["currentOnly"] == true { current_snapshot() } else { snapshot() });
         }
     }
     Err("No active primary display".into())

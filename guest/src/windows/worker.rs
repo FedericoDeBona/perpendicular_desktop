@@ -425,7 +425,11 @@ impl Worker {
                             } else if layout_request {
                                 display_topology::configure(&command)
                             } else if display_request {
-                                Ok(display::snapshot())
+                                Ok(if command["currentOnly"] == true {
+                                    display::current_snapshot()
+                                } else {
+                                    display::snapshot()
+                                })
                             } else {
                                 diagnostics()
                             };
