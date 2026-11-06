@@ -25,11 +25,11 @@ struct NetworkSettingsPanel:View {
                 }
                 if !network.detail.isEmpty {Text(network.detail).font(.system(size:12)).foregroundStyle(.secondary).fixedSize(horizontal:false,vertical:true)}
                 if network.installed {
-                    Button("Riprendi inoltro"){network.activate()}.disabled(network.busy || network.installationPending || !network.connected)
+                    Button(network.authorizationRequired ? "Autorizza inoltro":"Riprendi inoltro"){network.activate()}.disabled(network.busy || network.installationPending || !network.connected)
                     Toggle("Abilita inoltro",isOn:Binding(get:{network.enabled},set:network.setEnabled))
                         .toggleStyle(.switch).controlSize(.small).disabled(network.busy || !network.connected)
                         .accessibilityIdentifier("network-enabled")
-                    Text("L'inoltro riprende automaticamente quando Windows si ricollega. La connessione VPN in Windows resta sotto il tuo controllo.")
+                    Text("L'autorizzazione resta valida durante riaperture e aggiornamenti dell'app, fino al riavvio del Mac. La connessione VPN in Windows resta sotto il tuo controllo.")
                         .font(.system(size:11)).foregroundStyle(.secondary).fixedSize(horizontal:false,vertical:true)
                 }
                 Button(network.installationPending ? "Completa installazione":network.installed ? "Installa o ripara componenti":"Installa e attiva") {network.install()}

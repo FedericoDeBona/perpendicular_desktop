@@ -13,6 +13,9 @@ SOURCE = REPO / 'addons/linkmanager-arm64/host-vpn'
 spec = importlib.util.spec_from_file_location('network_prepare', SOURCE / 'prepare.py')
 prepare = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(prepare)
+sign_spec = importlib.util.spec_from_file_location('sign_macos', REPO/'scripts/sign-macos.py')
+signing = importlib.util.module_from_spec(sign_spec)
+sign_spec.loader.exec_module(signing)
 
 
 def main():
@@ -37,6 +40,7 @@ def main():
     for name, framework in [('authorize', ['-framework', 'Security']), ('supervisor', [])]:
         subprocess.run(['xcrun', 'clang', '-O2', '-target', 'arm64-apple-macosx14.0', '-Wno-deprecated-declarations', str(SOURCE / (name + '.c')),
                         *framework, '-o', str(output / name)], check=True)
+        signing.sign_component(output/name, 'com.perpendicular.restart.network.'+name)
         pins[name] = hashlib.sha256((output / name).read_bytes()).hexdigest()
     shutil.copy2(SOURCE / 'install-relay.ps1', output / 'install-relay.ps1')
     pins['install-relay.ps1'] = hashlib.sha256((output / 'install-relay.ps1').read_bytes()).hexdigest()

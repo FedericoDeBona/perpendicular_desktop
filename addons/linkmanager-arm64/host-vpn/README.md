@@ -4,6 +4,24 @@ Prima implementazione locale del28ottobre2026: normali socket Mac raggiungono gl
 
 **Correzione successiva delle risorse web:** raffiche di connessioni TCP sul forwarding locale producevano reset; ora Shadowsocks usa multiplex smux con max_connections1 per riusare un trasporto locale. Nuova visita Chrome192.168.27.100/login completata senza erroriJavaScript; generatore/checknativi e3controlli configurazione PASS. Causa interna del forwarding non dimostrata; timeout5000/affidabilità generale restano ADD-004. UDP non rieseguito dopo questo cambio; le prove echo iniziali restano storiche. [Riproduzione e limiti](../../../docs/VERIFICATION.md#28-ottobre--risorse-javascript-vpn-e-connessioni-parallele).
 
+## Controller locale e autorizzazione
+
+Da0.2.79 il controller autorizzato resta vivo nella sessione Mac quando si ferma
+il tunnel e viene riutilizzato dopo riaperture, aggiornamenti e boot Windows.
+Il socket privato accetta solo status/start/stop/reload e il peer utente della VM;
+il client richiede un peer root e una risposta di stato effettiva. Il binario
+sing-box resta fissato da SHA256, con configurazione privata e indirizzi scelti.
+Un lock impedisce controller concorrenti. La migrazione iniziale può sostituire
+soltanto la coppia root legacy ai percorsi esatti della stessa VM.
+
+La ripresa automatica non apre richieste di password. Se manca il controller,
+l’app richiede un’azione esplicita «Autorizza inoltro»; il dialogo macOS resta
+necessario al primo avvio e dopo il riavvio del Mac. Nessun servizio privilegiato
+permanente o memorizzazione della password. L’app aggiorna i soli due helper Mac
+firmati dal suo pacchetto, preservando relay Windows, chiave e indirizzi.
+La verifica locale fra due build è registrata nel diario; non dedurre l’esito
+dalla sola compilazione né dalla presenza delle route.
+
 ## Percorso effettivo
 
 Mac utun88 → relay cifrato loopback10884 → forwarding QEMU sulla NIC esistente → sing-box ARM64 Windows → socket vincolati a LinkManager Adapter → dispositivo. Shadowsocks2022/AES256-GCM con chiave casuale privata: nessuna password dell'utente richiesta o conservata dal relay. Non richiede altre NIC Windows, forwarding/NAT Windows o reboot.
@@ -29,11 +47,11 @@ python3 addons/linkmanager-arm64/host-vpn/host_vpn.py targets 192.168.10.111 192
 python3 addons/linkmanager-arm64/host-vpn/host_vpn.py start
 ```
 
-Cambiare gli IP richiede TUN fermo: aggiorna allowlist Windows e configurazione Mac, con controllo prima dell'attivazione e copie private delle configurazioni precedenti. `start` verifica VM/UUID, ripristina i soli forwarding QEMU del relay, avvia il task Windows e chiede l'autorizzazione amministrativa macOS per il TUN. Il piccolo supervisore privilegiato esegue un singolo binario con SHA256 fissato; il socket privato dell'utente consente l'arresto. Non installa helper privilegiati permanenti. `stop` chiude TUN, ferma il relay e ritira i due forwarding QEMU; le regole firewall e i file restano per il successivo avvio.
+Cambiare gli IP richiede TUN fermo: aggiorna allowlist Windows e configurazione Mac, con controllo prima dell'attivazione e copie private delle configurazioni precedenti. `start` verifica VM/UUID, ripristina i soli forwarding QEMU del relay, avvia il task Windows e riusa il controller autorizzato, anche dopo uno stop. Chiede l’autorizzazione macOS soltanto se quel controller manca. Il piccolo supervisore privilegiato esegue un singolo binario con SHA256 fissato; il socket privato dell'utente accetta soltanto status/start/stop/reload. Non installa helper privilegiati permanenti. `stop` chiude TUN, ferma il relay e ritira i due forwarding QEMU; le regole firewall e i file restano per il successivo avvio.
 
 **Ripresa dopo avvio VM:** i forwarding aggiunti a caldo non sopravvivono alla chiusura di QEMU e il task Windows non ha trigger al boot. Il TUN Mac può invece restare acceso con le route configurate: questo stato, da solo, non prova che il collegamento sia disponibile. Dal29ottobre `start` ammette anche questo caso: verifica il socket privato vivo e la UUID, ripristina forwarding/relay e conserva il TUN senza un'altra autorizzazione Mac. Ripetizione reale verificata senza duplicare processi o forwarding. Da0.2.59 il recupero viene richiamato dall’app se l’inoltro è abilitato; `start` resta il recupero manuale per versioni precedenti. La verifica locale della nuova UI e della ripresa è distinta nel diario corrente. Non attiva connessioni LinkManager o route mancanti nella VPN Windows. [Difetto e verifica](../../../docs/VERIFICATION.md#29-ottobre--redirect-vpn-persi-dopo-avvio-vm).
 
-**Verifiche distinte:** supervisore QA→stop→routeTUN ritirate e successivo avvio finale riusciti; riconoscimento dei forwarding già esistenti e task start idempotente verificati. Successivamente eseguito realmente il ciclo completo stop→targets a due IP→start per aggiungere 192.168.27.100, con serializzazione PowerShell corretta e conferma delle allowlist e delle due route attive. Parser/test della logica di scoping PASS. Reconnect LinkManager successivamente verificato con la v4 nella main; reboot, autoavvio e rimozione completa non qualificati. Il terzoIP è stato attivato con check/backup/riavvio relay e reload mirato del TUN già autorizzato, senza introdurre un comando live generale. status controlla soltanto configurazione/route.
+**Verifiche distinte:** supervisore QA→stop→routeTUN ritirate e successivo avvio finale riusciti; riconoscimento dei forwarding già esistenti e task start idempotente verificati. Successivamente eseguito realmente il ciclo completo stop→targets a due IP→start per aggiungere 192.168.27.100, con serializzazione PowerShell corretta e conferma delle allowlist e delle due route attive. Parser/test della logica di scoping PASS. Reconnect LinkManager successivamente verificato con la v4 nella main; reboot, autoavvio e rimozione completa non qualificati. Il terzoIP è stato attivato con check/backup/riavvio relay e reload mirato del TUN già autorizzato, senza introdurre un comando live generale. status controlla configurazione/route e risposta del controller; non prova l’accesso ai dispositivi.
 
 ## Preparazione su un'altra macchina
 

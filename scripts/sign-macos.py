@@ -39,6 +39,18 @@ def requirement():
     return fingerprint, f'identifier "{IDENTIFIER}" and certificate leaf = H"{fingerprint}"'
 
 
+def sign_component(path, identifier):
+    """Give packaged file/network helpers the same persistent per-Mac identity."""
+    if not identifier.startswith(IDENTIFIER + '.') or any(c not in 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.-' for c in identifier):
+        raise ValueError('Invalid companion signing identifier')
+    fingerprint, _ = requirement()
+    expected = f'identifier "{identifier}" and certificate leaf = H"{fingerprint}"'
+    run(['/usr/bin/security', 'unlock-keychain', '-p', PASSWORD.read_text(), KEYCHAIN])
+    run(['/usr/bin/codesign', '--force', '--sign', fingerprint, '--keychain', KEYCHAIN,
+         '--timestamp=none', '--identifier', identifier, '--requirements', '=designated => '+expected, path])
+    run(['/usr/bin/codesign', '--verify', '--strict', '-R', '='+expected, path])
+
+
 def setup():
     if ROOT.exists():
         requirement()

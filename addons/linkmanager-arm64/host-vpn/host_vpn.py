@@ -37,10 +37,19 @@ def supervisor_socket(root):
 
 
 def control(root, command):
+    if command not in ('status','start','stop','reload'):
+        raise ValueError('Invalid controller command')
     path=supervisor_socket(root)
     with socket.socket(socket.AF_UNIX) as s:
         s.settimeout(5);s.connect(str(path));s.sendall(command.encode()+b'\n')
-        return s.recv(128).decode().strip()
+        reply=s.recv(128).decode().strip()
+        if reply not in ('running','stopped','stopping','reloading'):
+            raise ValueError('Controller requires migration through the app network settings')
+        return reply
+
+
+def tunnel_status(root):
+    return control(root,'status') if (root/'tun.sock').exists() else 'absent'
 
 
 def receive_exact(stream, count):
@@ -147,31 +156,24 @@ def main():
     c=sub.add_parser('targets');c.add_argument('addresses',nargs='+')
     args=p.parse_args();root=checked_root(args.runtime)
     if args.command=='start':
-        if (root/'tun.sock').exists():
-            # A VM restart loses hot-added forwarding and stops its relay,
-            # while the Mac TUN may still be alive. Check that its owned socket
-            # is live before repairing only the existing VM side. Connecting
-            # and closing sends no supervisor command and retains the TUN.
-            with socket.socket(socket.AF_UNIX) as s:
-                s.settimeout(5);s.connect(str(supervisor_socket(root)))
-            connect_relay(root)
-            print('Existing Mac tunnel retained; VM relay and forwarding restored')
-            return
         subprocess.run([str(root/'sing-box'),'check','-c',str(root/'client-tun.json')],check=True)
         connect_relay(root)
-        subprocess.run([str(root/'authorize'),str(root/'supervisor'),str(root)],check=True)
+        if tunnel_status(root)=='absent':
+            subprocess.run([str(root/'authorize'),str(root/'supervisor'),str(root)],check=True)
+        else:
+            control(root,'start')
         deadline=time.monotonic()+10
-        while not (root/'tun.sock').exists() and time.monotonic()<deadline: time.sleep(.1)
-        if not (root/'tun.sock').exists(): raise ValueError('Supervisor did not start; inspect tun.log')
+        while tunnel_status(root)!='running' and time.monotonic()<deadline: time.sleep(.1)
+        if tunnel_status(root)!='running': raise ValueError('Tunnel did not start; inspect tun.log')
     elif args.command=='stop':
         print(control(root,'stop'))
         deadline=time.monotonic()+10
-        while (root/'tun.sock').exists() and time.monotonic()<deadline: time.sleep(.1)
-        if (root/'tun.sock').exists(): raise ValueError('TUN is still stopping; relay retained')
+        while tunnel_status(root)!='stopped' and time.monotonic()<deadline: time.sleep(.1)
+        if tunnel_status(root)!='stopped': raise ValueError('TUN is still stopping; relay retained')
         connect_relay(root,enabled=False)
     elif args.command=='targets':
         requested=targets(args.addresses)
-        if (root/'tun.sock').exists():
+        if tunnel_status(root)=='running':
             raise ValueError('Stop before changing targets, then start to activate')
         payload=json.dumps(requested,separators=(',',':'))
         update=r"""$d='C:\ProgramData\Perpendicular\HostVPN';
@@ -194,6 +196,7 @@ Move-Item -LiteralPath "$d\server.pending.json" -Destination "$d\server.json" -F
     else:
         data=json.loads((root/'client-tun.json').read_text())
         print(json.dumps({'supervisor_socket':(root/'tun.sock').exists(),
+                          'tunnel_state':tunnel_status(root),
                           'targets':data['inbounds'][0]['route_address'],
                           'protocols':['TCP','UDP'],
                           'status_scope':'configuration_and_routes_only'},indent=2))

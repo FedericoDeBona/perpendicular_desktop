@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """Package pinned Samba and its libraries; no system service or Homebrew needed."""
-import argparse,hashlib,json,os,shutil,subprocess,tarfile,urllib.request,urllib.error
+import argparse,hashlib,json,os,shutil,subprocess,tarfile,urllib.request,urllib.error,importlib.util,re
 from pathlib import Path
 REPO=Path(__file__).resolve().parents[1]
 CACHE=Path.home()/'.local/share/perpendicular-samba'
+_sign_spec=importlib.util.spec_from_file_location('sign_macos',REPO/'scripts/sign-macos.py')
+signing=importlib.util.module_from_spec(_sign_spec);_sign_spec.loader.exec_module(signing)
 def digest(p):return hashlib.sha256(p.read_bytes()).hexdigest()
 def package(app):
  spec=json.loads((REPO/'guest/samba-runtime.json').read_text());CACHE.mkdir(parents=True,exist_ok=True)
@@ -58,7 +60,8 @@ def package(app):
    if target is None:raise ValueError('Missing library '+dependency)
    changes+=['-change',dependency,'@loader_path/'+os.path.relpath(target,path.parent)]
   if changes:subprocess.run(['install_name_tool',*changes,str(path)],check=True,capture_output=True)
-  subprocess.run(['codesign','--force','--sign','-',str(path)],check=True,capture_output=True)
+  identifier='com.perpendicular.restart.samba.'+re.sub('[^a-zA-Z0-9.-]','-',str(path.relative_to(out)))
+  signing.sign_component(path,identifier)
  for path in out.rglob('*'):
   if path.is_symlink() and not path.resolve().is_relative_to(out.resolve()):raise ValueError('Library alias outside runtime')
  shutil.copy2(REPO/'guest/samba-runtime.json',notices/'sources.json')

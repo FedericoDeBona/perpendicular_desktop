@@ -36,14 +36,25 @@ Scrivania/Documenti/Download. La verifica pertinente è conservare l'accesso dop
 una build diversa firmata con lo stesso certificato, non soltanto rilanciare lo
 stesso eseguibile. Non cancellare TCC o concedere accesso completo al disco.
 
-L'installer rifiuta la sostituzione mentre il frontend canonico è aperto,
-verifica firma e requisito prima/dopo la copia, conserva rollback fuori Git con
-estensione `.bundle-backup` e registra soltanto la canonica. Non rinominare app
-in esecuzione in `Before-*.app`: copie con lo stesso bundle ID possono essere
-risolte da Launch Services al posto della canonica, anche per il nome nei
-consensi. Per ripristinare un rollback, app chiusa, ricopiare il suo contenuto
-come `/Applications/Perpendicular.app` e registrare la canonica; la firma vecchia
-può richiedere consenso. Non avviare direttamente il backup.
+Anche i programmi Samba e i due helper VPN vengono firmati con il certificato
+locale persistente e identificativi distinti stabili. Una firma persistente del
+solo frontend non basta a qualificare l’identità dei suoi componenti.
+
+L'installer rifiuta Windows e frontend canonico aperti. Arresta soltanto i server
+Samba appartenenti alla VM selezionata, con Windows già spento, prima di muovere
+la loro app responsabile. Verifica firma/requisito prima e dopo la copia.
+I rollback sono archivi `.tar.gz` privati, con contenuti verificati prima della
+rimozione della copia eseguibile; le vecchie `.bundle-backup` riconosciute vengono
+archiviate e deregistrate. Cambiare soltanto l’estensione non rende un bundle
+non eseguibile e non impedisce l’attribuzione dei consensi a una copia storica.
+Per ripristinare, con app/Windows spenti, estrarre l’archivio in una directory
+privata e installare il suo `Perpendicular.app` con l’installer; registrare solo
+la canonica. Un rollback alla vecchia identità può richiedere nuovo consenso.
+
+La verifica .79 ha eliminato gli avvisi del backup secondo l’utente, ma ha ancora
+richiesto quelli di Perpendicular nel primo passaggio. Due successive build.80/.81 hanno mantenuto i requisiti e collegato le cartelle.
+La continuità dei consensi richiede il riscontro reale dell’utente sui dialoghi,
+non l’assenza di clic CUA.
 
 Riferimenti Apple: [requisiti di firma](https://developer.apple.com/documentation/technotes/tn3127-inside-code-signing-requirements),
 [certificati locali e identità](https://developer.apple.com/library/archive/documentation/Security/Conceptual/CodeSigningGuide/Procedures/Procedures.html).

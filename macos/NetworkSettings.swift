@@ -14,6 +14,7 @@ final class NetworkSettings:ObservableObject {
     @Published private(set) var busy=false
     @Published private(set) var connected=false
     @Published private(set) var tunnelActive=false
+    @Published private(set) var authorizationRequired=false
     @Published private(set) var title="Non installato"
     @Published private(set) var detail=""
     @Published private(set) var error:String?
@@ -49,7 +50,7 @@ final class NetworkSettings:ObservableObject {
             installationPending=FileManager.default.fileExists(atPath:root.appendingPathComponent("pending-install.json").path)
             enabled=prefs["enabled"] as? Bool ?? FileManager.default.fileExists(atPath:root.appendingPathComponent("tun.sock").path)
             title=installed ? "In attesa di Windows":"Non installato"
-            if installed {try verifyRuntime()}
+            if installed {try refreshLocalCompanions();try verifyRuntime()}
         }catch{self.error=error.localizedDescription;title="Configurazione da verificare"}
     }
     func connectionChanged(_ ready:Bool){
@@ -70,7 +71,7 @@ final class NetworkSettings:ObservableObject {
             }
             guard !Task.isCancelled,self.connected,!self.guestBusy(),!self.busy else{return}
             if self.installationPending {self.title="Installazione da completare"}
-            else if self.enabled,self.installed {self.activate()}
+            else if self.enabled,self.installed {self.activate(allowAuthorization:false)}
             else {self.refresh()}
         }
     }
@@ -119,7 +120,7 @@ final class NetworkSettings:ObservableObject {
         }
     }
     func setEnabled(_ value:Bool){if value{activate()}else{deactivate()}}
-    func activate(){
+    func activate(allowAuthorization:Bool=true){
         guard installed,connected,!busy,!installationPending else{return}
         perform("Attivazione inoltro…"){
             guard !self.savedAddresses.isEmpty else{throw Self.failure("Aggiungi e salva almeno un indirizzo prima di attivare l'inoltro.")}
@@ -127,13 +128,20 @@ final class NetworkSettings:ObservableObject {
             try await self.forwarding(true)
             _ = try await self.ps(#"Start-ScheduledTask -TaskName 'PerpendicularHostVPN'"#)
             if try await !self.tunnel() {
-                _ = try await Self.run(self.root.appendingPathComponent("authorize"),[self.root.appendingPathComponent("supervisor").path,self.root.path])
+                // An authorized controller remains available while the tunnel
+                // is stopped. Reuse it across toggles, VM boots and app updates.
+                if try await !self.tunnel(command:"start") {
+                    self.authorizationRequired=true
+                    guard allowAuthorization else{throw Self.failure("L'inoltro richiede una riparazione iniziale. Premi Riprendi inoltro per autorizzarlo; l'avvio automatico non richiede password.")}
+                    _ = try await Self.run(self.root.appendingPathComponent("authorize"),[self.root.appendingPathComponent("supervisor").path,self.root.path])
+                }
                 for _ in 0..<30 {
                     if try await self.tunnel(){break}
                     try await Task.sleep(for:.milliseconds(200))
                 }
                 guard try await self.tunnel() else{throw Self.failure("Il tunnel Mac non si è avviato. Riprova l'attivazione.")}
             }
+            self.authorizationRequired=false
             self.enabled=true;try self.savePreferences();try await self.probe()
         }
     }
@@ -278,7 +286,7 @@ final class NetworkSettings:ObservableObject {
         installed=true;savedAddresses=try Self.normalized(selected);addresses=savedAddresses;enabled=true;guestVerified=false
         try savePreferences();try await forwarding(true)
         if try await tunnel(){_ = try await tunnel(command:"reload")}
-        else{_ = try await Self.run(root.appendingPathComponent("authorize"),[root.appendingPathComponent("supervisor").path,root.path])}
+        else if try await !tunnel(command:"start") {_ = try await Self.run(root.appendingPathComponent("authorize"),[root.appendingPathComponent("supervisor").path,root.path])}
         try await Task.sleep(for:.seconds(1));try await probe()
     }
     private func perform(_ message:String,_ work:@escaping @MainActor ()async throws->Void){
@@ -371,6 +379,29 @@ final class NetworkSettings:ObservableObject {
         let metadata=try Self.json(root.appendingPathComponent("connection.json"))
         guard metadata["machine_uuid"] as? String==machine!.configuration.id else{throw Self.failure("Il collegamento appartiene a un'altra macchina Windows.")}
     }
+    private func refreshLocalCompanions()throws {
+        // Updating the signed Mac helpers does not reinstall the Windows relay,
+        // rotate its key, change routes, or launch an authorization dialog.
+        try Self.privateDirectory(root)
+        let pins=try Self.json(payload.appendingPathComponent("requirements.json"))["files"] as? [String:String] ?? [:]
+        guard Self.hash(try Data(contentsOf:root.appendingPathComponent("sing-box")))==pins["sing-box"] else {
+            throw Self.failure("Il componente VPN locale richiede una riparazione.")
+        }
+        for name in ["authorize","supervisor"] {
+            let destination=root.appendingPathComponent(name)
+            var info=stat()
+            guard lstat(destination.path,&info)==0,(info.st_mode & S_IFMT)==S_IFREG,info.st_uid==getuid(),info.st_mode & 0o077==0 else {
+                throw Self.failure("Il componente di controllo della rete non è valido.")
+            }
+            let data=try Data(contentsOf:payload.appendingPathComponent(name))
+            guard Self.hash(data)==pins[name] else{throw Self.failure("Il pacchetto di rete dell'app non è completo.")}
+            if Self.hash(try Data(contentsOf:destination)) != pins[name] {
+                try data.write(to:destination,options:.atomic)
+                try FileManager.default.setAttributes([.posixPermissions:0o700],ofItemAtPath:destination.path)
+            }
+        }
+        runtimeStamp=""
+    }
     private func savePreferences()throws {try Self.write(["enabled":enabled,"addresses":savedAddresses],to:preferences)}
     private func ps(_ script:String)async throws->String {
         try Task.checkCancellation()
@@ -419,7 +450,9 @@ final class NetworkSettings:ObservableObject {
             if exists==enabled {continue}
             let command=enabled ? "hostfwd_add net \(protocolName):127.0.0.1:10884-10.0.2.15:10884":"hostfwd_remove net \(protocolName):127.0.0.1:10884"
             let response=try await qmp("human-monitor-command",["command-line":command]) as? String ?? ""
-            guard response.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty else{throw Self.failure("La porta locale del collegamento è occupata. Verifica la rete e riprova.")}
+            let reply=response.trimmingCharacters(in:.whitespacesAndNewlines)
+            let removed="host forwarding rule for \(protocolName):127.0.0.1:10884 removed"
+            guard reply.isEmpty || (!enabled && reply==removed) else{throw Self.failure("La porta locale del collegamento è occupata. Verifica la rete e riprova.")}
         }
     }
     private func eject(_ iso:URL)async throws {
@@ -450,15 +483,21 @@ final class NetworkSettings:ObservableObject {
             throw failure("Il tunnel locale non risponde.")
         }
         var uid:uid_t=0,gid:gid_t=0
-        guard getpeereid(fd,&uid,&gid)==0,uid==0 || uid==getuid() else{throw failure("Il supervisore del tunnel non è riconosciuto.")}
-        if let command {
-            let data=Array((command+"\n").utf8)
+        guard getpeereid(fd,&uid,&gid)==0,uid==0 else{throw failure("Il supervisore del tunnel non è riconosciuto.")}
+        let action=command ?? "status"
+        guard ["status","start","stop","reload"].contains(action) else{throw failure("Comando del tunnel non valido.")}
+        do {
+            let data=Array((action+"\n").utf8)
             guard data.withUnsafeBytes({send(fd,$0.baseAddress!,data.count,0)})==data.count else{throw failure("Non riesco a inviare il comando al tunnel.")}
             var timeout=timeval(tv_sec:3,tv_usec:0);_ = setsockopt(fd,SOL_SOCKET,SO_RCVTIMEO,&timeout,socklen_t(MemoryLayout<timeval>.size))
             var reply=[UInt8](repeating:0,count:128)
-            guard recv(fd,&reply,reply.count,0)>0 else{throw failure("Il supervisore non ha confermato il comando.")}
+            let count=recv(fd,&reply,reply.count,0)
+            // Legacy supervisors cannot answer status/start. Retain their
+            // socket and require explicit repair, rather than prompting at boot.
+            guard count>0 else{return false}
+            let response=String(decoding:reply.prefix(count),as:UTF8.self)
+            return ["running\n","reloading\n","stopping\n"].contains(response)
         }
-        return true
     }
     nonisolated private static func run(_ executable:URL,_ args:[String])async throws->Data {
         let result=try await Task.detached {
