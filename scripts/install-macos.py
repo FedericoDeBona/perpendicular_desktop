@@ -112,7 +112,7 @@ def main():
     requirement = '='+signing.requirement()[1]
     subprocess.run(['codesign', '--verify', '--deep', '--strict', '-R', requirement, str(source)], check=True)
     info=plistlib.loads((target/'Contents/Info.plist').read_bytes()) if target.exists() else {}
-    directory=Path(info.get('PerpendicularMachineDirectory', str(Path.home()/'Library/Application Support/Perpendicular Restart')))
+    directory=Path(info.get('PerpendicularMachineDirectory', str(Path.home()/'Library/Application Support/Perpendicular Memory IoT')))
     stop_folder_server(directory)
     backups = directory/'QA/AppBackups'
     backups.mkdir(parents=True, exist_ok=True)
