@@ -404,12 +404,25 @@ continuare a respingere un backend diagnostico non qualificato. [Domanda ed
 esiti](../../docs/VERIFICATION.md#registro-nativo-dellorigine-condivisa).
 
 
-## Candidata: dipendenze delle texture con caricamento iniziale separato
+## Dipendenze delle texture con caricamento iniziale separato
 
-`rebuild-native-video.py --late-texture-initialization-fences` applica
-`native-late-texture-initialization.patch` e registra l'opzione nella ricevuta.
-Default e release di produzione restano invariati finché manca la verifica main.
-La candidata non include il registro diagnostico e non richiede il marker.
+`rebuild-native-video.py` include ora per default
+`native-late-texture-initialization.patch`; il flag esplicito
+`--late-texture-initialization-fences` resta disponibile. La ricevuta registra
+il fix. `--without-late-texture-initialization-fences` ricostruisce soltanto
+la base storica e permette i vecchi esperimenti separati: il gate produttivo
+rifiuta un componente senza il requisito minimo condiviso. Nessun registro
+diagnostico o marker è necessario.
+
+Video0.1.5 e il profilo `m4-cpu-v12-late-init` sono predisposti con backend5DA8,
+UMDv17 e installer byte-identici a0.1.4. QA e primi casi main sono verificati nel
+diario; il lavoro è in pausa prima del confezionamento e della consegna canonica.
+La canonica locale è ancora0.2.84/video0.1.4. Per riprendere, confezionare prima
+un riferimento privato con `package-video-payload.py --release 0.1.5
+--host-profile m4-cpu-v12-late-init`, gli input esatti del manifest e firma
+persistente; poi usarlo come `PERPENDICULAR_RUNTIME_APP` nella build. Non forzare
+pin o trattare questa preparazione come distribuzione compiuta. Su M1 ricostruire
+e qualificare il profilo compatibile; non trasferire l'intero runtime M4.
 
 Neptune crea le texture native senza `pInitialData`, poi trasporta i dati iniziali
 con RESOURCE_UPDATE/UpdateSubresource. Anche una risorsa dichiarata IMMUTABLE

@@ -6,7 +6,8 @@
     "sdr-video-processor",
     "compact-shmem-map",
     "external-decoder-discard",
-    "present-amortization"
+    "present-amortization",
+    "late-texture-initialization-fences"
   ],
   "architecture": "aarch64",
   "guest_wire_version": 2,

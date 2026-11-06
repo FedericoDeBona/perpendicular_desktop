@@ -414,8 +414,12 @@ final class VirtualMachineController {
                 let scale=mixedDisplaysEnabled ? CGFloat(MixedDisplayPlan.rasterScale(hostDisplays)):$0.scale
                 return NSSize(width:$0.frame.width*scale,height:$0.frame.height*scale)
             } ?? NSSize(width:1280,height:800)
-            let scale=min(1,4096/fullDisplay.width,4096/fullDisplay.height,sqrt(8_388_608/(fullDisplay.width*fullDisplay.height)))
-            let initialDisplay=NSSize(width:max(640,(fullDisplay.width*scale).rounded()),height:max(480,(fullDisplay.height*scale).rounded()))
+            // Mixed mode reserves this output for the Desktop window, without
+            // a Mac point mapping. Start at the ordinary Desktop window raster;
+            // the existing native resize path still sets its requested size.
+            let bootDisplay=mixedDisplaysEnabled ? NSSize(width:1920,height:1280):fullDisplay
+            let scale=min(1,4096/bootDisplay.width,4096/bootDisplay.height,sqrt(8_388_608/(bootDisplay.width*bootDisplay.height)))
+            let initialDisplay=NSSize(width:max(640,(bootDisplay.width*scale).rounded()),height:max(480,(bootDisplay.height*scale).rounded()))
             let venus=native?.supportsVenus == true ? ",venus=on":""
             arguments += ["-device","virtio-ramfb-gl,id=display0,addr=0x8,disable-legacy=on,neptune=on\(venus),blob=on,hostmem=512M,max_outputs=1,xres=\(Int(initialDisplay.width)),yres=\(Int(initialDisplay.height))"]
             if mixedDisplaysEnabled {

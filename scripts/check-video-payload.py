@@ -25,8 +25,10 @@ def check(app):
     pinned = json.loads((REPO / 'graphics/backend/releases' / ('video-' + release['version'] + '.json')).read_text())
     if release != pinned or release['schema'] != required['schema']:
         raise ValueError('Video release differs from the shared manifest')
-    if not set(required['required_fixes']).issubset(release['fixes']):
-        raise ValueError('Video release lacks a required shared fix')
+    missing = set(required['required_fixes']) - set(release['fixes'])
+    if missing:
+        raise ValueError('Video ' + release['version'] + ' lacks required fixes: ' + ', '.join(sorted(missing)) +
+                         '; rebuild/package a compatible profile using graphics/backend/README.md')
     if release['kernel_abi'] != required['kernel_abi'] or release['architecture'] != 'aarch64':
         raise ValueError('Video architecture/kernel ABI differs')
     for name, expected in release['files'].items():
