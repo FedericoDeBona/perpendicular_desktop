@@ -79,6 +79,7 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
     private var machine:VirtualMachineController!
     private var bridge:GuestBridge!
     private var memoryController:RuntimeMemoryController?
+    private var cpuController:RuntimeCPUController?
     let network=NetworkSettings()
     private let folderIntegration=SharedFolderIntegration()
     @Published private(set) var folderIntegrationStatus="Le cartelle saranno preparate quando Windows sarà collegato."
@@ -367,6 +368,8 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
                        self.machineOperation == nil,!self.restarting {
                         self.acceptMachineState(state)
                         self.publishWindowEndpointIfReady(state)
+                        self.cpuController?.observe(pid:state.pid,eligible:self.connected && self.windows.isEmpty &&
+                            self.openingApps.isEmpty && self.machine?.desktopState["visible"] as? Bool != true)
                         let memory=state.pid != nil ? (self.memoryController?.state ?? [:]):[:]
                         // Only these fields are displayed. Device counters and
                         // the polling timestamp must not invalidate the entire
@@ -386,6 +389,8 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
     }
     private func configureMachineControllers(){
         windowEndpointPID=nil
+        cpuController=RuntimeCPUController(machine:machine)
+        machine.beforeDesktop={ [weak cpuController] in try await cpuController?.requireInteractive() }
         network.configure(machine:machine,bridge:bridge,guestBusy:{[weak self] in self?.folderIntegrationBusy ?? true})
         memoryController?.stop();memoryController=nil;vmMemoryState=[:]
         machine.desktopClipboardBridge=bridge
@@ -698,7 +703,7 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
                 "displayChecks":mixedDisplayChecks,"displayApplies":mixedDisplayApplies,"displayInvalidations":displayInvalidations,
                 "mappedDisplays":sharedDisplays.count,"displaySetupComplete":machine?.mixedDisplaysEnabled == true ? sharedDisplays.count==HostDisplay.current().count:sharedDisplay != nil,
                 "appLaunchReady":machine?.mixedDisplaysEnabled != true || !sharedDisplays.isEmpty,
-                "memory":memoryState,"networkObservation":network.observationDiagnostics,"sharedDownloads":sharedDownloads,"sharedFolders":folderState,
+                "memory":memoryState,"cpuIdle":cpuController?.state ?? [:],"networkObservation":network.observationDiagnostics,"sharedDownloads":sharedDownloads,"sharedFolders":folderState,
                 "vmSettings":["pending":settingsPending,"initialMemoryMiB":vmSettings?.initialMemoryMiB ?? 0,"maximumMemoryMiB":vmSettings?.maximumMemoryMiB ?? 0,"cpus":vmSettings?.cpus ?? 0],
                 "windowCount":windows.count,"capabilities":guestCapabilities,
                 "frameChannel":bridge?.separateFrames ?? false,
@@ -975,27 +980,37 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
         status="Opening \(app.name)…"
         let epoch=launcherEpoch,request=openingRequests[app.id]
         PipelineTrace.record("app-launch-request",app.id)
-        bridge.command("launch",["app":app.id]){[weak self] result in
-            guard let self,self.launcherEpoch == epoch else{return}
-            if PipelineTrace.enabled {
-                switch result {
-                case .success(let reply):PipelineTrace.record("app-launch-reply",app.id,["value":reply["value"] ?? [:]])
-                case .failure:PipelineTrace.record("app-launch-failed",app.id)
+        Task{@MainActor [weak self] in
+            guard let self else{return}
+            do {try await self.cpuController?.requireInteractive()}
+            catch {
+                guard self.launcherEpoch==epoch,self.openingRequests[app.id]==request else{return}
+                self.finishOpening(app.id);self.launcherNotice="Non riesco a preparare Windows. "+error.localizedDescription
+                return
+            }
+            guard self.launcherEpoch==epoch,self.openingRequests[app.id]==request,self.connected else{return}
+            self.bridge.command("launch",["app":app.id]){[weak self] result in
+                guard let self,self.launcherEpoch == epoch else{return}
+                if PipelineTrace.enabled {
+                    switch result {
+                    case .success(let reply):PipelineTrace.record("app-launch-reply",app.id,["value":reply["value"] ?? [:]])
+                    case .failure:PipelineTrace.record("app-launch-failed",app.id)
+                    }
                 }
-            }
-            if case .success=result {
-                self.launcherPreferences.record(app.id);try? self.launcherLibrary?.save(self.launcherPreferences)
-            }
-            guard self.openingRequests[app.id] == request else{return}
-            self.refreshApplicationStates()
-            switch result {
-            case .failure(let error):
-                self.finishOpening(app.id);self.status=error.localizedDescription
-                self.launcherNotice="Non riesco ad aprire \(app.name). "+error.localizedDescription;self.openingNoticeApp=app.id
-            case .success(let reply):
-                if let value=reply["value"] as? [String:Any],value["existing"] as? Bool == true,value["ready"] as? Bool != false,
-                   self.windows.contains(where:{self.windowApps[$0.key] == app.id && $0.value.role == .main && $0.value.readyForInput}) {
-                    self.finishOpening(app.id,appeared:true)
+                if case .success=result {
+                    self.launcherPreferences.record(app.id);try? self.launcherLibrary?.save(self.launcherPreferences)
+                }
+                guard self.openingRequests[app.id] == request else{return}
+                self.refreshApplicationStates()
+                switch result {
+                case .failure(let error):
+                    self.finishOpening(app.id);self.status=error.localizedDescription
+                    self.launcherNotice="Non riesco ad aprire \(app.name). "+error.localizedDescription;self.openingNoticeApp=app.id
+                case .success(let reply):
+                    if let value=reply["value"] as? [String:Any],value["existing"] as? Bool == true,value["ready"] as? Bool != false,
+                       self.windows.contains(where:{self.windowApps[$0.key] == app.id && $0.value.role == .main && $0.value.readyForInput}) {
+                        self.finishOpening(app.id,appeared:true)
+                    }
                 }
             }
         }
@@ -1558,6 +1573,7 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
             }
         case "windows":
             guard let items=value["windows"] as? [[String:Any]],items.count<=16 else{return}
+            if !items.isEmpty,windows.isEmpty {cpuController?.noteVisual(pid:machineState.pid)}
             let previousMainApps=Set(windows.compactMap{$0.value.role == .main ? windowApps[$0.key]:nil})
             let currentMainApps=Set(items.compactMap{item->String? in
                 guard let role=WindowRole(rawValue:item["role"] as? String ?? "dialog"),role == .main else{return nil}

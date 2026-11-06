@@ -1,18 +1,61 @@
 --- a/target/arm/hvf/hvf.c
 +++ b/target/arm/hvf/hvf.c
-@@ -2031,11 +2031,11 @@
-     nanos = ticks_to_sleep * cntfrq;
- 
+@@ -30,6 +30,7 @@
+ #include "hw/boards.h"
+ #include "hw/irq.h"
+ #include "qemu/main-loop.h"
++#include "qemu/timer.h"
+ #include "system/cpus.h"
+ #include "arm-powerctl.h"
+ #include "target/arm/cpu.h"
+@@ -1958,6 +1959,29 @@
+     return hvf_vtimer_val_raw();
+ }
+
++/* An idle lease expires if the frontend stops renewing it. Interactive and
++ * legacy frontends retain the original 2 ms busy window by default. */
++static int64_t perp_idle_wfi_until;
++
++static bool perp_idle_wfi_enabled(Object *obj, Error **errp)
++{
++    int64_t until = qatomic_read(&perp_idle_wfi_until);
++    return until && qemu_clock_get_ns(QEMU_CLOCK_REALTIME) < until;
++}
++
++static void perp_idle_wfi_set(Object *obj, bool enabled, Error **errp)
++{
++    qatomic_set(&perp_idle_wfi_until, enabled ?
++        qemu_clock_get_ns(QEMU_CLOCK_REALTIME) + 10LL * NANOSECONDS_PER_SECOND : 0);
++}
++
++static char *perp_idle_wfi_stats(Object *obj, Error **errp)
++{
++    bool idle = perp_idle_wfi_enabled(obj, errp);
++    return g_strdup_printf("{\"version\":1,\"idle\":%s,\"busyNanoseconds\":%d}",
++                           idle ? "true" : "false", idle ? 250000 : 2000000);
++}
++
+ static void hvf_wait_for_ipi(CPUState *cpu, struct timespec *ts)
+ {
      /*
--     * Don't sleep for less than the time a context switch would take,
--     * so that we can satisfy fast timer requests on the same CPU.
--     * Measurements on M1 show the sweet spot to be ~2ms.
-+     * Avoid repeated VM entries while the guest's idle loop waits for a
-+     * short timer. Keep a small busy window, but sleep for longer waits.
-+     * Interrupts still wake pselect immediately; the timer deadline is kept.
+@@ -2029,7 +2053,8 @@
+      * so that we can satisfy fast timer requests on the same CPU.
+      * Measurements on M1 show the sweet spot to be ~2ms.
       */
 -    if (!seconds && nanos < (2 * SCALE_MS)) {
-+    if (!seconds && nanos < 250000) {
++    if (!seconds && nanos < (perp_idle_wfi_enabled(NULL, NULL) ?
++                              250000 : (2 * SCALE_MS))) {
          return;
      }
- 
+
+@@ -2552,6 +2577,10 @@
+
+ int hvf_arch_init(void)
+ {
++    object_property_add_bool(OBJECT(current_machine), "perp-idle-wfi",
++                             perp_idle_wfi_enabled, perp_idle_wfi_set);
++    object_property_add_str(OBJECT(current_machine), "perp-idle-wfi-stats",
++                            perp_idle_wfi_stats, NULL);
+     hvf_state->vtimer_offset = mach_absolute_time();
+     vmstate_register(NULL, 0, &vmstate_hvf_vtimer, &vtimer);
+     qemu_add_vm_change_state_handler(hvf_vm_state_change, &vtimer);

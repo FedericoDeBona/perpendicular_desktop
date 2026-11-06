@@ -125,7 +125,8 @@ def main():
     run(["codesign", "--force", "--sign", "-", "--entitlements",
          ROOT / "macos/Hypervisor.entitlements", target], "sign-qemu")
     manifest["files"]["bin/qemu-system-aarch64"] = sha(target)
-    manifest["hvf_idle_wfi_candidate"] = {"version": 1, "busyNanoseconds": 250000,
+    manifest["hvf_idle_wfi_candidate"] = {"version": 1, "idleBusyNanoseconds": 250000,
+                                          "interactiveBusyNanoseconds": 2000000, "leaseSeconds": 10,
                                           "patchSHA256": sha(PATCH), "qualified": False}
     (target.parent.parent / "runtime.json").write_text(json.dumps(manifest, indent=2) + "\n")
     info_path = app / "Contents/Info.plist"

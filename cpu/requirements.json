@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "hvfIdleWFIVersion": 1,
+  "idleBusyNanoseconds": 250000,
+  "interactiveBusyNanoseconds": 2000000,
+  "leaseSeconds": 10,
+  "requiredPatches": ["cpu/hvf-wfi-sleep.patch"]
+}

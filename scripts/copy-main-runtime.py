@@ -23,6 +23,8 @@ def main():
     subprocess.run(['codesign', '--verify', '--deep', '--strict', str(source)], check=True)
     # A valid local signature can still seal obsolete graphics libraries.
     # Validate shared fixes before copying any member into the destination.
+    subprocess.run(['python3', str(Path(__file__).with_name('check-cpu-idle-runtime.py')),
+                    '--app', str(source)], check=True)
     subprocess.run(['python3', str(Path(__file__).with_name('check-memory-runtime.py')),
                     '--app', str(source)], check=True)
     subprocess.run(['python3', str(Path(__file__).with_name('check-opengl-payload.py')),

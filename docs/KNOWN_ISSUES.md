@@ -1,5 +1,7 @@
 # Registro dei problemi
 
+**6 novembre — incremento CPU idle .84 qualificato nella QA, main in consegna (TODO-006/007/012).** Standby display senza beneficio respinto; soglia WFI fissa respinta per code timer. Nuova modalità soltanto senza finestre, con lease10s e ripristino originale prima dell'uso: stesso boot/RAM, CPUQEMU13,15% idle contro23,36% nel ritorno originale; scadenza e console/Desktop/ritornoidle PASS circoscritti. Patch/ricetta/requisiti/gate condivisi, nessun driver/protezione/topologia Windows modificati. App principale .84 ancora da installare/verificare, nessun risparmio fisicoGPU/RAM o chiusura difetti grafici dichiarato. [Evidenze](VERIFICATION.md#lease-e-integrazione-84-verificati-nella-qa).
+
 **6 novembre — ottimizzazione idle ripresa su richiesta esplicita (TODO-006/007/012).** Nuovo obiettivo attivo dopo la misura GPU, con priorità alla verifica concreta dello standby degli schermi e poi al costo residuo attribuito. Il mancato carico GPU alto non conclude l'obiettivo risorse; nessun nuovo difetto/beneficio ancora dimostrato. Stato, criteri e tentativi nel [diario esistente](VERIFICATION.md#6-novembre--prosecuzione-della-riduzione-risorse-idle).
 
 **Primo esito:** standby confermato da Windows ma nessun risparmio nel confronto acceso→spento→acceso; display ripristinati e policy invariata. Si prosegue sul costo del runtime/vCPU, senza ripetere il tentativo negativo o attribuire alla GPU ciò che non è stato osservato. [Misure e limiti](VERIFICATION.md#standby-reversibile-nessun-beneficio-qualificato).

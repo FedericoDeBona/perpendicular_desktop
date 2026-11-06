@@ -56,6 +56,7 @@ final class VirtualMachineController {
     var onDesktopSize:((NSSize)->Void)?
     var desktopClipboardBridge:GuestBridge?
     var onDesktopInput:(()->Void)?
+    var beforeDesktop:(()async throws->Void)?
     var desktopState:[String:Any] {desktop?.state ?? ["visible":false]}
     private var desktop:DesktopWindow?
     private var displayControl:DesktopConnection?
@@ -181,6 +182,7 @@ final class VirtualMachineController {
 
     func showDesktop() async throws {
         try await start()
+        try await beforeDesktop?()
         if let launch=desktopLaunch() {
             if desktop == nil {desktop=try DesktopWindow(socket:launch.socket,endpoint:{[weak self] in self?.desktopLaunch()?.native},resized:{[weak self] size in self?.onDesktopSize?(size)},input:{[weak self] in self?.onDesktopInput?()})}
             desktop?.configureClipboard(desktopClipboardBridge);desktop?.show();return

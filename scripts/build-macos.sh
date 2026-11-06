@@ -8,6 +8,7 @@ guest="$PWD/guest/target/aarch64-pc-windows-msvc/release/perpendicular-guest.exe
 [[ -f "$guest" ]] || { print -u2 'Build the ARM64 guest first with scripts/build-guest.sh'; exit 1; }
 if [[ "${SKIP_RUNTIME:-0}" != 1 ]]; then
     # Detect a stale payload on another Mac before compiling the frontend.
+    python3 scripts/check-cpu-idle-runtime.py --app "$runtime_app"
     python3 scripts/check-memory-runtime.py --app "$runtime_app"
     python3 scripts/check-opengl-payload.py --app "$runtime_app"
     python3 scripts/check-x86-payload.py --app "$runtime_app"
@@ -39,7 +40,7 @@ xcrun swiftc -swift-version 6 -O -parse-as-library -target arm64-apple-macosx14.
     -import-objc-header macos/NativeTransport/bridge.h .build/native-transport.o .build/gpu-receiver.o \
     macos/RuntimeStore.swift macos/NativeWindowFrames.swift macos/NativeGraphics.swift macos/NativeDisplay.swift macos/DesktopConnection.swift macos/DesktopWindow.swift \
     macos/VirtualMachine.swift macos/SharedFolders.swift macos/SambaServer.swift macos/SharedFolderIntegration.swift macos/MachineControl.swift macos/MachineSettings.swift macos/MachineSettingsPanel.swift macos/NetworkSettings.swift macos/NetworkSettingsPanel.swift macos/MemoryUnplugProgress.swift macos/MemoryReleaseBudget.swift macos/MemoryControl.swift macos/GuestBridge.swift macos/GuestFrameSurface.swift macos/MacLocalControl.swift macos/DisplayTopology.swift macos/SharedDisplay.swift \
-    macos/WindowGeometry.swift macos/WindowRenderer.swift macos/WindowTransitionView.swift macos/ApplicationContent.swift macos/ApplicationWindow.swift macos/LauncherLibrary.swift macos/LauncherStatus.swift macos/Launcher.swift macos/GuestApplicationState.swift macos/App.swift \
+    macos/CPUControl.swift macos/WindowGeometry.swift macos/WindowRenderer.swift macos/WindowTransitionView.swift macos/ApplicationContent.swift macos/ApplicationWindow.swift macos/LauncherLibrary.swift macos/LauncherStatus.swift macos/Launcher.swift macos/GuestApplicationState.swift macos/App.swift \
     -o "$app/Contents/MacOS/Perpendicular"
 cp "$guest" guest/install.ps1 guest/install.cmd "$app/Contents/Resources/Guest/"
 cp guest/apply-shared-folders.ps1 guest/configure-shared-folders.ps1 guest/connect-shared-folders.ps1 guest/retire-shared-files.ps1 guest/configure-smb-cache.ps1 guest/install-shared-folders.ps1 "$app/Contents/Resources/Guest/"
@@ -53,6 +54,7 @@ if [[ "${SKIP_RUNTIME:-0}" == 1 && -d .build/Native3D ]]; then
     rm -rf "$app/Contents/Resources/Native3D"
     cp -R .build/Native3D "$app/Contents/Resources/Native3D"
 fi
+python3 scripts/check-cpu-idle-runtime.py --app "$app"
 python3 scripts/check-memory-runtime.py --app "$app"
 python3 scripts/check-opengl-payload.py --app "$app"
 python3 scripts/check-x86-payload.py --app "$app"
