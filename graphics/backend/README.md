@@ -40,8 +40,9 @@ candidata privata zero; stampa il percorsoUMD effettivo, da verificare perhash.
 CompilareARM64 con il wrapperclang-cl e le librerieXWin della stessa ricetta,
 `d3d11.lib dxgi.lib dxguid.lib`, output fuoriGit. Non misura prestazioni o
 correttezza dei testiExplorer: nella QA l'intestazione resta alterata e i due
-buffer512KiB osservati non hanno dati iniziali. Produzione senza osservatore,
-regressioni e distribuzione principale ancora da completare.
+buffer512KiB osservati non hanno dati iniziali. Produzionev20 senza osservatore qualificata nella QA: probeAPI, letturaR8,
+SDR/VP9/OpenGLARM64+x64 e singolo cicloSettings con monitor collegato PASS.
+Distribuzione/verifica principale ancora da completare.
 [Evidenze e limiti](../../docs/VERIFICATION.md#driver-firmato-v05-e-modi-a-monitor-collegato).
 
 ## Candidata NV12 nativa, non distribuita

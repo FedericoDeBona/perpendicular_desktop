@@ -54,9 +54,9 @@
   "hosts": {
     "m1-cpu-v12-late-init-v20": {
       "backend_sha256": "2a7e93274c2aa2578d26ea5e3350eea546ff37e6518e62bc8e7b44b8acd4ce16",
-      "qualification": "Native bytes unchanged from v19; v20 guest initial-buffer fix compiled from pinned source. Protected QA/main execution pending; private v28 same functional source passes the exact Windows preservation probe."
+      "qualification": "M1 QA protected coldboot52973: actual v20 in Explorer/SystemSettings, initialized-buffer and typed R8 GPU probes, SDR/three VP9 4K frames, OpenGL ARM64/x64 and one same-Settings connected resize/fullscreen/return pass. Main verification pending; no Explorer text fix or performance claim."
     }
   },
   "verification": "docs/VERIFICATION.md#driver-firmato-v05-e-modi-a-monitor-collegato",
-  "deployment": "Production candidate without first-map observer or WARP hooks. Explorer remains negative in private v28; UI fix is not claimed. Protected production regression/deployment pending."
+  "deployment": "Production without first-map observer or WARP hooks qualified in M1 QA. Explorer remains open from private v28 evidence; main deployment/verification pending."
 }
