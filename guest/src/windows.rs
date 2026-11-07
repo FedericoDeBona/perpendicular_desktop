@@ -13,6 +13,7 @@ mod menu_capture;
 mod identity;
 mod service;
 mod window_control;
+mod desktop_placement;
 mod wire;
 mod gpu;
 mod worker;

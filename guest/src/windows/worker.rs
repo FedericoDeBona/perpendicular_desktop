@@ -2,7 +2,7 @@ use super::{
     Configuration, app_process,
     capture::{self, Target},
     catalogue::{self, Catalogue},
-    clipboard, cloak, display, display_topology, error, execute, identity, window_control,
+    clipboard, cloak, desktop_placement, display, display_topology, error, execute, identity, window_control,
     wire::{self, Outbox},
 };
 use serde_json::{Value, json};
@@ -87,6 +87,7 @@ struct Worker {
     execution_busy: Arc<AtomicBool>,
     process_busy: Arc<AtomicBool>,
     display_observer: Option<display::Observer>,
+    desktop_placement: Option<desktop_placement::Snapshot>,
 }
 
 fn state_path() -> PathBuf {
@@ -196,6 +197,7 @@ pub fn run(path: &Path) -> Result<(), String> {
         graphics_busy: Arc::new(AtomicBool::new(false)),
         execution_busy: Arc::new(AtomicBool::new(false)),
         process_busy: Arc::new(AtomicBool::new(false)),
+        desktop_placement: None,
         display_observer: match display::Observer::new() {
             Ok(observer) => Some(observer),
             Err(error) => {
@@ -229,6 +231,7 @@ pub fn run(path: &Path) -> Result<(), String> {
 
 impl Worker {
     fn connected(&mut self, mut stream: TcpStream, config: &Configuration) -> Result<(), String> {
+        self.desktop_placement=None;
         let _display=ConnectedDisplay::acquire();
         stream.set_nodelay(true).map_err(error)?;
         stream
@@ -242,6 +245,7 @@ impl Worker {
             "sid":self.sid,"session":self.session,"version":env!("CARGO_PKG_VERSION"),
             "capabilities":{"capture":"wgc-hardware-readback-with-software-recovery","windows":4,"transients":12,"windowRoles":true,"input":true,"catalogue":true,"appIcon":true,"frameChannel":true,"windowRefresh":true,"windowCaptureSource":true,"nativeAppInput":true,"modeFocus":true,"deviceFocus":true,"devicePlacement":true,"gpuFramesOnly":true,"frameEncodings":[],"displayInfo":true,"displayTopology":true,"driverInfo":true,"graphicsInfo":true,"displayConfigure":true,"displayConfigureDPI":true,"primaryDisplayInfo":true,"sharedGeometry":true,"processControl":true,"clipboard":true,"clipboardTextBytes":262144,"applicationStatus":true,"memoryStatus":true,"execute":true,"executeTimeoutSeconds":60,"executeOutputBytes":65536,"displayEvents":self.display_observer.is_some()}});
         hello["capabilities"]["displayMonitorState"] = json!(true);
+        hello["capabilities"]["desktopResizeWindows"] = json!(true);
         outbox.control(hello);
         let (sender, receiver) = mpsc::sync_channel(128);
         let state = outbox.clone();
@@ -586,6 +590,25 @@ impl Worker {
             }
         }
         match value["operation"].as_str().ok_or("Missing operation")? {
+            "desktop_resize_windows" => {
+                let token=value["token"].as_str().ok_or("Missing Desktop resize identity")?;
+                let excluded=self.windows.values().filter(|w|w.mac_owned).map(|w|w.target.hwnd).collect();
+                match value["action"].as_str() {
+                    Some("begin") => {
+                        let device=value["device"].as_str().ok_or("Missing original Desktop device")?;
+                        let snapshot=desktop_placement::Snapshot::begin(token,device,&self.sid,self.session,&excluded)?;
+                        let count=snapshot.count();self.desktop_placement=Some(snapshot);
+                        Ok(json!({"captured":count}))
+                    }
+                    Some("restore") => self.desktop_placement.as_mut().ok_or("Desktop window snapshot unavailable")?
+                        .restore(value,&self.sid,self.session,&excluded),
+                    Some("finish") => {
+                        if self.desktop_placement.as_ref().is_some_and(|s|s.matches(token)) {self.desktop_placement=None;}
+                        Ok(json!({"accepted":true}))
+                    }
+                    _ => Err("Invalid Desktop window action".into()),
+                }
+            }
             "catalogue" => Ok(self.catalogue.refresh()?),
             "app_input_mode" => {
                 let enabled=value["enabled"].as_bool().ok_or("Missing input mode")?;

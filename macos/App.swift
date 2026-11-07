@@ -1452,7 +1452,13 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
             // advertised before this transaction changed the monitor.
             var advertisedModesCurrent=true
             var originalDevice:String?
+            var windowRestorePass=0
+            var restoredWindowPass=0
+            var windowMoveRects=Set<String>()
+            var windowMoveCount=0
             @MainActor func publish(_ mode:NSSize,reconnectDelay:TimeInterval=0.25,forceReconnect:Bool=false){
+                windowRestorePass+=1
+                windowMoveRects.removeAll();windowMoveCount=0
                 let primary=self.launcherDisplays.first(where:{$0["primary"] as? Bool == true})
                 let advertised = !forceReconnect && advertisedModesCurrent && self.machine?.nativeGraphicsEnabled == true &&
                     (primary?["modes"] as? [[String:Any]] ?? []).contains {
@@ -1521,6 +1527,26 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
             if mode == self.desktopConfirmed,scale.width == Int(mode.width),scale.height == Int(mode.height) {
                 self.desktopResizeRequest=nil;self.desktopResizeReport["phase"]="unchanged"
                 return
+            }
+            let preserveDesktopWindows=self.guestCapabilities["desktopResizeWindows"] == true
+            let windowToken=request.uuidString
+            if preserveDesktopWindows {
+                self.desktopResizeReport["phase"]="preservingWindows"
+                let captured:Int?=await withCheckedContinuation {continuation in
+                    self.bridge.command("desktop_resize_windows",["action":"begin","token":windowToken,"device":scale.device],timeout:.seconds(2)){result in
+                        if case .success(let reply)=result,let value=reply["value"] as? [String:Any],
+                           let count=value["captured"] as? Int {continuation.resume(returning:count)}
+                        else {continuation.resume(returning:nil)}
+                    }
+                }
+                guard !Task.isCancelled,self.connected,self.displayEpoch == epoch,self.desktopResizeRequest == request else{return}
+                guard let captured else {
+                    self.desktopResizeRequest=nil;self.desktopAttempted = .zero
+                    self.desktopResizeReport["phase"]="failed"
+                    self.launcherNotice="Non riesco a conservare le finestre del Desktop. Termina l’interazione Windows e riprova."
+                    return
+                }
+                self.desktopResizeReport["preservedWindows"]=captured
             }
             framesBeforeRequest=self.machine?.desktopState["nativeReceivedFrames"] as? UInt64 ?? 0
             publish(mode)
@@ -1599,6 +1625,44 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
                            let primary=(snapshot["displays"] as? [[String:Any]])?.first(where:{$0["primary"] as? Bool == true}),
                            primary["width"] as? Int == Int(mode.width),primary["height"] as? Int == Int(mode.height),
                            primary["dpi"] as? Int == dpi {
+                            // Hotplug can migrate real Desktop windows onto a
+                            // DOD output. Restore only the pre-change snapshot,
+                            // then take the renewed image of that final layout.
+                            if preserveDesktopWindows,restoredWindowPass != windowRestorePass {
+                                self.desktopResizeReport["phase"]="restoringWindows"
+                                let pass=windowRestorePass
+                                let checkedAt=ProcessInfo.processInfo.systemUptime
+                                self.bridge.command("desktop_resize_windows",["action":"restore","token":windowToken,"pass":pass],timeout:.seconds(2)){result in
+                                    guard read.pending else{return}
+                                    guard self.connected,self.displayEpoch==epoch,self.desktopResizeRequest==request,
+                                          windowRestorePass==pass else{read.finish(false);return}
+                                    if case .success(let reply)=result,let value=reply["value"] as? [String:Any] {
+                                        self.desktopResizeReport["windowRestore"]=value
+                                        if value["complete"] as? Bool == true {restoredWindowPass=pass}
+                                        else if let rect=value["moveForegroundRect"] as? String,
+                                                let maxMoves=value["maxMoves"] as? Int,
+                                                windowMoveCount<min(8,maxMoves),!windowMoveRects.contains(rect),
+                                                self.machine?.desktopIsKey == true,
+                                                ProcessInfo.processInfo.systemUptime<checkedAt+0.5 {
+                                            windowMoveRects.insert(rect);windowMoveCount+=1
+                                            self.desktopResizeReport["windowMoveCount"]=windowMoveCount
+                                            Task{@MainActor in
+                                                defer{read.finish(false)}
+                                                guard read.pending,self.connected,self.displayEpoch==epoch,
+                                                      self.desktopResizeRequest==request,windowRestorePass==pass,
+                                                      self.machine?.desktopIsKey == true else{return}
+                                                do {try await self.machine?.moveApplicationToNextDisplay(notAfter:checkedAt+0.5)}
+                                                catch {self.desktopResizeReport["windowRestoreError"]=error.localizedDescription}
+                                            }
+                                            return
+                                        }
+                                    }else if case .failure(let error)=result {
+                                        self.desktopResizeReport["windowRestoreError"]=error.localizedDescription
+                                    }
+                                    read.finish(false)
+                                }
+                                return
+                            }
                             // A hotplug frame can have the final raster before
                             // DWM finishes rebuilding its contents. Renew the
                             // consumer once after Windows confirms the mode,
@@ -1631,12 +1695,17 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
                                 read.finish(false);return
                             }
                             self.machine?.finishDesktopResolution();self.desktopResizeRequest=nil
+                            if preserveDesktopWindows {
+                                self.bridge.command("desktop_resize_windows",["action":"finish","token":windowToken]){_ in}
+                            }
                             self.desktopReadAgain=false
                             self.desktopResizeReport["phase"]="confirmed"
                             self.desktopResizeReport["milliseconds"]=(ProcessInfo.processInfo.systemUptime-started)*1000
                             self.desktopResizeReport["targetMilliseconds"]=(ProcessInfo.processInfo.systemUptime-targetStarted)*1000
-                            if self.launcherNotice=="Windows non ha confermato la risoluzione richiesta." ||
-                               self.launcherNotice=="Non riesco a conservare la scala Windows. Verifica il collegamento e aggiorna i Guest Tools." {self.launcherNotice=nil}
+                            if ["Windows non ha confermato la risoluzione richiesta.",
+                                "Non riesco a conservare la scala Windows. Verifica il collegamento e aggiorna i Guest Tools.",
+                                "Non riesco a conservare le finestre del Desktop. Termina l’interazione Windows e riprova.",
+                                "Windows non ha ripristinato le finestre del Desktop."].contains(self.launcherNotice ?? "") {self.launcherNotice=nil}
                             self.desktopConfirmed=mode
                             if self.machine?.mixedDisplaysEnabled == true {self.readMixedDisplay()}
                             else{self.readDesktopDisplay()}
@@ -1692,7 +1761,11 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
             self.machine?.finishDesktopResolution();self.desktopResizeRequest=nil
             self.desktopResizeReport["phase"]="failed"
             self.desktopResizeReport["milliseconds"]=(ProcessInfo.processInfo.systemUptime-started)*1000
-            self.launcherNotice="Windows non ha confermato la risoluzione richiesta."
+            let pendingWindows=(self.desktopResizeReport["windowRestore"] as? [String:Any])?["pending"] as? Int ?? 0
+            self.launcherNotice=pendingWindows>0 ? "Windows non ha ripristinato le finestre del Desktop.":"Windows non ha confermato la risoluzione richiesta."
+            if preserveDesktopWindows {
+                self.bridge.command("desktop_resize_windows",["action":"finish","token":windowToken]){_ in}
+            }
             self.readDisplay()
         }
     }
@@ -1744,7 +1817,7 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
             displayEpoch=value["epoch"] as? String
             invalidateDisplay("Checking Windows display…")
             let capabilities=value["capabilities"] as? [String:Any] ?? [:]
-            guestCapabilities=Dictionary(uniqueKeysWithValues:["windowCaptureSource","nativeAppInput","modeFocus","memoryStatus","execute","displayInfo","displayConfigureDPI","primaryDisplayInfo","displayMonitorState","displayTopology","driverInfo","graphicsInfo","sharedGeometry","appIcon","applicationStatus","processControl","clipboard"].map{($0,capabilities[$0] as? Bool == true)})
+            guestCapabilities=Dictionary(uniqueKeysWithValues:["windowCaptureSource","nativeAppInput","modeFocus","memoryStatus","execute","displayInfo","displayConfigureDPI","primaryDisplayInfo","displayMonitorState","desktopResizeWindows","displayTopology","driverInfo","graphicsInfo","sharedGeometry","appIcon","applicationStatus","processControl","clipboard"].map{($0,capabilities[$0] as? Bool == true)})
             network.connectionChanged(guestCapabilities["execute"] == true)
             memoryController?.guestReady=guestCapabilities["memoryStatus"] == true
             prepareSharedFolders()
