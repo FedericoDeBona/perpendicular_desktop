@@ -22,7 +22,7 @@ final class DesktopConnection:@unchecked Sendable {
     private var stopped=false
     private var ready=false
     private var updates=true
-    private var pendingLayout:(screens:[DesktopScreen],reconnect:Bool,delay:TimeInterval,disconnected:(@MainActor @Sendable () async -> Void)?,submitted:(@MainActor @Sendable ()->Void)?)?
+    private var pendingLayout:(screens:[DesktopScreen],submitted:(@MainActor @Sendable ()->Void)?)?
     private var screen=DesktopScreen(id:0,x:0,y:0,width:800,height:600)
     private var framebufferWidth=800
     private var framebufferHeight=600
@@ -65,13 +65,13 @@ final class DesktopConnection:@unchecked Sendable {
     func inputSubmitted(_ completion:@escaping @MainActor @Sendable ()->Void){
         writes.async {Task{@MainActor in completion()}}
     }
-    func setScreens(_ screens:[DesktopScreen],reconnectMonitor:Bool=false,reconnectDelay:TimeInterval=1,disconnected:(@MainActor @Sendable () async -> Void)?=nil,submitted:(@MainActor @Sendable ()->Void)?=nil){
+    func setScreens(_ screens:[DesktopScreen],submitted:(@MainActor @Sendable ()->Void)?=nil){
         guard !screens.isEmpty,screens.count<=16 else{return}
         let width=screens.map{$0.x+$0.width}.max() ?? 0,height=screens.map{$0.y+$0.height}.max() ?? 0
         guard width>0,height>0,width<=16384,height<=16384,
               screens.allSatisfy({$0.x>=0 && $0.y>=0 && $0.width>=640 && $0.height>=480 && $0.width<=4096 && $0.height<=4096}) else{return}
         state.lock()
-        if !ready {pendingLayout=(screens,reconnectMonitor,reconnectDelay,disconnected,submitted);state.unlock();return}
+        if !ready {pendingLayout=(screens,submitted);state.unlock();return}
         state.unlock()
         var message:[UInt8]=[251,0,UInt8(width>>8),UInt8(width&255),UInt8(height>>8),UInt8(height&255),UInt8(screens.count),0]
         for screen in screens {
@@ -83,30 +83,10 @@ final class DesktopConnection:@unchecked Sendable {
         writes.async{[self] in
             defer{Task{@MainActor in submitted?()}}
             do {
-                // The signed driver updates its custom raster before notifying
-                // Windows. Prime that raster first, then invalidate the cached
-                // monitor modes with an actual disconnect/reconnect event.
+                // v0.5 adds this exact raster to the existing monitor's mode
+                // set. Never send an empty layout: the monitor stays connected.
                 try write(target)
-                if reconnectMonitor {
-                    Thread.sleep(forTimeInterval:max(0.25,min(1,reconnectDelay)))
-                    try write(Data([251,0,0,0,0,0,0,0]))
-                    Thread.sleep(forTimeInterval:max(0.25,min(1,reconnectDelay)))
-                    if let disconnected {
-                        // Only this background serial writer waits. The guest
-                        // query runs asynchronously on the main actor, bounded
-                        // below five seconds. Always reattach on timeout.
-                        let ready=DispatchSemaphore(value:0)
-                        Task{@MainActor in await disconnected();ready.signal()}
-                        _=ready.wait(timeout:.now()+5)
-                    }
-                    try write(target)
-                }
-            }catch{
-                // Reattach before the queued stop if a write failed mid-cycle.
-                // stop() shares this writer queue and cannot interrupt the gap.
-                if reconnectMonitor {try? write(target)}
-                stop()
-            }
+            }catch{stop()}
         }
     }
     private func send(_ bytes:[UInt8]){
@@ -211,7 +191,7 @@ final class DesktopConnection:@unchecked Sendable {
             for value:Int32 in [0,-223,-308] {let n=UInt32(bitPattern:value);encodings += [UInt8(n>>24),UInt8((n>>16)&255),UInt8((n>>8)&255),UInt8(n&255)]}
             try write(Data(encodings))
             state.lock();ready=true;let planned=pendingLayout;pendingLayout=nil;state.unlock()
-            if let planned {setScreens(planned.screens,reconnectMonitor:planned.reconnect,reconnectDelay:planned.delay,disconnected:planned.disconnected,submitted:planned.submitted)}
+            if let planned {setScreens(planned.screens,submitted:planned.submitted)}
             try request(incremental:false)
             while !isStopped {
                 let type=try read(1)[0]

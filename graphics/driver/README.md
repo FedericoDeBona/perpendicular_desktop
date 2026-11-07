@@ -1,5 +1,7 @@
 # Driver grafico corrente
 
+**Candidata .93 (7 novembre):** percorso host senza unplug implementato e compilato; driver upstream firmato v0.5 aggiunge i nuovi modi al monitor esistente e normalizza EDID. [Pin/ricetta/patch](../../graphics/driver/connected-resize-v05.json) e [verifica in corso](../../docs/VERIFICATION.md#driver-firmato-v05-e-modi-a-monitor-collegato). Installazione/coldboot QA, integrazione installer ordinari e qualifica main ancora pendenti; non equivale a correzione verificata di icone/nero o prestazioni.
+
 La base desktop usa il driver ufficiale ARM64 v0.4 firmato Microsoft, identificato in [guest/graphics-driver.json](../../guest/graphics-driver.json). Nel sistema di sviluppo: VioGpu3D Running, SYS cfbc713754c7, Secure Boot attivo e TESTSIGNING disattivato.
 
 **Nuovo requisito del7 novembre:** il [resize personalizzato](custom-resolution.md) deve mantenere il monitor collegato, senza unplug o successivo recupero delle finestre. Intervenire su driver/notifiche e sul riconoscimento/applicazione dei nuovi modi; conservare protezioni e compatibilità dei componenti. La sequenza host con scollegamento è una base storica installata, non soddisfa il nuovo criterio e non va sviluppata come soluzione definitiva. [Obiettivo e prove precedenti](../../docs/VERIFICATION.md#cambio-obbligatorio-di-percorso-resize-a-monitor-collegato).

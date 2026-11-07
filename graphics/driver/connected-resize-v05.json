@@ -1,0 +1,55 @@
+{
+  "schema": 1,
+  "status": "candidate-not-qualified",
+  "release": "https://github.com/osy/kvm-guest-drivers-windows/releases/tag/v0.5",
+  "source": {
+    "commit": "ed821008215ded87d2d03495240d5aad6d8e42ba",
+    "url": "https://codeload.github.com/osy/kvm-guest-drivers-windows/tar.gz/ed821008215ded87d2d03495240d5aad6d8e42ba",
+    "archive_sha256": "9bd55159cee86466b28910c10ab14dde9d28bcb59d6ba5f8fc18e1ecb1ddbc3d",
+    "files": {
+      "viogpu/viogpu3d/viogpu_adapter.cpp": "73cf5ae23663960ace391fda26f35bdb9b50c7c296c536ded919c042d136d81a",
+      "viogpu/viogpu3d/viogpu_vidpn.cpp": "279c7fef347f75caf777e823a5ff1f4e4dceb81b113f9ca538f21c9d9327dbb9",
+      "viogpu/viogpu3d/viogpu_vidpn.h": "aa4019934ab350334a3b966a130d1777424ddfa251ba1fae4e9020b5139d7249"
+    }
+  },
+  "archive": {
+    "url": "https://github.com/osy/kvm-guest-drivers-windows/releases/download/v0.5/viogpu3d-arm64x-signed.zip",
+    "sha256": "155695ab7820f71e75c369aeae7b8c060691ba43646ac37edef72aa2428506d5"
+  },
+  "members": {
+    "viogpu3d.cat": "a7a8f2b5ae8c323b5a8108a9793f3f6b4ecf2103f317c02038351ff3300380b9",
+    "neptune_umd_arm64.dll": "eb25a35df16ed31f990a2270d63be942661934991d70b85f75cae8a9070f86b5",
+    "neptune_umd.dll": "eaeb81f2df568594ace7cb685276ee636d160d99a4248caa05cecdc13863652b",
+    "viogpuap.exe": "41e1f961aa5e4caa15e15d2788d538086d5c77c4bb31d044150da7833e2fc7f3",
+    "virtio_icd.json": "7a215445f88230a5d3d7b44f007bbffdc79f0829d54d4ae72984686faed1ce14",
+    "viogpu3d.inf": "3bc89b2ff4687477f644d882cd0361fcf710766e2bd06ade5e03ba50a1914326",
+    "vgpusrv.exe": "5aef5f61ea84f703c9df7dc7fb9bbad038baab8dbd8c6e9412c056f92e3385a5",
+    "viogpu3d.sys": "642f2d861124639059469722c165fb9a640eed0dad97d30e59e5a42b88d4b1d6",
+    "vulkan_virtio.dll": "4d080a870ec1fd8bc604cb14b66f43f7eaf63d534000dd401a07581c1efcb55c",
+    "neptune_umd_ec.dll": "9ec6f75166deda93a57b47efe7f804b4b221b9afce4279d7952ef9f87ad8e885",
+    "neptune_umd_x86.dll": "11014a35829e96b25a56160a44bf4c7bb67bac9310896d60d1ff66617edd9586"
+  },
+  "fixes": [
+    "connected-monitor-mode-admission",
+    "stable-monitor-edid"
+  ],
+  "native_runtime": {
+    "guest_wire_version": 2,
+    "renderer_source_pin": "cf5af71359b224a9a482e9b5a67f8160497dc951",
+    "protocol_source_pin": "f510a6e41ea89a6d626de4da9d9b02978a770e37"
+  },
+  "policy": "Install the original signed package only on the accelerated PCI instance. Preserve the qualified video/x86/OpenGL registrations and verify loaded modules after protected coldboot. Never unplug for resize.",
+  "installer_helper_sha256": "34793f8e3fe29db2dc11b88d34c9e038df818bf5d7ce651e531bbc1560407fbd",
+  "preserved_dll_sha256": [
+    "1e3c36214370f45a751a3ee2780d3aae6475a36fc3e8055d5cdfa9ddcac9e426",
+    "265f269ea3ed3b71ca544234b762e5dd05f228c07dd5d85179de91af2316f4ac",
+    "50a53b16df567e7f06a609e64a3511a45927b17998c47f77fa3949d3ab744692",
+    "74d6cd4366a3918127a4ac49564d80136510bddfcfbca0c491359657c1b13f7a",
+    "7e362846334b6c1b492b81ccdf02bcd0d68a9e92e51f5b020650ecc98e27e3e0",
+    "a6b067d53443c1d72886fed0d9448e7fb8bd8c3234b7f7c9c04ae2f13f1b2ea1",
+    "cf7cd403a6b89b519bbffc43c43f42d8da5ba97259fe7b5a6e489628d8c8a05a",
+    "d11a75526d5562ab5e16acc1aa75fbc2198ac104094b1d66d6610c68d3fe1e61",
+    "e0ac15f46e34f8f42a7ba50e8ebc607988e0da5dd10338a4c94df944f7743cbe"
+  ],
+  "opengl_version": "0.2.34"
+}

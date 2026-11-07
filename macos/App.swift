@@ -1404,31 +1404,6 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
             else {self.displayStatus="Windows display could not be checked."}
         }
     }
-    private func awaitDesktopDisconnect(device:String,epoch:String,request:UUID) async {
-        let started=ProcessInfo.processInfo.systemUptime
-        while ProcessInfo.processInfo.systemUptime-started<4 {
-            guard !Task.isCancelled,connected,displayEpoch==epoch,desktopResizeRequest==request else{return}
-            let detached:Bool=await withCheckedContinuation {continuation in
-                bridge.command("display_monitor_state",["device":device],timeout:.seconds(1)){result in
-                    if case .success(let reply)=result,let value=reply["value"] as? [String:Any],
-                       value["device"] as? String==device,value["attached"] as? Bool==false {
-                        continuation.resume(returning:true)
-                    }else{continuation.resume(returning:false)}
-                }
-            }
-            guard displayEpoch==epoch,desktopResizeRequest==request else{return}
-            if detached {
-                desktopResizeReport["disconnectConfirmed"]=true
-                desktopResizeReport["disconnectWaitMilliseconds"]=(ProcessInfo.processInfo.systemUptime-started)*1000
-                return
-            }
-            try? await Task.sleep(for:.milliseconds(100))
-        }
-        if displayEpoch==epoch,desktopResizeRequest==request {
-            desktopResizeReport["disconnectConfirmed"]=false
-            desktopResizeReport["disconnectWaitMilliseconds"]=(ProcessInfo.processInfo.systemUptime-started)*1000
-        }
-    }
     private func scheduleDesktopResize(){
         guard (desktopOnly || machine?.mixedDisplaysEnabled == true),connected,displayConfigurable,!mixedDisplayConfiguring,desktopResizeRequest == nil,desktopReadRequest == nil,
               desktopSize.width>0,desktopSize.height>0,
@@ -1447,25 +1422,8 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
                 return NSSize(width:max(640,(desired.width*scale).rounded()),height:max(480,(desired.height*scale).rounded()))
             }
             var mode=raster(self.desktopSize)
-            // A custom EDID replaces the mode list used to build this cache.
-            // A retarget must publish again even if its old custom size was
-            // advertised before this transaction changed the monitor.
-            var advertisedModesCurrent=true
-            var originalDevice:String?
-            @MainActor func publish(_ mode:NSSize,reconnectDelay:TimeInterval=0.25,forceReconnect:Bool=false){
-                let primary=self.launcherDisplays.first(where:{$0["primary"] as? Bool == true})
-                let advertised = !forceReconnect && advertisedModesCurrent && self.machine?.nativeGraphicsEnabled == true &&
-                    (primary?["modes"] as? [[String:Any]] ?? []).contains {
-                        $0["width"] as? Int == Int(mode.width) && $0["height"] as? Int == Int(mode.height)
-                    }
-                self.desktopResizeReport["advertisedMode"]=advertised
-                if !advertised {advertisedModesCurrent=false}
-                var disconnected:(@MainActor @Sendable () async -> Void)?
-                if self.guestCapabilities["displayMonitorState"] == true,let device=originalDevice,
-                   let epoch=self.displayEpoch,let request=self.desktopResizeRequest {
-                    disconnected={[weak self] in await self?.awaitDesktopDisconnect(device:device,epoch:epoch,request:request)}
-                }
-                self.machine?.requestDesktopResolution(mode,reconnectDelay:reconnectDelay,advertisedMode:advertised,disconnected:disconnected)
+            @MainActor func publish(_ mode:NSSize){
+                self.machine?.requestDesktopResolution(mode)
             }
             guard mode != self.desktopConfirmed,mode != self.desktopAttempted else{return}
             self.desktopAttempted=mode
@@ -1473,11 +1431,9 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
             self.desktopResizeChangedAt=ProcessInfo.processInfo.systemUptime
             let started=self.desktopResizeChangedAt
             var framesBeforeRequest=self.machine?.desktopState["nativeReceivedFrames"] as? UInt64 ?? 0
-            self.desktopResizeReport=["targetWidth":Int(mode.width),"targetHeight":Int(mode.height),"phase":"publishing","fallback":false,"events":0,"retargets":0]
+            self.desktopResizeReport=["targetWidth":Int(mode.width),"targetHeight":Int(mode.height),"phase":"publishing","fallback":false,"monitorPolicy":"connected","events":0,"retargets":0]
             self.displayReadTask?.cancel();self.displayReadTask=nil
-            // Read the user's current scale before publishing an EDID change.
-            // Keep that value for every retarget in this transaction; reading
-            // it after reconnect would accept Windows' new recommendation.
+            // Preserve the user's current scale for every connected retarget.
             self.desktopResizeReport["phase"]="readingScale"
             let primaryOnly=self.guestCapabilities["primaryDisplayInfo"] == true
             self.desktopResizeReport["primaryOnly"]=primaryOnly
@@ -1501,7 +1457,6 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
                 return
             }
             let dpi=scale.dpi
-            originalDevice=scale.device
             self.desktopResizeReport["targetDPI"]=dpi
             if self.machine?.desktopState["visible"] as? Bool != true ||
                self.machine?.desktopState["fullScreenTransition"] as? Bool == true {
@@ -1527,7 +1482,6 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
             // The driver's resolution event and application are asynchronous.
             // Keep one transaction pending and verify actual Windows geometry.
             var checks=0
-            var slowRetry=false
             var applyUnconfirmed=false
             var postModeRefresh=false
             var targetStarted=started
@@ -1543,11 +1497,10 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
                     self.desktopResizeReport["phase"]="cancelled"
                     return
                 }
-                // Keep this transaction until the monitor is reattached. A
-                // newer request must not race the previous final host raster.
+                // Keep one publication pending until the serial writer submits it.
                 if self.machine?.desktopResolutionPending == true {continue}
                 if self.machine?.desktopState["fullScreenTransition"] as? Bool == true {continue}
-                // The serial writer has completed its reconnect. Follow the
+                // The serial writer has submitted the connected mode. Follow the
                 // latest view now, before waiting for obsolete Windows geometry
                 // and repairing N+1 for a mode the user has already replaced.
                 let latest=raster(self.desktopSize)
@@ -1590,8 +1543,8 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
                         if case .success(let reply)=result,let snapshot=reply["value"] as? [String:Any],
                            let primary=(snapshot["displays"] as? [[String:Any]])?.first(where:{$0["primary"] as? Bool == true}),
                            primary["device"] as? String != scale.device {
-                            // A disconnected primary can temporarily promote
-                            // a DOD app output. Never resize or rescale it.
+                            // Never resize or rescale an app output if the original
+                            // primary is no longer selected.
                             self.desktopResizeReport["phase"]="waitingPrimary"
                             read.finish(false);return
                         }
@@ -1599,7 +1552,7 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
                            let primary=(snapshot["displays"] as? [[String:Any]])?.first(where:{$0["primary"] as? Bool == true}),
                            primary["width"] as? Int == Int(mode.width),primary["height"] as? Int == Int(mode.height),
                            primary["dpi"] as? Int == dpi {
-                            // A hotplug frame can have the final raster before
+                            // A scanout frame can have the final raster before
                             // DWM finishes rebuilding its contents. Renew the
                             // consumer once after Windows confirms the mode,
                             // then require an image from that new reader. Keep
@@ -1624,8 +1577,7 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
                                 self.desktopResizeReport["phase"]="waitingFrame"
                                 read.finish(false);return
                             }
-                            // Notifications during reconnect describe temporary
-                            // topology. Let the exact raster settle before N+1
+                            // Let the exact connected raster settle before N+1
                             // can repair the app outputs, once, from a fresh read.
                             guard ProcessInfo.processInfo.systemUptime-self.desktopResizeChangedAt>=0.3 else {
                                 read.finish(false);return
@@ -1662,18 +1614,6 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
                                 guard self.machine?.desktopState["visible"] as? Bool == true,
                                       self.machine?.desktopState["fullScreenTransition"] as? Bool != true,
                                       raster(self.desktopSize) == mode else{read.finish(false);return}
-                                if case .failure=result {
-                                    // A timed-out mode set can still complete.
-                                    // An advertised mode needs no EDID refresh;
-                                    // read its actual outcome before another apply.
-                                    if !applyUnconfirmed,!slowRetry,self.machine?.nativeGraphicsEnabled == true,
-                                       self.desktopResizeReport["advertisedMode"] as? Bool != true {
-                                        slowRetry=true
-                                        postModeRefresh=false
-                                        self.desktopResizeReport["fallback"]=true
-                                        publish(mode,reconnectDelay:1,forceReconnect:true)
-                                    }
-                                }
                                 read.finish(false)
                             }
                         }else {

@@ -4,7 +4,8 @@
 param(
  [Parameter(Mandatory=$true)][string]$InstanceId,
  [Parameter(Mandatory=$true)][ValidateSet('Accelerated','AppDisplay')][string]$Role,
- [Parameter(Mandatory=$true)][string]$InfPath
+ [Parameter(Mandatory=$true)][string]$InfPath,
+ [ValidateSet('v0.4','v0.5')][string]$AcceleratedRelease='v0.4'
 )
 $ErrorActionPreference='Stop'
 if (-not ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {throw 'Elevation required'}
@@ -12,6 +13,9 @@ $expected = if ($Role -eq 'Accelerated') {
  @{Subsystem='1101'; Hash='22DCA43CB82E02EB1467EFFA0EA8E3288DA0C8A07B99C6E3BD95A79B98F92545'; Service='VioGpu3D'}
 } else {
  @{Subsystem='1100'; Hash='849CFEFA9364B4A3E80DD44CE898E3B4766AF5C4A475EA0A95DDB4C9F1CB2E4B'; Service='VioGpuDod'}
+}
+if ($Role -eq 'Accelerated' -and $AcceleratedRelease -eq 'v0.5') {
+ $expected.Hash='3BC89B2FF4687477F644D882CD0361FCF710766E2BD06ADE5E03BA50A1914326'
 }
 $device=Get-PnpDevice -InstanceId $InstanceId
 $hardware=@((Get-PnpDeviceProperty -InstanceId $InstanceId -KeyName DEVPKEY_Device_HardwareIds).Data)

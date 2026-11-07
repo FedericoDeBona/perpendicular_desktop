@@ -1,0 +1,182 @@
+--- a/viogpu/viogpu3d/viogpu_adapter.cpp
++++ b/viogpu/viogpu3d/viogpu_adapter.cpp
+@@ -3630,6 +3630,7 @@
+     if (events_read & VIRTIO_GPU_EVENT_DISPLAY)
+     {
+         vidpn.GetDisplayInfo();
++        vidpn.AddCustomMonitorMode(0);
+         events_clear |= VIRTIO_GPU_EVENT_DISPLAY;
+         virtio_set_config(&m_VioDev, FIELD_OFFSET(GPU_CONFIG, events_clear), &events_clear, sizeof(events_clear));
+ 
+--- a/viogpu/viogpu3d/viogpu_vidpn.cpp
++++ b/viogpu/viogpu3d/viogpu_vidpn.cpp
+@@ -1949,6 +1949,10 @@
+         FixEdid();
+     }
+     ParseEdidTiming();
++    if (m_EdidSize[0])
++    {
++        NormalizeHostEdid();
++    }
+     return AddEdidModes();
+ }
+ 
+@@ -2102,13 +2106,72 @@
+ {
+     PAGED_CODE();
+ 
++    ((PEDID_DATA_V1)GetEdidData(0))->ExtensionFlag[0] = 0;
++    ClearEdidImageSize();
++}
++
++// The host generates its EDID for the window as it is when the EDID is read:
++// the image size, the preferred timing, and -- for a size too large for a
++// detailed timing descriptor -- a DisplayID extension in its place.  Windows
++// keeps a monitor's resolution and scaling under a key that includes the EDID
++// checksum, so a boot at another window size was a new monitor that had
++// neither.  Once the refresh rate has been read from it, hand Windows the same
++// EDID whatever the size.  The image size is left undefined, as the built-in
++// EDID does, because Windows derives its recommended scaling from it and the
++// current mode, so the scaling would follow the window instead.
++void VioGpuVidPN::NormalizeHostEdid(void)
++{
++    PAGED_CODE();
++
++    // 1024x768 at 60 Hz (VESA DMT), the mode the driver prefers.
++    static const UCHAR PreferredTiming[sizeof(EDID_DETAILED_DESCRIPTOR)] =
++        {0x64, 0x19, 0x00, 0x40, 0x41, 0x00, 0x26, 0x30, 0x18, 0x88, 0x36, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x18};
++    static const UCHAR DummyDescriptor[sizeof(EDID_DETAILED_DESCRIPTOR)] = {0x00, 0x00, 0x00, 0x10};
++
++    PUCHAR buf = GetEdidData(0);
++    PEDID_DATA_V1 pdata = (PEDID_DATA_V1)buf;
++    EDID_DETAILED_DESCRIPTOR desc[4];
++    UINT count = 0;
++
++    // The preferred timing first, then the display descriptors (range limits,
++    // name, ...) in their order, whichever slots the host put them in.
++    RtlCopyMemory(&desc[count++], PreferredTiming, sizeof(PreferredTiming));
++    for (UINT i = 0; i < 4 && count < 4; i++)
++    {
++        PEDID_DISPLAY_DESCRIPTOR disp = (PEDID_DISPLAY_DESCRIPTOR)&pdata->EDIDDetailedTimings[i];
++        if (pdata->EDIDDetailedTimings[i].PixelClock == 0 && disp->Tag[3] != 0x10)
++        {
++            RtlCopyMemory(&desc[count++], disp, sizeof(desc[0]));
++        }
++    }
++    while (count < 4)
++    {
++        RtlCopyMemory(&desc[count++], DummyDescriptor, sizeof(DummyDescriptor));
++    }
++    RtlCopyMemory(pdata->EDIDDetailedTimings, desc, sizeof(desc));
++
++    // Keep the extensions before the DisplayID block.
++    for (ULONG blk = 1; blk <= pdata->ExtensionFlag[0]; blk++)
++    {
++        if ((blk + 1) * EDID_V1_BLOCK_SIZE > m_EdidSize[0] || buf[blk * EDID_V1_BLOCK_SIZE] == 0x70)
++        {
++            pdata->ExtensionFlag[0] = (UCHAR)(blk - 1);
++            break;
++        }
++    }
++
++    ClearEdidImageSize();
++}
++
++void VioGpuVidPN::ClearEdidImageSize(void)
++{
++    PAGED_CODE();
++
+     UCHAR Sum = 0;
+     PUCHAR buf = GetEdidData(0);
+-    ;
+     PEDID_DATA_V1 pdata = (PEDID_DATA_V1)buf;
+     pdata->MaximumHorizontalImageSize[0] = 0;
+     pdata->MaximumVerticallImageSize[0] = 0;
+-    pdata->ExtensionFlag[0] = 0;
+     pdata->Checksum[0] = 0;
+     for (ULONG i = 0; i < EDID_V1_BLOCK_SIZE; i++)
+     {
+@@ -2374,6 +2437,66 @@
+     SetVideoModeInfo(m_CustomModeIndex, &tmpModeInfo);
+ }
+ 
++// dxgkrnl builds a monitor's source mode set from RecommendMonitorModes once,
++// when the monitor arrives, and accepts no target mode outside it.  A host
++// size that arrives later only reaches the custom slot, so add it to the set
++// of the monitor that is already there.
++void VioGpuVidPN::AddCustomMonitorMode(_In_ D3DDDI_VIDEO_PRESENT_TARGET_ID TargetId)
++{
++    PAGED_CODE();
++
++    CONST DXGK_MONITOR_INTERFACE *pMonitorInterface;
++    NTSTATUS Status = m_pDxgkInterface->DxgkCbQueryMonitorInterface(m_pDxgkInterface->DeviceHandle,
++                                                                    DXGK_MONITOR_INTERFACE_VERSION_V1,
++                                                                    &pMonitorInterface);
++    if (!NT_SUCCESS(Status))
++    {
++        DbgPrint(TRACE_LEVEL_ERROR, ("%s DxgkCbQueryMonitorInterface failed with Status = 0x%X\n", __FUNCTION__, Status));
++        return;
++    }
++
++    D3DKMDT_HMONITORSOURCEMODESET hMonitorSourceModeSet;
++    CONST DXGK_MONITORSOURCEMODESET_INTERFACE *pMonitorSourceModeSetInterface;
++    Status = pMonitorInterface->pfnAcquireMonitorSourceModeSet(m_pDxgkInterface->DeviceHandle,
++                                                               TargetId,
++                                                               &hMonitorSourceModeSet,
++                                                               &pMonitorSourceModeSetInterface);
++    if (!NT_SUCCESS(Status))
++    {
++        // No monitor yet: RecommendMonitorModes will offer the slot when it arrives.
++        DbgPrint(TRACE_LEVEL_WARNING, ("%s pfnAcquireMonitorSourceModeSet failed with Status = 0x%X\n", __FUNCTION__, Status));
++        return;
++    }
++
++    PVIDEO_MODE_INFORMATION pModeInfo = &m_ModeInfo[m_CustomModeIndex];
++    D3DKMDT_MONITOR_SOURCE_MODE *pMonitorSourceMode = NULL;
++    Status = pMonitorSourceModeSetInterface->pfnCreateNewModeInfo(hMonitorSourceModeSet, &pMonitorSourceMode);
++    if (NT_SUCCESS(Status))
++    {
++        BuildVideoSignalInfo(&pMonitorSourceMode->VideoSignalInfo, pModeInfo);
++        pMonitorSourceMode->Origin = D3DKMDT_MCO_DRIVER;
++        pMonitorSourceMode->Preference = D3DKMDT_MP_NOTPREFERRED;
++        pMonitorSourceMode->ColorBasis = D3DKMDT_CB_SRGB;
++        pMonitorSourceMode->ColorCoeffDynamicRanges.FirstChannel = 8;
++        pMonitorSourceMode->ColorCoeffDynamicRanges.SecondChannel = 8;
++        pMonitorSourceMode->ColorCoeffDynamicRanges.ThirdChannel = 8;
++        pMonitorSourceMode->ColorCoeffDynamicRanges.FourthChannel = 8;
++
++        Status = pMonitorSourceModeSetInterface->pfnAddMode(hMonitorSourceModeSet, pMonitorSourceMode);
++        if (!NT_SUCCESS(Status))
++        {
++            NTSTATUS TempStatus = pMonitorSourceModeSetInterface->pfnReleaseModeInfo(hMonitorSourceModeSet,
++                                                                                     pMonitorSourceMode);
++            UNREFERENCED_PARAMETER(TempStatus);
++            NT_ASSERT(NT_SUCCESS(TempStatus));
++        }
++    }
++    DbgPrint(TRACE_LEVEL_FATAL,
++             ("%s %dx%d Status = 0x%X\n", __FUNCTION__, pModeInfo->VisScreenWidth, pModeInfo->VisScreenHeight, Status));
++
++    pMonitorInterface->pfnReleaseMonitorSourceModeSet(m_pDxgkInterface->DeviceHandle, hMonitorSourceModeSet);
++}
++
+ PAGED_CODE_SEG_END
+ 
+ //
+--- a/viogpu/viogpu3d/viogpu_vidpn.h
++++ b/viogpu/viogpu3d/viogpu_vidpn.h
+@@ -76,11 +76,14 @@
+     BOOLEAN GetDisplayInfo(void);
+     int ProcessEdid(void);
+     void FixEdid(void);
++    void ClearEdidImageSize(void);
++    void NormalizeHostEdid(void);
+     BOOLEAN GetEdids(void);
+     void ParseEdidTiming(void);
+     int AddEdidModes(void);
+     BOOLEAN UpdateModes(USHORT xres, USHORT yres, int &cnt);
+     void SetCustomDisplay(_In_ USHORT xres, _In_ USHORT yres);
++    void AddCustomMonitorMode(_In_ D3DDDI_VIDEO_PRESENT_TARGET_ID TargetId);
+ 
+     NTSTATUS EscapeCustomResoulution(VIOGPU_DISP_MODE *resolution);
+ 

@@ -231,14 +231,11 @@ final class VirtualMachineController {
             }
         }.value
     }
-    func requestDesktopResolution(_ size:NSSize,reconnectDelay:TimeInterval=0.25,advertisedMode:Bool=false,disconnected:(@MainActor @Sendable () async -> Void)?=nil){
+    func requestDesktopResolution(_ size:NSSize){
         guard let launch=desktopLaunch() else{return}
         displayControl?.stop()
         let request=UUID();displayRequest=request;desktopResolutionPending=true
         desktop?.beginResolutionChange(size)
-        // An already advertised mode can be applied by Windows directly. Do
-        // not change EDID or disconnect the monitor just to select that mode.
-        if advertisedMode {displayControl=nil;desktopResolutionPending=false;return}
         // This publishes the custom mode to virtio-gpu. The guest's driver
         // helper applies it; RFB's framebuffer acknowledgement is not proof
         // of the Windows mode, which ApplicationModel reads back separately.
@@ -246,7 +243,7 @@ final class VirtualMachineController {
             guard let self,self.displayRequest == request else{return};self.desktopResolutionPending=false
         })
         displayControl=client;client.requestPixels(false)
-        client.setScreens([DesktopScreen(id:0,x:0,y:0,width:Int(size.width),height:Int(size.height))],reconnectMonitor:nativeGraphicsEnabled,reconnectDelay:reconnectDelay,disconnected:disconnected,submitted:{[weak self] in
+        client.setScreens([DesktopScreen(id:0,x:0,y:0,width:Int(size.width),height:Int(size.height))],submitted:{[weak self] in
             guard let self,self.displayRequest == request else{return};self.desktopResolutionPending=false
         });client.start()
     }

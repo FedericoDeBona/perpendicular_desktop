@@ -1,5 +1,7 @@
 # Piano di lavoro — desktop Windows su Mac
 
+**Candidata .93 (7 novembre):** percorso host senza unplug implementato e compilato; driver upstream firmato v0.5 aggiunge i nuovi modi al monitor esistente e normalizza EDID. [Pin/ricetta/patch](../graphics/driver/connected-resize-v05.json) e [verifica in corso](VERIFICATION.md#driver-firmato-v05-e-modi-a-monitor-collegato). Installazione/coldboot QA, integrazione installer ordinari e qualifica main ancora pendenti; non equivale a correzione verificata di icone/nero o prestazioni.
+
 **7 novembre — NUOVO OBIETTIVO ATTIVO: resize con monitor sempre collegato.** Vincolo esplicito dell’utente: cambiare strada, intervenire su driver e riconoscimento/applicazione delle nuove risoluzioni a monitor connesso; nessun unplug, scollegamento temporaneo o recupero delle finestre come soluzione al resize. Conservati icone/testi, artefatti/nero, fullscreen, tempi e regressioni nell’app principale. Percorso .92 ritirato e salvato nel ramo `codex/archive-unplug-window-recovery` (43962e0), non promosso. Main .90/EB06 invariata/spenta; QA arrestata normalmente dopo fine aggiornamento734F, task propria rimossa/CDvuoto. Prossimo passo percorso driver/notifiche/modi senza scollegamento, riusando i negativi già documentati; nessuna nuova soluzione ancora implementata. [Requisito ed evidenze](VERIFICATION.md#cambio-obbligatorio-di-percorso-resize-a-monitor-collegato).
 
 
