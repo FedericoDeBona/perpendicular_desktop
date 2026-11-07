@@ -1,0 +1,180 @@
+--- a/src/perp-sync/proxy-broker.c
++++ b/src/perp-sync/proxy-broker.c
+@@ -2,6 +2,7 @@
+  * VM-global host registry on the actual proxy caller thread. No background
+  * reader races the proxy's ordinary request/reply channel. */
+ #include "live.h"
++#include "virgl_resource.h"
+ #include "snapshot-storage.h"
+ #include "channel.h"
+ #include "wire.h"
+@@ -17,7 +18,6 @@
+ #include <unistd.h>
+ 
+ #define MAX_CONTEXTS 32
+-#define MAX_RESOURCES 256
+ typedef struct LiveExport {uint64_t blob,object;uint32_t resource;} LiveExport;
+ typedef struct LiveWorker {
+     uint32_t id;uint64_t epoch;int fd;struct proxy_socket *control;
+@@ -30,6 +30,7 @@
+     _Alignas(8) unsigned char input[248];size_t have,want;int rights[2];unsigned fd_count;
+ } LiveWorker;
+ typedef struct LiveResource {
++    struct LiveResource *next;
+     uint32_t id,context,last_generation,passive_contexts;uint64_t worker_epoch,epoch,blob,object,bytes;
+     bool tainted,granted,deny_acked,destroyed,retiring;
+ } LiveResource;
+@@ -37,7 +38,8 @@
+     PerpBrokerHeader header;PerpSnapshotPacket packet;int fds[2];bool used,leased;uint64_t received;
+ } LiveFrame;
+ static LiveWorker workers[MAX_CONTEXTS];
+-static LiveResource resources[MAX_RESOURCES];
++static LiveResource *resources;
++static unsigned resource_live_count;
+ static LiveFrame frames[LIVE_MAX_PENDING];
+ static PerpLivePoolStats pool;
+ static uint64_t abandoned,context_retirements;
+@@ -51,7 +53,18 @@
+ static bool enabled(void) {const char *value=getenv("PERP_NEPTUNE_SCANOUT_BROKER");return value && !strcmp(value,"1");}
+ static uint64_t now(void) {struct timespec t;clock_gettime(CLOCK_MONOTONIC,&t);return (uint64_t)t.tv_sec*1000000000ull+t.tv_nsec;}
+ static LiveWorker *worker(uint32_t id) {for(unsigned i=0;i<MAX_CONTEXTS;i++)if(workers[i].id==id && id)return &workers[i];return NULL;}
+-static LiveResource *resource(uint32_t id) {for(unsigned i=0;i<MAX_RESOURCES;i++)if(resources[i].id==id && id)return &resources[i];return NULL;}
++static LiveResource *resource(uint32_t id) {for(LiveResource *r=resources;r;r=r->next)if(r->id==id && id)return r;return NULL;}
++static unsigned owned_resources(uint32_t context,uint64_t epoch)
++{
++    unsigned count=0;for(LiveResource *r=resources;r;r=r->next)count+=r->context==context && r->worker_epoch==epoch;
++    return count;
++}
++static void release_resource(LiveResource *r)
++{
++    LiveResource **at=&resources;
++    while(*at && *at!=r)at=&(*at)->next;
++    if(*at) {*at=r->next;free(r);resource_live_count--;}
++}
+ static void close_rights(int *fds,unsigned count) {for(unsigned i=0;i<count;i++)if(fds[i]>=0)close(fds[i]);}
+ static bool send_control(LiveWorker *w,PerpBrokerHeader *h,const int *fds,unsigned count)
+ {
+@@ -128,9 +141,9 @@
+         close_rights(frames[i].fds,2);memset(&frames[i],0,sizeof(frames[i]));
+     }
+     uint32_t bit=1u<<(unsigned)(w-workers);
+-    for(unsigned i=0;i<MAX_RESOURCES;i++) {
+-        resources[i].passive_contexts&=~bit;
+-        if(resources[i].context==id)memset(&resources[i],0,sizeof(resources[i]));
++    for(LiveResource *r=resources,*next;r;r=next) {
++        next=r->next;r->passive_contexts&=~bit;
++        if(r->context==id)release_resource(r);
+     }
+     memset(w,0,sizeof(*w));
+ }
+@@ -138,28 +151,29 @@
+ {
+     LiveWorker *w=worker(context);if(!w || !blob)return;
+     collect_resources();if(w->bad)return;
+-    LiveResource *r=NULL;
++    // Ordinary virgl owns the resource before this callback. Metadata follows
++    // that real lifetime, rather than closing unrelated capture at slot 256.
++    // A reused ID still waits only for the exact old retirement, never aliases.
+     uint64_t deadline=now()+100000000ull;
+-    do {
+-        for(unsigned i=0;i<MAX_RESOURCES;i++)if(!resources[i].id) {r=&resources[i];break;}
+-        LiveResource *old=resource(id);
+-        if(r && !old)break;
+-        bool retiring=false;for(unsigned i=0;i<MAX_RESOURCES;i++)retiring|=resources[i].destroyed;
+-        if(!retiring || w->bad || now()>=deadline)break;
+-        // Only capacity pressure waits, bounded to 100ms. Ordinary registration
+-        // stays asynchronous; consumer leases are never forcibly released.
++    while(!w->bad && now()<deadline) {
++        LiveResource *old=resource(id);bool waiting=old && old->destroyed;
++        if(owned_resources(context,w->epoch)>=LIVE_MAX_SOURCES)
++            for(LiveResource *pending=resources;pending;pending=pending->next)
++                waiting|=pending->context==context && pending->worker_epoch==w->epoch && pending->destroyed;
++        if(!waiting)break;
+         collect_resources();struct pollfd wait={-1,0,0};poll(&wait,0,1);
+-    }while(true);
++    }
+     if(w->bad)return;
+-    const char *reason=!r?"registry full":resource(id)?"duplicate resource ID":!id?"zero resource ID":!bytes?"empty resource":bytes>LIVE_MAX_BYTES?"oversized resource":NULL;
+-    if(reason || ++resource_epoch==0) {
+-        unsigned live=0,tainted=0;for(unsigned i=0;i<MAX_RESOURCES;i++)if(resources[i].id) {live++;tainted+=resources[i].tainted;}
+-        fprintf(stderr,"perp-live: registration refused reason=%s resource=%u context=%u bytes=%llu live=%u tainted=%u selected=%u active=%u\n",reason?reason:"epoch wrap",id,context,(unsigned long long)bytes,live,tainted,selected,active);
++    const char *reason=resource(id)?"duplicate resource ID":!id?"zero resource ID":!bytes?"empty resource":bytes>LIVE_MAX_BYTES?"oversized resource":!virgl_resource_lookup(id)?"missing ordinary resource":owned_resources(context,w->epoch)>=LIVE_MAX_SOURCES?"producer resource bound":resource_epoch==UINT64_MAX?"epoch wrap":NULL;
++    if(reason) {
++        fprintf(stderr,"perp-live: registration refused reason=%s resource=%u context=%u bytes=%llu live=%u selected=%u active=%u\n",reason,id,context,(unsigned long long)bytes,resource_live_count,selected,active);
+         fail_worker(w,"resource identity/bound");return;
+     }
+-    *r=(LiveResource){.id=id,.context=context,.worker_epoch=w->epoch,.epoch=resource_epoch,.blob=blob,.bytes=bytes};
+-    resource_registrations++;unsigned live=0;for(unsigned i=0;i<MAX_RESOURCES;i++)live+=resources[i].id!=0;
+-    if(live>resource_peak)resource_peak=live;
++    LiveResource *r=calloc(1,sizeof(*r));
++    if(!r) {fail_worker(w,"resource metadata allocation");return;}
++    *r=(LiveResource){.next=resources,.id=id,.context=context,.worker_epoch=w->epoch,.epoch=++resource_epoch,.blob=blob,.bytes=bytes};
++    resources=r;resource_registrations++;resource_live_count++;
++    if(resource_live_count>resource_peak)resource_peak=resource_live_count;
+ }
+ void perp_live_resource_destroy(uint32_t id)
+ {
+@@ -229,7 +243,7 @@
+         }
+         if(w->capture_resource==r->id)w->capture_resource=0;
+         resource_granted_retirements+=r->granted;
+-        memset(r,0,sizeof(*r));resource_retirements++;return true;
++        release_resource(r);resource_retirements++;return true;
+     }
+     if(h->kind==PERP_ACKED && h->bytes==sizeof(*h) && !h->fd_count)return true;
+     if(h->kind==LIVE_POOL_STATS && h->bytes==sizeof(*h)+sizeof(pool) && !h->fd_count) {
+@@ -246,7 +260,7 @@
+     }
+     if(h->kind==LIVE_REVOKED && h->bytes==sizeof(*h) && !h->fd_count && w->revoking) {
+         w->revoking=w->enabled=false;w->capture_resource=0;if(active==w->id)active=0;
+-        for(unsigned i=0;i<MAX_RESOURCES;i++)if(resources[i].context==w->id)resources[i].granted=false;return true;
++        for(LiveResource *r=resources;r;r=r->next)if(r->context==w->id)r->granted=false;return true;
+     }
+     if(h->kind==LIVE_DENIED && h->bytes==sizeof(*h) && !h->fd_count) {
+         LiveResource *r=resource(h->resource_id);
+@@ -307,8 +321,8 @@
+ static void collect_resources(void)
+ {
+     for(unsigned i=0;i<MAX_CONTEXTS;i++)if(workers[i].id && !workers[i].bad)receive_messages(&workers[i]);
+-    for(unsigned i=0;i<MAX_RESOURCES;i++) {
+-        LiveResource *r=&resources[i];if(!r->destroyed || r->retiring)continue;
++    for(LiveResource *r=resources;r;r=r->next) {
++        if(!r->destroyed || r->retiring)continue;
+         LiveWorker *w=worker(r->context);if(!w || w->bad || w->epoch!=r->worker_epoch)continue;
+         PerpBrokerHeader retire={.kind=LIVE_RETIRE,.resource_id=r->id,.resource_epoch=r->epoch,.blob_id=r->blob};
+         if(send_control(w,&retire,NULL,0))r->retiring=true;else fail_worker(w,"resource retirement channel");
+@@ -357,9 +371,13 @@
+     if(w->commands_started)return true;
+     w->commands_started=true;
+     uint32_t bit=1u<<(unsigned)(w-workers);
+-    for(unsigned i=0;i<MAX_RESOURCES;i++)if(resources[i].passive_contexts&bit) {
+-        resources[i].passive_contexts&=~bit;
+-        if(!perp_live_before_import(context,resources[i].id)) {
++    // before_import may consume a retirement and free any metadata node.
++    // Find the next attachment afresh after each call instead of retaining it.
++    while(true) {
++        LiveResource *r=resources;while(r && !(r->passive_contexts&bit))r=r->next;
++        if(!r)break;
++        uint32_t id=r->id;r->passive_contexts&=~bit;
++        if(!perp_live_before_import(context,id)) {
+             fail_worker(w,"first command could not revoke passive attachment");return false;
+         }
+     }
+@@ -439,7 +457,7 @@
+ {
+     if(!enabled() || permanently_failed)return false;
+     if(active)return true;
+-    for(unsigned i=0;i<MAX_RESOURCES;i++)if(resources[i].destroyed)return true;
++    for(LiveResource *r=resources;r;r=r->next)if(r->destroyed)return true;
+     for(unsigned i=0;i<LIVE_MAX_PENDING;i++)if(frames[i].used)return true;
+     return false;
+ }
+@@ -504,7 +522,7 @@
+     free(base);char *full=NULL;
+     asprintf(&full,"%.*s,\"context_retirements\":%llu}",(int)strlen(result)-1,result,(unsigned long long)context_retirements);
+     free(result);unsigned live=0,destroyed=0;
+-    for(unsigned i=0;i<MAX_RESOURCES;i++) {live+=resources[i].id!=0;destroyed+=resources[i].destroyed;}
++    for(LiveResource *r=resources;r;r=r->next) {live++;destroyed+=r->destroyed;}
+     char *stats=NULL;
+     asprintf(&stats,"%.*s,\"resource_registrations\":%llu,\"resource_retirements\":%llu,\"resource_live\":%u,\"resource_destroyed\":%u,\"resource_peak\":%u,\"resource_granted_retirements\":%llu}",
+         (int)strlen(full)-1,full,(unsigned long long)resource_registrations,(unsigned long long)resource_retirements,live,destroyed,resource_peak,(unsigned long long)resource_granted_retirements);

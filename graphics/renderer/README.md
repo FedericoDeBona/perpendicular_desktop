@@ -61,3 +61,33 @@ realmente avviato. `check-monitor-runtime.py` rifiuta sia quel marker sia il cod
 diagnostico nelle build ordinarie. La prova di replay e il primo inventario QA
 sono nel [diario](../../docs/VERIFICATION.md#saturazione-del-registro-dopo-resize-consecutivi-nella-qa-89);
 non dimostrano ancora causa della saturazione o fix del nero.
+
+## Metadati per durata e proprietario — candidata
+
+`resource-lifetime-metadata.patch` sostituisce la tabella globale del prototipo
+con un nodo per risorsa ordinaria virgl. Conserva i limiti già esistenti di
+256 sorgenti per produttore e 32 contesti: al più 8192 nodi da 72 byte, senza
+cambiare budget di snapshot, lease o ammissione GPU. Il ritiro mantiene tutti
+i controlli di identità e conferma; la fine del contesto libera i suoi
+nodi. Una risorsa sconosciuta, un ID duplicato, un'allocazione fallita o il limite
+per produttore continuano a rifiutare la cattura. Nessuna risorsa ancora usata
+viene espulsa per lasciare posto al nuovo scanout.
+
+Aggiungere `--resource-lifetimes` alla ricetta precedente produce la coppia
+`production/` senza inventario e `diagnostic/` con
+`resource-lifetime-inventory.patch`. Prima esegue sul vero broker il controllo
+`check-resource-lifetime-metadata.c` con ASan/UBSan: più proprietari, conferma e
+lease, vecchi epoch, assenza della risorsa normale e ricezioni che liberano i
+nodi durante il primo import. L'inventario elenca al massimo 512 voci e riporta
+anche totale e assenti, compresi quelli oltre il taglio.
+
+Il nome `production/` indica soltanto l'assenza di diagnostica: questa candidata
+non è ancora qualificata per l'app ordinaria. In una confezione privata marcare
+`resource_lifetime_metadata_candidate`; il gate produttivo la rifiuta. Dopo la
+QA occorrono pin/requisiti condivisi e confezionamento compatibile prima della
+consegna, senza trasferire la coppia M1 indiscriminatamente su M4.
+
+`tests/GraphicsResourcePressure.ps1` è la singola pressione Windows circoscritta:
+230 texture condivise BGRA1×1 valide, tenuta di 35 secondi e rilascio garantito,
+nessuna modifica degli schermi o scrittura di file. La geometria e il flusso vanno
+osservati separatamente nell'app reale; la riuscita della fixture non li prova.

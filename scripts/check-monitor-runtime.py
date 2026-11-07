@@ -16,6 +16,7 @@ def main():
     native = args.app.resolve(strict=True) / 'Contents/Resources/Native3D'
     manifest = json.loads((native / 'runtime.json').read_text())
     if (manifest.get('resource_inventory_candidate') or
+            manifest.get('resource_lifetime_metadata_candidate') or
             b'resource_inventory' in (native / 'lib/libvirglrenderer.1.dylib').read_bytes()):
         raise ValueError('QA resource inventory cannot enter an ordinary build')
     binary = (native / 'bin/qemu-system-aarch64').read_bytes()

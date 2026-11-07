@@ -1,0 +1,21 @@
+--- a/src/perp-sync/proxy-broker.c
++++ b/src/perp-sync/proxy-broker.c
+@@ -542,5 +542,16 @@
+         free(detail);detail=next;
+     }
+     char *result_frames=NULL;asprintf(&result_frames,"%.*s,\"pending_frames\":%s]}",(int)strlen(stats)-1,stats,detail);
+-    free(detail);free(stats);return result_frames;
+-}
++    free(detail);free(stats);
++    char *inventory=strdup("[");unsigned entries=0,total=0,missing=0;
++    for(LiveResource *r=resources;r;r=r->next) {
++        bool ordinary=virgl_resource_lookup(r->id)!=NULL;total++;missing+=!ordinary;
++        if(entries==512)continue;
++        char *next=NULL;
++        asprintf(&next,"%s%s{\"id\":%u,\"context\":%u,\"epoch\":%llu,\"blob\":%llu,\"bytes\":%llu,\"tainted\":%s,\"granted\":%s,\"destroyed\":%s,\"retiring\":%s,\"ordinary_present\":%s}",inventory,entries++?",":"",r->id,r->context,(unsigned long long)r->epoch,(unsigned long long)r->blob,(unsigned long long)r->bytes,r->tainted?"true":"false",r->granted?"true":"false",r->destroyed?"true":"false",r->retiring?"true":"false",ordinary?"true":"false");
++        free(inventory);inventory=next;
++    }
++    char *with_inventory=NULL;asprintf(&with_inventory,"%.*s,\"resource_inventory\":%s],\"resource_inventory_total\":%u,\"resource_inventory_stale\":%u,\"resource_inventory_truncated\":%s}",(int)strlen(result_frames)-1,result_frames,inventory,total,missing,entries<total?"true":"false");
++    free(inventory);free(result_frames);return with_inventory;
++
++}

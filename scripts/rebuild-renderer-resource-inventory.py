@@ -4,6 +4,7 @@ import json,hashlib,subprocess,shlex,shutil,runpy
 from pathlib import Path
 import argparse
 parser=argparse.ArgumentParser(description="Rebuild the exact renderer baseline, then add read-only QA resource ownership.")
+parser.add_argument('--resource-lifetimes',action='store_true',help='Build/check the lifetime metadata candidate plus diagnostic variant')
 parser.add_argument('--reference',type=Path,required=True,help='Compatible host-source/host-build/venv root')
 parser.add_argument('--runtime',type=Path,required=True,help='Qualified Native3D directory, never modified')
 parser.add_argument('--output',type=Path,required=True,help='Fresh private output, no app or VM is modified')
@@ -36,7 +37,24 @@ subprocess.run(['patch','-p1','--batch','--forward','-i',str(patch)],cwd=patched
 patched=target.read_text()
 receipt['patchSHA256']=digest(patch)
 assert patched!=base
-for variant,code in [('baseline',base),('diagnostic',patched)]:
+variants=[('baseline',base),('diagnostic',patched)]
+if args.resource_lifetimes:
+ fixed_root=out/'lifetime-source';fixed_file=fixed_root/'src/perp-sync/proxy-broker.c';fixed_file.parent.mkdir(parents=True);fixed_file.write_text(base)
+ fixed_patch=repo/'graphics/renderer/resource-lifetime-metadata.patch';inventory_patch=repo/'graphics/renderer/resource-lifetime-inventory.patch'
+ subprocess.run(['patch','-p1','--batch','--forward','-i',str(fixed_patch)],cwd=fixed_root,check=True)
+ fixed=fixed_file.read_text()
+ # Compile the real patched broker with exact retirement/lease and owner limits.
+ check_dir=out/'check';check_dir.mkdir();(check_dir/'proxy-broker.c').write_text(fixed)
+ check_cmd=list(cmd)
+ for option in ['-c','-o','-MF','-MQ']:
+  at=check_cmd.index(option);del check_cmd[at:at+2]
+ check_cmd=[x for x in check_cmd if x!='-MD'];check_cmd[1:1]=['-iquote',str(check_dir),'-iquote',str(source/'src/perp-sync')]
+ check_cmd+=['-UNDEBUG','-fsanitize=address,undefined',str(repo/'graphics/renderer/check-resource-lifetime-metadata.c'),'-o',str(check_dir/'check')]
+ subprocess.run(check_cmd,cwd=build,check=True);subprocess.run([str(check_dir/'check')],check=True)
+ subprocess.run(['patch','-p1','--batch','--forward','-i',str(inventory_patch)],cwd=fixed_root,check=True)
+ variants=[('baseline',base),('production',fixed),('diagnostic',fixed_file.read_text())]
+ receipt['resourceLifetimes']={'version':1,'perProducerSources':256,'maxContexts':32,'patchSHA256':digest(fixed_patch),'inventoryPatchSHA256':digest(inventory_patch),'checkSHA256':digest(repo/'graphics/renderer/check-resource-lifetime-metadata.c'),'sanitizedCheck':'PASS','qa':'not verified'}
+for variant,code in variants:
  work=out/variant;work.mkdir();src=work/'proxy-broker.c';src.write_text(code);obj=work/'perp-sync_proxy-broker.c.o';args=list(cmd)
  args[1:1]=['-iquote',str(source/'src/perp-sync')]
  for f,v in [('-c',src),('-o',obj),('-MF',str(obj)+'.d'),('-MQ',obj)]:args[args.index(f)+1]=str(v)
