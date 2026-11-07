@@ -51,5 +51,6 @@
     "d11a75526d5562ab5e16acc1aa75fbc2198ac104094b1d66d6610c68d3fe1e61",
     "e0ac15f46e34f8f42a7ba50e8ebc607988e0da5dd10338a4c94df944f7743cbe"
   ],
-  "opengl_version": "0.2.34"
+  "opengl_version": "0.2.34",
+  "installer_sha256": "b4408fe99c6ea2d5c672c3aa53f9e28e6d4693a5894dc9ea1203d8f8c5b1c57a"
 }

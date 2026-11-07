@@ -95,3 +95,39 @@ il log identifica WARP; riaperto lo stesso exe senza `-force-driver-type-warp`,
 carica la nuova UMD/VirtIO e l’utente conferma «Ora è fluido». Il vecchio
 collegamento software è stato conservato e aggiornato a `-force-d3d11`, senza
 forzare risoluzione. Non è una misura FPS. [Evidenze e limiti](../../docs/VERIFICATION.md#3-novembre--pull-rebuild-e-guest-tools-sul-m4).
+
+## Candidata resize connesso v0.5 (.93, M1)
+
+Il driver originale firmato v0.5 aggiunge i modi al monitor già presente,
+conservando il wire2 e gli header KMD/UMD della base. Pin e differenza upstream
+sono in [connected-resize-v05.json](connected-resize-v05.json) e
+[upstream-connected-modes.patch](upstream-connected-modes.patch). Il profilo
+candidato conserva UMDv19, x86 M1 e OpenGL0.2.34: non sostituire queste librerie
+con quelle nuove dell'archivio. Altri profili richiedono una qualifica esplicita.
+
+```sh
+python3 scripts/prepare-connected-resize.py --output "$fresh_external_media"
+python3 scripts/package-connected-resize.py --app "$separate_runtime_reference" \
+  --payload "$fresh_external_media" --sign
+python3 scripts/check-connected-resize.py --app "$separate_runtime_reference"
+PERPENDICULAR_RUNTIME_APP="$separate_runtime_reference" zsh scripts/build-macos.sh
+```
+
+Usare una copia separata dei componenti canonici compatibili. Un riferimento
+senza `Contents/MacOS`, senza `CFBundleExecutable` e tipo `BNDL` non può avviare un frontend; usare un ID componente `com.perpendicular.restart.*` e `--sign` per la firma persistente di questo Mac. Il controllo build rifiuta
+un bundle privo del pacchetto firmato o con installer/ABI/profilo diversi;
+non forzare pin per riusare la vecchia base. Il pacchetto copia soltanto i
+componenti pubblici fissati, mai configurazioni/credenziali dei media privati.
+
+L'installer candidato richiede normale amministrazione e identifica una sola
+PCI accelerata1101. Conserva e rilegge registrazioni video/x86/Vulkan qualificate;
+non aggiorna le uscite app con quel driver. Dopo installazione serve spegnimento
+normale e coldboot: la ricevuta non prova pixel o caricamento della nuova coppia.
+L'installer guest ordinario video/x86 è ancora vincolato al kernel precedente:
+**integrazione degli aggiornamenti ripetibili e consegna main DA FARE**. Non
+promuovere questa candidata come aggiornamento ordinario prima di completarle.
+
+QA protetta: coldboot e primo percorso sempre collegato PASS circoscritto,
+1440×1676→2880×1800→ritorno e2880×1676→fullscreen→ritorno con nuovi frame/DPI96.
+Icone Settings nel Desktop, input postcicli, avvio iniziale/regressioni e main
+restano aperti. [Evidenze e negativi](../../docs/VERIFICATION.md#driver-firmato-v05-e-modi-a-monitor-collegato).

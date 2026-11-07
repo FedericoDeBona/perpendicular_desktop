@@ -40,6 +40,8 @@ def main():
     helper = REPO / 'scripts/install-mixed-display-driver.ps1'
     if digest(helper.read_bytes()) != manifest['installer_helper_sha256']:
         raise ValueError('Pinned per-device installer differs')
+    if digest((REPO / 'graphics/driver/install-connected-resize.ps1').read_bytes()) != manifest['installer_sha256']:
+        raise ValueError('Pinned connected-display installer differs')
     # Validate every member before writing any usable media.
     with zipfile.ZipFile(io.BytesIO(archives['driver'])) as archive:
         members = {name: archive.read('drivers/viogpu3d/' + name) for name in manifest['members']}
