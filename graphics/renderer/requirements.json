@@ -1,0 +1,10 @@
+{
+  "schema": 1,
+  "resourceLifetimeMetadataVersion": 1,
+  "perProducerSources": 256,
+  "maxContexts": 32,
+  "maxMetadataNodes": 8192,
+  "requiredPatches": [
+    "graphics/renderer/resource-lifetime-metadata.patch"
+  ]
+}

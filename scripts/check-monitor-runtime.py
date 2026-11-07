@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Reject stale scanout code and the QA-only failure injection in builds."""
+"""Reject stale desktop scanout components and QA-only code in builds."""
 import argparse
 import hashlib
 import json
@@ -19,6 +19,32 @@ def main():
             manifest.get('resource_lifetime_metadata_candidate') or
             b'resource_inventory' in (native / 'lib/libvirglrenderer.1.dylib').read_bytes()):
         raise ValueError('QA resource inventory cannot enter an ordinary build')
+    renderer_required = json.loads((ROOT / 'graphics/renderer/requirements.json').read_text())
+    renderer_fix = manifest.get('resource_lifetime_metadata', {})
+    for key, required_key in [('version', 'resourceLifetimeMetadataVersion'),
+                              ('perProducerSources', 'perProducerSources'),
+                              ('maxContexts', 'maxContexts'), ('maxMetadataNodes', 'maxMetadataNodes')]:
+        if renderer_fix.get(key) != renderer_required[required_key]:
+            raise ValueError('Renderer lacks lifetime-owned metadata; rebuild/package the compatible recipe in graphics/renderer/README.md')
+    renderer_patches = {name: hashlib.sha256((ROOT / name).read_bytes()).hexdigest()
+                        for name in renderer_required['requiredPatches']}
+    if renderer_fix.get('patches') != renderer_patches:
+        raise ValueError('Renderer metadata patch differs from the shared fix')
+    profile_name = renderer_fix.get('hostProfile', '')
+    if not profile_name or not profile_name.replace('-', '').isalnum():
+        raise ValueError('Renderer host profile is missing/invalid')
+    profile = json.loads((ROOT / 'graphics/renderer/profiles' / (profile_name + '.json')).read_text())
+    pair = {'lib/libvirglrenderer.1.dylib', 'bin/virgl_render_server'}
+    if set(profile.get('files', {})) != pair or renderer_fix.get('files') != profile['files']:
+        raise ValueError('Renderer pair differs from its compatible shared profile')
+    for name, expected in profile['files'].items():
+        if (manifest['files'].get(name) != expected or
+                hashlib.sha256((native / name).read_bytes()).hexdigest() != expected):
+            raise ValueError('Renderer lifetime payload hash differs: ' + name)
+    renderer_bytes = (native / 'lib/libvirglrenderer.1.dylib').read_bytes()
+    if any(marker not in renderer_bytes for marker in
+           (b'missing ordinary resource', b'producer resource bound', b'resource metadata allocation')):
+        raise ValueError('Renderer lacks lifetime ownership and existing producer bounds')
     binary = (native / 'bin/qemu-system-aarch64').read_bytes()
     candidate = manifest.get('deferred_scanout_selection_candidate', {})
     if candidate.get('qaFaultInjection') or b'QA delaying selection admission' in binary:
@@ -37,7 +63,7 @@ def main():
            (b'perp-native: selection timed out resource=', b'selection_pending',
             b'selection_resumed', b'update_pending')):
         raise ValueError('QEMU lacks bounded selection and retained-update capabilities')
-    print('Monitor: bounded selection, retained update, shared patches and QEMU hash verified')
+    print('Monitor: bounded selection, retained update and lifetime-owned renderer metadata verified')
 
 
 if __name__ == '__main__':

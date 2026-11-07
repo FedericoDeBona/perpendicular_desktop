@@ -91,3 +91,38 @@ consegna, senza trasferire la coppia M1 indiscriminatamente su M4.
 230 texture condivise BGRA1×1 valide, tenuta di 35 secondi e rilascio garantito,
 nessuna modifica degli schermi o scrittura di file. La geometria e il flusso vanno
 osservati separatamente nell'app reale; la riuscita della fixture non li prova.
+
+### Confezionamento del fix verificato
+
+Il ramo di esaurimento globale è verificato nella QA M1: pressione303/picco315,
+resize e rilascio senza rifiuti, SDR/VP9/OpenGL ARM64+x64 e fullscreen con
+Settings completa. Questo non chiude tutti i difetti intermittenti o la lentezza.
+`requirements.json` rende obbligatorio il fix nelle build ordinarie tramite
+`check-monitor-runtime.py`, già eseguito prima/dopo la copia del runtime e con
+SKIP_RUNTIME. La diagnostica resta rifiutata.
+
+Dopo la ricostruzione con `--resource-lifetimes`, confezionare entrambi gli
+output senza inventario in una nuova app di riferimento, lasciando intatta
+quella installata:
+
+```sh
+python3 scripts/package-renderer-resource-lifetimes.py \
+  --reference-app "$qualified_baseline_app" --build "$lifetime_build" \
+  --host-profile m1-resource-lifetimes-1 --output-app "$fresh_reference_app"
+PERPENDICULAR_RUNTIME_APP="$fresh_reference_app" zsh scripts/build-macos.sh
+```
+
+Il confezionatore verifica sorgente corretto, controllo sanitizzato, pin raw,
+sezioni della coppia di riferimento e hash di tutti i componenti preservati;
+normalizza dipendenze e firma il riferimento con l'identità locale persistente.
+Non avvia Windows. Il profilo condiviso `profiles/m1-resource-lifetimes-1.json`
+pinna codice di base, output compilati e coppia confezionata; il gate controlla
+profilo, patch, hash effettivi e capacità. La ricevuta nel runtime conserva la
+provenienza. Frontend e guest del riferimento restano quelli di base: la build
+successiva inserisce i sorgenti e il guest correnti.
+
+Su una base diversa ricostruire il medesimo fix e verificare baseline, contratto
+e caso locale prima di aggiungere il profilo compatibile; non forzare i pin M1
+né copiare il suo runtime su M4. La mancanza del requisito deve fermare la build
+fino alla distribuzione compatibile. La verifica locale nell'app principale
+resta separata dalla build e dalle prove della copia.
