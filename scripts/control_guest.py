@@ -38,6 +38,7 @@ def main():
         command_parser = commands.add_parser(name)
         if name == "display_info":
             command_parser.add_argument("--current-only", action="store_true", help="Read current geometry without enumerating supported modes.")
+            command_parser.add_argument("--primary-only", action="store_true", help="Read only the primary monitor rectangle and DPI.")
     terminate = commands.add_parser("process_terminate", help="Terminate one process using its exact identity from process_list.")
     terminate.add_argument("pid", type=int)
     terminate.add_argument("creation")
@@ -68,6 +69,8 @@ def main():
     request = {"command": options.command}
     if options.command == "display_info" and options.current_only:
         request["currentOnly"] = True
+    if options.command == "display_info" and options.primary_only:
+        request.update(currentOnly=True, primaryOnly=True)
     if options.command in ("window_refresh", "window_image", "window_transport_check"):
         request["window"] = options.window
     if options.command == "window_geometry":

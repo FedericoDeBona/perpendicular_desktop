@@ -333,7 +333,7 @@ fn set_dpi(path: &DISPLAYCONFIG_PATH_INFO, dpi: u32) -> Result<(), String> {
 /// Restore only the primary source's scale after its monitor mode changes.
 /// App outputs and their private work areas are independent of this operation.
 pub fn set_primary_dpi(device: &str, dpi: u32) -> Result<(), String> {
-    let monitors = super::display::current_snapshot();
+    let monitors = super::display::primary_snapshot()?;
     let primary = monitors["displays"].as_array()
         .and_then(|displays| displays.iter().find(|d| d["primary"] == true))
         .ok_or("Primary display disappeared during DPI update")?;

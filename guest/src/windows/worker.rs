@@ -238,11 +238,11 @@ impl Worker {
         let writer = stream.try_clone().map_err(error)?;
         let sender = outbox.clone();
         std::thread::spawn(move || sender.writer(writer));
-        outbox.control(
-            json!({"type":"hello","protocol":1,"token":config.token,"epoch":self.epoch,
+        let mut hello = json!({"type":"hello","protocol":1,"token":config.token,"epoch":self.epoch,
             "sid":self.sid,"session":self.session,"version":env!("CARGO_PKG_VERSION"),
-            "capabilities":{"capture":"wgc-hardware-readback-with-software-recovery","windows":4,"transients":12,"windowRoles":true,"input":true,"catalogue":true,"appIcon":true,"frameChannel":true,"windowRefresh":true,"windowCaptureSource":true,"nativeAppInput":true,"modeFocus":true,"deviceFocus":true,"devicePlacement":true,"gpuFramesOnly":true,"frameEncodings":[],"displayInfo":true,"displayTopology":true,"driverInfo":true,"graphicsInfo":true,"displayConfigure":true,"displayConfigureDPI":true,"sharedGeometry":true,"processControl":true,"clipboard":true,"clipboardTextBytes":262144,"applicationStatus":true,"memoryStatus":true,"execute":true,"executeTimeoutSeconds":60,"executeOutputBytes":65536,"displayEvents":self.display_observer.is_some()}}),
-        );
+            "capabilities":{"capture":"wgc-hardware-readback-with-software-recovery","windows":4,"transients":12,"windowRoles":true,"input":true,"catalogue":true,"appIcon":true,"frameChannel":true,"windowRefresh":true,"windowCaptureSource":true,"nativeAppInput":true,"modeFocus":true,"deviceFocus":true,"devicePlacement":true,"gpuFramesOnly":true,"frameEncodings":[],"displayInfo":true,"displayTopology":true,"driverInfo":true,"graphicsInfo":true,"displayConfigure":true,"displayConfigureDPI":true,"primaryDisplayInfo":true,"sharedGeometry":true,"processControl":true,"clipboard":true,"clipboardTextBytes":262144,"applicationStatus":true,"memoryStatus":true,"execute":true,"executeTimeoutSeconds":60,"executeOutputBytes":65536,"displayEvents":self.display_observer.is_some()}});
+        hello["capabilities"]["displayMonitorState"] = json!(true);
+        outbox.control(hello);
         let (sender, receiver) = mpsc::sync_channel(128);
         let state = outbox.clone();
         std::thread::spawn(move || {
@@ -391,6 +391,7 @@ impl Worker {
                 if command["operation"] == "diagnostics"
                     || command["operation"] == "driver_info"
                     || command["operation"] == "display_info"
+                    || command["operation"] == "display_monitor_state"
                     || command["operation"] == "graphics_info"
                     || command["operation"] == "display_configure"
                     || command["operation"] == "display_topology"
@@ -401,7 +402,8 @@ impl Worker {
                     let configure_request = command["operation"] == "display_configure";
                     let topology_request = command["operation"] == "display_topology";
                     let layout_request = command["operation"] == "display_layout";
-                    let display_request = command["operation"] == "display_info" || configure_request || topology_request || layout_request;
+                    let monitor_request = command["operation"] == "display_monitor_state";
+                    let display_request = command["operation"] == "display_info" || configure_request || topology_request || layout_request || monitor_request;
                     let busy = if graphics_request {
                         self.graphics_busy.clone()
                     } else if display_request {
@@ -418,6 +420,8 @@ impl Worker {
                                 super::drivers::devices().map(|devices| json!({"devices":devices}))
                             } else if graphics_request {
                                 Ok(display::graphics())
+                            } else if monitor_request {
+                                display::monitor_state(&command)
                             } else if configure_request {
                                 display::configure(&command)
                             } else if topology_request {
@@ -425,11 +429,13 @@ impl Worker {
                             } else if layout_request {
                                 display_topology::configure(&command)
                             } else if display_request {
-                                Ok(if command["currentOnly"] == true {
+                                if command["primaryOnly"] == true {
+                                    display::primary_snapshot()
+                                } else { Ok(if command["currentOnly"] == true {
                                     display::current_snapshot()
                                 } else {
                                     display::snapshot()
-                                })
+                                }) }
                             } else {
                                 diagnostics()
                             };

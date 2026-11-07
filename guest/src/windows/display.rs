@@ -181,6 +181,60 @@ pub fn current_snapshot() -> Value {
     snapshot_with_modes(false)
 }
 
+/// Read the original source even while Windows temporarily promotes an app
+/// output to primary. Never mistake a missing/renamed source for an ACK.
+pub fn monitor_state(value: &Value) -> Result<Value, String> {
+    let device = value["device"].as_str().ok_or("Missing display device")?;
+    let suffix = device.strip_prefix(r"\\.\DISPLAY").ok_or("Invalid display device")?;
+    if suffix.is_empty() || !suffix.bytes().all(|c| c.is_ascii_digit()) || suffix.len() > 3 {
+        return Err("Invalid display device".into());
+    }
+    unsafe {
+        for index in 0..16 {
+            let mut display = DISPLAY_DEVICEW { cb:size_of::<DISPLAY_DEVICEW>() as u32, ..Default::default() };
+            if !EnumDisplayDevicesW(None,index,&mut display,0).as_bool() { break; }
+            if text(&display.DeviceName) == device {
+                return Ok(json!({"device":device,"attached":display.StateFlags.contains(DISPLAY_DEVICE_ATTACHED_TO_DESKTOP)}));
+            }
+        }
+    }
+    Err("Original display source is not available".into())
+}
+
+/// Desktop resize only needs the primary monitor. Avoid enumerating adapter
+/// mode lists (including independent DOD outputs) while Windows rebuilds them.
+/// The host still confirms this rectangle against a new native scanout frame.
+pub fn primary_snapshot() -> Result<Value, String> {
+    let started = Instant::now();
+    unsafe {
+        SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+        let monitor = MonitorFromPoint(POINT::default(), MONITOR_DEFAULTTOPRIMARY);
+        let mut info = MONITORINFOEXW::default();
+        info.monitorInfo.cbSize = size_of::<MONITORINFOEXW>() as u32;
+        if !GetMonitorInfoW(monitor, &mut info.monitorInfo).as_bool()
+            || info.monitorInfo.dwFlags & MONITORINFOF_PRIMARY == 0 {
+            return Err("Primary monitor is not available".into());
+        }
+        let rect = info.monitorInfo.rcMonitor;
+        if rect.left != 0 || rect.top != 0 || rect.right <= 0 || rect.bottom <= 0 {
+            return Err("Primary monitor geometry is not settled".into());
+        }
+        let (mut dpi_x, mut dpi_y) = (0, 0);
+        GetDpiForMonitor(monitor, MDT_EFFECTIVE_DPI, &mut dpi_x, &mut dpi_y)
+            .map_err(|error| format!("Read primary display DPI: {error}"))?;
+        let device = text(&info.szDevice);
+        if device.is_empty() || dpi_x == 0 || dpi_x != dpi_y {
+            return Err("Primary monitor identity or DPI is not settled".into());
+        }
+        let work = info.monitorInfo.rcWork;
+        Ok(json!({"primaryOnly":true,"readMilliseconds":started.elapsed().as_secs_f64()*1000.0,
+            "displays":[{"device":device,"primary":true,"x":rect.left,"y":rect.top,
+                "width":rect.right,"height":rect.bottom,"dpi":dpi_x,"modes":[],
+                "workArea":{"x":work.left,"y":work.top,"width":work.right-work.left,
+                    "height":work.bottom-work.top}}]}))
+    }
+}
+
 fn snapshot_with_modes(include_modes: bool) -> Value {
     let mut displays = Vec::new();
     unsafe {
@@ -264,6 +318,9 @@ fn snapshot_with_modes(include_modes: bool) -> Value {
 /// Apply a mode advertised by the current primary display. RFB updates the
 /// virtual monitor's preferred size; Windows still needs an explicit mode set.
 pub fn configure(value: &Value) -> Result<Value, String> {
+    let expected_device = value.get("device").map(|v| v.as_str()
+        .filter(|s| !s.is_empty() && s.len() <= 128)
+        .ok_or("Invalid display device")).transpose()?;
     // Validate scaling before changing a mode. A monitor reconnect can change
     // Windows' recommended DPI even though the user only resized a Mac view.
     let dpi = value.get("dpi").map(|v| v.as_u64()
@@ -297,6 +354,9 @@ pub fn configure(value: &Value) -> Result<Value, String> {
             {
                 continue;
             }
+            if expected_device.is_some_and(|expected| expected != text(&display.DeviceName)) {
+                return Err("Original display is not primary yet".into());
+            }
             let name = PCWSTR(display.DeviceName.as_ptr());
             let mut mode = DEVMODEW {
                 dmSize: size_of::<DEVMODEW>() as u16,
@@ -319,7 +379,8 @@ pub fn configure(value: &Value) -> Result<Value, String> {
                 if let Some(dpi) = dpi {
                     super::display_topology::set_primary_dpi(&text(&display.DeviceName), dpi)?;
                 }
-                return Ok(if value["currentOnly"] == true { current_snapshot() } else { snapshot() });
+                return if value["primaryOnly"] == true { primary_snapshot() }
+                    else { Ok(if value["currentOnly"] == true { current_snapshot() } else { snapshot() }) };
             }
             mode.dmPelsWidth = width;
             mode.dmPelsHeight = height;
@@ -345,7 +406,8 @@ pub fn configure(value: &Value) -> Result<Value, String> {
             if let Some(dpi) = dpi {
                 super::display_topology::set_primary_dpi(&text(&display.DeviceName), dpi)?;
             }
-            return Ok(if value["currentOnly"] == true { current_snapshot() } else { snapshot() });
+            return if value["primaryOnly"] == true { primary_snapshot() }
+                else { Ok(if value["currentOnly"] == true { current_snapshot() } else { snapshot() }) };
         }
     }
     Err("No active primary display".into())

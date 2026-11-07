@@ -231,7 +231,7 @@ final class VirtualMachineController {
             }
         }.value
     }
-    func requestDesktopResolution(_ size:NSSize,reconnectDelay:TimeInterval=0.25,advertisedMode:Bool=false){
+    func requestDesktopResolution(_ size:NSSize,reconnectDelay:TimeInterval=0.25,advertisedMode:Bool=false,disconnected:(@MainActor @Sendable () async -> Void)?=nil){
         guard let launch=desktopLaunch() else{return}
         displayControl?.stop()
         let request=UUID();displayRequest=request;desktopResolutionPending=true
@@ -246,7 +246,7 @@ final class VirtualMachineController {
             guard let self,self.displayRequest == request else{return};self.desktopResolutionPending=false
         })
         displayControl=client;client.requestPixels(false)
-        client.setScreens([DesktopScreen(id:0,x:0,y:0,width:Int(size.width),height:Int(size.height))],reconnectMonitor:nativeGraphicsEnabled,reconnectDelay:reconnectDelay,submitted:{[weak self] in
+        client.setScreens([DesktopScreen(id:0,x:0,y:0,width:Int(size.width),height:Int(size.height))],reconnectMonitor:nativeGraphicsEnabled,reconnectDelay:reconnectDelay,disconnected:disconnected,submitted:{[weak self] in
             guard let self,self.displayRequest == request else{return};self.desktopResolutionPending=false
         });client.start()
     }

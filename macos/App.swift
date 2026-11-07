@@ -695,7 +695,7 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
         guard allowed.contains(command) else {
             localResponse(["ok":false,"error":"This local command is not supported."],reply:reply);return
         }
-        let fields:Set<String>=command == "display_info" ? ["command","currentOnly"]:command == "execute" ? ["command","executable","args","timeoutSeconds"]:command == "process_terminate" ? ["command","pid","creation"]:command == "window_geometry" ? ["command","window","x","y","width","height"]:(command == "window_copy_mode" || command == "window_presentation_mode" || command == "window_capture_source") ? ["command","window","mode"]:(command == "window_refresh" || command == "window_image" || command == "window_transport_check") ? ["command","window"]:["command"]
+        let fields:Set<String>=command == "display_info" ? ["command","currentOnly","primaryOnly"]:command == "execute" ? ["command","executable","args","timeoutSeconds"]:command == "process_terminate" ? ["command","pid","creation"]:command == "window_geometry" ? ["command","window","x","y","width","height"]:(command == "window_copy_mode" || command == "window_presentation_mode" || command == "window_capture_source") ? ["command","window","mode"]:(command == "window_refresh" || command == "window_image" || command == "window_transport_check") ? ["command","window"]:["command"]
         guard Set(request.keys).isSubset(of:fields) else {
             localResponse(["ok":false,"error":"Unexpected command fields."],reply:reply);return
         }
@@ -862,7 +862,13 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
         guard let capability=capabilities[command],guestCapabilities[capability] == true else {
             localResponse(["ok":false,"error":"The connected guest does not support this query."],reply:reply);return
         }
-        let queryFields:[String:Any]=command == "display_info" && request["currentOnly"] as? Bool == true ? ["currentOnly":true]:[:]
+        var queryFields:[String:Any]=command == "display_info" && request["currentOnly"] as? Bool == true ? ["currentOnly":true]:[:]
+        if command == "display_info",request["primaryOnly"] as? Bool == true {
+            guard guestCapabilities["primaryDisplayInfo"] == true else {
+                localResponse(["ok":false,"error":"Update Guest Tools to read the primary monitor directly."],reply:reply);return
+            }
+            queryFields["primaryOnly"]=true
+        }
         bridge.command(command,queryFields,timeout:.seconds(command == "driver_info" ? 35:6)){[weak self] result in
             self?.localBridgeResponse(result,reply:reply)
         }
@@ -1398,6 +1404,31 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
             else {self.displayStatus="Windows display could not be checked."}
         }
     }
+    private func awaitDesktopDisconnect(device:String,epoch:String,request:UUID) async {
+        let started=ProcessInfo.processInfo.systemUptime
+        while ProcessInfo.processInfo.systemUptime-started<4 {
+            guard !Task.isCancelled,connected,displayEpoch==epoch,desktopResizeRequest==request else{return}
+            let detached:Bool=await withCheckedContinuation {continuation in
+                bridge.command("display_monitor_state",["device":device],timeout:.seconds(1)){result in
+                    if case .success(let reply)=result,let value=reply["value"] as? [String:Any],
+                       value["device"] as? String==device,value["attached"] as? Bool==false {
+                        continuation.resume(returning:true)
+                    }else{continuation.resume(returning:false)}
+                }
+            }
+            guard displayEpoch==epoch,desktopResizeRequest==request else{return}
+            if detached {
+                desktopResizeReport["disconnectConfirmed"]=true
+                desktopResizeReport["disconnectWaitMilliseconds"]=(ProcessInfo.processInfo.systemUptime-started)*1000
+                return
+            }
+            try? await Task.sleep(for:.milliseconds(100))
+        }
+        if displayEpoch==epoch,desktopResizeRequest==request {
+            desktopResizeReport["disconnectConfirmed"]=false
+            desktopResizeReport["disconnectWaitMilliseconds"]=(ProcessInfo.processInfo.systemUptime-started)*1000
+        }
+    }
     private func scheduleDesktopResize(){
         guard (desktopOnly || machine?.mixedDisplaysEnabled == true),connected,displayConfigurable,!mixedDisplayConfiguring,desktopResizeRequest == nil,desktopReadRequest == nil,
               desktopSize.width>0,desktopSize.height>0,
@@ -1416,14 +1447,25 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
                 return NSSize(width:max(640,(desired.width*scale).rounded()),height:max(480,(desired.height*scale).rounded()))
             }
             var mode=raster(self.desktopSize)
-            @MainActor func publish(_ mode:NSSize){
+            // A custom EDID replaces the mode list used to build this cache.
+            // A retarget must publish again even if its old custom size was
+            // advertised before this transaction changed the monitor.
+            var advertisedModesCurrent=true
+            var originalDevice:String?
+            @MainActor func publish(_ mode:NSSize,reconnectDelay:TimeInterval=0.25,forceReconnect:Bool=false){
                 let primary=self.launcherDisplays.first(where:{$0["primary"] as? Bool == true})
-                let advertised=self.machine?.nativeGraphicsEnabled == true &&
+                let advertised = !forceReconnect && advertisedModesCurrent && self.machine?.nativeGraphicsEnabled == true &&
                     (primary?["modes"] as? [[String:Any]] ?? []).contains {
                         $0["width"] as? Int == Int(mode.width) && $0["height"] as? Int == Int(mode.height)
                     }
                 self.desktopResizeReport["advertisedMode"]=advertised
-                self.machine?.requestDesktopResolution(mode,advertisedMode:advertised)
+                if !advertised {advertisedModesCurrent=false}
+                var disconnected:(@MainActor @Sendable () async -> Void)?
+                if self.guestCapabilities["displayMonitorState"] == true,let device=originalDevice,
+                   let epoch=self.displayEpoch,let request=self.desktopResizeRequest {
+                    disconnected={[weak self] in await self?.awaitDesktopDisconnect(device:device,epoch:epoch,request:request)}
+                }
+                self.machine?.requestDesktopResolution(mode,reconnectDelay:reconnectDelay,advertisedMode:advertised,disconnected:disconnected)
             }
             guard mode != self.desktopConfirmed,mode != self.desktopAttempted else{return}
             self.desktopAttempted=mode
@@ -1437,14 +1479,16 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
             // Keep that value for every retarget in this transaction; reading
             // it after reconnect would accept Windows' new recommendation.
             self.desktopResizeReport["phase"]="readingScale"
+            let primaryOnly=self.guestCapabilities["primaryDisplayInfo"] == true
+            self.desktopResizeReport["primaryOnly"]=primaryOnly
             let scaleReadStarted=ProcessInfo.processInfo.systemUptime
-            let originalScale:(width:Int,height:Int,dpi:Int)?=await withCheckedContinuation { continuation in
-                self.bridge.command("display_info",["currentOnly":true],timeout:.seconds(5)){result in
+            let originalScale:(width:Int,height:Int,dpi:Int,device:String)?=await withCheckedContinuation { continuation in
+                self.bridge.command("display_info",["currentOnly":true,"primaryOnly":primaryOnly],timeout:.seconds(5)){result in
                     if case .success(let reply)=result,let snapshot=reply["value"] as? [String:Any],
                        let primary=(snapshot["displays"] as? [[String:Any]])?.first(where:{$0["primary"] as? Bool == true}),
                        let width=primary["width"] as? Int,let height=primary["height"] as? Int,
-                       let dpi=primary["dpi"] as? Int {
-                        continuation.resume(returning:(width,height,dpi))
+                       let dpi=primary["dpi"] as? Int,let device=primary["device"] as? String,!device.isEmpty {
+                        continuation.resume(returning:(width,height,dpi,device))
                     }else {continuation.resume(returning:nil)}
                 }
             }
@@ -1457,6 +1501,7 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
                 return
             }
             let dpi=scale.dpi
+            originalDevice=scale.device
             self.desktopResizeReport["targetDPI"]=dpi
             if self.machine?.desktopState["visible"] as? Bool != true ||
                self.machine?.desktopState["fullScreenTransition"] as? Bool == true {
@@ -1486,7 +1531,10 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
             var applyUnconfirmed=false
             var targetStarted=started
             var deadline=started+12
-            while checks<10 && ProcessInfo.processInfo.systemUptime<deadline {
+            // Fast primary reads must not spend the old ten-read allowance
+            // before Windows has settled. Keep the existing wall-clock limit;
+            // the 150 ms interval bounds this to at most 80 reads per target.
+            while checks<80 && ProcessInfo.processInfo.systemUptime<deadline {
                 try? await Task.sleep(for:.milliseconds(150))
                 guard !Task.isCancelled,self.connected,self.displayEpoch == epoch,self.desktopResizeRequest == request else{return}
                 guard self.machine?.desktopState["visible"] as? Bool == true else {
@@ -1525,14 +1573,26 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
                     if !applyUnconfirmed {self.desktopResizeRead=read}
                     let readStarted=ProcessInfo.processInfo.systemUptime
                     self.desktopResizeReport["phase"]="readingGeometry"
-                    self.bridge.command("display_info",["currentOnly":true],timeout:.seconds(5)){result in
+                    self.bridge.command("display_info",["currentOnly":true,"primaryOnly":primaryOnly],timeout:.seconds(5)){result in
                         guard read.pending else{return}
                         guard self.displayEpoch == epoch,self.desktopResizeRequest == request else{read.finish(false);return}
                         self.desktopResizeReport["lastReadMilliseconds"]=(ProcessInfo.processInfo.systemUptime-readStarted)*1000
+                        if case .success(let reply)=result,let snapshot=reply["value"] as? [String:Any],
+                           let milliseconds=snapshot["readMilliseconds"] as? Double {
+                            self.desktopResizeReport["lastGuestReadMilliseconds"]=milliseconds
+                        }
                         if case .success=result {applyUnconfirmed=false}
                         guard self.machine?.desktopState["visible"] as? Bool == true,
                               self.machine?.desktopState["fullScreenTransition"] as? Bool != true,
                               raster(self.desktopSize) == mode else{read.finish(false);return}
+                        if case .success(let reply)=result,let snapshot=reply["value"] as? [String:Any],
+                           let primary=(snapshot["displays"] as? [[String:Any]])?.first(where:{$0["primary"] as? Bool == true}),
+                           primary["device"] as? String != scale.device {
+                            // A disconnected primary can temporarily promote
+                            // a DOD app output. Never resize or rescale it.
+                            self.desktopResizeReport["phase"]="waitingPrimary"
+                            read.finish(false);return
+                        }
                         if case .success(let reply)=result,let snapshot=reply["value"] as? [String:Any],
                            let primary=(snapshot["displays"] as? [[String:Any]])?.first(where:{$0["primary"] as? Bool == true}),
                            primary["width"] as? Int == Int(mode.width),primary["height"] as? Int == Int(mode.height),
@@ -1570,7 +1630,7 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
                             if self.desktopResizeRead === read {self.desktopResizeRead=nil}
                             self.desktopResizeReport["phase"]="applyingMode"
                             let applyStarted=ProcessInfo.processInfo.systemUptime
-                            self.bridge.command("display_configure",["width":Int(mode.width),"height":Int(mode.height),"dpi":dpi,"currentOnly":true],timeout:.seconds(3)){result in
+                            self.bridge.command("display_configure",["width":Int(mode.width),"height":Int(mode.height),"dpi":dpi,"device":scale.device,"currentOnly":true,"primaryOnly":primaryOnly],timeout:.seconds(3)){result in
                                 guard read.pending else{return}
                                 guard self.connected,self.displayEpoch == epoch,self.desktopResizeRequest == request else{read.finish(false);return}
                                 self.desktopResizeReport["lastApplyMilliseconds"]=(ProcessInfo.processInfo.systemUptime-applyStarted)*1000
@@ -1591,7 +1651,7 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
                                        self.desktopResizeReport["advertisedMode"] as? Bool != true {
                                         slowRetry=true
                                         self.desktopResizeReport["fallback"]=true
-                                        self.machine?.requestDesktopResolution(mode,reconnectDelay:1)
+                                        publish(mode,reconnectDelay:1,forceReconnect:true)
                                     }
                                 }
                                 read.finish(false)
@@ -1664,7 +1724,7 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
             displayEpoch=value["epoch"] as? String
             invalidateDisplay("Checking Windows display…")
             let capabilities=value["capabilities"] as? [String:Any] ?? [:]
-            guestCapabilities=Dictionary(uniqueKeysWithValues:["windowCaptureSource","nativeAppInput","modeFocus","memoryStatus","execute","displayInfo","displayConfigureDPI","displayTopology","driverInfo","graphicsInfo","sharedGeometry","appIcon","applicationStatus","processControl","clipboard"].map{($0,capabilities[$0] as? Bool == true)})
+            guestCapabilities=Dictionary(uniqueKeysWithValues:["windowCaptureSource","nativeAppInput","modeFocus","memoryStatus","execute","displayInfo","displayConfigureDPI","primaryDisplayInfo","displayMonitorState","displayTopology","driverInfo","graphicsInfo","sharedGeometry","appIcon","applicationStatus","processControl","clipboard"].map{($0,capabilities[$0] as? Bool == true)})
             network.connectionChanged(guestCapabilities["execute"] == true)
             memoryController?.guestReady=guestCapabilities["memoryStatus"] == true
             prepareSharedFolders()
