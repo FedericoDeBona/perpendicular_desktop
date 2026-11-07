@@ -32,3 +32,32 @@ I controlli C accanto alle patch verificano confini circoscritti del broker; non
 Il difetto Wait/Signal del driver ufficiale v0.4, [segnalato upstream](https://github.com/osy/kvm-guest-drivers-windows/issues/8#issuecomment-6374085762), resta aperto in GFX-007/TODO-016. Ritirati sono i tentativi di correzione; né il loro ritiro né un gate di pubblicazione circoscritto dimostrano corretto ordinamento di tutto il lavoro GPU.
 
 Le ricette dei vecchi build, le prove Wire1 e gli esperimenti fence sono stati tolti da questa guida. Restano nel [diario](../../docs/VERIFICATION.md) e nella [versione storica](https://github.com/FedericoDeBona/perpendicular_desktop/blob/3589194/graphics/renderer/README.md), con i fallimenti e i limiti originali.
+
+## Inventario circoscritto della saturazione
+
+`resource-inventory.patch` aggiunge alla lettura QMP esistente un elenco di al
+massimo 256 voci: identità, proprietario, durata e presenza nel registro ordinario
+virgl. Non legge pixel, titoli o dati delle app; non raccoglie messaggi, concede
+catture o libera risorse. La presenza ordinaria non prova da sola ogni riferimento
+ancora detenuto dal guest. Usare il confronto sullo stato effettivamente guasto.
+
+La ricetta `scripts/rebuild-renderer-resource-inventory.py` richiede il profilo
+compatibile M1 `host-source/host-build/venv` conservato per OpenGL28ottobre.
+Verifica sorgente, archivio e ricette pinned; confronta tutte le sezioni Mach-O
+con il runtime indicato e ricostruisce prima una base identica. Solo dopo produce
+la coppia diagnostica in una directory privata, senza modificare app o VM:
+
+```sh
+python3 scripts/rebuild-renderer-resource-inventory.py \
+  --reference "$renderer_reference" --runtime "$qualified_native3d" \
+  --output "$fresh_private_output"
+```
+
+Non è una ricetta generica per l'altro Mac: uno scarto richiede ricostruire e
+verificare la base compatibile. Per la sola QA conservare dipendenze e backend,
+confezionare entrambi gli output, aggiornare i loro hash nel manifesto privato,
+marcare `resource_inventory_candidate`, poi firmare e confrontare il runtime
+realmente avviato. `check-monitor-runtime.py` rifiuta sia quel marker sia il codice
+diagnostico nelle build ordinarie. La prova di replay e il primo inventario QA
+sono nel [diario](../../docs/VERIFICATION.md#saturazione-del-registro-dopo-resize-consecutivi-nella-qa-89);
+non dimostrano ancora causa della saturazione o fix del nero.

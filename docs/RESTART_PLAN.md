@@ -1,5 +1,8 @@
 # Piano di lavoro — desktop Windows su Mac
 
+**7 novembre — inventario causale QA disponibile, obiettivo grafica ATTIVO.** Il blocco precedente ha raggiunto registro256 e chiuso la cattura; stato/log/GDI conservati, QA15906 poi spenta normalmente. Ricetta/patch readonly condivise, replay della coppia effettiva identico e gate ordinario respinge la diagnostica. Nuova QA24177/29hash/guestEB06037A/protezioni conformi: due cicli con icone/testi completi, inventario44->58->73, tutte risorse presenti nel registroordinario. Non riprodotta di nuovo saturazione o dimostrata causa esclusiva; nessun fix/promozione .89. Main/canonica.88 spenta e intatta. Prossimo passo lifetime/pressione controllata pertinente, poi piccolo fix del registro senza aumento cieco dei limiti; icone intermittenti e lentezza restano aperte. [Evidenze e punto corrente](VERIFICATION.md#saturazione-del-registro-dopo-resize-consecutivi-nella-qa-89).
+
+
 **7 novembre — nuovo blocco QA .89: saturazione GFX-004 RIPRODOTTA, obiettivo ATTIVO.** Dopo un ciclo completo, il successivo Left/fullscreen/ritorno lascia Windows1440x1676 ma flussoMac fermo al precedente2880x1676. Log/QOM concordano: registro256/tainted254, refusal context11, cattura chiusa;1299frame/1299ACK/pending0, non leaseMac saturi. Correzione ammissione tardiva .87 gia presente e allineata: questo ramo resta distinto. Icone complete nei nuovi controlli, negativo storico non chiuso; CDS_RESET non eseguito su UI sana. Prossimo passo proprieta/lifetime delle voci rispetto alle risorse ordinarie, poi fix causale senza semplice aumento del limite. Nessuna promozione .89: canonica.88/main spenta intatte, QA15906 guasta conservata. [Evidenze e limiti](VERIFICATION.md#saturazione-del-registro-dopo-resize-consecutivi-nella-qa-89).
 
 

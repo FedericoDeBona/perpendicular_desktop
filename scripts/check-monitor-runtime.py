@@ -15,6 +15,9 @@ def main():
     required = json.loads((ROOT / 'graphics/monitor/requirements.json').read_text())
     native = args.app.resolve(strict=True) / 'Contents/Resources/Native3D'
     manifest = json.loads((native / 'runtime.json').read_text())
+    if (manifest.get('resource_inventory_candidate') or
+            b'resource_inventory' in (native / 'lib/libvirglrenderer.1.dylib').read_bytes()):
+        raise ValueError('QA resource inventory cannot enter an ordinary build')
     binary = (native / 'bin/qemu-system-aarch64').read_bytes()
     candidate = manifest.get('deferred_scanout_selection_candidate', {})
     if candidate.get('qaFaultInjection') or b'QA delaying selection admission' in binary:
