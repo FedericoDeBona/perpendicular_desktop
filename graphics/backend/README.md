@@ -42,7 +42,9 @@ CompilareARM64 con il wrapperclang-cl e le librerieXWin della stessa ricetta,
 correttezza dei testiExplorer: nella QA l'intestazione resta alterata e i due
 buffer512KiB osservati non hanno dati iniziali. Produzionev20 senza osservatore qualificata nella QA: probeAPI, letturaR8,
 SDR/VP9/OpenGLARM64+x64 e singolo cicloSettings con monitor collegato PASS.
-Distribuzione/verifica principale ancora da completare.
+Distribuzione.95 e verifica protetta nella principale completate per il fixAPI,
+SDR/VP9/OpenGL; le icone sidebar restano mancanti e fisicamente confermate
+nella stessaSettings. Non qualifica grafica generale o lentezza del resize.
 [Evidenze e limiti](../../docs/VERIFICATION.md#driver-firmato-v05-e-modi-a-monitor-collegato).
 
 ## Candidata NV12 nativa, non distribuita
