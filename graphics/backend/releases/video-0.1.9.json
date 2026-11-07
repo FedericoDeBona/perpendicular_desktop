@@ -1,0 +1,62 @@
+{
+  "schema": 1,
+  "version": "0.1.9",
+  "architecture": "aarch64",
+  "kernel_abi": "100.6.101.58000",
+  "revision": "Perpendicular video-resource-v20",
+  "fixes": [
+    "native-vp9",
+    "shared-nv12",
+    "sdr-video-processor",
+    "compact-shmem-map",
+    "external-decoder-discard",
+    "present-amortization",
+    "target-independent-coverage",
+    "async-pool-retire",
+    "late-texture-initialization-fences",
+    "dynamic-buffer-initial-contents"
+  ],
+  "source": {
+    "native_recipe": "scripts/rebuild-native-video.py (default CPUv12 + late-texture-initialization-fences; no diagnostics)",
+    "umd_recipe": "scripts/rebuild-video-umd.py --external-video-discard --present-amortization --target-independent-coverage --async-pool-retire --preserve-initial-buffer",
+    "native_inputs": "graphics/backend/video-inputs.json",
+    "umd_inputs": "graphics/backend/video-umd-inputs.json",
+    "upgrade_policy": "Pinned signed kernels v0.4/v0.5; retained v0.4 wrapper/companions and exact known v19 upgrade source required. Unknown sources or registrations preserved."
+  },
+  "patches": {
+    "shared-initialization.patch": "fd16333b1bf057abd985b01d8ffd8c29bb5ec07c06cddb4e94f680893c939827",
+    "nv12-native.patch": "920c19e67ec26c0224713764720f1deb9fc4306ba82bd73b1f55c951532462e1",
+    "vp9-video-device.patch": "faa55e0876949d365c350fbb78628be73353b47474b78ce31c1a55567eb351f1",
+    "video-resource-submit.patch": "4a2b310dbb0d9ea8a3e609add6996991437f0f57a10c9d047de9106951ec1657",
+    "shared-video-native.patch": "68134f900c642152dbf48669a96b15da8deda24254964f8cf08f261f0bcaf37b",
+    "video-named-errors.patch": "300b7d7272f8aa35122ab3d3d2b3eb7ca9b6811202975dc19d4111c8ed320ad4",
+    "video-processor-format-support.patch": "3677f718e105bc9eb8d5048bafa36a7b29e07d9ea4832a83b0f2bad422c8a453",
+    "video-processor-native.patch": "a0e9f490908322b143487af549ab941958b04113db6490d571cac9c7ffa5bed5",
+    "video-ddi.patch": "f2cb99b2bbdb21599c574624e1cfbca2dd22a6912ddc9b72f91b3f0ed9e8e745",
+    "video-processor-ddi.patch": "9dcd37703840c5ea07a32eb51fa3be19a9a81f1812f5500bb10df7d61bce1945",
+    "map-allocation-trace.patch": "782638c63cb1ffb965b1747d77dc048df5709222e72f9fcd084c90b01406cf24",
+    "compact-shmem-fallback.patch": "132b5a55e512637f364e0adea8029fd05c88738232f317f149b8d8e43e3f61f7",
+    "external-video-discard.patch": "dc4dc0f46fd3bcdf4611c676b02788a5bf98a41ff3bb0a82e78c0941011ed550",
+    "video-resource-submit.h": "ad2f6d652779f29a8d63860333cb0007456c00fd020c2574d9118421a67a95cd",
+    "present-amortization.patch": "ed1f68177101a7ea3276f4acccc20a75fba82fa3fe41664777d892614cb8dd91",
+    "sample-mask-no-targets.patch": "236bf7728c1eb76be64b1cc4424505dada9616ba01f2b0fb5320ac2f7386befa",
+    "target-independent-coverage.patch": "b5be9a66a9f8cc00a56c910f04b2274b0a3f67e86b20f91dc42e0c048c469c86",
+    "target-independent-coverage-version.patch": "a93d50dbf40b4ff7c3ae187050da0e4b4e867be54567c72d20f0a364f4f899ba",
+    "async-pool-retire-production.patch": "70a8390718574cbaee7ec7357e2b94a9b01a1867f3f17f4481a61e370e7542f2",
+    "native-late-texture-initialization.patch": "900107884c2f91bfc405a0486aec8e0900eeb4d8d0f28f91937f0f222c51e122",
+    "initial-buffer-contents.patch": "43627325a4bf3ffddc39632b4412d681790b72d569837282ae5f77ad785f382b",
+    "initial-buffer-version.patch": "c9fe7a43948278e2b5afba2945dc5442db9cb2fda7992a3a3f42741ecc06d08b"
+  },
+  "files": {
+    "neptune_umd_arm64.dll": "eb1e1aa133124b07138993bfbfe386e7ce31a0abc757d9927d3c409f536e424d",
+    "install.ps1": "25c3c749f7f749f295f0eac5c357bba9c69b3c808bfd3961897ca462c202176e"
+  },
+  "hosts": {
+    "m1-cpu-v12-late-init-v20": {
+      "backend_sha256": "2a7e93274c2aa2578d26ea5e3350eea546ff37e6518e62bc8e7b44b8acd4ce16",
+      "qualification": "Native bytes unchanged from v19; v20 guest initial-buffer fix compiled from pinned source. Protected QA/main execution pending; private v28 same functional source passes the exact Windows preservation probe."
+    }
+  },
+  "verification": "docs/VERIFICATION.md#driver-firmato-v05-e-modi-a-monitor-collegato",
+  "deployment": "Production candidate without first-map observer or WARP hooks. Explorer remains negative in private v28; UI fix is not claimed. Protected production regression/deployment pending."
+}

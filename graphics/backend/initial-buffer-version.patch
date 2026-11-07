@@ -1,0 +1,11 @@
+--- a/src/virtio/neptune/triton/neptune_umd.rc
++++ b/src/virtio/neptune/triton/neptune_umd.rc
+@@ -30,7 +30,7 @@
+             VALUE "CompanyName", "Perpendicular experimental build; upstream Turing Software LLC"
+             VALUE "FileDescription", "Experimental Neptune video UMD - Perpendicular"
+             VALUE "FileVersion", NPT_RC_STR(VER)
+-            VALUE "PrivateBuild", "Perpendicular video-resource-v19"
++            VALUE "PrivateBuild", "Perpendicular video-resource-v20"
+             VALUE "InternalName", "neptune_umd"
+             VALUE "OriginalFilename", "neptune_umd.dll"
+             VALUE "ProductName", "Neptune"

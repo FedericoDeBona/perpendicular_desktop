@@ -88,5 +88,8 @@
   "async_pool_retire_patch_sha256": "6687b5329832b942a97fa0f294a9995c5f215871b825cc58b43314e70a4ed41c",
   "pool_retire_timing_header_sha256": "41e48da16a8b5c357318be90dc335016b8bd1376079e2e05e250257f36cd6182",
   "async_pool_retire_production_revision": "Perpendicular video-resource-v19",
-  "async_pool_retire_production_patch_sha256": "70a8390718574cbaee7ec7357e2b94a9b01a1867f3f17f4481a61e370e7542f2"
+  "async_pool_retire_production_patch_sha256": "70a8390718574cbaee7ec7357e2b94a9b01a1867f3f17f4481a61e370e7542f2",
+  "initial_buffer_contents_revision": "Perpendicular video-resource-v20",
+  "initial_buffer_contents_patch_sha256": "43627325a4bf3ffddc39632b4412d681790b72d569837282ae5f77ad785f382b",
+  "initial_buffer_version_patch_sha256": "c9fe7a43948278e2b5afba2945dc5442db9cb2fda7992a3a3f42741ecc06d08b"
 }

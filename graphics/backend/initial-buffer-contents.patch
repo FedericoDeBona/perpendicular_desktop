@@ -1,0 +1,105 @@
+--- a/src/virtio/neptune/npt_resource.h
++++ b/src/virtio/neptune/npt_resource.h
+@@ -225,6 +225,10 @@
+ bool npt_d3d11_buffer_fill_desc(struct npt_d3d11_buffer *b,
+                                 D3D11_BUFFER_DESC *out);
+ uint32_t npt_d3d11_buffer_get_byte_width(struct npt_d3d11_buffer *b);
++
++/* Keep initialized DYNAMIC contents until the lazy map shadow exists. */
++bool npt_d3d11_buffer_preserve_initial_data(struct npt_d3d11_buffer *b,
++                                             const void *data);
+ 
+ bool npt_d3d11_buffer_ensure_map_shmem(struct npt_d3d11_buffer *b);
+ 
+@@ -468,6 +472,7 @@
+    D3D11_BUFFER_DESC desc;
+    bool has_desc;
+    struct npt_d3d_map_ring map_ring;
++   _Atomic(void *) initial_data;
+    /* Host-shared rename storage, indexed by cookie.  eligible and
+     * retiring are read on every context's thread; the rest belongs to the
+     * immediate context.  A slot is stored before the bind that lets the
+--- a/src/virtio/neptune/npt_resource.c
++++ b/src/virtio/neptune/npt_resource.c
+@@ -526,6 +526,7 @@
+          npt_renderer_shmem_unref_async(aux->com->base.device->renderer,
+                                         aux->external_slots[i]);
+    }
++   free(atomic_load_explicit(&aux->initial_data, memory_order_relaxed));
+    npt_d3d_map_ring_fini(&aux->map_ring);
+    free(aux);
+ }
+@@ -537,6 +538,7 @@
+    struct npt_d3d11_buffer_aux *aux = com->aux;
+    aux->com = com;
+    aux->external_current = NPT_EXTERNAL_COOKIE_NONE;
++   atomic_init(&aux->initial_data, NULL);
+    npt_d3d_map_ring_init(&aux->map_ring, com);
+    com->aux_destroy = npt_d3d11_buffer_aux_destroy;
+    (void)dev; (void)host_id;
+@@ -728,12 +730,49 @@
+ }
+ 
+ bool
++npt_d3d11_buffer_preserve_initial_data(struct npt_d3d11_buffer *b,
++                                        const void *data)
++{
++   struct npt_d3d11_buffer_aux *aux = buf_aux(b);
++   if (!aux || !aux->has_desc) return false;
++   if (!data || aux->desc.Usage != D3D11_USAGE_DYNAMIC ||
++       !(aux->desc.CPUAccessFlags & D3D11_CPU_ACCESS_WRITE))
++      return true;
++   void *copy = malloc(aux->byte_width);
++   if (!copy) return false;
++   memcpy(copy, data, aux->byte_width);
++   /* CreateBuffer has not published this wrapper to its caller yet. */
++   atomic_store_explicit(&aux->initial_data, copy, memory_order_release);
++   return true;
++}
++
++bool
+ npt_d3d11_buffer_ensure_map_shmem(struct npt_d3d11_buffer *b)
+ {
+    struct npt_d3d11_buffer_aux *aux = buf_aux(b);
+    if (!aux || !aux->byte_width) return false;
+    const uint32_t slot_size = (aux->byte_width + 63u) & ~63u;
+-   return npt_d3d_map_ring_alloc_shmem(&aux->map_ring, slot_size);
++   if (!npt_d3d_map_ring_alloc_shmem(&aux->map_ring, slot_size))
++      return false;
++   if (!atomic_load_explicit(&aux->initial_data, memory_order_acquire))
++      return true;
++   /* A first NO_OVERWRITE writes only part of the buffer. Its Unmap
++    * transfers the whole shadow, so preserve the initialized bytes too.
++    * Later DISCARDs still rotate normally and need no old contents. */
++   mtx_lock(&aux->map_ring.lock);
++   void *initial = atomic_load_explicit(&aux->initial_data, memory_order_relaxed);
++   if (initial) {
++      void *slot = npt_d3d_map_ring_slot_ptr(&aux->map_ring, 0);
++      if (!slot) {
++         mtx_unlock(&aux->map_ring.lock);
++         return false;
++      }
++      memcpy(slot, initial, aux->byte_width);
++      atomic_store_explicit(&aux->initial_data, NULL, memory_order_release);
++   }
++   mtx_unlock(&aux->map_ring.lock);
++   free(initial);
++   return true;
+ }
+ 
+ uint32_t
+--- a/src/virtio/neptune/npt_overrides_d3d11_device.c
++++ b/src/virtio/neptune/npt_overrides_d3d11_device.c
+@@ -90,6 +90,12 @@
+                                         (struct npt_com_base *)self);
+       if (b && pDesc)
+          npt_d3d11_buffer_set_desc(b, pDesc);
++      if (b && pDesc && ppBuffer && pInitialData && pInitialData->pSysMem &&
++          !npt_d3d11_buffer_preserve_initial_data(b, pInitialData->pSysMem)) {
++         npt_com_default_release(b);
++         *ppBuffer = NULL;
++         return NPT_E_OUTOFMEMORY;
++      }
+       if (b && ppBuffer && dev_buffer_external_eligible(dev, pDesc))
+          npt_d3d11_buffer_set_external_eligible(b);
+       if (ppBuffer) {

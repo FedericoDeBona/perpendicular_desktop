@@ -12,6 +12,38 @@ Il backend effettivo va identificato dal `runtime.json` e dai byte della libreri
 
 Le vecchie istruzioni di cattura, i comandi di build legati a profili storici e i tentativi intermedi sono tolti dalla guida corrente. Restano nel [diario delle verifiche](../../docs/VERIFICATION.md) e nella [versione storica](https://github.com/FedericoDeBona/perpendicular_desktop/blob/3589194/graphics/backend/README.md).
 
+## Conservazione dei buffer DYNAMIC inizializzati (7 novembre)
+
+`initial-buffer-contents.patch` conserva i dati iniziali di CreateBuffer fino
+all'allocazione pigra dello shadowCPU. La prima MapWRITE_NO_OVERWRITE può
+modificare solo una parte: Unmap trasferisce l'intero shadow, quindi deve
+conservare anche i byte inizializzati e non modificati. La copia viene rilasciata
+al primoMap o alla distruzione; DISCARD mantiene la rotazione esistente. Nessuna
+attesaGPU aggiunta. Costo: una copiaCPU aggiuntiva di ByteWidth per i buffer
+DYNAMIC/CPUWRITE inizializzati fino al primoMap/distruzione.
+
+Ricostruire con gli input e gli strumenti già fissati sopra, aggiungendo
+`--external-video-discard --present-amortization --target-independent-coverage
+--async-pool-retire --preserve-initial-buffer`. La nuova opzione richiede la base
+produzionev19 e rifiuta la diagnostica map-timing. Marker produzionev20 tramite
+`initial-buffer-version.patch`; ABI e kernel firmato invariati. Patch e marker
+sono verificati perSHA prima della preparazione. L'autorità
+`video-requirements.json` richiede `dynamic-buffer-initial-contents`: il gate
+ordinario rifiuta i vecchi payload anche se la versione frontend è recente.
+Non forzare i pin o copiare un runtime da un altroMac.
+
+`tests/WindowsInitialBufferChecks.cpp` è il singolo controllo che ha riprodotto
+il difetto: hardwareD3D11 e capacitàNO_OVERWRITE/SRV obbligatori, buffer512KiB
+R8_UINT con dati iniziali, verifica completa dopoCreateBuffer e dopo32byte
+modificati alla primaNO_OVERWRITE. Stesso eseguibile: base522208byte errati,
+candidata privata zero; stampa il percorsoUMD effettivo, da verificare perhash.
+CompilareARM64 con il wrapperclang-cl e le librerieXWin della stessa ricetta,
+`d3d11.lib dxgi.lib dxguid.lib`, output fuoriGit. Non misura prestazioni o
+correttezza dei testiExplorer: nella QA l'intestazione resta alterata e i due
+buffer512KiB osservati non hanno dati iniziali. Produzione senza osservatore,
+regressioni e distribuzione principale ancora da completare.
+[Evidenze e limiti](../../docs/VERIFICATION.md#driver-firmato-v05-e-modi-a-monitor-collegato).
+
 ## Candidata NV12 nativa, non distribuita
 
 `nv12-native.patch` è il prerequisite per il decoder VP9: due texture Metal per un'immagine NV12, SRV di piano e trasferimenti coerenti. Deriva dalla [proposta di hadykachmarv-coder](https://github.com/3Shain/dxmt/issues/229), [gist](https://gist.github.com/hadykachmarv-coder/b8a3074182aa755f6bedde534481855e) revisione `822a74043048972717460b51688e23f739bebc1a`, adattata al nostro pin e alle sue firme/gestione BC. Le modifiche ereditano la licenza dei sorgenti DXMT (LGPL2.1-or-later); attribuzione e fallimenti conservati nel diario. La parte swapchain desktop della proposta non è inclusa.

@@ -37,6 +37,7 @@ def main():
     parser.add_argument('--target-independent-coverage', action='store_true', help='Opt in to v18 upstream TIR coverage fixes above v17; requires --present-amortization, Windows qualification required')
     parser.add_argument('--map-timing', action='store_true', help='Opt-in diagnostic Map phase timing above v18; no performance qualification or production promotion')
     parser.add_argument('--async-pool-retire', action='store_true', help='Apply old-pool retirement above v18; --map-timing retains the separate diagnostic profile')
+    parser.add_argument('--preserve-initial-buffer', action='store_true', help='Preserve initialized DYNAMIC buffer bytes through the first partial NO_OVERWRITE; requires the production v19 baseline')
     parser.add_argument('--prepare-only', action='store_true', help='Check inputs and reconstruct source without compiling')
     parser.add_argument('--toolchain-profile', default='original',
                         help='Explicit pinned toolchain; profiles do not change the driver/source ABI')
@@ -51,6 +52,8 @@ def main():
         parser.error('--map-timing requires the v18 coverage baseline')
     if args.async_pool_retire and not args.target_independent_coverage:
         parser.error('--async-pool-retire requires the v18 coverage baseline')
+    if args.preserve_initial_buffer and (not args.async_pool_retire or args.map_timing):
+        parser.error('--preserve-initial-buffer requires --async-pool-retire without --map-timing')
     pins = json.loads((REPO / 'graphics/backend/video-umd-inputs.json').read_text())
     if args.bounded_map_growth:
         pins['candidate_revision'] = pins['bounded_map_growth_revision']
@@ -65,6 +68,8 @@ def main():
     if args.async_pool_retire:
         pins['candidate_revision'] = pins['async_pool_retire_revision' if args.map_timing
                                           else 'async_pool_retire_production_revision']
+    if args.preserve_initial_buffer:
+        pins['candidate_revision'] = pins['initial_buffer_contents_revision']
     if args.toolchain_profile != 'original':
         profiles = pins.get('toolchain_profiles', {})
         if args.toolchain_profile not in profiles:
@@ -124,6 +129,15 @@ def main():
         for path, key in pool_inputs:
             if digest(path) != pins[key]:
                 raise ValueError('Pool candidate differs from its shared pin: ' + path.name)
+    initial_buffer_patches = []
+    if args.preserve_initial_buffer:
+        for name, key in (
+                ('initial-buffer-contents.patch', 'initial_buffer_contents_patch_sha256'),
+                ('initial-buffer-version.patch', 'initial_buffer_version_patch_sha256')):
+            initial_patch = REPO / 'graphics/backend' / name
+            if digest(initial_patch) != pins[key]:
+                raise ValueError('Initial buffer fix differs from its shared pin: ' + name)
+            initial_buffer_patches.append(initial_patch)
     compiler = sdk / 'clang-cl'
     version = subprocess.check_output([str(compiler), '--version'], text=True).splitlines()[0]
     if version != pins['compiler_version']:
@@ -197,6 +211,9 @@ def main():
         run(['git', 'apply', pool_patch], cwd=source)
         if args.map_timing:
             shutil.copyfile(pool_header, source / 'src/virtio/neptune/triton/pool-retire-timing.h')
+    for initial_patch in initial_buffer_patches:
+        run(['git', 'apply', '--check', initial_patch], cwd=source)
+        run(['git', 'apply', initial_patch], cwd=source)
     shutil.copyfile(header, source / 'src/virtio/neptune/triton/video-resource-submit.h')
     includes = [wdk / 'c/Include' / pins['wdk']['include_version'] / kind for kind in ('um', 'shared')]
     includes += [sdk / 'xwin' / name for name in ('sdk/include/ucrt', 'sdk/include/shared', 'sdk/include/um', 'sdk/include/winrt', 'crt/include')]
@@ -231,6 +248,7 @@ def main():
                'map_timing_diagnostic': args.map_timing,
                'async_pool_retire_experiment': args.async_pool_retire,
                'async_pool_retire_without_timing': args.async_pool_retire and not args.map_timing,
+               'preserve_initial_buffer': args.preserve_initial_buffer,
                'present_amortization': args.present_amortization, 'toolchain_profile': args.toolchain_profile, 'compiler': version, 'commands': commands,
                'qualification': 'source preparation only; no Windows install or video qualification'}
     if not args.prepare_only:
