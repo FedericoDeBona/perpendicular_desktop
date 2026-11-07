@@ -1412,7 +1412,7 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
         desktopResizeTask?.cancel()
         desktopResizeTask=Task{@MainActor [weak self] in
             try? await Task.sleep(for:.milliseconds(300))
-            guard !Task.isCancelled,let self,self.desktopResizeRequest == nil,self.desktopReadRequest == nil,self.connected,
+            guard !Task.isCancelled,let self,self.desktopResizeRequest == nil,self.desktopReadRequest == nil,!self.mixedDisplayConfiguring,self.connected,
                   let epoch=self.displayEpoch,self.machine?.desktopState["visible"] as? Bool == true,
                   self.machine?.desktopState["fullScreenTransition"] as? Bool != true else{return}
             // Resize Windows to the view's backing raster, rather than fitting
@@ -1438,17 +1438,46 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
             let primaryOnly=self.guestCapabilities["primaryDisplayInfo"] == true
             self.desktopResizeReport["primaryOnly"]=primaryOnly
             let scaleReadStarted=ProcessInfo.processInfo.systemUptime
-            let originalScale:(width:Int,height:Int,dpi:Int,device:String)?=await withCheckedContinuation { continuation in
-                self.bridge.command("display_info",["currentOnly":true,"primaryOnly":primaryOnly],timeout:.seconds(5)){result in
-                    if case .success(let reply)=result,let snapshot=reply["value"] as? [String:Any],
-                       let primary=(snapshot["displays"] as? [[String:Any]])?.first(where:{$0["primary"] as? Bool == true}),
-                       let width=primary["width"] as? Int,let height=primary["height"] as? Int,
-                       let dpi=primary["dpi"] as? Int,let device=primary["device"] as? String,!device.isEmpty {
-                        continuation.resume(returning:(width,height,dpi,device))
-                    }else {continuation.resume(returning:nil)}
+            var originalScale:(width:Int,height:Int,dpi:Int,device:String)?
+            var scaleReads=0
+            // A topology read can still own the guest's display worker at
+            // startup. Retry only its explicit transient replies, before any
+            // mode publication; never substitute or infer the user's DPI.
+            repeat {
+                guard !Task.isCancelled,self.connected,self.displayEpoch == epoch,self.desktopResizeRequest == request else{return}
+                var retryable=false
+                scaleReads+=1
+                originalScale=await withCheckedContinuation { continuation in
+                    self.bridge.command("display_info",["currentOnly":true,"primaryOnly":primaryOnly],timeout:.seconds(5)){result in
+                        guard self.connected,self.displayEpoch == epoch,self.desktopResizeRequest == request else {
+                            continuation.resume(returning:nil);return
+                        }
+                        switch result {
+                        case .success(let reply):
+                            if let snapshot=reply["value"] as? [String:Any],
+                               let primary=(snapshot["displays"] as? [[String:Any]])?.first(where:{$0["primary"] as? Bool == true}),
+                               let width=primary["width"] as? Int,let height=primary["height"] as? Int,
+                               let dpi=primary["dpi"] as? Int,let device=primary["device"] as? String,!device.isEmpty {
+                                continuation.resume(returning:(width,height,dpi,device))
+                            }else {
+                                self.desktopResizeReport["lastScaleError"]="Primary display reply is incomplete"
+                                continuation.resume(returning:nil)
+                            }
+                        case .failure(let error):
+                            let message=error.localizedDescription
+                            self.desktopResizeReport["lastScaleError"]=message
+                            retryable=["Diagnostics already running","Primary monitor is not available",
+                                "Primary monitor geometry is not settled","Primary monitor identity or DPI is not settled"].contains(message)
+                            continuation.resume(returning:nil)
+                        }
+                    }
                 }
-            }
+                guard originalScale == nil,retryable,scaleReads<20,
+                      ProcessInfo.processInfo.systemUptime-scaleReadStarted<6 else{break}
+                try? await Task.sleep(for:.milliseconds(250))
+            }while true
             guard !Task.isCancelled,self.connected,self.displayEpoch == epoch,self.desktopResizeRequest == request else{return}
+            self.desktopResizeReport["scaleReads"]=scaleReads
             self.desktopResizeReport["scaleReadMilliseconds"]=(ProcessInfo.processInfo.systemUptime-scaleReadStarted)*1000
             guard self.guestCapabilities["displayConfigureDPI"] == true,
                   let scale=originalScale,[96,120,144,168,192,216,240,288,336,384,432,480].contains(scale.dpi) else {

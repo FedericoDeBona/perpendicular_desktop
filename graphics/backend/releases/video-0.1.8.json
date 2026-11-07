@@ -1,0 +1,59 @@
+{
+  "schema": 1,
+  "version": "0.1.8",
+  "architecture": "aarch64",
+  "kernel_abi": "100.6.101.58000",
+  "revision": "Perpendicular video-resource-v19",
+  "fixes": [
+    "native-vp9",
+    "shared-nv12",
+    "sdr-video-processor",
+    "compact-shmem-map",
+    "external-decoder-discard",
+    "present-amortization",
+    "target-independent-coverage",
+    "async-pool-retire",
+    "late-texture-initialization-fences"
+  ],
+  "source": {
+    "native_recipe": "scripts/rebuild-native-video.py (default CPUv12 + late-texture-initialization-fences; no diagnostics)",
+    "umd_recipe": "scripts/rebuild-video-umd.py --external-video-discard --present-amortization --target-independent-coverage --async-pool-retire",
+    "native_inputs": "graphics/backend/video-inputs.json",
+    "umd_inputs": "graphics/backend/video-umd-inputs.json",
+    "upgrade_policy": "Pinned signed kernels v0.4/v0.5; exact retained v0.4 wrapper/companions required from DriverStore. Qualified UMD/native bytes unchanged. Unknown kernels, sources or registrations rejected."
+  },
+  "patches": {
+    "shared-initialization.patch": "fd16333b1bf057abd985b01d8ffd8c29bb5ec07c06cddb4e94f680893c939827",
+    "nv12-native.patch": "920c19e67ec26c0224713764720f1deb9fc4306ba82bd73b1f55c951532462e1",
+    "vp9-video-device.patch": "faa55e0876949d365c350fbb78628be73353b47474b78ce31c1a55567eb351f1",
+    "video-resource-submit.patch": "4a2b310dbb0d9ea8a3e609add6996991437f0f57a10c9d047de9106951ec1657",
+    "shared-video-native.patch": "68134f900c642152dbf48669a96b15da8deda24254964f8cf08f261f0bcaf37b",
+    "video-named-errors.patch": "300b7d7272f8aa35122ab3d3d2b3eb7ca9b6811202975dc19d4111c8ed320ad4",
+    "video-processor-format-support.patch": "3677f718e105bc9eb8d5048bafa36a7b29e07d9ea4832a83b0f2bad422c8a453",
+    "video-processor-native.patch": "a0e9f490908322b143487af549ab941958b04113db6490d571cac9c7ffa5bed5",
+    "video-ddi.patch": "f2cb99b2bbdb21599c574624e1cfbca2dd22a6912ddc9b72f91b3f0ed9e8e745",
+    "video-processor-ddi.patch": "9dcd37703840c5ea07a32eb51fa3be19a9a81f1812f5500bb10df7d61bce1945",
+    "map-allocation-trace.patch": "782638c63cb1ffb965b1747d77dc048df5709222e72f9fcd084c90b01406cf24",
+    "compact-shmem-fallback.patch": "132b5a55e512637f364e0adea8029fd05c88738232f317f149b8d8e43e3f61f7",
+    "external-video-discard.patch": "dc4dc0f46fd3bcdf4611c676b02788a5bf98a41ff3bb0a82e78c0941011ed550",
+    "video-resource-submit.h": "ad2f6d652779f29a8d63860333cb0007456c00fd020c2574d9118421a67a95cd",
+    "present-amortization.patch": "ed1f68177101a7ea3276f4acccc20a75fba82fa3fe41664777d892614cb8dd91",
+    "sample-mask-no-targets.patch": "236bf7728c1eb76be64b1cc4424505dada9616ba01f2b0fb5320ac2f7386befa",
+    "target-independent-coverage.patch": "b5be9a66a9f8cc00a56c910f04b2274b0a3f67e86b20f91dc42e0c048c469c86",
+    "target-independent-coverage-version.patch": "a93d50dbf40b4ff7c3ae187050da0e4b4e867be54567c72d20f0a364f4f899ba",
+    "async-pool-retire-production.patch": "70a8390718574cbaee7ec7357e2b94a9b01a1867f3f17f4481a61e370e7542f2",
+    "native-late-texture-initialization.patch": "900107884c2f91bfc405a0486aec8e0900eeb4d8d0f28f91937f0f222c51e122"
+  },
+  "files": {
+    "neptune_umd_arm64.dll": "74d6cd4366a3918127a4ac49564d80136510bddfcfbca0c491359657c1b13f7a",
+    "install.ps1": "af37a1349c7cf9ed8c2dedf6cdb4e989bd446d0e14c9e6e9d8b8f06632009b1e"
+  },
+  "hosts": {
+    "m1-cpu-v12-late-init-v19": {
+      "backend_sha256": "2a7e93274c2aa2578d26ea5e3350eea546ff37e6518e62bc8e7b44b8acd4ce16",
+      "qualification": "M1 local reconstruction completed; protected clone/main pixel, OpenGL and minimal UI qualification pending in the linked verification."
+    }
+  },
+  "verification": "docs/VERIFICATION.md#driver-firmato-v05-e-modi-a-monitor-collegato",
+  "deployment": "M1 connected-resize candidate: v19/native bytes identical to 0.1.6. Installer supports protected repeat updates after signed v0.5 KMD; QA/main installer verification pending."
+}

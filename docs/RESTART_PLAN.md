@@ -1,5 +1,8 @@
 # Piano di lavoro — desktop Windows su Mac
 
+**7 novembre — .94: aggiornamento e coldboot QA PASS circoscritto; main DA FARE.** Due cicli nella stessa Settings completi con monitor sempre collegato,1,71–3,40s, icone/testi e input conservati; .94 adatta anche Desktop aperto da Windows spento,1920×1280/DPI96/nuovo frame,995ms della transazione (non tempo boot). Aggiornamento ordinario video.1.8/x86.1.2/ConnectedDisplay verificato, audit/protezioni e SDR/VP9/OpenGL ARM64+x64 PASS nella QA. Le DLL qualificate restano identiche. Canonica.90/main ancora spente e invariate; prossimo passo breve Explorer/Seamless, backup e distribuzione/verifica nella principale. Obiettivo ATTIVO, nessuna chiusura generale di icone/nero o lag. [Evidenze](VERIFICATION.md#driver-firmato-v05-e-modi-a-monitor-collegato).
+
+
 **7 novembre — .93: primo percorso sempre collegato QA PASS circoscritto; obiettivo ATTIVO.** Driver v0.5 originale firmato sulla sola PCI accelerata, coldboot protetto/guest395D e29host allineati, UMDv19/x86/OpenGL conservati. Due cicli con nuovi raster1440×1676 e2880×1676, fullscreen2880×1800 e ritorno, DPI96/frame esatti,1,84–2,61s, nessun fallback/unplug o nero persistente osservato. Non A/B o qualifica UI/input/main. Avvio automatico fallisce nella lettura scala durante preparazione cartelle; Settings parte su DOD/cloaked, completa in Seamless ma Desktop e input postcicli ancora da qualificare. Build gate/pin/ricetta rifiutano il vecchio payload; integrazione aggiornamenti ordinari video/x86, avvio/contesto Desktop e regressioni DA FARE. Main.90 spenta/invariata; QA58659 accesa a2880×1676, taskpropria0/CDvuoto. [Evidenze e negativi](VERIFICATION.md#driver-firmato-v05-e-modi-a-monitor-collegato).
 
 

@@ -468,3 +468,19 @@ confezionare M4 usare ora `--release 0.1.7`, mantenendo il suo profilo
 locale. La collisione storica del numero0.1.5 fra i due rami non viene risolta
 riscrivendo un vecchio manifesto. Verifiche locali e limiti nel
 [diario](../../docs/VERIFICATION.md#6-novembre--pull-rebuild-e-guest-tools-0285-sul-m1).
+
+### Aggiornamenti M1 dopo il driver connesso v0.5
+
+La release candidata [video0.1.8](releases/video-0.1.8.json) conserva gli stessi
+byte UMDv19/native del profiloM1.1.6 e aggiorna il solo installer. Accetta soltanto
+i kernel originali firmati v0.4/v0.5; nel secondo caso legge la baseoriginalev0.4
+ancora in DriverStore e ne verifica tutti i pin prima di usare wrapper/compagni
+e backup. Il nuovo driver non autorizza a installare le UMDv0.5 sul backend M1.
+Assenza della base o registrazioni sconosciute comportano rifiuto e conservazione.
+
+Confezionare un riferimento separato con il profilo `m1-cpu-v12-late-init-v19`
+e release0.1.8, poi Win320.1.2 e ConnectedDisplay. In una copia della canonica,
+rimuovere soltanto le copie pubbliche dei vecchi `Guest/VideoGraphics` e
+`Native3D/Notices/Video` prima del packager, che richiede destinazioni nuove.
+Non modificare cache, sorgenti o runtime effettivi dell'app in esecuzione.
+Qualifica installer ordinario e consegna restano separate dalle prove UI QA.

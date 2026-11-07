@@ -69,9 +69,12 @@ if not shared.is_dir():
     raise RuntimeError('Build the complete Mac app first: the Windows shared-folder payload is missing.')
 x86=repo/'.build/Perpendicular.app/Contents/Resources/Guest/X86Graphics'
 video=repo/'.build/Perpendicular.app/Contents/Resources/Guest/VideoGraphics'
+connected=repo/'.build/Perpendicular.app/Contents/Resources/Guest/ConnectedDisplay'
 subprocess.run([sys.executable,str(repo/'scripts/check-x86-payload.py'),
                 '--app',str(repo/'.build/Perpendicular.app')],check=True)
 subprocess.run([sys.executable,str(repo/'scripts/check-video-payload.py'),
+                '--app',str(repo/'.build/Perpendicular.app')],check=True)
+subprocess.run([sys.executable,str(repo/'scripts/check-connected-resize.py'),
                 '--app',str(repo/'.build/Perpendicular.app')],check=True)
 digest=hashlib.sha256()
 for source in sources:
@@ -92,6 +95,9 @@ for source in sorted(x86.rglob('*')):
 for source in sorted(video.rglob('*')):
     if source.is_file():
         digest.update(('VideoGraphics/'+str(source.relative_to(video))).encode());digest.update(source.read_bytes())
+for source in sorted(connected.rglob('*')):
+    if source.is_file():
+        digest.update(('ConnectedDisplay/'+str(source.relative_to(connected))).encode());digest.update(source.read_bytes())
 if arguments.dry_run:
     print('Setup inputs verified. No CD created or attached.')
     raise SystemExit(0)
@@ -114,6 +120,7 @@ for source,name in memory_drivers:
 shutil.copytree(shared,setup/'SharedFiles',dirs_exist_ok=True)
 shutil.copytree(x86,setup/'X86Graphics',dirs_exist_ok=True)
 shutil.copytree(video,setup/'VideoGraphics',dirs_exist_ok=True)
+shutil.copytree(connected,setup/'ConnectedDisplay',dirs_exist_ok=True)
 (setup/'connection.json').write_text(json.dumps({'port':configuration['guestPort'],'token':configuration['token']}))
 (setup/'connection.json').chmod(0o600)
 iso=setup.with_suffix('.iso')
@@ -121,6 +128,11 @@ if not iso.exists():
     subprocess.run(['hdiutil','makehybrid','-iso','-joliet','-default-volume-name','PERPSETUP','-o',str(iso),str(setup)],check=True,stdout=subprocess.DEVNULL)
 iso.chmod(0o600)
 address=f"/tmp/perpendicular-{os.getuid()}-{configuration['id'][:8]}.sock"
+# Clones can share a Windows UUID. Also require the selected root's live disk.
+pid=int((root/'qemu-system-aarch64.pid').read_text())
+command=subprocess.check_output(['ps','-p',str(pid),'-o','command='],text=True)
+if str(root/'Windows/system.qcow2') not in command.replace('\\/', '/'):
+    raise RuntimeError('The running VM does not use the selected machine disk.')
 with socket.socket(socket.AF_UNIX) as connection:
     connection.settimeout(4)
     connection.connect(address)

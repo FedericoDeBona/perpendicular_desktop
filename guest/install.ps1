@@ -19,6 +19,12 @@ try {
         & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $x86 'install.ps1') -ExpectedMachineID $machine -ExpectedSHA256 $release.files.'neptune_umd_x86.dll' -PayloadRoot $x86
         if ($LASTEXITCODE -ne 0) { throw 'The Win32 graphics correction could not be installed.' }
     }
+    $connected=Join-Path $PSScriptRoot 'ConnectedDisplay'
+    if(Test-Path (Join-Path $connected 'release.json')) {
+        $machine=[Guid](Get-CimInstance Win32_ComputerSystemProduct).UUID
+        & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $connected 'install.ps1') -ExpectedMachineID $machine -PayloadRoot $connected
+        if ($LASTEXITCODE -ne 0) { throw 'The signed connected-display driver could not be installed.' }
+    }
     # Ordinary updates install this bridge; the explicit one-time removal of
     # legacy agents and sharing is handled by remove-legacy.ps1.
     $shared=Join-Path $PSScriptRoot 'SharedFiles'

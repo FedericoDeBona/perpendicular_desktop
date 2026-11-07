@@ -18,13 +18,32 @@ public static class VideoPayloadIntegrity {
 }
 '@
 if(![VideoPayloadIntegrity]::Protected()){throw 'Code Integrity must remain enabled and test signing disabled'}
-$driver=Split-Path (Get-CimInstance Win32_SystemDriver -Filter "Name='VioGpu3D'").PathName
+$kernelPath=(Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Services\VioGpu3D').ImagePath -replace '^\\SystemRoot',$env:SystemRoot
+$kernelHash=(Get-FileHash -LiteralPath $kernelPath).Hash
+if($kernelHash -inotmatch '^(cfbc713754c7f0dcae4803017af3a0ebfc781d37fd57604f8ee8f2cfdad306c4|642f2d861124639059469722c165fb9a640eed0dad97d30e59e5a42b88d4b1d6)$'){throw 'Unsupported signed graphics kernel; preserve current registration'}
+$driver=Split-Path $kernelPath
 $originals=@{
  'viogpu3d.sys'='cfbc713754c7f0dcae4803017af3a0ebfc781d37fd57604f8ee8f2cfdad306c4'
  'neptune_umd.dll'='cf7cd403a6b89b519bbffc43c43f42d8da5ba97259fe7b5a6e489628d8c8a05a'
  'neptune_umd_arm64.dll'='b62f463ec4e4bea8ee75b9c6d5ca59d1c9faa9a62273d9fdf7dc75e4f593af36'
  'neptune_umd_ec.dll'='d03a3a342ee0952f3d6315c008970a4507746de295b1891cede56efb567c46f3'
  'neptune_umd_x86.dll'='b1581a53d4db0ce7247180e66017cd84d9a8d17a2767b3a39982012e85d3f9dc'
+}
+# v0.5 changes monitor-mode admission, not the pinned v0.4 UMD ABI.
+# Keep using the exact original wrapper/companions; never copy v0.5 UMDs over
+# the qualified video pair. The retained signed v0.4 store is a prerequisite.
+if($kernelHash -ine $originals['viogpu3d.sys']){
+ $bases=@()
+ foreach($candidate in Get-ChildItem (Join-Path $env:SystemRoot 'System32\DriverStore\FileRepository') -Directory -Filter 'viogpu3d.inf_arm64_*'){
+  $matches=$true
+  foreach($name in $originals.Keys){
+   $file=Join-Path $candidate.FullName $name
+   if(!(Test-Path -LiteralPath $file) -or (Get-FileHash -LiteralPath $file).Hash -ine $originals[$name]){$matches=$false;break}
+  }
+  if($matches){$bases+=$candidate.FullName}
+ }
+ if(!$bases.Count){throw 'The pinned original v0.4 DriverStore base is required; do not replace the qualified UMDs with v0.5'}
+ $driver=@($bases|Sort-Object)[0]
 }
 foreach($name in $originals.Keys){if((Get-FileHash (Join-Path $driver $name)).Hash -ine $originals[$name]){throw ('Original graphics component differs: '+$name)}}
 $dest=Join-Path $env:ProgramFiles ('Perpendicular Graphics\video-'+$ExpectedSHA256.Substring(0,12).ToLowerInvariant())

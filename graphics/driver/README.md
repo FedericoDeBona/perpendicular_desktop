@@ -123,11 +123,16 @@ L'installer candidato richiede normale amministrazione e identifica una sola
 PCI accelerata1101. Conserva e rilegge registrazioni video/x86/Vulkan qualificate;
 non aggiorna le uscite app con quel driver. Dopo installazione serve spegnimento
 normale e coldboot: la ricevuta non prova pixel o caricamento della nuova coppia.
-L'installer guest ordinario video/x86 è ancora vincolato al kernel precedente:
-**integrazione degli aggiornamenti ripetibili e consegna main DA FARE**. Non
-promuovere questa candidata come aggiornamento ordinario prima di completarle.
+I nuovi installer [video0.1.8](../backend/releases/video-0.1.8.json) e
+[Win320.1.2](releases/x86-0.1.2.json) supportano anche il kernel firmato v0.5,
+con DLL/native identiche ai profili M1 precedenti. Richiedono la base originale
+v0.4 ancora in DriverStore, verificata per hash: non sostituire wrapper o UMD
+con quelli dell'archivio v0.5. Il normale installer guest installa ConnectedDisplay
+dopo video/x86; bootstrap lo verifica e lo include nel CD. **Aggiornamento ordinario QA/coldboot94, SDR/VP9/OpenGL PASS circoscritti;
+consegna main ancora DA FARE.**
 
 QA protetta: coldboot e primo percorso sempre collegato PASS circoscritto,
 1440×1676→2880×1800→ritorno e2880×1676→fullscreen→ritorno con nuovi frame/DPI96.
-Icone Settings nel Desktop, input postcicli, avvio iniziale/regressioni e main
-restano aperti. [Evidenze e negativi](../../docs/VERIFICATION.md#driver-firmato-v05-e-modi-a-monitor-collegato).
+SeguitoQA: stessa Settings completa prima e dopo due cicli connessi, senza
+hover/riapertura o recupero finestre; navigazioneBluetooth postcicli completa.
+Avvio iniziale e regressioni PASS nella QA94; main ancora da qualificare. [Evidenze e negativi](../../docs/VERIFICATION.md#driver-firmato-v05-e-modi-a-monitor-collegato).
