@@ -1,5 +1,7 @@
 # Piano di lavoro — desktop Windows su Mac
 
+**7 novembre — .94 nella canonica, installazione Windows IN CORSO.** Checkpoint offline completo creato e vecchia.90 archiviata/verificata;609file canonici e29componenti host effettivi del bootmain78189 allineati. CD ordinario preparato, driver/GuestTools Windows e qualifica funzionale main ancora DA FARE. QA spenta normalmente, utente ha chiuso le app; nessun risultato generale o completamento dal solo frontend. [Evidenze](VERIFICATION.md#driver-firmato-v05-e-modi-a-monitor-collegato).
+
 **7 novembre — .94: aggiornamento e coldboot QA PASS circoscritto; main DA FARE.** Due cicli nella stessa Settings completi con monitor sempre collegato,1,71–3,40s, icone/testi e input conservati; .94 adatta anche Desktop aperto da Windows spento,1920×1280/DPI96/nuovo frame,995ms della transazione (non tempo boot). Aggiornamento ordinario video.1.8/x86.1.2/ConnectedDisplay verificato, audit/protezioni e SDR/VP9/OpenGL ARM64+x64 PASS nella QA. Le DLL qualificate restano identiche. Canonica.90/main ancora spente e invariate; prossimo passo breve Explorer/Seamless, backup e distribuzione/verifica nella principale. Obiettivo ATTIVO, nessuna chiusura generale di icone/nero o lag. [Evidenze](VERIFICATION.md#driver-firmato-v05-e-modi-a-monitor-collegato).
 
 
