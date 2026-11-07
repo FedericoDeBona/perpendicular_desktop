@@ -1529,6 +1529,7 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
             var checks=0
             var slowRetry=false
             var applyUnconfirmed=false
+            var postModeRefresh=false
             var targetStarted=started
             var deadline=started+12
             // Fast primary reads must not spend the old ten-read allowance
@@ -1552,6 +1553,7 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
                 let latest=raster(self.desktopSize)
                 if latest != mode,!applyUnconfirmed {
                     mode=latest;self.desktopAttempted=mode;checks=0
+                    postModeRefresh=false
                     framesBeforeRequest=self.machine?.desktopState["nativeReceivedFrames"] as? UInt64 ?? 0
                     self.desktopResizeChangedAt=ProcessInfo.processInfo.systemUptime
                     targetStarted=self.desktopResizeChangedAt;deadline=targetStarted+12
@@ -1597,6 +1599,23 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
                            let primary=(snapshot["displays"] as? [[String:Any]])?.first(where:{$0["primary"] as? Bool == true}),
                            primary["width"] as? Int == Int(mode.width),primary["height"] as? Int == Int(mode.height),
                            primary["dpi"] as? Int == dpi {
+                            // A hotplug frame can have the final raster before
+                            // DWM finishes rebuilding its contents. Renew the
+                            // consumer once after Windows confirms the mode,
+                            // then require an image from that new reader. Keep
+                            // the owned image, input and monitor configuration.
+                            if self.machine?.nativeGraphicsEnabled == true,!postModeRefresh {
+                                let before=self.machine?.desktopState["nativeReceivedFrames"] as? UInt64 ?? 0
+                                guard self.machine?.reconnectDesktopGraphics() == true else {
+                                    self.desktopResizeReport["phase"]="waitingPostModeReader"
+                                    read.finish(false);return
+                                }
+                                postModeRefresh=true
+                                framesBeforeRequest=before
+                                self.desktopResizeReport["postModeRefresh"]=true
+                                self.desktopResizeReport["phase"]="waitingPostModeFrame"
+                                read.finish(false);return
+                            }
                             if self.machine?.nativeGraphicsEnabled == true,
                                self.machine?.desktopState["nativeActive"] as? Bool != true
                                 || self.machine?.desktopState["width"] as? Int != Int(mode.width)
@@ -1650,6 +1669,7 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
                                     if !applyUnconfirmed,!slowRetry,self.machine?.nativeGraphicsEnabled == true,
                                        self.desktopResizeReport["advertisedMode"] as? Bool != true {
                                         slowRetry=true
+                                        postModeRefresh=false
                                         self.desktopResizeReport["fallback"]=true
                                         publish(mode,reconnectDelay:1,forceReconnect:true)
                                     }
