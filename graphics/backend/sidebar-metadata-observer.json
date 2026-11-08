@@ -1,0 +1,23 @@
+{
+  "schema": 1,
+  "purpose": "Optional bounded CPU metadata observer for an isolated QA VM; never part of the production graphics payload.",
+  "nativeBackendSHA256": "2a7e93274c2aa2578d26ea5e3350eea546ff37e6518e62bc8e7b44b8acd4ce16",
+  "targetWidth": 955,
+  "targetHeight": 614,
+  "maxRecords": 48,
+  "maxTrianglesPerRecord": 64,
+  "callbackStopNanoseconds": 16000000,
+  "lifetime": "Detach all hooks, unload script and detach session after the bounded observation. No automatic launch or injection.",
+  "preconditions": [
+    "Verify selected worker context from the actual VM QMP stats, worker/server/QEMU ancestry, exact VM disk and only one VM with this UUID.",
+    "Verify this exact native backend hash before relying on its private CPU buffer layout. Refuse any other hash.",
+    "Use an isolated QA VM, preserve OS protections; no image readback, GPU operation, resource mutation or wait is performed by this observer."
+  ],
+  "assembly": "Replace the single C_SOURCE token in sidebar-metadata-observer.js.in with json.dumps(the UTF-8 C source) before creating a Frida script. The caller supplies a bounded session and cleanup.",
+  "costScope": "Native callback body only; excludes attachment/load, interception glue, total system cost and ordinary rendering performance.",
+  "coverage": "Four direct draw variants; matching 955x614 targets only; at most64 triangle bounds per draw, truncated flag explicit. No full-frame completeness, indirect-draw absence or missing-icon cause is proved.",
+  "sourceSHA256": {
+    "sidebar-metadata-observer.c": "95466ab877d51be2733609cafd324df9af39b57530fc7376327c280d8e3f065c",
+    "sidebar-metadata-observer.js.in": "c674548292514e24a9015158e5212f38f8e03ecea1b12b9c473a2282fe4e8939"
+  }
+}

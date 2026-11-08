@@ -47,6 +47,28 @@ SDR/VP9/OpenGL; le icone sidebar restano mancanti e fisicamente confermate
 nella stessaSettings. Non qualifica grafica generale o lentezza del resize.
 [Evidenze e limiti](../../docs/VERIFICATION.md#driver-firmato-v05-e-modi-a-monitor-collegato).
 
+## Diagnostica sidebar limitata alla copia di prova (8 novembre)
+
+`sidebar-metadata-observer.c` e il template `.js.in` sostituiscono la raccolta
+completa che rallentava i draw. Il codice nativo conserva solo identità,
+descrittori SRV e fino a64 rettangoli dei triangoli per draw sulla superficie
+Settings955×614;48record massimi, stop oltre16ms per callback. Nessuna copia
+di immagini o costanti complete, operazione GPU, attesa o modifica di risorse.
+Il sorgente usa un layout CPU privato: il chiamante deve rifiutare backend
+diversi dalla SHA esatta in `sidebar-metadata-observer.json`, verificare VM,
+disco, contesto e parentela dei processi e scollegare sempre la diagnostica al
+termine. Non viene caricata automaticamente o confezionata nel prodotto.
+
+Assemblaggio: sostituire l'unico token `C_SOURCE` del template con
+`json.dumps(sorgente_C)` e creare lo script Frida soltanto nel worker QA
+verificato. Il chiamante limita anche la durata della sessione e conserva
+ricevute di caricamento, stop, scaricamento e detach. I pin dei sorgenti sono
+nel manifest; la verifica effettiva e i tentativi falliti sono nel
+[diario](../../docs/VERIFICATION.md#driver-firmato-v05-e-modi-a-monitor-collegato).
+La misura dei callback esclude avvio/intercettazione e costo totale del sistema.
+I triangoli troncati e la copertura limitata non provano assenza di draw,
+completezza di un frame o causa delle icone mancanti. Non è un fix grafico.
+
 ## Candidata NV12 nativa, non distribuita
 
 `nv12-native.patch` è il prerequisite per il decoder VP9: due texture Metal per un'immagine NV12, SRV di piano e trasferimenti coerenti. Deriva dalla [proposta di hadykachmarv-coder](https://github.com/3Shain/dxmt/issues/229), [gist](https://gist.github.com/hadykachmarv-coder/b8a3074182aa755f6bedde534481855e) revisione `822a74043048972717460b51688e23f739bebc1a`, adattata al nostro pin e alle sue firme/gestione BC. Le modifiche ereditano la licenza dei sorgenti DXMT (LGPL2.1-or-later); attribuzione e fallimenti conservati nel diario. La parte swapchain desktop della proposta non è inclusa.
