@@ -8,6 +8,30 @@ Il backend effettivo va identificato dal `runtime.json` e dai byte della libreri
 
 `native-bounded-capture.patch` resta diagnostica opzionale, non abilitata per l’uso corrente. Può catturare un solo worker selezionato con un marker privato; richiede un avvio diagnostico e può registrare pixel delle app. Non riattivarla o ricompilare il backend senza una domanda concreta pertinente al desktop.
 
+Il profilo opzionale [native-bounded-capture.json](native-bounded-capture.json)
+conserva la ricetta compatibile M1 sulla base `2A7`, senza sostituire i pin del
+prodotto. La domanda attuale riguarda geometria e dati dei glifi del negativo
+Explorer con UMD v20, non un'altra dimostrazione generica di atlas popolato.
+Sono qualificati build, firma, confronto dei due soli membri modificati,
+rifiuto del gate di produzione e allineamento runtime/Windows della copia;
+una cattura effettiva del contesto Explorer e il replay Xcode sono qualificati
+localmente. I dati R8 del draw266 formano Documents, mentre la barra Windows
+resta alterata: non è ancora una correzione UI o prova dei consumer successivi.
+Gli offset flat dello shader sono bit, da dividere per8 prima di leggere R8;
+non usare le vecchie regioni calcolate erroneamente in byte. Non attivarla sulla
+principale né interpretare una finestra pulita in modalità cattura come fix.
+
+`read-renderer-contexts.ps1` conserva il piccolo lettore Windows di sola memoria
+che ha associato Explorer708 al contesto79, poi al worker83867 realmente
+catturato. Richiede PID esplicito, elenco dei contesti attivi del parent QA già
+verificato e SHA esatta della UMD; layout/sorgenti/pin e limiti sono nel JSON.
+Nessuna iniezione, scrittura o chiamata nel processo letto. Fallisce su altre
+UMD: non cambiare la SHA per tentare un layout non verificato. Il wrapper
+parametrizzato deriva dal lettore eseguito, senza una nuova esecuzione.
+Non scegliere il worker per il solo ordine di creazione; il primo marker così
+selezionato non è stato consumato. Letture parziali o assenti non provano che
+un processo non abbia il contesto.
+
 `rebuild-native-backend.py` conserva input della vecchia base Wire1; non usarlo per sostituire automaticamente il runtime corrente. `rebuild-native-shared-initialization.py` richiede il proprio riferimento e runtime Wire2 pinned. Ogni output nuovo conserva una ricevuta, ma build e firma non dimostrano il funzionamento in Windows. Verificare gli input disponibili, preservare la coppia renderer/server e qualificare il passaggio modificato in una nuova copia privata.
 
 Le vecchie istruzioni di cattura, i comandi di build legati a profili storici e i tentativi intermedi sono tolti dalla guida corrente. Restano nel [diario delle verifiche](../../docs/VERIFICATION.md) e nella [versione storica](https://github.com/FedericoDeBona/perpendicular_desktop/blob/3589194/graphics/backend/README.md).

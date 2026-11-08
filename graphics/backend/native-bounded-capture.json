@@ -1,0 +1,54 @@
+{
+  "schema": 1,
+  "purpose": "Optional bounded Metal capture of actual glyph inputs in one selected QA worker. Diagnostic only, never a graphics fix or production payload.",
+  "question": "For the already reproduced blank or altered Explorer header, determine which geometry, R8 data and LUT the actual BF686D24/6455F5C6 draw consumes; distinguish populated inputs with wrong rendering from missing or stale producer inputs. Do not repeat a generic populated-atlas capture.",
+  "baseNativeSHA256": "2a7e93274c2aa2578d26ea5e3350eea546ff37e6518e62bc8e7b44b8acd4ce16",
+  "patch": "native-bounded-capture.patch",
+  "patchSHA256": "712c818c2158fbf0f47c4e719dfc5ee87e76d0bbd8323f7335516f57f176519d",
+  "localM1OriginalSourceSHA256": {
+    "src/dxmt/dxmt_command_queue.cpp": "2be4df086570b50c80bd1da037a454586c898b0e0afd016e76d1578e2fbe49e3",
+    "src/winemetal/unix/winemetal_unix.c": "9c43ccfb67f18ef9779725a54d8c442aa2b35e1c0d9f7a31653348539c146814"
+  },
+  "localM1OriginalArchivesSHA256": {
+    "libdxmt.a": "c23f42d8664e0505ba9a1fb20ddeb4cb7b9a21a45e7af1a0a759f7688c5655a9",
+    "libwinemetal.a": "8078ebdeb1dc0c70a66e8f97a27e0ed913a87110825518a60d36d3e5d65cff2a"
+  },
+  "recipe": [
+    "Use the compatible local production build that independently relinks to baseNativeSHA256. Never copy a runtime from another Mac or change production pins.",
+    "Copy only src/dxmt/dxmt_command_queue.cpp and src/winemetal/unix/winemetal_unix.c to a private source tree, apply the existing patch there.",
+    "Reuse that build compile_commands.json for these two units, changing only source/output/dependency paths; add the original winemetal/unix directory to the private bridge include search so its relative sibling headers remain available.",
+    "Copy libdxmt.a and libwinemetal.a and replace only the matching members. Compare every member except the rebuilt archive index; all other members must remain byte-identical.",
+    "Reuse the qualified baseline link command with only the two archive paths and output changed. Preserve original source and archives, all existing production patches and the other 28 native files.",
+    "Package in an isolated QA app with its existing private machine directory. Private ad-hoc signing changes the frontend signature but no frontend source or code is modified.",
+    "Set only MTL_CAPTURE_ENABLED=1 and DXMT_NATIVE_CAPTURE_DIR in the private app LSEnvironment; launch through Launch Services and verify just these selected flags in the actual QEMU environment without printing any other environment.",
+    "Update only the private native manifest file hash, sign and verify the diagnostic app; the standard production video gate MUST reject the changed native library. Do not modify the production release profile.",
+    "Main VM must be normally stopped and its frontend closed before QA launch; confirm actual disk, parentage, native hashes and protected production Windows v20/driver v0.5 before any observation."
+  ],
+  "capture": {
+    "arm": "Private directory0700, selected actual worker PID.arm regular empty file0600, no symlink or overwrite. Confirm the visual negative and exact window/process before arming.",
+    "limit": "One process-lifetime capture, four CommitChunkInternal groups or stop request after two seconds. Initializer buffers may add GPU command buffers. Not a hard real-time deadline.",
+    "effects": "Metal capture changes scheduling and records local pixels; do not infer ordinary performance or a causal graphics fix. No per-draw JS callback, readback, GPU wait or shader/resource mutation is added.",
+    "cleanup": "Always verify capture stopped and valid metadata, remove any remaining owned arm marker; normal QA shutdown and restore ordinary runtime before main use.",
+    "ownership": "Use read-renderer-contexts.ps1 only on an identified Windows process with the exact pinned UMD, supplying active contexts from its verified QA renderer parent. Match returned virtio_ctx_id to the host worker. Newest-worker timing is not ownership proof. Require the actual draw in the resulting capture before qualifying attribution."
+  },
+  "qualification": {
+    "status": "Build/signature/member comparison/production rejection/actual QA29 hashes/protected Windows audit PASS. One actual Explorer708 context79 worker83867 capture consumed its marker, start_result=1, stopped at four command buffers. Xcode27.2 replay Frame ready, 34 draws. Two actual9-instance glyph draws266/388 use the exact shaders and matching descriptors. Actual R8 viewer bytes at13499 match MTLBuffer-662 snapshots, whose corrected glyph regions visibly spell Documents. UI fix, later consumers and ordinary performance remain unqualified.",
+    "localM1DiagnosticSHA256": "5ca7990d72050fcb4e695f2831f97388ae9ff90ee71ba327f1a2e39f4537d24f",
+    "productionEligible": false,
+    "evidence": "Private QA/graphics-resize-20261108/metal-glyph-state; no trace or VM data in Git."
+  },
+  "viewerPrerequisite": "Xcode system components installed normally; checkFirstLaunchStatus exit0. Single local trace replay qualified Frame ready on same M1. Viewer invalid-data warnings alone are not rendering-error evidence.",
+  "launchServicesReference": "https://developer.apple.com/documentation/bundleresources/information-property-list/lsenvironment",
+  "contextReader": {
+    "script": "read-renderer-contexts.ps1",
+    "sha256": "4a1803eb6664b3fc6bd4695b87cd407cf86213a3a69b5547edba212233ab4be9",
+    "actualUMDSHA256": "eb1e1aa133124b07138993bfbfe386e7ce31a0abc757d9927d3c409f536e424d",
+    "sourceLayoutSHA256": {
+      "src/virtio/neptune/npt_renderer.h": "edbff85cffd2bb1b31163951dcc8a9981457aa72dacbbd9ec38d95f612171493",
+      "src/virtio/neptune/npt_renderer_virtgpu_win32.c": "fbbf6fb232d69a4db2c6b471e951f7fa72acdc3e0e137862ff2e2c7e14357425"
+    },
+    "bounds": "Read-only OpenProcess0x410, private writable regions only,128MiB or1000ms body budget, at most8 candidate objects. Partial/inaccessible reads and budget exhaustion do not prove absence. Five operation pointers must fall inside actual pinned module. Generalized wrapper derived from the executed private helper; not independently rerun.",
+    "layout": "wire2/caps/maxTimelines64/virtio_ctx_id at0/4/8/12; operations at16/24/32/120/128. No process injection, target calls or writes."
+  },
+  "interpretation": "VS flat offset is in BITS; PS shifts address right by3. Old private r8-backing-candidates.json erroneously treated these offsets as bytes, so its glyph-region hashes are invalid. Buffers662 snapshots agree at correct regions;663 is different, excluded by actual Xcode resource sample. No universal identity from equal prefixes."
+}
