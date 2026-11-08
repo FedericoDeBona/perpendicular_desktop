@@ -1515,6 +1515,53 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
             var postModeRefresh=false
             var targetStarted=started
             var deadline=started+12
+            // A matching Windows reply stays usable only until a display event,
+            // host topology change or retarget. Waiting for its presented image
+            // is local: do not send another guest geometry request each poll.
+            var confirmedGeometry:(revision:Int,changedAt:Double)?
+            @MainActor func finishConfirmedGeometry()->Bool {
+                // A scanout frame can have the final raster before
+                // DWM finishes rebuilding its contents. Renew the
+                // consumer once after Windows confirms the mode,
+                // then require an image from that new reader. Keep
+                // the owned image, input and monitor configuration.
+                if self.machine?.nativeGraphicsEnabled == true,!postModeRefresh {
+                    let before=self.machine?.desktopState["nativeReceivedFrames"] as? UInt64 ?? 0
+                    guard self.machine?.reconnectDesktopGraphics() == true else {
+                        self.desktopResizeReport["phase"]="waitingPostModeReader"
+                        return false
+                    }
+                    postModeRefresh=true
+                    framesBeforeRequest=before
+                    self.desktopResizeReport["postModeRefresh"]=true
+                    self.desktopResizeReport["phase"]="waitingPostModeFrame"
+                    return false
+                }
+                if self.machine?.nativeGraphicsEnabled == true,
+                   self.machine?.desktopState["nativeActive"] as? Bool != true
+                    || self.machine?.desktopState["width"] as? Int != Int(mode.width)
+                    || self.machine?.desktopState["height"] as? Int != Int(mode.height)
+                    || (self.machine?.desktopState["presentedNativeFrame"] as? UInt64 ?? 0)<=framesBeforeRequest {
+                    self.desktopResizeReport["phase"]="waitingFrame"
+                    return false
+                }
+                // Let the exact connected raster settle before N+1
+                // can repair the app outputs, once, from confirmed geometry.
+                guard ProcessInfo.processInfo.systemUptime-self.desktopResizeChangedAt>=0.3 else {
+                    return false
+                }
+                self.machine?.finishDesktopResolution();self.desktopResizeRequest=nil
+                self.desktopReadAgain=false
+                self.desktopResizeReport["phase"]="confirmed"
+                self.desktopResizeReport["milliseconds"]=(ProcessInfo.processInfo.systemUptime-started)*1000
+                self.desktopResizeReport["targetMilliseconds"]=(ProcessInfo.processInfo.systemUptime-targetStarted)*1000
+                if self.launcherNotice=="Windows non ha confermato la risoluzione richiesta." ||
+                   self.launcherNotice=="Non riesco a conservare la scala Windows. Verifica il collegamento e aggiorna i Guest Tools." {self.launcherNotice=nil}
+                self.desktopConfirmed=mode
+                if self.machine?.mixedDisplaysEnabled == true {self.readMixedDisplay()}
+                else{self.readDesktopDisplay()}
+                return true
+            }
             // Fast primary reads must not spend the old ten-read allowance
             // before Windows has settled. Keep the existing wall-clock limit;
             // the 150 ms interval bounds this to at most 80 reads per target.
@@ -1535,7 +1582,7 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
                 let latest=raster(self.desktopSize)
                 if latest != mode,!applyUnconfirmed {
                     mode=latest;self.desktopAttempted=mode;checks=0
-                    postModeRefresh=false
+                    postModeRefresh=false;confirmedGeometry=nil
                     framesBeforeRequest=self.machine?.desktopState["nativeReceivedFrames"] as? UInt64 ?? 0
                     self.desktopResizeChangedAt=ProcessInfo.processInfo.systemUptime
                     targetStarted=self.desktopResizeChangedAt;deadline=targetStarted+12
@@ -1546,8 +1593,17 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
                     publish(mode)
                     continue
                 }
+                if let geometry=confirmedGeometry,
+                   geometry.revision == self.displayRevision,
+                   geometry.changedAt == self.desktopResizeChangedAt {
+                    self.desktopResizeReport["frameWaitChecks"]=(self.desktopResizeReport["frameWaitChecks"] as? Int ?? 0)+1
+                    if finishConfirmedGeometry() {return}
+                    continue
+                }
+                confirmedGeometry=nil
                 self.desktopResizeReport["phase"]="confirming"
                 checks+=1
+                self.desktopResizeReport["geometryReads"]=checks
                 let matched:Bool=await withCheckedContinuation { continuation in
                     let read=DesktopResizeRead {continuation.resume(returning:$0)}
                     // Reads have no display side effects. A newer view can
@@ -1556,6 +1612,8 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
                     // publish another monitor mode.
                     if !applyUnconfirmed {self.desktopResizeRead=read}
                     let readStarted=ProcessInfo.processInfo.systemUptime
+                    let geometryRevision=self.displayRevision
+                    let geometryChangedAt=self.desktopResizeChangedAt
                     self.desktopResizeReport["phase"]="readingGeometry"
                     self.bridge.command("display_info",["currentOnly":true,"primaryOnly":primaryOnly],timeout:.seconds(5)){result in
                         guard read.pending else{return}
@@ -1581,47 +1639,12 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
                            let primary=(snapshot["displays"] as? [[String:Any]])?.first(where:{$0["primary"] as? Bool == true}),
                            primary["width"] as? Int == Int(mode.width),primary["height"] as? Int == Int(mode.height),
                            primary["dpi"] as? Int == dpi {
-                            // A scanout frame can have the final raster before
-                            // DWM finishes rebuilding its contents. Renew the
-                            // consumer once after Windows confirms the mode,
-                            // then require an image from that new reader. Keep
-                            // the owned image, input and monitor configuration.
-                            if self.machine?.nativeGraphicsEnabled == true,!postModeRefresh {
-                                let before=self.machine?.desktopState["nativeReceivedFrames"] as? UInt64 ?? 0
-                                guard self.machine?.reconnectDesktopGraphics() == true else {
-                                    self.desktopResizeReport["phase"]="waitingPostModeReader"
-                                    read.finish(false);return
-                                }
-                                postModeRefresh=true
-                                framesBeforeRequest=before
-                                self.desktopResizeReport["postModeRefresh"]=true
-                                self.desktopResizeReport["phase"]="waitingPostModeFrame"
+                            guard geometryRevision == self.displayRevision,
+                                  geometryChangedAt == self.desktopResizeChangedAt else {
                                 read.finish(false);return
                             }
-                            if self.machine?.nativeGraphicsEnabled == true,
-                               self.machine?.desktopState["nativeActive"] as? Bool != true
-                                || self.machine?.desktopState["width"] as? Int != Int(mode.width)
-                                || self.machine?.desktopState["height"] as? Int != Int(mode.height)
-                                || (self.machine?.desktopState["presentedNativeFrame"] as? UInt64 ?? 0)<=framesBeforeRequest {
-                                self.desktopResizeReport["phase"]="waitingFrame"
-                                read.finish(false);return
-                            }
-                            // Let the exact connected raster settle before N+1
-                            // can repair the app outputs, once, from a fresh read.
-                            guard ProcessInfo.processInfo.systemUptime-self.desktopResizeChangedAt>=0.3 else {
-                                read.finish(false);return
-                            }
-                            self.machine?.finishDesktopResolution();self.desktopResizeRequest=nil
-                            self.desktopReadAgain=false
-                            self.desktopResizeReport["phase"]="confirmed"
-                            self.desktopResizeReport["milliseconds"]=(ProcessInfo.processInfo.systemUptime-started)*1000
-                            self.desktopResizeReport["targetMilliseconds"]=(ProcessInfo.processInfo.systemUptime-targetStarted)*1000
-                            if self.launcherNotice=="Windows non ha confermato la risoluzione richiesta." ||
-                               self.launcherNotice=="Non riesco a conservare la scala Windows. Verifica il collegamento e aggiorna i Guest Tools." {self.launcherNotice=nil}
-                            self.desktopConfirmed=mode
-                            if self.machine?.mixedDisplaysEnabled == true {self.readMixedDisplay()}
-                            else{self.readDesktopDisplay()}
-                            read.finish(true)
+                            confirmedGeometry=(geometryRevision,geometryChangedAt)
+                            read.finish(finishConfirmedGeometry())
                         }else if case .success=result {
                             // The monitor notification may complete after the
                             // driver's helper first tries the mode. Apply the
