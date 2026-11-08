@@ -16,11 +16,24 @@
     "Capture at shader creation from the actual bytecode before parsing/compilation. No GPU operation, readback, wait, resource or shader mutation. This performs bounded file IO during creation: measure its cost, do not use that run as ordinary performance or causal UI qualification.",
     "Verify each retained file SHA1 equals its name, then restore the ordinary runtime; never distribute the diagnostic binary."
   ],
-  "implementationStatus": "Compiled on M1, baseline relink byte-exact2A7, one archive object changed, signature strict verification passed. Actual capture, file cost and QA deployment still pending.",
+  "implementationStatus": "Qualified for exact immutable-program capture in isolated QA:2 hash-identical files,0600,184/188us write portions. Ordinary2A7 restored and actual29host/Windows/protections audited afterwards. No UI fix or ordinary performance qualification.",
   "sourceSHA256": {
     "glyph-bytecode-capture.hpp": "595b5f8ba97a93d6ddbf1b5fea2eeeabe7aa035093b172548fa5b404ff0c6a45",
     "glyph-bytecode-capture.patch": "db257ec6a75435914e046316baa0a74226b3d19d4c651ee8dfdc1e9e029ab6f3"
   },
   "localDiagnosticSHA256": "65e987dd54f2ff5aa70b3d4af3160b13731d58449808035b47787ecb645055fc",
-  "localBuildEvidence": "Private QA/graphics-resize-20261108/glyph-bytecode-capture/{baseline-link-result,archive-comparison,candidate-build-receipt}.json"
+  "localBuildEvidence": "Private QA/graphics-resize-20261108/glyph-bytecode-capture/{baseline-link-result,archive-comparison,candidate-build-receipt}.json",
+  "capture": {
+    "qaPID": 55086,
+    "psBytes": 672,
+    "vsBytes": 824,
+    "writeMicroseconds": [
+      184,
+      188
+    ],
+    "sourceEvidence": "Private QA/graphics-resize-20261108/glyph-bytecode-capture/capture-receipt.json",
+    "restoredOrdinaryQaPID": 56585,
+    "ordinaryActual29HashesVerified": true,
+    "productionEligible": false
+  }
 }

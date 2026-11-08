@@ -565,8 +565,12 @@ il link della base byte per byte. Su questo M1 il link riproduce2A7; compilazion
 del solo pipeline cache, sostituzione del solo oggetto nell'archivio e rilink
 producono la diagnostica65E987DD. Gli altri35oggetti restano identici, l'indice
 dell'archivio viene rigenerato. Firma strict e rifiuto del gatevideo di produzione
-verificati; cattura reale e relativo costo ancora DA FARE. Ricette/ricevute
-locali in `QA/graphics-resize-20261108/glyph-bytecode-capture` fuoriGit.
+verificati. QA55086 cattura entrambi gli hash esatti: VS824byte ePS672byte,
+file0600; porzioni open/write/close188/184µs (esclusi filtro/hash/log e costo
+totale del sistema). Nessuna sovrascrittura o immagineUI salvata. QA poi spenta
+normalmente; runtimeordinario2A7/all29file e Windowsv20/protezioni verificati
+nel nuovo boot56585, variabile diagnostica assente. Ricette/ricevute locali in
+`QA/graphics-resize-20261108/glyph-bytecode-capture` fuoriGit.
 
 Usare una copiaQA separata, Windowsv20/protezioni conservati e una solaVM con
 questoUUID; manifest privato con l'hash realmente costruito. Non cambiare i pin
