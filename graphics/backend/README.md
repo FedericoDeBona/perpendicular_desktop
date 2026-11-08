@@ -541,3 +541,34 @@ rimuovere soltanto le copie pubbliche dei vecchi `Guest/VideoGraphics` e
 `Native3D/Notices/Video` prima del packager, che richiede destinazioni nuove.
 Non modificare cache, sorgenti o runtime effettivi dell'app in esecuzione.
 Qualifica installer ordinario e consegna restano separate dalle prove UI QA.
+
+### Cattura opzionale dei due programmi glifi Explorer
+
+`glyph-bytecode-capture.{patch,hpp,json}` è sola diagnostica per la base M1
+`2a7e9327…`, non un fix o un payload distribuibile. La patch include l'header
+accanto al sorgente `d3d11_pipeline_cache.cpp` e chiama la cattura dopo il calcolo
+dell'hash, prima del parsing. Serve definire esplicitamente
+`PERP_DIAGNOSTIC_GLYPH_DXBC` nella sola compilazione diagnostica e impostare
+`PERP_CAPTURE_GLYPH_DXBC` a una directory assoluta già esistente, privata0700.
+Senza il flag la produzione non include il codice; senza la variabile la
+variante diagnostica non scrive file.
+
+Conserva solo i programmi SHA1 `bf686d24…` e `6455f5c6…` osservati nel draw
+R8_UINT→A8 di Explorer. Scrive al massimo un file per hash, entro1MiB,
+con0600/O_EXCL/O_NOFOLLOW, senza sovrascrivere file esistenti. Non cambia shader,
+risorse, attese o comandi GPU. L'IO avviene durante la creazione: il log misura
+il costo della scrittura, ma quel run non qualifica prestazioni ordinarie o
+causalità del difetto UI. Verificare sempre SHA1 dei file contro i nomi.
+
+Prima di una build locale, verificare il pin del sorgente nel JSON e riprodurre
+il link della base byte per byte. Su questo M1 il link riproduce2A7; compilazione
+del solo pipeline cache, sostituzione del solo oggetto nell'archivio e rilink
+producono la diagnostica65E987DD. Gli altri35oggetti restano identici, l'indice
+dell'archivio viene rigenerato. Firma strict e rifiuto del gatevideo di produzione
+verificati; cattura reale e relativo costo ancora DA FARE. Ricette/ricevute
+locali in `QA/graphics-resize-20261108/glyph-bytecode-capture` fuoriGit.
+
+Usare una copiaQA separata, Windowsv20/protezioni conservati e una solaVM con
+questoUUID; manifest privato con l'hash realmente costruito. Non cambiare i pin
+di release per farlo passare. Dopo la cattura ripristinare2A7 prima di qualunque
+qualifica integrata o prestazionale. Non trasferire questa DLL su un altro Mac.

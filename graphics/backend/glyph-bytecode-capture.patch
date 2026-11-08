@@ -1,0 +1,22 @@
+--- a/src/d3d11/d3d11_pipeline_cache.cpp
++++ b/src/d3d11/d3d11_pipeline_cache.cpp
+@@ -11,6 +11,9 @@
+ #include "../d3d10/d3d10_input_layout.hpp"
+ #include <cstring>
+ #include <shared_mutex>
++#ifdef PERP_DIAGNOSTIC_GLYPH_DXBC
++#include "glyph-bytecode-capture.hpp"
++#endif
+ 
+ namespace dxmt {
+ 
+@@ -220,6 +223,9 @@
+   CachedSM50Shader *CreateShader(const void *pBytecode,
+                                  uint32_t BytecodeLength) {
+     auto sha1 = Sha1HashState::compute(pBytecode, BytecodeLength);
++#ifdef PERP_DIAGNOSTIC_GLYPH_DXBC
++    captureGlyphBytecode(sha1, pBytecode, BytecodeLength);
++#endif
+     {
+       std::shared_lock<std::shared_mutex> lock(mutex_shares);
+       auto result = shaders_.find(sha1);

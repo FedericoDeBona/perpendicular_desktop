@@ -1,0 +1,26 @@
+{
+  "schema": 1,
+  "purpose": "Optional one-file-per-hash CPU shader ingress capture, not a graphics fix or production payload.",
+  "baseNativeSHA256": "2a7e93274c2aa2578d26ea5e3350eea546ff37e6518e62bc8e7b44b8acd4ce16",
+  "basePipelineCacheSHA256": "265e3b7155d8281387ca90d486d92e0b8482ba61111c64794d68b8916cf947e4",
+  "shaderSHA1": [
+    "bf686d2421523da35bf96a28103aaa80ee93be18",
+    "6455f5c65380e530486c8965ced8e662623c11df"
+  ],
+  "flag": "PERP_DIAGNOSTIC_GLYPH_DXBC",
+  "directoryEnvironment": "PERP_CAPTURE_GLYPH_DXBC",
+  "requirements": [
+    "Private isolated QA only; preserve actual installed Windows v20, OS protections and main VM.",
+    "Apply the patch to the pinned pipeline cache source and add the header include path only for this diagnostic compilation. No change to production build flags or payload pins.",
+    "The output directory must already exist with mode0700, belong to the process user and not be a symlink. Each file uses O_EXCL/O_NOFOLLOW/mode0600, at most1MiB, no overwrite.",
+    "Capture at shader creation from the actual bytecode before parsing/compilation. No GPU operation, readback, wait, resource or shader mutation. This performs bounded file IO during creation: measure its cost, do not use that run as ordinary performance or causal UI qualification.",
+    "Verify each retained file SHA1 equals its name, then restore the ordinary runtime; never distribute the diagnostic binary."
+  ],
+  "implementationStatus": "Compiled on M1, baseline relink byte-exact2A7, one archive object changed, signature strict verification passed. Actual capture, file cost and QA deployment still pending.",
+  "sourceSHA256": {
+    "glyph-bytecode-capture.hpp": "595b5f8ba97a93d6ddbf1b5fea2eeeabe7aa035093b172548fa5b404ff0c6a45",
+    "glyph-bytecode-capture.patch": "db257ec6a75435914e046316baa0a74226b3d19d4c651ee8dfdc1e9e029ab6f3"
+  },
+  "localDiagnosticSHA256": "65e987dd54f2ff5aa70b3d4af3160b13731d58449808035b47787ecb645055fc",
+  "localBuildEvidence": "Private QA/graphics-resize-20261108/glyph-bytecode-capture/{baseline-link-result,archive-comparison,candidate-build-receipt}.json"
+}
