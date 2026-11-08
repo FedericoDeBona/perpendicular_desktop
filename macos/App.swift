@@ -1644,6 +1644,7 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
                                 read.finish(false);return
                             }
                             confirmedGeometry=(geometryRevision,geometryChangedAt)
+                            self.desktopResizeReport["modeConfirmationSource"]="geometryRead"
                             read.finish(finishConfirmedGeometry())
                         }else if case .success=result {
                             // The monitor notification may complete after the
@@ -1653,6 +1654,8 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
                             if self.desktopResizeRead === read {self.desktopResizeRead=nil}
                             self.desktopResizeReport["phase"]="applyingMode"
                             let applyStarted=ProcessInfo.processInfo.systemUptime
+                            let applyRevision=self.displayRevision
+                            let applyChangedAt=self.desktopResizeChangedAt
                             self.bridge.command("display_configure",["width":Int(mode.width),"height":Int(mode.height),"dpi":dpi,"device":scale.device,"currentOnly":true,"primaryOnly":primaryOnly],timeout:.seconds(3)){result in
                                 guard read.pending else{return}
                                 guard self.connected,self.displayEpoch == epoch,self.desktopResizeRequest == request else{read.finish(false);return}
@@ -1666,6 +1669,22 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
                                 guard self.machine?.desktopState["visible"] as? Bool == true,
                                       self.machine?.desktopState["fullScreenTransition"] as? Bool != true,
                                       raster(self.desktopSize) == mode else{read.finish(false);return}
+                                // configure() reads actual Windows geometry after
+                                // applying the mode and DPI. Reuse that snapshot
+                                // only if no display event or topology change
+                                // superseded the operation; otherwise read again.
+                                if case .success(let reply)=result,
+                                   applyRevision == self.displayRevision,
+                                   applyChangedAt == self.desktopResizeChangedAt,
+                                   let snapshot=reply["value"] as? [String:Any],
+                                   let primary=(snapshot["displays"] as? [[String:Any]])?.first(where:{$0["primary"] as? Bool == true}),
+                                   primary["device"] as? String == scale.device,
+                                   primary["width"] as? Int == Int(mode.width),primary["height"] as? Int == Int(mode.height),
+                                   primary["dpi"] as? Int == dpi {
+                                    confirmedGeometry=(applyRevision,applyChangedAt)
+                                    self.desktopResizeReport["modeConfirmationSource"]="configureSnapshot"
+                                    read.finish(finishConfirmedGeometry());return
+                                }
                                 read.finish(false)
                             }
                         }else {
