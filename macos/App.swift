@@ -1512,6 +1512,7 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
             // Keep one transaction pending and verify actual Windows geometry.
             var checks=0
             var applyUnconfirmed=false
+            var tryInitialModeApply=true
             var postModeRefresh=false
             var targetStarted=started
             var deadline=started+12
@@ -1582,7 +1583,7 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
                 let latest=raster(self.desktopSize)
                 if latest != mode,!applyUnconfirmed {
                     mode=latest;self.desktopAttempted=mode;checks=0
-                    postModeRefresh=false;confirmedGeometry=nil
+                    postModeRefresh=false;confirmedGeometry=nil;tryInitialModeApply=true
                     framesBeforeRequest=self.machine?.desktopState["nativeReceivedFrames"] as? UInt64 ?? 0
                     self.desktopResizeChangedAt=ProcessInfo.processInfo.systemUptime
                     targetStarted=self.desktopResizeChangedAt;deadline=targetStarted+12
@@ -1603,7 +1604,6 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
                 confirmedGeometry=nil
                 self.desktopResizeReport["phase"]="confirming"
                 checks+=1
-                self.desktopResizeReport["geometryReads"]=checks
                 let matched:Bool=await withCheckedContinuation { continuation in
                     let read=DesktopResizeRead {continuation.resume(returning:$0)}
                     // Reads have no display side effects. A newer view can
@@ -1611,6 +1611,57 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
                     // A timed-out mode set, however, must finish before we
                     // publish another monitor mode.
                     if !applyUnconfirmed {self.desktopResizeRead=read}
+                    @MainActor func applyMode(){
+                        if self.desktopResizeRead === read {self.desktopResizeRead=nil}
+                        self.desktopResizeReport["phase"]="applyingMode"
+                        self.desktopResizeReport["modeApplyRequests"]=(self.desktopResizeReport["modeApplyRequests"] as? Int ?? 0)+1
+                        let applyStarted=ProcessInfo.processInfo.systemUptime
+                        let applyRevision=self.displayRevision
+                        let applyChangedAt=self.desktopResizeChangedAt
+                        self.bridge.command("display_configure",["width":Int(mode.width),"height":Int(mode.height),"dpi":dpi,"device":scale.device,"currentOnly":true,"primaryOnly":primaryOnly],timeout:.seconds(3)){result in
+                            guard read.pending else{return}
+                            guard self.connected,self.displayEpoch == epoch,self.desktopResizeRequest == request else{read.finish(false);return}
+                            self.desktopResizeReport["lastApplyMilliseconds"]=(ProcessInfo.processInfo.systemUptime-applyStarted)*1000
+                            if case .success=result {applyUnconfirmed=false}
+                            if case .failure(let error)=result {
+                                self.desktopResizeReport["lastApplyError"]=error.localizedDescription
+                                applyUnconfirmed=error.localizedDescription == "Windows took too long to respond."
+                                    || error.localizedDescription == "Diagnostics already running"
+                            }
+                            guard self.machine?.desktopState["visible"] as? Bool == true,
+                                  self.machine?.desktopState["fullScreenTransition"] as? Bool != true,
+                                  raster(self.desktopSize) == mode else{read.finish(false);return}
+                            // configure() reads actual Windows geometry after
+                            // applying the mode and DPI. Reuse that snapshot
+                            // only if no display event or topology change
+                            // superseded the operation; otherwise read again.
+                            if case .success(let reply)=result,
+                               applyRevision == self.displayRevision,
+                               applyChangedAt == self.desktopResizeChangedAt,
+                               let snapshot=reply["value"] as? [String:Any],
+                               let primary=(snapshot["displays"] as? [[String:Any]])?.first(where:{$0["primary"] as? Bool == true}),
+                               primary["device"] as? String == scale.device,
+                               primary["width"] as? Int == Int(mode.width),primary["height"] as? Int == Int(mode.height),
+                               primary["dpi"] as? Int == dpi {
+                                confirmedGeometry=(applyRevision,applyChangedAt)
+                                self.desktopResizeReport["modeConfirmationSource"]="configureSnapshot"
+                                read.finish(finishConfirmedGeometry());return
+                            }
+                            read.finish(false)
+                        }
+                    }
+                    // configure() reads the live primary mode, skips an already
+                    // applied/saved mode and returns verified geometry and DPI.
+                    // Try it directly once per target, avoiding the preliminary
+                    // guest read followed by the same read inside configure().
+                    // This mutating operation owns the wait until its reply;
+                    // a retarget must not retire it like a read-only query.
+                    if tryInitialModeApply,!applyUnconfirmed {
+                        tryInitialModeApply=false
+                        self.desktopResizeReport["initialModeApply"]=true
+                        applyMode();return
+                    }
+                    self.desktopResizeReport["geometryReads"]=(self.desktopResizeReport["geometryReads"] as? Int ?? 0)+1
                     let readStarted=ProcessInfo.processInfo.systemUptime
                     let geometryRevision=self.displayRevision
                     let geometryChangedAt=self.desktopResizeChangedAt
@@ -1651,42 +1702,7 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
                             // driver's helper first tries the mode. Apply the
                             // exact raster once its mode set becomes available;
                             // the next read still confirms Windows' actual size.
-                            if self.desktopResizeRead === read {self.desktopResizeRead=nil}
-                            self.desktopResizeReport["phase"]="applyingMode"
-                            let applyStarted=ProcessInfo.processInfo.systemUptime
-                            let applyRevision=self.displayRevision
-                            let applyChangedAt=self.desktopResizeChangedAt
-                            self.bridge.command("display_configure",["width":Int(mode.width),"height":Int(mode.height),"dpi":dpi,"device":scale.device,"currentOnly":true,"primaryOnly":primaryOnly],timeout:.seconds(3)){result in
-                                guard read.pending else{return}
-                                guard self.connected,self.displayEpoch == epoch,self.desktopResizeRequest == request else{read.finish(false);return}
-                                self.desktopResizeReport["lastApplyMilliseconds"]=(ProcessInfo.processInfo.systemUptime-applyStarted)*1000
-                                if case .success=result {applyUnconfirmed=false}
-                                if case .failure(let error)=result {
-                                    self.desktopResizeReport["lastApplyError"]=error.localizedDescription
-                                    applyUnconfirmed=error.localizedDescription == "Windows took too long to respond."
-                                        || error.localizedDescription == "Diagnostics already running"
-                                }
-                                guard self.machine?.desktopState["visible"] as? Bool == true,
-                                      self.machine?.desktopState["fullScreenTransition"] as? Bool != true,
-                                      raster(self.desktopSize) == mode else{read.finish(false);return}
-                                // configure() reads actual Windows geometry after
-                                // applying the mode and DPI. Reuse that snapshot
-                                // only if no display event or topology change
-                                // superseded the operation; otherwise read again.
-                                if case .success(let reply)=result,
-                                   applyRevision == self.displayRevision,
-                                   applyChangedAt == self.desktopResizeChangedAt,
-                                   let snapshot=reply["value"] as? [String:Any],
-                                   let primary=(snapshot["displays"] as? [[String:Any]])?.first(where:{$0["primary"] as? Bool == true}),
-                                   primary["device"] as? String == scale.device,
-                                   primary["width"] as? Int == Int(mode.width),primary["height"] as? Int == Int(mode.height),
-                                   primary["dpi"] as? Int == dpi {
-                                    confirmedGeometry=(applyRevision,applyChangedAt)
-                                    self.desktopResizeReport["modeConfirmationSource"]="configureSnapshot"
-                                    read.finish(finishConfirmedGeometry());return
-                                }
-                                read.finish(false)
-                            }
+                            applyMode()
                         }else {
                             if case .failure(let error)=result {
                                 self.desktopResizeReport["lastReadError"]=error.localizedDescription
