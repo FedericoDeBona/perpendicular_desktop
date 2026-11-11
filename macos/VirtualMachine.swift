@@ -123,7 +123,10 @@ final class VirtualMachineController {
         }.value
     }
     var nativeGraphicsEnabled:Bool {configuration.graphics == "native3D" && configuration.recoveryDisplay != true}
-    var mixedDisplaysEnabled:Bool {nativeGraphicsEnabled && configuration.mixedDisplays == true}
+    // Desktop mode exposes only its primary output. Keep the existing PCI
+    // identity below so Windows continues using the installed 3D driver.
+    var mixedDisplaysEnabled:Bool {nativeGraphicsEnabled && configuration.mixedDisplays == true
+        && Bundle.main.object(forInfoDictionaryKey:"PerpendicularDesktopOnly") as? Bool != true}
     var virtualDisplayEnabled:Bool {nativeGraphicsEnabled}
     var desktopIsKey:Bool {desktop?.window.isKeyWindow == true}
     var appDisplayBindings:AppDisplayBindings? {
@@ -441,7 +444,7 @@ final class VirtualMachineController {
         var launchEnvironment=native?.environment(directory:displayDirectory,session:session,primary:HostDisplay.current().first(where:\.primary))
         // Never inherit an experiment flag into an ordinary VM. The runtime
         // changes the primary PCI identity only for this explicit configuration.
-        if native != nil {launchEnvironment?["PERP_VIRTIO_MIXED_DISPLAYS"]=mixedDisplaysEnabled ? "1":"0"}
+        if native != nil {launchEnvironment?["PERP_VIRTIO_MIXED_DISPLAYS"]=configuration.mixedDisplays == true ? "1":"0"}
         // The qualified runtime gates its small PCI window on both flags,
         // including with fixed RAM. Memory devices still follow dynamicMemory.
         if c.dynamicMemory != nil || native != nil {
