@@ -33,6 +33,9 @@ struct MachineConfiguration: Codable {
     }
     /// Experimental protected layout: one accelerated desktop plus one DOD
     /// adapter per Mac display. Enabled only after installing the signed pair.
+    let installationISO:String?
+    let installationAnswer:String?
+    let installationSoftwareCPU:Bool?
     let mixedDisplays:Bool?
     var settings:MachineSettings {
         var result=MachineSettings(cpus:cpus,initialMemoryMiB:memoryMiB,automaticMemory:dynamicMemory != nil,
@@ -387,7 +390,7 @@ final class VirtualMachineController {
             "-L",runtime.deletingLastPathComponent().appendingPathComponent("share/qemu").path,
             "-k",c.keyboardLayout ?? "en-us",
             "-machine", "virt,gic-version=3,highmem=on,pflash0=code,pflash1=vars\(pciWindow)",
-            "-accel", native == nil ? "hvf":"hvf,ipa-granule-size=4096", "-cpu", "host", "-smp", String(c.cpus), "-m", String(c.memoryMiB),
+            "-accel", c.installationISO != nil && c.installationSoftwareCPU == true ? "tcg":(native == nil ? "hvf":"hvf,ipa-granule-size=4096"), "-cpu", c.installationISO != nil && c.installationSoftwareCPU == true ? "max":"host", "-smp", String(c.cpus), "-m", String(c.memoryMiB),
             "-nodefaults", "-vga", "none",
             "-device", "qemu-xhci,id=xhci", "-device", "usb-kbd,bus=xhci.0",
             "-device", "usb-tablet,bus=xhci.0", "-device", "virtio-rng-pci",
@@ -402,11 +405,25 @@ final class VirtualMachineController {
             "-drive", "if=none,id=bootstrap,media=cdrom,readonly=on",
             "-device", "usb-bot,id=usbcd,bus=xhci.0", "-device", "scsi-cd,drive=bootstrap,bus=usbcd.0",
             "-chardev", "socket,id=tpmchar,path=\(tpmSocket)", "-tpmdev", "emulator,id=tpm,chardev=tpmchar",
-            "-device", native == nil && c.dynamicMemory == nil ? "tpm-tis-device,tpmdev=tpm,ppi=off":"tpm-tis-device,tpmdev=tpm",
+            "-device", "tpm-tis-device,tpmdev=tpm",
             "-display", nativeGraphicsEnabled ? "egl-headless,gl=es":"none", "-vnc", "unix:\(desktopSocket)",
             "-qmp", "unix:\(controlSocket),server=on,wait=off",
             "-monitor", "none", "-serial", "file:\(directory.path)/serial.log", "-rtc", "base=localtime"
         ]
+        if let iso=c.installationISO,let answer=c.installationAnswer {
+            guard InstallerState.load(directory)?.phase == "installing",
+                  answer == directory.appendingPathComponent("installation-answer.iso").path,
+                  FileManager.default.fileExists(atPath:iso),FileManager.default.fileExists(atPath:answer),
+                  !iso.contains(","),!answer.contains(",") else {throw CocoaError(.fileReadInvalidFileName)}
+            // Keep Windows on the first optical device; the answer medium
+            // must never become a boot candidate.
+            let index=arguments.firstIndex(of:"if=none,id=bootstrap,media=cdrom,readonly=on")!
+            arguments[index] += ",file=\(iso)"
+            let device=arguments.firstIndex(of:"scsi-cd,drive=bootstrap,bus=usbcd.0")!
+            arguments[device] += ",bootindex=2"
+            arguments += ["-drive","if=none,id=installation-answer,media=cdrom,readonly=on,file=\(answer)",
+                          "-device","usb-bot,id=answercd,bus=xhci.0","-device","scsi-cd,drive=installation-answer,bus=answercd.0"]
+        }
         if nativeGraphicsEnabled {
             // First qualify the reference backend's single scanout. Additional
             // monitor outputs require their own topology/capture integration.

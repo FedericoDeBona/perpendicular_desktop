@@ -1,0 +1,16 @@
+{
+  "schema": 1,
+  "firmware": {
+    "url": "https://deb.debian.org/debian/pool/main/e/edk2/qemu-efi-aarch64_2025.02-8+deb13u1_all.deb",
+    "sha256": "a00b2411a79c8aeafd95a7c868ac3cd1aab592f1af9fff965f02d81a625276ed",
+    "code": "usr/share/AAVMF/AAVMF_CODE.secboot.fd",
+    "variables": "usr/share/AAVMF/AAVMF_VARS.ms.fd",
+    "license": "usr/share/doc/qemu-efi-aarch64/copyright"
+  },
+  "supportedEdition": "IoTEnterpriseS",
+  "architecture": 12,
+  "minimumBuild": 26100,
+  "minimumFreeBytes": 17179869184,
+  "diskGiB": 80,
+  "memoryMiB": 4096
+}

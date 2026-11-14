@@ -16,6 +16,7 @@ private struct DesktopSingletonState:Sendable {
 }
 @MainActor
 final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation,ObservableObject {
+    private var firstRun:FirstRunInstaller?
     private let desktopOnly=Bundle.main.object(forInfoDictionaryKey:"PerpendicularDesktopOnly") as? Bool == true
     @Published var apps:[WindowsApplication]=[]
     @Published var launcherPreferences=LauncherPreferences()
@@ -135,7 +136,24 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
             if let path=ProcessInfo.processInfo.environment["PERPENDICULAR_MACHINE_DIRECTORY"] ?? Bundle.main.object(forInfoDictionaryKey:"PerpendicularMachineDirectory") as? String {
                 guard path.hasPrefix("/") else{throw CocoaError(.fileReadInvalidFileName)}
                 directory=URL(fileURLWithPath:path,isDirectory:true)
-            }else{directory=FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/Perpendicular Memory IoT")}
+            }else{directory=FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(
+                Bundle.main.object(forInfoDictionaryKey:"PerpendicularFirstRun") as? Bool == true ? "Library/Application Support/Perpendicular/Windows":"Library/Application Support/Perpendicular Memory IoT")}
+            if firstRun == nil,FirstRunInstaller.needed(directory) {
+                let installer=FirstRunInstaller(directory:directory);firstRun=installer
+                installer.prepared={ [weak self] in self?.applicationDidFinishLaunching(notification) }
+                installer.restart={ [weak self] in
+                    guard let self,let previous=self.machine else{return}
+                    previous.closeDesktop()
+                    self.machine=try VirtualMachineController(directory:previous.directory,runtime:previous.runtime)
+                    self.configureMachineControllers();self.loadVMSettings()
+                    try await self.machine.start()
+                }
+                installer.ready={ [weak self] in
+                    guard let self else{return};self.firstRun=nil;self.bridge?.disconnect();self.showWindows()
+                }
+                installer.show()
+                if !FileManager.default.fileExists(atPath:directory.appendingPathComponent("machine.json").path){return}
+            }
             if !desktopOnly {
                 launcherLibrary=try LauncherLibrary(directory:directory)
                 launcherPreferences=launcherLibrary?.loadPreferences() ?? .init()
@@ -500,7 +518,11 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
             do {
                 let machine=try await self.prepareMachineForStart()
                 if await machine.observedState() == .stopped {self.awaitingInitialGuest=true;self.guestContactEstablished=false}
-                if self.desktopOnly {try await machine.showDesktop()}else{try await machine.start()}
+                if self.firstRun != nil {
+                    let stopped=await machine.observedState() == .stopped
+                    try await machine.start()
+                    if stopped {self.firstRun?.started(machine:machine)}
+                }else if self.desktopOnly {try await machine.showDesktop()}else{try await machine.start()}
                 let state=await machine.observedState()
                 self.acceptMachineState(state);self.publishWindowEndpointIfReady(state)
             }
@@ -1803,6 +1825,7 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
             invalidateDisplay("Checking Windows display…")
             let capabilities=value["capabilities"] as? [String:Any] ?? [:]
             guestCapabilities=Dictionary(uniqueKeysWithValues:["windowCaptureSource","nativeAppInput","modeFocus","memoryStatus","execute","displayInfo","displayConfigureDPI","primaryDisplayInfo","displayMonitorState","displayTopology","driverInfo","graphicsInfo","sharedGeometry","appIcon","applicationStatus","processControl","clipboard"].map{($0,capabilities[$0] as? Bool == true)})
+            if let firstRun {firstRun.connected(bridge:bridge,machine:machine);return}
             network.connectionChanged(guestCapabilities["execute"] == true)
             memoryController?.guestReady=guestCapabilities["memoryStatus"] == true
             prepareSharedFolders()
