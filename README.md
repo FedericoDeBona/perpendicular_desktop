@@ -1,5 +1,13 @@
 # Perpendicular Desktop
 
+Perpendicular apre direttamente lo schermo completo di Windows. Seamless è disabilitato: nessun launcher di app, monitor aggiuntivo, cattura o trasferimento di finestre individuali. Il codice e le preferenze precedenti sono conservati; il controllo `PerpendicularDesktopOnly` rimane attivo nel pacchetto ordinario. Impostazioni, gestione Windows, condivisione cartelle e rete restano accessibili dal menu dell'app.
+
+Aggiornamento0.2.99 del14novembre: integra `main` nel ramo `codex/graphics-resize-reliability` conservandone il lavoro. Stato della distribuzione e prove locali in [TODO](docs/TODO.md) e [VERIFICATION](docs/VERIFICATION.md#14-novembre--avvio-diretto-windows-e-seamless-disabilitato). I difetti grafici precedenti restano aperti.
+
+## Funzionalità e verifiche storiche
+
+Le descrizioni Seamless/launcher/N+1 seguenti documentano il lavoro conservato e non descrivono funzionalità attive nella configurazione corrente.
+
 La0.2.20 introduce il launcher glass nativo: ricerca grande, Preferiti, Recenti e resto del catalogo, senza sidebar o pagina Schermi. L’icona nella barra inferiore apre stato e azioni Windows; Impostazioni→Aspetto permette Sistema, Chiaro e Scuro. Preferiti e tema persistono dopo la chiusura del frontend, verificati nell’app ordinaria. La prova di apertura della console è stata interrotta dall’uscita del runtime: affidabilità generale ancora aperta. [Verifiche e limiti](docs/VERIFICATION.md#27-ottobre--launcher-glass-nativo-e-temi-0220).
 
 **Seamless Apps** integra le singole app Windows nel Mac; **Desktop Mode** apre il desktop Windows completo. Nell’interfaccia compatta: **Seamless / Desktop**. Catalogo unico con tutte le app, ultime aperte in alto, ricerca e icone originali ad alta risoluzione conservate sul Mac. Impostazioni della VM per CPU e RAM, con modifiche applicate al prossimo avvio.

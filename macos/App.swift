@@ -61,7 +61,7 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
     private var catalogueNotice:String?
     private var catalogueRefreshes=0
     private var catalogueAutomaticEligible:Bool {
-        NSApp.isActive && !NSApp.isHidden && launcher?.isKeyWindow == true
+        !desktopOnly && NSApp.isActive && !NSApp.isHidden && launcher?.isKeyWindow == true
     }
     private var visibleIcons:Set<String>=[]
     private var iconVisibility:[String:Int]=[:]
@@ -136,15 +136,17 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
                 guard path.hasPrefix("/") else{throw CocoaError(.fileReadInvalidFileName)}
                 directory=URL(fileURLWithPath:path,isDirectory:true)
             }else{directory=FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/Perpendicular Memory IoT")}
-            launcherLibrary=try LauncherLibrary(directory:directory)
-            launcherPreferences=launcherLibrary?.loadPreferences() ?? .init()
-            apps=launcherLibrary?.loadCatalogue() ?? []
+            if !desktopOnly {
+                launcherLibrary=try LauncherLibrary(directory:directory)
+                launcherPreferences=launcherLibrary?.loadPreferences() ?? .init()
+                apps=launcherLibrary?.loadCatalogue() ?? []
+            }
             let runtime:URL
             if let override=ProcessInfo.processInfo.environment["PERPENDICULAR_RUNTIME"] {runtime=URL(fileURLWithPath:override)}
             else {runtime=try RuntimeStore.prepare(contents:Bundle.main.bundleURL.appendingPathComponent("Contents"),directory:directory)}
             machine=try VirtualMachineController(directory:directory,runtime:runtime)
-            try NativeWindowFrames.shared.prepare(directory:directory,machineID:machine.configuration.id)
-            bridge=try GuestBridge(port:machine.configuration.guestPort,token:machine.configuration.token,individualWindows:true)
+            if !desktopOnly {try NativeWindowFrames.shared.prepare(directory:directory,machineID:machine.configuration.id)}
+            bridge=try GuestBridge(port:machine.configuration.guestPort,token:machine.configuration.token,individualWindows:!desktopOnly)
             configureMachineControllers();loadVMSettings()
             bridge.onConnection={ [weak self] value in
                 guard let self else{return};self.connected=value;self.status=value ? "Windows connected":"Reconnecting to Windows…"
@@ -176,7 +178,7 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
                     self.invalidateDisplay("Waiting for Windows display…")
                 }
                 if value{
-                    self.refresh()
+                    if !self.desktopOnly {self.refresh()}
                     if ProcessInfo.processInfo.environment["PERPENDICULAR_AUDIT"] == "1" {self.bridge.command("diagnostics",timeout:.seconds(35)){result in
                         if case .success(let reply)=result,let data=try? JSONSerialization.data(withJSONObject:reply["value"] ?? [:],options:[.prettyPrinted,.sortedKeys]){
                             let report=directory.appendingPathComponent("guest-diagnostics.json")
@@ -210,18 +212,29 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
         launcher.appearance=launcherAppearance.native
         launcher.minSize=NSSize(width:540,height:480)
         launcher.setFrameAutosaveName("PerpendicularLauncher")
-        let launcherContent=LauncherHostingView(rootView:Launcher(model:self))
-        // AppKit owns the window frame. Content and screen safe-area changes
-        // must not resize/reposition it during a native cross-display drag.
-        launcherContent.sizingOptions=[]
-        launcher.contentView=launcherContent
-        launcher.center();launcher.makeKeyAndOrderFront(nil)
+        if desktopOnly {
+            // Keep settings accessible without constructing the app launcher.
+            launcher.title="Impostazioni Perpendicular"
+            launcher.titleVisibility = .visible;launcher.isMovable=true
+            launcher.styleMask.remove(.fullSizeContentView)
+            launcher.contentView=NSHostingView(rootView:MachineSettingsPanel(model:self))
+            launcher.center()
+        }else{
+            let launcherContent=LauncherHostingView(rootView:Launcher(model:self))
+            // AppKit owns the window frame. Content and screen safe-area changes
+            // must not resize/reposition it during a native cross-display drag.
+            launcherContent.sizingOptions=[]
+            launcher.contentView=launcherContent
+            launcher.center();launcher.makeKeyAndOrderFront(nil)
+        }
         NSApp.activate(ignoringOtherApps:true)
         let main=NSMenu();let appItem=NSMenuItem();main.addItem(appItem)
         let menu=NSMenu();appItem.submenu=menu
-        let applications=NSMenuItem(title:"Seamless Apps",action:#selector(showApplications),keyEquivalent:"l");applications.target=self;menu.addItem(applications)
+        if !desktopOnly {
+            let applications=NSMenuItem(title:"Seamless Apps",action:#selector(showApplications),keyEquivalent:"l");applications.target=self;menu.addItem(applications)
+        }
         let settings=NSMenuItem(title:"Impostazioni…",action:#selector(showSettings),keyEquivalent:",");settings.target=self;menu.addItem(settings)
-        let show=NSMenuItem(title:"Desktop Mode",action:#selector(showWindows),keyEquivalent:"");show.target=self;menu.addItem(show)
+        let show=NSMenuItem(title:desktopOnly ? "Mostra Windows":"Desktop Mode",action:#selector(showWindows),keyEquivalent:"");show.target=self;menu.addItem(show)
         let displayItem=NSMenuItem(title:"Display",action:nil,keyEquivalent:"")
         let displayMenu=NSMenu();displayItem.submenu=displayMenu;menu.addItem(displayItem)
         for (profile,title) in [("standard","Standard"),("native3D","Experimental 3D")] {
@@ -258,6 +271,7 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
         let close=NSMenuItem(title:"Close",action:#selector(closeCurrentWindow),keyEquivalent:"w");close.target=self;windowMenu.addItem(close)
         startMachineObservation()
         startWindows()
+        if machine == nil,desktopOnly {showDesktopError(launcherNotice ?? status)}
     }
     func applicationShouldTerminateAfterLastWindowClosed(_ sender:NSApplication)->Bool{false}
     func applicationShouldHandleReopen(_ sender:NSApplication,hasVisibleWindows flag:Bool)->Bool{showApplications();return false}
@@ -280,10 +294,12 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
         item.menu=menu
         statusItem=item
     }
-    @objc func showApplications(){launcher.makeKeyAndOrderFront(nil);NSApp.activate(ignoringOtherApps:true);NotificationCenter.default.post(name:.launcherFocusSearch,object:nil)}
+    @objc func showApplications(){
+        if desktopOnly {showWindows();return}
+        launcher.makeKeyAndOrderFront(nil);NSApp.activate(ignoringOtherApps:true);NotificationCenter.default.post(name:.launcherFocusSearch,object:nil)}
     func applicationDidBecomeActive(_ notification:Notification){refreshCatalogueIfNeeded()}
     @objc private func launcherBecameKey(_ notification:Notification){refreshCatalogueIfNeeded()}
-    @objc func showSettings(){launcher.makeKeyAndOrderFront(nil);NSApp.activate(ignoringOtherApps:true);NotificationCenter.default.post(name:.launcherShowSettings,object:nil)}
+    @objc func showSettings(){launcher.makeKeyAndOrderFront(nil);NSApp.activate(ignoringOtherApps:true);if !desktopOnly {NotificationCenter.default.post(name:.launcherShowSettings,object:nil)}}
     @objc func closeCurrentWindow(){
         if NSApp.sendAction(NSSelectorFromString("closeDocument:"),to:nil,from:self){return}
         (NSApp.keyWindow ?? NSApp.mainWindow)?.performClose(nil)
@@ -345,7 +361,7 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
         }
     }
     private func publishWindowEndpointIfReady(_ state:MachineRuntimeState){
-        guard case .running(let pid)=state,windowEndpointPID != pid else{return}
+        guard !desktopOnly,case .running(let pid)=state,windowEndpointPID != pid else{return}
         do {
             // start() can return with a live process before QMP is ready.
             // Keep its UUID/PID authentication and retry from observation;
@@ -484,11 +500,15 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
             do {
                 let machine=try await self.prepareMachineForStart()
                 if await machine.observedState() == .stopped {self.awaitingInitialGuest=true;self.guestContactEstablished=false}
-                try await machine.start()
+                if self.desktopOnly {try await machine.showDesktop()}else{try await machine.start()}
                 let state=await machine.observedState()
                 self.acceptMachineState(state);self.publishWindowEndpointIfReady(state)
             }
-            catch {self.acceptMachineState(await self.machine.observedState());self.launcherNotice="Non riesco ad avviare Windows. "+error.localizedDescription}
+            catch {
+                self.acceptMachineState(await self.machine.observedState())
+                self.launcherNotice="Non riesco ad avviare Windows. "+error.localizedDescription
+                if self.desktopOnly {self.showDesktopError(self.launcherNotice!)}
+            }
         }
     }
     @objc func forceStopWindows(){
@@ -518,7 +538,7 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
         }
     }
     private func followDesktopFocus(){
-        guard connected,guestCapabilities["modeFocus"] == true else{return}
+        guard !desktopOnly,connected,guestCapabilities["modeFocus"] == true else{return}
         desktopFocusTask?.cancel();let request=UUID();desktopFocusRequest=request
         let epoch=displayEpoch
         desktopFocusTask=Task{@MainActor [weak self] in
@@ -663,8 +683,15 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
         Task{@MainActor [weak self] in
             guard let self else{return};defer{self.machineOperation=nil}
             do {let machine=try await self.prepareMachineForStart();try await machine.showDesktop();self.acceptMachineState(await machine.observedState())}
-            catch {self.launcherNotice="Non riesco ad aprire il desktop Windows. "+error.localizedDescription;self.showApplications()}
+            catch {
+                self.launcherNotice="Non riesco ad aprire il desktop Windows. "+error.localizedDescription
+                if self.desktopOnly {self.showDesktopError(self.launcherNotice!)}else{self.showApplications()}
+            }
         }
+    }
+    private func showDesktopError(_ message:String){
+        let alert=NSAlert();alert.messageText="Windows non disponibile";alert.informativeText=message
+        alert.runModal()
     }
     @objc func shutdownWindows(){
         guard canStopWindows,let machine else{return}
@@ -714,14 +741,16 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
                 "status":status,"displayStatus":displayStatus,"primaryMatchesHost":sharedDisplay != nil,
                 "displayChecks":mixedDisplayChecks,"displayApplies":mixedDisplayApplies,"displayInvalidations":displayInvalidations,
                 "mappedDisplays":sharedDisplays.count,"displaySetupComplete":machine?.mixedDisplaysEnabled == true ? sharedDisplays.count==HostDisplay.current().count:sharedDisplay != nil,
-                "appLaunchReady":machine?.mixedDisplaysEnabled != true || !sharedDisplays.isEmpty,
+                "desktopOnly":desktopOnly,"seamlessEnabled":!desktopOnly,
+                "appLaunchReady":!desktopOnly && (machine?.mixedDisplaysEnabled != true || !sharedDisplays.isEmpty),
                 "memory":memoryState,"cpuIdle":cpuController?.state ?? [:],"networkObservation":network.observationDiagnostics,"sharedDownloads":sharedDownloads,"sharedFolders":folderState,
                 "vmSettings":["pending":settingsPending,"initialMemoryMiB":vmSettings?.initialMemoryMiB ?? 0,"maximumMemoryMiB":vmSettings?.maximumMemoryMiB ?? 0,"cpus":vmSettings?.cpus ?? 0],
                 "windowCount":windows.count,"capabilities":guestCapabilities,
                 "frameChannel":bridge?.separateFrames ?? false,
                 "windowGPU":NativeWindowFrames.shared.diagnostics,
                 "windowGPUCache":NativeWindowFrames.shared.cacheDiagnostics,
-                "launcher":["cursor":launcher.cursorDiagnostics,"catalogueAutomaticEligible":catalogueAutomaticEligible,"catalogueAgeSeconds":ProcessInfo.processInfo.systemUptime-lastCatalogueRefresh,"catalogueRefreshes":catalogueRefreshes,"statusMessage":launcherStatusMessage as Any? ?? NSNull(),"dragSamples":launcher.dragSamples,"dragPointer":["x":launcher.dragPointer.x,"y":launcher.dragPointer.y],"dragRequested":["x":launcher.dragRequested.x,"y":launcher.dragRequested.y],"frame":["x":launcher.frame.minX,"y":launcher.frame.minY,"width":launcher.frame.width,"height":launcher.frame.height],"screen":launcher.screen?.localizedName ?? "", "apps":apps.map{["id":$0.id,"name":$0.name,"key":$0.key,"essential":$0.essential]},"opening":Array(openingApps).sorted(),"notice":launcherNotice as Any? ?? NSNull(),"iconCacheHits":iconCacheHits,"iconFetches":iconFetches,"cachedIcons":applicationIcons.count,"recent":launcherPreferences.recent(apps).map(\.id),"favorites":launcherPreferences.sections(apps).favorites.map(\.id),"appearance":launcherAppearance.rawValue,"indicator":launcherWindowsStatus.title],
+                "settingsVisible":desktopOnly && launcher.isVisible,
+                "launcher":["enabled":!desktopOnly,"visible":launcher.isVisible && !desktopOnly,"cursor":launcher.cursorDiagnostics,"catalogueAutomaticEligible":catalogueAutomaticEligible,"catalogueAgeSeconds":ProcessInfo.processInfo.systemUptime-lastCatalogueRefresh,"catalogueRefreshes":catalogueRefreshes,"statusMessage":launcherStatusMessage as Any? ?? NSNull(),"dragSamples":launcher.dragSamples,"dragPointer":["x":launcher.dragPointer.x,"y":launcher.dragPointer.y],"dragRequested":["x":launcher.dragRequested.x,"y":launcher.dragRequested.y],"frame":["x":launcher.frame.minX,"y":launcher.frame.minY,"width":launcher.frame.width,"height":launcher.frame.height],"screen":launcher.screen?.localizedName ?? "", "apps":apps.map{["id":$0.id,"name":$0.name,"key":$0.key,"essential":$0.essential]},"opening":Array(openingApps).sorted(),"notice":launcherNotice as Any? ?? NSNull(),"iconCacheHits":iconCacheHits,"iconFetches":iconFetches,"cachedIcons":applicationIcons.count,"recent":launcherPreferences.recent(apps).map(\.id),"favorites":launcherPreferences.sections(apps).favorites.map(\.id),"appearance":launcherAppearance.rawValue,"indicator":launcherWindowsStatus.title],
                 "desktop":machine?.desktopState ?? [:],
                 "desktopResize":desktopResizeReport,
                 "lastCommandRTTMilliseconds":bridge?.lastRoundTripMilliseconds ?? 0,
@@ -951,7 +980,7 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
         refresh(checkDisplay:false)
     }
     func refresh(checkDisplay:Bool=true){
-        guard connected,!catalogueLoading else{return}
+        guard !desktopOnly,connected,!catalogueLoading else{return}
         lastCatalogueRefresh=ProcessInfo.processInfo.systemUptime;catalogueRefreshes+=1
         catalogueLoading=true
         if launcherNotice==catalogueNotice {launcherNotice=nil}
@@ -991,7 +1020,7 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
         }
     }
     func launch(_ app:WindowsApplication){
-        guard connected else{return}
+        guard !desktopOnly,connected else{return}
         if openingRequests[app.id] != nil {
             if !openingApps.contains(app.id) {launcherNotice="Sto ancora cercando la finestra di \(app.name). Puoi continuare a usare Desktop nel frattempo."}
             return
@@ -1079,7 +1108,7 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
         if appeared,openingNoticeApp == id {launcherNotice=nil;openingNoticeApp=nil;openingNoticeTimedOut=false}
     }
     private func startApplicationStatusUpdates(){
-        guard guestCapabilities["applicationStatus"] == true else{return}
+        guard !desktopOnly,guestCapabilities["applicationStatus"] == true else{return}
         applicationStatusTask?.cancel()
         applicationStatusTask=Task{@MainActor [weak self] in
             while !Task.isCancelled {
@@ -1089,7 +1118,7 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
         }
     }
     func refreshApplicationStates(){
-        guard connected,guestCapabilities["applicationStatus"] == true,!applicationStatusBusy else{return}
+        guard !desktopOnly,connected,guestCapabilities["applicationStatus"] == true,!applicationStatusBusy else{return}
         applicationStatusBusy=true;let epoch=launcherEpoch
         bridge.command("application_status",timeout:.seconds(4)){[weak self] result in
             guard let self,self.launcherEpoch == epoch else{return}
@@ -1765,6 +1794,8 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
                 if let data=try? JSONSerialization.data(withJSONObject:value,options:[.sortedKeys]){try? FileHandle.standardError.write(contentsOf:data+Data([10]))}
             }
         }
+        if desktopOnly,let kind=value["type"] as? String,
+           ["windows","frame","activate","seamless_transfer","desktop_focus","launch_state","window_notice","window_error","launch_error"].contains(kind) {return}
         switch value["type"] as? String{
         case "hello":
             if !desktopOnly {machine.synchronizePrimaryDisplay()}

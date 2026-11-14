@@ -125,8 +125,9 @@ final class VirtualMachineController {
     var nativeGraphicsEnabled:Bool {configuration.graphics == "native3D" && configuration.recoveryDisplay != true}
     // Desktop mode exposes only its primary output. Keep the existing PCI
     // identity below so Windows continues using the installed 3D driver.
+    private var desktopOnly:Bool {Bundle.main.object(forInfoDictionaryKey:"PerpendicularDesktopOnly") as? Bool == true}
     var mixedDisplaysEnabled:Bool {nativeGraphicsEnabled && configuration.mixedDisplays == true
-        && Bundle.main.object(forInfoDictionaryKey:"PerpendicularDesktopOnly") as? Bool != true}
+        && !desktopOnly}
     var virtualDisplayEnabled:Bool {nativeGraphicsEnabled}
     var desktopIsKey:Bool {desktop?.window.isKeyWindow == true}
     var appDisplayBindings:AppDisplayBindings? {
@@ -443,6 +444,7 @@ final class VirtualMachineController {
                 "-device","virtio-mem-pci,id=vmem0,memdev=vmemram,requested-size=0,block-size=2M,dynamic-memslots=off"]
         }
         var launchEnvironment=native?.environment(directory:displayDirectory,session:session,primary:HostDisplay.current().first(where:\.primary))
+        if desktopOnly {launchEnvironment?.removeValue(forKey:"PERP_WGC_EXPORT_SOCKET")}
         // Never inherit an experiment flag into an ordinary VM. The runtime
         // changes the primary PCI identity only for this explicit configuration.
         if native != nil {launchEnvironment?["PERP_VIRTIO_MIXED_DISPLAYS"]=configuration.mixedDisplays == true ? "1":"0"}
@@ -463,7 +465,7 @@ final class VirtualMachineController {
         let endpoint=nativeGraphicsEnabled ? NativeDisplayEndpoint(socketPath:displayDirectory.appendingPathComponent("native-display.sock").path,
             serverPID:machine!.processIdentifier,expectedUID:getuid(),sessionHi:UInt64(session.prefix(16),radix:16)!,sessionLo:UInt64(session.suffix(16),radix:16)!,epoch:1):nil
         let state=DesktopLaunch(machineID:c.id,pid:machine!.processIdentifier,socket:desktopSocket,native:endpoint,
-            wgcSocket:nativeGraphicsEnabled ? NativeWindowFrames.shared.socketPath:nil,fileSharing:"smb")
+            wgcSocket:nativeGraphicsEnabled && !desktopOnly ? NativeWindowFrames.shared.socketPath:nil,fileSharing:"smb")
         let launchFile=directory.appendingPathComponent("desktop-launch.json")
         try JSONEncoder().encode(state).write(to:launchFile,options:.atomic)
         try FileManager.default.setAttributes([.posixPermissions:0o600],ofItemAtPath:launchFile.path)
@@ -503,7 +505,7 @@ final class VirtualMachineController {
         process.executableURL=executable ?? runtime.appendingPathComponent(name)
         if let environment {
             var inherited=ProcessInfo.processInfo.environment
-            for name in ["PERP_PRIMARY_MONITOR_WIDTH_MM","PERP_PRIMARY_MONITOR_HEIGHT_MM","PERP_PRIMARY_MONITOR_ID"] {
+            for name in ["PERP_PRIMARY_MONITOR_WIDTH_MM","PERP_PRIMARY_MONITOR_HEIGHT_MM","PERP_PRIMARY_MONITOR_ID","PERP_WGC_EXPORT_SOCKET"] {
                 inherited.removeValue(forKey:name)
             }
             process.environment=inherited.merging(environment){_,new in new}
