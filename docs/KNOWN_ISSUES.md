@@ -1,5 +1,7 @@
 # Registro dei problemi
 
+**16 novembre — SYS-002, nuova pulizia autorizzata verificata:** ~26,73GB netti recuperati sul Mac, ~34,68GB disponibili. Eliminati 11QCOW2 superati incluse VM/checkpoint video4K, 15runtime inattivi, 21archivi app e media/payload delle prove. Main accesa nello stesso processo, configurazione/disco/protezioni non modificati; due checkpoint completi e ultimo archivio app conservati. Sorgenti/ricette/toolchain e recupero LOK preservati. Prove4K/60 ritirate su richiesta, nessuna nuova qualificaFPS. C: non ampliato/rimisurato, installazioneTIA ancora da preparare. Prevenzione esaurimentoSYS-002 resta aperta. [Evidenze](VERIFICATION.md#16-novembre--pulizia-dischi-e-prove-video-autorizzata).
+
 **16 novembre — TIA Portal V19+, fattibilità iniziale/TODO-026:** CPU 1214C utente raggiunta dalla VM suTCP 102; identificazioneS7 dalMac6ES7214-1AG40-0XB0/FW4.6.1. TIA e tool Siemens non installati/non qualificati, nessun nuovo difettoARM dimostrato. Spazio insufficiente per l'installazioneV21 documentato inSYS-002; preservare laVM attualmente usata dall'utente. Host29/29 e driverrete allineati; servizio guest diverso dal bundle, nessun aggiornamento invasivo durante la ricognizione. [Evidenze e limiti](VERIFICATION.md#16-novembre--tia-portal-v19-o-superiore-e-cpu-1214c-reale).
 
 **11 novembre — WIN-003, mitigazione richiesta: multischermo Seamless disabilitato nel Desktop.** L’utente segnala ancora app sugli altri schermi. DesktopOnly ora esclude creazione DOD e mapping N+1, conservando l’identità PCI della primaria già installata. Distribuzione/verifica main0.2.86 FATTE: una sola uscita Windows e zero DOD nel QEMU60653, Desktop visibile. Nessuna nuova diagnosi del difetto né chiusura generale. [Evidenze](VERIFICATION.md#11-novembre--desktop-con-un-solo-monitor).
@@ -568,6 +570,8 @@ Il ciclo RAM protetto 4→2→4 GiB con dati conservati resta la qualifica prece
 - **Evidenze:** [diario del ripristino protezioni](VERIFICATION.md#25-ottobre--resize-con-driver-ufficiale-e-protezioni-ripristinate).
 
 ### SYS-002 — Spazio host esaurito durante le scritture VM
+
+- **16 novembre, pulizia successiva autorizzata:** spazio host7.951.753.216→34.677.616.640 byte, delta26.725.863.424 byte (~26,73GB). Rimossi 11QCOW2 superati e artefatti selezionati, non la VM viva; confronto inodi/configurazione/QMP e29hash host PASS. Conservati due checkpoint completi main e archivio app verificato; C: non ampliato né rimisurato. È recupero manuale dello spazio, non prevenzione prodotto o installazioneTIA completata. [Evidenze](VERIFICATION.md#16-novembre--pulizia-dischi-e-prove-video-autorizzata).
 
 - **16 novembre, M4/TODO-026:** ricognizioneTIA con VM in uso: volume host7.916.996KiB liberi (~7,55GiB), C:7,93GiB su63,06GiB. RequisitoTIA V21 almeno20GB liberi non soddisfatto. Installazione BLOCCATA nel perimetro attuale; nessun nuovo esaurimento/erroreI/O, pulizia o resize del disco eseguiti. Servono capacità adeguata e distribuzione dei supporti verificata, senza sacrificare dati/checkpoint. Prevenzione prodotto resta aperta. [Evidenze](VERIFICATION.md#16-novembre--tia-portal-v19-o-superiore-e-cpu-1214c-reale).
 

@@ -1,5 +1,40 @@
 # Diario delle verifiche
 
+## 16 novembre — Pulizia dischi e prove video autorizzata
+
+**Autorizzazione:** l'utente chiede di eliminare vecchie QCOW e altro materiale del progetto senza compromettere la VM; aggiunge esplicitamente tutte le vecchie prove video4K/60fps, considerando sufficiente lo stato attuale. Vincolo precedente conservato: sta usando Windows. Nessun arresto, riavvio, installazione o modifica della VM. Il ritiro delle prove non è una misura o qualifica di60fps.
+
+**Criterio osservabile:** spazio host effettivamente aumentato, candidati eliminati assenti, stessa main in esecuzione con configurazione e file protetti conservati; almeno un ripristino completo pertinente preservato. Esecuzione locale FATTA; clone di verifica non avviato e nessun nuovo pacchetto prodotto distribuito.
+
+**Inventario e dipendenze prima della rimozione:** cartelle Perpendicular in ApplicationSupport, workspace e cartelle `perpendicular-*`/`perp-*` in `.local/share`. Prima ricerca limitata ai nomi `perpendicular-*`: ampliata ai percorsi `perp-*` indicati dal diario, trovata la vecchia VM video. I piccoli file `.qcow2/.raw` nei test dei sorgenti QEMU non sono dischi VM e sono conservati. Un glob shell senza corrispondenze ha interrotto solo l'elenco di percorsi, poi ricostruito conPython; nessuna cancellazione in questa fase.
+
+- QMP della main: running, disco principale e firmware/variabili indicati dai percorsi effettivi, backing depth0, CD bootstrap senza supporto. Il nome/UUID dei clone video coincide con la main: identificazione eseguita da percorsi, file aperti e processo, non dall'UUID da solo.
+- `qemu-img info --output=json --backing-chain` sulle sei copie main, sui sette dischi video e sul clone ibernazione conservato: immagini autonome, nessun backing file. Nessun `check/repair`, mount o avvio delle immagini. Due checkpoint main conservati: manifesti, esistenza e dimensione di tutti i cinque file richiesti ciascuno verificate; hash di configurazione/EFI/TPM conservati per il confronto successivo, senza leggere/hashare tutto il discoVM.
+- Inventario completo dei file aperti aggiornato prima della rimozione, controllo di tutti i processi: nessun target selezionato aperto. Percorsi, device/inodi e confini delle directory ricontrollati; file di configurazione main, Windows, runtime attivo, app canonica, rete/driver, sorgenti e dati LOK esclusi. Piano esplicito di300 target privati, senza cancellazioni da glob non verificato.
+- Archivio app più recente conservato: lista tar integra810 membri, presenzaInfo.plist/eseguibile e SHA256 registrato. Prima di ritirare app/VM video copiate360 piccole sorgenti/header/script dal relativo sottoalbero nel dossier; sorgenti originali video, prove sorgente, pin/patch/ricette/LLVM/SDK/input di compilazione fuori dalla VM conservati. Nessuna dipendenza di build eliminata per il solo nome storico.
+
+**Eliminati:**
+
+| Categoria | Rimozione verificata |
+| --- | --- |
+| Vecchia VM video | `perp-video-m4-20261102/machine-qa`, incluso disco e sei checkpoint:7QCOW2; app `PerpendicularVideoQA.app` ritirata. |
+| Checkpoint intermedi main | Quattro del6novembre:082708Z,114813Z,155932Z,163438Z. Totale dischi QCOW2 eliminati:11. |
+| Runtime main | 15store immutabili inattivi; conservato il solo runtime realmente in uso `f1e34e04…`. |
+| Archivi app | 21archivi superati; conservato `20261111T174233178621.tar.gz`. |
+| Prove generate | 232vecchie immagini/media/ISO e26payload video generati; sorgenti, script e documentazione conservati. |
+
+**Conservati:** disco/EFI/TPM/configurazione main; checkpoint completi `before-graphics-20261105T091939Z` (copia autentica precedente collegata al recuperoLOK) e `before-graphics-20261110T163305Z` (ultimo checkpoint completo); archivio app sopra; clone ibernazione distinto e relative evidenze; dossier recuperoLOK; sorgenti, modifiche utente, driver/pin/ricette e strumenti di compilazione. Cartelle file utente e altre app fuori dal perimetro. Non reinstallare o riavviare automaticamente i percorsi video cancellati.
+
+**Verifica locale dopo la pulizia PASS:**
+
+- Main nello stesso QEMU77855 e stato QMP running; stesso disco autonomo/backing depth0. Configurazione main byte-identica/SHA256 identico, device/inodi dei quattro file vivi protetti invariati. Non confrontati i contenuti mutabili del disco/EFI/TPM mentre l'utente usaWindows. Nessuna interazione UI o prova di riavvio.
+- Due checkpoint conservati completi, stessi file/inodi/dimensioni e hash dei componenti piccoli. Archivio app conservato con SHA256 identico.29membriNative3D del runtime attivo ancora byte-conformi al manifesto e alla canonica. Sorgenti/toolchain video presenti. Tutti300target rimossi assenti; store main con un solo runtime e cartellaRollback con i due checkpoint previsti.
+- Spazio disponibile iniziale7.951.753.216 byte; dopo rimozione34.682.400.768 byte; dopo verifiche34.677.616.640 byte. **Delta finale26.725.863.424 byte (~26,73GB/~24,89GiB), disponibili~34,68GB/~32,30GiB.** Confronto di spazio reale sul volume, non somma dei circa centinaia diGB apparenti dei cloniAPFS; piccole variazioni concorrenti dell'host comprese nel delta. Rimozione dei300target in27,12s dopo i controlli.
+
+**Limiti e prossimo passo:** Windows continua a usare lo stesso disco, C: non ampliato né rimisurato dopo il precedente rilievo7,93GiB; la pulizia host non aumenta automaticamente il volume guest. PerTIA V21 restano supporto ufficiale, capacitàWindows e compatibilitàARM da verificare; nessuna installazione durante l'uso. SYS-002 resta aperto per la prevenzione dell'esaurimento, non riattivata TODO-010. Stato delle vecchie candidate video ora ritirato per scelta utente, risultati storici nel diario conservati senza rivendicare un nuovo miglioramento.
+
+**Ricevute private fuoriGit:** `~/Library/Application Support/Perpendicular Restart/QA/cleanup-20261116/`, inventari iniziali, catene immagini, manifesti/file protetti, liste file aperti, piano esplicito, registro rimozioni, spazi e verifica finale. Nessun disco, token, configurazione privata VM, lista di file personali o artefatto generato aggiunto al repository. Modifiche LOK preesistenti nei registri preservate e separate dal commit della pulizia.
+
 ## 16 novembre — TIA Portal V19 o superiore e CPU 1214C reale
 
 **Richiesta:** ricerca e verifiche a carico dell'agente su TIA Portal e tool con collegamento a PLC fisico. Dopo lo stop iniziale, ripresa esplicita. Chiarimenti: S7-1200 CPU 1214C DC/DC/DC, indirizzo fornito dall'utente, **TIA Portal V19 o superiore**. Riferimento scelto: V21; nessuna riduzione dell'obiettivo al solo Basic o a un client alternativo. L'utente sta usando Windows: conservare sessione e documenti. Dopo questo avviso, ulteriori letture PLC svolte dal Mac.
