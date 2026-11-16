@@ -1,5 +1,19 @@
 # Diario delle verifiche
 
+## 16 novembre — Rimozione clone ibernazione e altri residui
+
+**Richiesta:** eliminare anche `perp-hib-clone`; l'utente domanda se serva l'intera cartella `Perpendicular Restart`. Quest'ultima è la radice attiva della VM: contiene discoWindows/EFI/TPM, configurazione, runtime, rete/cartelle condivise e copie di ripristino. Preservata; proseguita la pulizia dei residui di prova già autorizzata. Utente continua a usareWindows, nessun riavvio o cambio configurazione.
+
+**Rimossi nove target verificati non aperti:** `~/.local/share/perp-hib-clone`; tre sottocartelle `captures` nelle proveQA `consumer-capture-20261023`, `texture-capture-20261023`, `consumer-transition-20261023`; cinqueISO `HostVPN/Setup-*.iso` elencate nel piano privato. Conservati runtime/configurazioniVPN e strumenti/sorgenti/patch/ricette; nessun intervento nel Windows vivo. Il clone aveva circa63GiB apparenti condivisi APFS, non attribuiti integralmente al recupero effettivo.
+
+**Controlli prima:** catena main già attestata autonoma, ricontrolloQMP backing depth0/stato running e assenza del clone nei dischi collegati. Inventario file aperti globale aggiornato prima della rimozione, disco principale osservato e nessun target in uso; identitàdevice/inodi controllate e confini di ogni percorso espliciti. Configurazione main hash identico al riferimento di inizio seguito. Nessuna rimozione indiscriminata della radice Perpendicular Restart.
+
+**Esito locale FATTO:** tutti i nove target assenti. Main nello stesso processo e QMP running, stessa configurazione SHA256 e stesso percorso disco autonomo; tutti29membriNative3D del runtime ancora conformi a manifesto/canonica. I due checkpoint main conservati restano completi rispetto ai manifesti. Nessuna provaUI/riavvio, installazione o ripresa dei test di ibernazione; SYS-007 resta aperto, clone ritirato e non ricreato automaticamente.
+
+**Spazio host:** 33.949.478.912→45.291.520.000 byte disponibili, delta netto11.342.041.088 byte (~11,34GB/~10,56GiB). Baseline nuova, successiva alla precedente pulizia e con utente/processi attivi: non sommare le dimensioni apparenti dei dischi o attribuire le variazioni fra i due interventi esclusivamente alla pulizia. C: non modificato né rimisurato.
+
+**Ricevute private:** `~/Library/Application Support/Perpendicular Restart/QA/cleanup-20261116/hib-followup/`, baseline/spazio, piano, file aperti, rimozioni e verifica. InGit soltanto documentazione; modifiche LOK preesistenti preservate e separate. Nessun nuovo componente prodotto distribuito.
+
 ## 16 novembre — Pulizia dischi e prove video autorizzata
 
 **Autorizzazione:** l'utente chiede di eliminare vecchie QCOW e altro materiale del progetto senza compromettere la VM; aggiunge esplicitamente tutte le vecchie prove video4K/60fps, considerando sufficiente lo stato attuale. Vincolo precedente conservato: sta usando Windows. Nessun arresto, riavvio, installazione o modifica della VM. Il ritiro delle prove non è una misura o qualifica di60fps.

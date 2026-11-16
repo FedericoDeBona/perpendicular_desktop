@@ -1,5 +1,7 @@
 # Registro dei problemi
 
+**16 novembre — ulteriore pulizia verificata:** eliminato `perp-hib-clone` su richiesta e altri residui di test/setup, recuperati altri~11,34GB; host~45,29GB disponibili. Main accesa, stesso disco/processo/configurazione e29componenti conformi. SYS-007 resta aperto, clone ritirato senza nuova prova; `Perpendicular Restart` contiene la VM corrente, quindi preservata. [Evidenze](VERIFICATION.md#16-novembre--rimozione-clone-ibernazione-e-altri-residui).
+
 **16 novembre — SYS-002, nuova pulizia autorizzata verificata:** ~26,73GB netti recuperati sul Mac, ~34,68GB disponibili. Eliminati 11QCOW2 superati incluse VM/checkpoint video4K, 15runtime inattivi, 21archivi app e media/payload delle prove. Main accesa nello stesso processo, configurazione/disco/protezioni non modificati; due checkpoint completi e ultimo archivio app conservati. Sorgenti/ricette/toolchain e recupero LOK preservati. Prove4K/60 ritirate su richiesta, nessuna nuova qualificaFPS. C: non ampliato/rimisurato, installazioneTIA ancora da preparare. Prevenzione esaurimentoSYS-002 resta aperta. [Evidenze](VERIFICATION.md#16-novembre--pulizia-dischi-e-prove-video-autorizzata).
 
 **16 novembre — TIA Portal V19+, fattibilità iniziale/TODO-026:** CPU 1214C utente raggiunta dalla VM suTCP 102; identificazioneS7 dalMac6ES7214-1AG40-0XB0/FW4.6.1. TIA e tool Siemens non installati/non qualificati, nessun nuovo difettoARM dimostrato. Spazio insufficiente per l'installazioneV21 documentato inSYS-002; preservare laVM attualmente usata dall'utente. Host29/29 e driverrete allineati; servizio guest diverso dal bundle, nessun aggiornamento invasivo durante la ricognizione. [Evidenze e limiti](VERIFICATION.md#16-novembre--tia-portal-v19-o-superiore-e-cpu-1214c-reale).
@@ -571,6 +573,8 @@ Il ciclo RAM protetto 4→2→4 GiB con dati conservati resta la qualifica prece
 
 ### SYS-002 — Spazio host esaurito durante le scritture VM
 
+- **16 novembre, seguito pulizia:** ulteriori11.342.041.088 byte recuperati, disponibili45.291.520.000 byte dopo rimozione del cloneibernazione, tre raccolteGPU e cinqueISOsetupVPN. Main preservata/verificata, nessuna pulizia interna aWindows o prevenzione prodotto implementata. [Evidenze](VERIFICATION.md#16-novembre--rimozione-clone-ibernazione-e-altri-residui).
+
 - **16 novembre, pulizia successiva autorizzata:** spazio host7.951.753.216→34.677.616.640 byte, delta26.725.863.424 byte (~26,73GB). Rimossi 11QCOW2 superati e artefatti selezionati, non la VM viva; confronto inodi/configurazione/QMP e29hash host PASS. Conservati due checkpoint completi main e archivio app verificato; C: non ampliato né rimisurato. È recupero manuale dello spazio, non prevenzione prodotto o installazioneTIA completata. [Evidenze](VERIFICATION.md#16-novembre--pulizia-dischi-e-prove-video-autorizzata).
 
 - **16 novembre, M4/TODO-026:** ricognizioneTIA con VM in uso: volume host7.916.996KiB liberi (~7,55GiB), C:7,93GiB su63,06GiB. RequisitoTIA V21 almeno20GB liberi non soddisfatto. Installazione BLOCCATA nel perimetro attuale; nessun nuovo esaurimento/erroreI/O, pulizia o resize del disco eseguiti. Servono capacità adeguata e distribuzione dei supporti verificata, senza sacrificare dati/checkpoint. Prevenzione prodotto resta aperta. [Evidenze](VERIFICATION.md#16-novembre--tia-portal-v19-o-superiore-e-cpu-1214c-reale).
@@ -1073,5 +1077,7 @@ Queste voci conservano limiti non risolti, senza richiedere di ripristinare codi
 
 
 ### SYS-007 — Ibernazione termina con bugcheck Windows
+
+**16 novembre — clone ritirato:** `~/.local/share/perp-hib-clone` eliminato su esplicita richiesta, non in uso e non backing della main. Sorgenti/correzioni candidate e diario conservati; nessuna nuova verifica, problema non chiuso. Non ricreare automaticamente il clone. [Evidenze](VERIFICATION.md#16-novembre--rimozione-clone-ibernazione-e-altri-residui).
 
 **30 ottobre, APERTO.** S4 dichiarato disponibile dopo abilitazione, ma primo shutdown /h termina la VM e alla riaccensione manca la sessione. Event41 bugcheck0x1e/eccezione0xc000001d/istruzione0xd5385308; nuovo boot completo. Indizio ERRIDR_EL1 non gestito dal runtime HVF, distinto dalle assertion host SYS-001. Candidata lettura EL1/registro0 e builder condiviso compilati/verificati offline; clone poi fallisce con bugcheck0x7e/access violation, sessione assente. Nessun fix generale qualificato o distribuito. Ibernazione ripristinata disabilitata, niente automatismo in chiusura. **Prossimo passo:** lettura adeguata del dump kernel0x7e e modulo/stack, poi candidata nel clone; **criterio di chiusura:** sessione/documento realmente ripresi con grafica/input e protezioni conservati, poi distribuzione main. TODO-025 IN CORSO. [Evidenze](VERIFICATION.md#30-ottobre--prima-prova-ibernazione-e-bugcheck).
