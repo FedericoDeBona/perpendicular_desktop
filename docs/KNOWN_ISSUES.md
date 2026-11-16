@@ -1,5 +1,7 @@
 # Registro dei problemi
 
+**16 novembre — preparazione TIA V21 completata nella main; installazione affidata all’utente.** Autorizzati espansione e arresti: disco64→160GiB, C:158,38GiB Healthy/100.84GiB liberi, WinRE1,5GiB Enabled e immagine originale verificata dopo nuovo avvio. RAM originale ripristinata semanticamente, task temporanei rimossi. ISO principale, italiano e DVD2 verificati SHA256 Siemens in `~/Downloads/TIA Portal V21`, raggiungibili dalla condivisione downloads. Copia C: superflua avviata dall’agente, fermata/rimossa dopo correzione utente: usare il disco condiviso. TIA non installato. PLCSIM non scaricabile: Siemens segnala revisione della registrazione export ancora in corso. AssertionRAM/HVF durante riattivazioneWinRE conservata, recupero riuscito senza riparazioneQCOW2; SYS-001/003 restano aperti. [Evidenze](VERIFICATION.md#16-novembre--disco-160gib-e-supporti-tia-v21-pronti).
+
 **16 novembre — eliminazione Rollback richiesta e verificata:** i due checkpoint main5/10novembre sono stati eliminati e non sono più input disponibili per il recuperoLOK. DiscoWindows attuale autonomo, stessa main accesa e configurazione invariata. Recuperati ~51.08GB, host~155.97GB disponibili. Difetti già aperti non chiusi dalla pulizia. [Evidenze](VERIFICATION.md#16-novembre--rollback-eliminato-su-richiesta).
 
 **16 novembre — ulteriore pulizia verificata:** eliminato `perp-hib-clone` su richiesta e altri residui di test/setup, recuperati altri~11,34GB; host~45,29GB disponibili. Main accesa, stesso disco/processo/configurazione e29componenti conformi. SYS-007 resta aperto, clone ritirato senza nuova prova; `Perpendicular Restart` contiene la VM corrente, quindi preservata. [Evidenze](VERIFICATION.md#16-novembre--rimozione-clone-ibernazione-e-altri-residui).
@@ -543,6 +545,9 @@ Il ciclo RAM protetto 4→2→4 GiB con dati conservati resta la qualifica prece
 
 ### SYS-001 — Arresto HVF durante riavvio o arresto
 
+**16 novembre, TODO-026:** assertion `!qemu_in_vcpu_thread()` in `perp_hvf_quiesce`, stack `perp_balloon_output_bh→aio_poll→blk_pwrite→pflash_write` durante reagentc/enable. Runtime0.2.86 effettivo già conforme29/29; nuovo caso reentrante distinto dal deadlock precedentemente corretto. Checkqcow2 offline senza riparazione PASS; riavvio, RAM temporaneamente mantenuta8192MiB e riparazione dei riferimentiBCD WinRE riusciti. RAM originale ripristinata e boot finale verificato. Nessun fixQEMU promosso; prossimo passo soltanto su richiesta: proteggere il percorsoBH reentrante e verificare lo stesso contestoEFI con sorgenti/ricetta/pin/gate. [Evidenze](VERIFICATION.md#16-novembre--disco-160gib-e-supporti-tia-v21-pronti).
+
+
 **4 novembre, RAMQA:** dopo ricorrenza esatta del deadlock26ottobre con.63 e singolo forcestop della solaQA autorizzato, correzione.64 lascia libero il mainloop mentre attende tutti gli ACKvCPU. Stesso profilo protetto: boot/ciclo/integrità e arrestoACPI con1522MiBballoon/0finestre terminano QEMU realmente, diskcheck0; PASS circoscritto alla dipendenza circolare, altre assertionHVF aperte. Ricette/pin/gate condivisi, canonica.64/mainconfig2+2 e runtime effettivo29hash/driver firmati/main3→4GiB verificati; nessun ulteriore ciclo shutdownmain, affidabilità generale aperta. [Esito negativo](VERIFICATION.md#4-novembre--consegna-main-fermata-dal-deadlock-ramresetgpu-gia-noto), [rimedio e prova](VERIFICATION.md#4-novembre--quiesce0264-nel-clone-e-arresto-normale-con-balloon-attivo).
 
 **3 novembre, integrazione0.2.62:** Corretto caso distinto di falso errore all’avvio: endpoint pubblicato solo dopo QMP autenticato, ripresa osservata se ritardato. ColdbootQA/PIDendpoint/desktop PASS; nessuna nuova chiusura della causaHVF o affidabilità generale. [Evidenze](VERIFICATION.md#3-novembre--build-unica-resize-e-video0262-sul-m1).
@@ -577,6 +582,9 @@ Il ciclo RAM protetto 4→2→4 GiB con dati conservati resta la qualifica prece
 
 ### SYS-002 — Spazio host esaurito durante le scritture VM
 
+**16 novembre, preparazioneTIA:** deficitC risolto con disco160GiB/C158,38GiB Healthy, 100.84GiB liberi dopo riavvio e rimozione duplicato. È preparazione locale manuale, non prevenzione prodotto implementata. [Evidenze](VERIFICATION.md#16-novembre--disco-160gib-e-supporti-tia-v21-pronti).
+
+
 - **16 novembre, seguito pulizia:** ulteriori11.342.041.088 byte recuperati, disponibili45.291.520.000 byte dopo rimozione del cloneibernazione, tre raccolteGPU e cinqueISOsetupVPN. Main preservata/verificata, nessuna pulizia interna aWindows o prevenzione prodotto implementata. [Evidenze](VERIFICATION.md#16-novembre--rimozione-clone-ibernazione-e-altri-residui).
 
 - **16 novembre, pulizia successiva autorizzata:** spazio host7.951.753.216→34.677.616.640 byte, delta26.725.863.424 byte (~26,73GB). Rimossi 11QCOW2 superati e artefatti selezionati, non la VM viva; confronto inodi/configurazione/QMP e29hash host PASS. Conservati due checkpoint completi main e archivio app verificato; C: non ampliato né rimisurato. È recupero manuale dello spazio, non prevenzione prodotto o installazioneTIA completata. [Evidenze](VERIFICATION.md#16-novembre--pulizia-dischi-e-prove-video-autorizzata).
@@ -597,6 +605,9 @@ Il ciclo RAM protetto 4→2→4 GiB con dati conservati resta la qualifica prece
 - **Evidenze:** [incidente e recupero](VERIFICATION.md#24-ottobre--driver-per-risoluzioni-personalizzate-preparazione-e-installazione-nel-clone), [pulizia autorizzata](VERIFICATION.md#25-ottobre--pulizia-delle-vecchie-prove-e-base-corrente).
 
 ### SYS-003 — RAM della VM non restituita al Mac a runtime
+
+**16 novembre, TODO-026:** assertion `!qemu_in_vcpu_thread()` in `perp_hvf_quiesce`, stack `perp_balloon_output_bh→aio_poll→blk_pwrite→pflash_write` durante reagentc/enable. Runtime0.2.86 effettivo già conforme29/29; nuovo caso reentrante distinto dal deadlock precedentemente corretto. Checkqcow2 offline senza riparazione PASS; riavvio, RAM temporaneamente mantenuta8192MiB e riparazione dei riferimentiBCD WinRE riusciti. RAM originale ripristinata e boot finale verificato. Nessun fixQEMU promosso; prossimo passo soltanto su richiesta: proteggere il percorsoBH reentrante e verificare lo stesso contestoEFI con sorgenti/ricetta/pin/gate. [Evidenze](VERIFICATION.md#16-novembre--disco-160gib-e-supporti-tia-v21-pronti).
+
 
 **6 novembre, preservazione nella .84:**11letture consecutive in primo piano a8192MiB/balloon0/reusable0/pendingfalse dopo3letture di transizione. Ultimo campione idle3328MiB netti balloon, ma plugged4278MiB/balloon2998MiB e pending/unplugStalledtrue: rilascio fisico ancora parziale, non risolto dal fixCPU. Successivo status3072MiB; nessun nuovo minimo stabile o risparmio fisico unico dichiarato. Ricetta/quiesce/driver conformi e configurazione invariata. [Consegna e limiti](VERIFICATION.md#consegna-84-nellapp-principale-e-misura-finale).
 
