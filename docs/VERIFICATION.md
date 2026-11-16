@@ -1,5 +1,17 @@
 # Diario delle verifiche
 
+## 16 novembre — Rollback eliminato su richiesta
+
+Dopo aver chiarito che conteneva i due backup completi main e che la loro eliminazione avrebbe rimosso anche la copia conservata per il recuperoLOK, l’utente ordina esplicitamente di procedere. Eliminata l’intera cartella `~/Library/Application Support/Perpendicular Restart/Rollback` con i checkpoint5novembre091939Z e10novembre163305Z. Non più disponibili, non ricreati automaticamente. Archivio app, sorgenti e altri dati fuori da questa directory non modificati.
+
+Prima della rimozione: percorso esatto e assenza di symlink verificati; ogni file vivo Windows/EFI/TPM risiede fuoriRollback. QMPmain running, disco vivo autonomo/backing depth0 e nessun checkpoint collegato. Inventario globale file aperti aggiornato: nessun file sottoRollback aperto, disco main effettivamente osservato. Piano dei due checkpoint e file salvato privatamente, senza duplicare i dischi da eliminare.
+
+**Esito locale FATTO/PASS:** Rollback assente; stesso processoQEMU e sessione running, stessa configurazioneSHA256, stessi device/inodi dei quattro file vivi, stesso percorso disco autonomo. Nessun arresto, riavvio, mount/riparazione, cambio rete/RAM o modifica dei salvataggi. Nessuna nuova qualificaUI o risoluzione dei difetti precedenti.
+
+**Spazio:** 104890425344→155970121728 byte disponibili; delta netto51079696384 byte (~51.08GB), disponibili~155.97GB. Nuova baseline successiva ai precedenti interventi, con attività concorrente dell’utente: non attribuire a questa rimozione le variazioni fra le diverse baseline né sommare le dimensioni apparentiAPFS. Spazio internoC: non ampliato né rimisurato.
+
+Ricevute private in `QA/cleanup-20261116/rollback-removal/`: baseline/configurazione hash e identità dei file protetti, inventario file aperti, QMP e verifica/spazio finali. InGit solo documentazione; modificheLOK preesistenti conservate e separate dal commit.
+
 ## 16 novembre — Rimozione clone ibernazione e altri residui
 
 **Richiesta:** eliminare anche `perp-hib-clone`; l'utente domanda se serva l'intera cartella `Perpendicular Restart`. Quest'ultima è la radice attiva della VM: contiene discoWindows/EFI/TPM, configurazione, runtime, rete/cartelle condivise e copie di ripristino. Preservata; proseguita la pulizia dei residui di prova già autorizzata. Utente continua a usareWindows, nessun riavvio o cambio configurazione.

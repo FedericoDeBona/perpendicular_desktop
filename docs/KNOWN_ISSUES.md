@@ -1,5 +1,7 @@
 # Registro dei problemi
 
+**16 novembre — eliminazione Rollback richiesta e verificata:** i due checkpoint main5/10novembre sono stati eliminati e non sono più input disponibili per il recuperoLOK. DiscoWindows attuale autonomo, stessa main accesa e configurazione invariata. Recuperati ~51.08GB, host~155.97GB disponibili. Difetti già aperti non chiusi dalla pulizia. [Evidenze](VERIFICATION.md#16-novembre--rollback-eliminato-su-richiesta).
+
 **16 novembre — ulteriore pulizia verificata:** eliminato `perp-hib-clone` su richiesta e altri residui di test/setup, recuperati altri~11,34GB; host~45,29GB disponibili. Main accesa, stesso disco/processo/configurazione e29componenti conformi. SYS-007 resta aperto, clone ritirato senza nuova prova; `Perpendicular Restart` contiene la VM corrente, quindi preservata. [Evidenze](VERIFICATION.md#16-novembre--rimozione-clone-ibernazione-e-altri-residui).
 
 **16 novembre — SYS-002, nuova pulizia autorizzata verificata:** ~26,73GB netti recuperati sul Mac, ~34,68GB disponibili. Eliminati 11QCOW2 superati incluse VM/checkpoint video4K, 15runtime inattivi, 21archivi app e media/payload delle prove. Main accesa nello stesso processo, configurazione/disco/protezioni non modificati; due checkpoint completi e ultimo archivio app conservati. Sorgenti/ricette/toolchain e recupero LOK preservati. Prove4K/60 ritirate su richiesta, nessuna nuova qualificaFPS. C: non ampliato/rimisurato, installazioneTIA ancora da preparare. Prevenzione esaurimentoSYS-002 resta aperta. [Evidenze](VERIFICATION.md#16-novembre--pulizia-dischi-e-prove-video-autorizzata).
@@ -395,6 +397,8 @@ Il ciclo RAM protetto 4→2→4 GiB con dati conservati resta la qualifica prece
 - **Criterio circoscritto verificato:** percorso C:\Users\federico\Downloads, unità logiche C:/D:/nessuna X:, byte e rinomina bidirezionali, riavvio servizio,9voci originali nel backup; Explorer con Downloads normale, Salva con nome Notepad→nuovo file effettivo Mac. Pulizia dei soli due file di prova confermata anche dal Mac. Qualifica del boot completo e semantiche generali restano TODO-003; non ripetere il caso già positivo senza modifiche pertinenti. [Diario](VERIFICATION.md#27-ottobre--download-ordinaria-senza-unita-aggiuntiva).
 
 ### GFX-011 — Avvio Unity x86 interrotto sul percorso Direct3D
+
+**16 novembre — disponibilità delle copie aggiornata:** su esplicita autorizzazione eliminati anche i checkpoint completi5/10novembre della main; non usarli come input di recuperoLOK. Nessun ripristino o intervento sui dati del gioco durante questa pulizia; esiti storici e problema conservati. [Evidenze](VERIFICATION.md#16-novembre--rollback-eliminato-su-richiesta).
 
 - **M4, 3 novembre: caso LOK hardware SUPERATO nel perimetro osservato.** Prima sessione Desktop con forte lag: Player.log identifica WARP, esito negativo conservato. Dopo aggiornamento guest/Win32 release0.1.1 e cold boot normale, stesso exe Desktop riaperto senza WARP: modulo6cf6… effettivo, VirtIO/D3D11/menu verificati e utente “Ora è fluido”. Collegamento software precedente conservato e aggiornato all’hardware; nessun FPS numerico o qualifica generale. Build/distribuzione/main circoscritte FATTE, clone NON ESEGUITO qui; altre app/main Windows M1 distinte. [Evidenze e limiti](VERIFICATION.md#3-novembre--pull-rebuild-e-guest-tools-sul-m4).
 
