@@ -1,5 +1,13 @@
 # Diario delle verifiche
 
+## 17 novembre — obiettivo PLC reale, backup e programma di verifica
+
+- Obiettivo attivo creato su richiesta: FlashLED riuscito oppure compilazione/caricamento verificati sulla1214C192.168.2.253. Autorizzati anche driverpropri/modotest se necessari. Utente conferma banco prova con uscite scollegate e autorizza STOP/riavvio. Non modificata la protezioneWindows per la provaIP.
+- TIA mainV21: avviato Backup from online device; anteprima richiedeva STOP. Dopo l’autorizzazione utente e durante la sessioneCUA, logTIA attesta PLC_1stopped11:30:15 e backup online concluso11:30:19 con0errori/0avvisi. Non attribuita all’agente ogni selezione dell’anteprima: il completamento è stato osservato fra due catture senza tracciatura esclusiva degli input utente.
+- Saveproject iniziale riporta anche `Archive could not be saved`; due cartelle preesistenti `Project1/AdditionalFiles/PLCM` e `IM/SPL` erano mode000. Ripristinato soltanto accesso del proprietario `u+rwx`, cartelle vuote; nessuna modifica globale ai permessiSamba. Resta da verificare il successivo salvataggio dell’archivio interno. FS-011: questo residuo non annulla la precedente prova mkdir, ma impedisce di presumere compatibilità completa dei vecchi contenuti.
+- Backup esportato con Saveas dalla voceOnlinebackups: TIA conferma salvataggio11:32:32 in `C:\Users\federico\Downloads\PLC_1214C_originale_20261117.s7pbkp`. File sulMac495841byte, SHA256 `e10ce49bf9072207a28ced4b37866c99649c6b32903cb4783c00b4f61dcba21b`; ricevuta privata `QA/tia-network-20261117/plc-original-backup-export.json`. Ripristino non ancora provato.
+- Generato sorgente privato condiviso `~/Downloads/Perpendicular_PLC_Verifica_20261117.scl`: DBottimizzatoPerp_VM_Proof con firmaDWORD50455250 e contatoreUDInt aggiornato daMain/OB1, senza accessiI/Q o comunicazioni esterne. Importazione/generazioneTIA11:34:39 conclusa0errori/0avvisi, MainOB1 e DB1 visibili. CompilazioneCPU/download/esecuzione ancora da verificare. Sorgenti e backup privati fuoriGit.
+
 ## 17 novembre — conferma binario driver DCP x64
 
 - **Richiesta/esito:** l’utente segnala nuovamente che FlashLED non funziona. NET-001 resta aperto; la precedente compilazione senza password non risolveva il comando di identificazione. Nessun nuovo fix implementato o distribuito in questa ripresa.

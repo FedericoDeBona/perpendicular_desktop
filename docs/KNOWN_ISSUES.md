@@ -311,6 +311,8 @@ Il ciclo RAM protetto 4→2→4 GiB con dati conservati resta la qualifica prece
 
 ### FS-011 — Creazione cartelle SMB negata nel percorso temporaneo Samba
 
+- **Residuo17novembre:** due sottocartelle create prima della correzione (`Project1/AdditionalFiles/PLCM`, `IM/SPL`) ancora mode000, entrambe vuote; ripristinato solo `u+rwx`. TIA aveva segnalatoArchivecouldnotbesaved pur salvando ilprogetto. BackupCPU esportato separatamente con esitoTIA e hashfileMac verificati; persistenza dell’archivio interno dopo riparazione ancora da verificare. Non riaperta la diagnosi delmkdir già corretto. [Diario](VERIFICATION.md#17-novembre--obiettivo-plc-reale-backup-e-programma-di-verifica).
+
 - **Stato:** implementazione condivisa .87 e creazione progettoTIA nella main con policy live VERIFICATE; distribuzione .87 e verifica finale nella main dopo nuovo boot FATTE17novembre nel perimetro mkdir/progetto. Clone NON ESEGUITO.
 - **Sintomo:** TIA4600:000251 creando Downloads\Project1; riproduzione anche con normale .NETmkdir, cartellaMac vuota mode000. Downloads è deliberatamente condivisa con ilMac: un progetto locale C: non soddisfa il requisito.
 - **Causa/correzione:** serverSamba4.25.1 non privilegiato suMac fallisce il rename della directory temporanea mode000. Per ogni export autenticato usare `vfs mkdir use tmp name = no`, preservando modi/ACL, autenticazione, SMBcifrato e loopback. Non aggiungere force unknown acl user/force mode: candidata respinta. Non cambiare SID/Defender per aggirare il difetto.
