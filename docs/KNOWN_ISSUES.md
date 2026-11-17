@@ -301,6 +301,8 @@ Il ciclo RAM protetto 4→2→4 GiB con dati conservati resta la qualifica prece
 
 ### NET-001 — Flash LED TIA non disponibile nel percorso NAT/ARM attuale
 
+- **Conferma binario17novembre, dopo nuova segnalazione utente:** trovato il file originale `Simatic OAM/NetTrans/s7PnDiscoveryDriver.sys` (41400byte): headerPE Machine0x8664/x64, SHA256 `494d2d2dc4f24dbd6104a7e8fc08768883d9133d6046deaf2cdc21efc82f5473`. Non è un driverARM64 non ancora registrato: questo binario non può essere caricato dal kernelWindowsARM. File installato/servizio/binding ancora assenti. NAT e driver sono due ostacoli distinti; il solo bridge non basta. FlashLED **NON RISOLTO**; compilazione senza password non è una verifica del lampeggio. Serve un percorsoDCP compatibile completo, non un altro tentativo di inoltroIP. [Evidenze](VERIFICATION.md#17-novembre--conferma-binario-driver-dcp-x64).
+
 - **Seguito17novembre:** pacchetto `s7pndiscoverydriver.inf_arm64_*` contiene soloINF/CAT; INF9.3.6.0 ManufacturerNTamd64, ServiceType1 e filekernel richiesto assente. S7oiehsx64 e PnDiscovery installati sono serviziuser-mode/Type16, non driverDCPARM. Non installato/forzato alcun binariox64kernel, nessuna modifica alla firma o alle protezioni. [Diario](VERIFICATION.md#17-novembre--seguito-inoltro-plc-locale-e-driver-dcp).
 
 - **Stato:** APERTO; identificazione/diagnosticaS7 online verificate, lampeggio fallito anche secondo l’utente. Nessuna impossibilità generale di programmazioneARM dedotta.
