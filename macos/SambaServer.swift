@@ -75,7 +75,11 @@ enum SambaServer {
             // Windows images need SMB execute access even when a readable Mac
             // file has no POSIX x bit. Scope this to the authenticated exports;
             // keep Mac modes, read access and the private server unchanged.
-            config += "[\(folder.kind.windowsName)]\npath = \(folder.hostPath)\nread only = no\nvalid users = \(value.username)\nbrowseable = yes\nfollow symlinks = no\nacl allow execute always = yes\n\n"
+            // Samba's temporary mkdir path creates a mode-000 directory before
+            // renaming it. On this unprivileged macOS server the rename fails
+            // with ACCESS_DENIED and can leave an inaccessible final folder.
+            // Create at the requested name; keep normal permissions and ACLs.
+            config += "[\(folder.kind.windowsName)]\npath = \(folder.hostPath)\nread only = no\nvalid users = \(value.username)\nbrowseable = yes\nfollow symlinks = no\nacl allow execute always = yes\nvfs mkdir use tmp name = no\n\n"
         }
         let configFile=root.appendingPathComponent("smb.conf"),data=Data(config.utf8)
         let changed=(try? Data(contentsOf:configFile)) != data

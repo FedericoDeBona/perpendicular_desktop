@@ -1,5 +1,7 @@
 # Registro dei problemi
 
+**17 novembre — TODO-026/003: TIA V21 avviato e progetto condiviso creato; rete locale e lampeggio distinti.** FS-011: creazione cartelle Samba falliva nel percorso con nome temporaneo; policy `vfs mkdir use tmp name = no` verificata nella main il16novembre, incorporata nella .87 e ora installata. Dopo ripresa Windows, TIA identifica online la1214C/FW4.6.1. Rimosso solo192.168.2.253 dall’inoltro Mac→VPN Windows: è sulla LAN del Mac; cinque target remoti preservati. FlashLED NON RISOLTO: TIA segnala impossibilità di stabilire DCP, confermata dall’utente; zero frameDCP nella cattura VirtIO/NAT e nessun protocolloSiemens associato allaNIC. Compilazione/licenza/download non ancora qualificati; programmaPLC esistente intatto. [Evidenze](VERIFICATION.md#17-novembre--tia-condivisione-progetto-rete-locale-e-limite-dcp).
+
 **16 novembre — TODO-026, installazione TIA V21 riuscita secondo il setup; riavvio pendente.** Installazione avviata dall’utente e seguita dall’agente fino al riepilogo «Setup has successfully completed». Registro Siemens: SuccessRebootRequired,0errori/0avvisi, tempoINSTALL21min37s. Fase sistema finale conclusa; pulsanteRestart lasciato all’utente. Nessuna prova di avvio/compilazione/licenza o online sulla1214C ancora eseguita; compatibilitàARM non qualificata dal solo installer. [Evidenze](VERIFICATION.md#16-novembre--monitoraggio-installazione-tia-v21).
 
 **16 novembre — TODO-026, controllo dell’installer avviato dall’utente:** fase Checking prerequisites superata senza interventi. Il registro Siemens attesta verifica integrità di 2080 file in 310 secondi, Success/exit0 alle16:02:07; schermata successiva Initializing:25% e log MSI in avanzamento alle16:03:30. Nessuna conclusione sulla compatibilità completa ARM o sull’installazione terminata. Prossimo passo: prosecuzione dell’utente e verifica dell’esito effettivo; criterio generale TIA/PLC ancora pendente. [Evidenze](VERIFICATION.md#16-novembre--controllo-prerequisiti-tia-v21-avviato-dallutente).
@@ -290,6 +292,19 @@ Il ciclo RAM protetto 4→2→4 GiB con dati conservati resta la qualifica prece
 - Conservare fallimenti nel diario e dati privati fuori Git. Non ripetere test senza modifiche pertinenti o nuove evidenze.
 
 ## Problemi pertinenti al desktop
+
+### NET-001 — Flash LED TIA non disponibile nel percorso NAT/ARM attuale
+
+- **Stato:** APERTO; identificazione/diagnosticaS7 online verificate, lampeggio fallito anche secondo l’utente. Nessuna impossibilità generale di programmazioneARM dedotta.
+- **Evidenza:** TIA V21 `Unable to establish DCP connection!`; zeroEtherType0x8892 nella cattura guest, NICVirtIO senza bindingSiemens rilevato. NAT attuale non fornisce EthernetL2 verso ilPLC. Il semplice inoltroIP Mac→VPNWindows non aggiunge tale capacità; quello delPLC locale è stato rimosso con successo.
+- **Prossimo passo/chiusura:** qualificare prima un componenteDCP Windows compatibileARM e un percorsoEthernet reale verso la LAN, poi breve prova TIAFlashLED con conferma fisica. Non sostituire questa prova con TCPconnect, non attivare STOP/RUN/download per testare l’identificazione. [Diario](VERIFICATION.md#17-novembre--tia-condivisione-progetto-rete-locale-e-limite-dcp).
+
+### FS-011 — Creazione cartelle SMB negata nel percorso temporaneo Samba
+
+- **Stato:** implementazione condivisa .87 e creazione progettoTIA nella main con policy live VERIFICATE; distribuzione .87 e verifica finale nella main dopo nuovo boot FATTE17novembre nel perimetro mkdir/progetto. Clone NON ESEGUITO.
+- **Sintomo:** TIA4600:000251 creando Downloads\Project1; riproduzione anche con normale .NETmkdir, cartellaMac vuota mode000. Downloads è deliberatamente condivisa con ilMac: un progetto locale C: non soddisfa il requisito.
+- **Causa/correzione:** serverSamba4.25.1 non privilegiato suMac fallisce il rename della directory temporanea mode000. Per ogni export autenticato usare `vfs mkdir use tmp name = no`, preservando modi/ACL, autenticazione, SMBcifrato e loopback. Non aggiungere force unknown acl user/force mode: candidata respinta. Non cambiare SID/Defender per aggirare il difetto.
+- **Chiusura:** policy generata dalla canonica dopo boot, mkdir/scrittura/lettura dalla Downloads Windows e creazione/aperturaTIA effettiva nella cartellaMac. [Diario](VERIFICATION.md#17-novembre--tia-condivisione-progetto-rete-locale-e-limite-dcp).
 
 ### FS-010 — Eseguibili Windows leggibili rifiutati dalle cartelle SMB
 
