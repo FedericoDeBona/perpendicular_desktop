@@ -48,7 +48,8 @@ $shortcutPath = Join-Path $desktop 'A Good Snowman.lnk'
 $shell = New-Object -ComObject WScript.Shell
 $shortcut = $shell.CreateShortcut($shortcutPath)
 $shortcutExists = Test-Path -LiteralPath $shortcutPath
-if ($shortcutExists -and ($shortcut.TargetPath -ine $launcherPath -or
+$installedLaunchers = @($launcherPath, (Join-Path $game.FullName 'Start Snowman Wide.cmd'))
+if ($shortcutExists -and ($installedLaunchers -notcontains $shortcut.TargetPath -or
     $shortcut.WorkingDirectory -ine $game.FullName -or $shortcut.Arguments)) {
     throw "Existing shortcut preserved: $shortcutPath"
 }
