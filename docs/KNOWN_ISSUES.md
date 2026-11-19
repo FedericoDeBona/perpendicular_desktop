@@ -435,6 +435,12 @@ Il ciclo RAM protetto 4→2→4 GiB con dati conservati resta la qualifica prece
 - **Fallimenti conservati:** controllo immediato del mount fallisce due volte, rollback riuscito; aggiunta attesa limitata della pubblicazione. Primo Ctrl+L mostra ancora suggerimenti X: della prova precedente: rimosse soltanto le relative voci TypedPaths, preservati gli altri valori/ordine.
 - **Criterio circoscritto verificato:** percorso C:\Users\federico\Downloads, unità logiche C:/D:/nessuna X:, byte e rinomina bidirezionali, riavvio servizio,9voci originali nel backup; Explorer con Downloads normale, Salva con nome Notepad→nuovo file effettivo Mac. Pulizia dei soli due file di prova confermata anche dal Mac. Qualifica del boot completo e semantiche generali restano TODO-003; non ripetere il caso già positivo senza modifiche pertinenti. [Diario](VERIFICATION.md#27-ottobre--download-ordinaria-senza-unita-aggiuntiva).
 
+### GFX-012 — A Good Snowman si chiude all'avvio su Windows ARM64
+
+- **Stato:** avvio ripristinato per la versione Windows x86 1.1.1 nella VM principale. Il gioco si chiudeva con `0xc0000005` sia da Downloads condivisa sia da una copia locale. Dalla stessa copia con Mesa OpenGL x86 e llvmpipe si apre il giardino.
+- **Distribuzione locale:** collegamento **A Good Snowman** sul desktop di Windows e due DLL nella copia locale del gioco. Ricetta e pin condivisi, con verifica delle DLL prima e dopo la copia. Clone non eseguito. Le correzioni Direct3D x86 di GFX-011 riguardano un altro percorso grafico.
+- **Limite:** OpenAL segnala un errore di inizializzazione e Windows non espone dispositivi di riproduzione. L'audio resta fuori dalla verifica di avvio. L'utente ha ritirato la segnalazione di lag. [Procedura ed evidenze](VERIFICATION.md#19-novembre--avvio-di-a-good-snowman-nella-vm-principale)
+
 ### GFX-011 — Avvio Unity x86 interrotto sul percorso Direct3D
 
 **16 novembre — disponibilità delle copie aggiornata:** su esplicita autorizzazione eliminati anche i checkpoint completi5/10novembre della main; non usarli come input di recuperoLOK. Nessun ripristino o intervento sui dati del gioco durante questa pulizia; esiti storici e problema conservati. [Evidenze](VERIFICATION.md#16-novembre--rollback-eliminato-su-richiesta).
