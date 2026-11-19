@@ -702,7 +702,9 @@ Il difetto Wait/Signal di TODO-016 condiziona l'interpretazione delle misure gue
 
 ## TODO-007 — GPU e traduzione grafica
 
-**19 novembre — A Good Snowman 1.1.1, avvio FATTO (GFX-012).** Ricetta Mesa OpenGL x86 condivisa e installazione locale completata. Clone non eseguito. Criterio verificato nell'app principale: avvio dal collegamento **A Good Snowman** e giardino visibile. L'utente conferma che il lag segnalato non si verifica. Audio non disponibile nella VM. Riprendere il caso se l'avvio regredisce o se viene richiesto l'audio. [Evidenze](VERIFICATION.md#19-novembre--avvio-di-a-good-snowman-nella-vm-principale)
+**19 novembre — A Good Snowman 1.1.1, avvio FATTO (GFX-012).** Ricetta Mesa OpenGL x86 condivisa e installazione locale completata. Clone non eseguito. Criterio verificato nell'app principale: avvio dal collegamento **A Good Snowman** e giardino visibile. Audio non disponibile nella VM. [Evidenze](VERIFICATION.md#19-novembre--avvio-di-a-good-snowman-nella-vm-principale)
+
+**19 novembre — A Good Snowman (GFX-012), riduzione del carico FATTA nella VM principale.** Impostazione del gioco salvata in modalità finestra, 756×504. Stesso processo e giardino: da 9,03 a 2,19 vCPU su 10 (~76% in meno). Contatore Mesa intorno a 60 FPS nella schermata iniziale del giardino. Clone non eseguito. Se il lag persiste a questa dimensione, misurare il caso in partita prima di cambiare il percorso grafico. [Confronto](VERIFICATION.md#19-novembre--carico-cpu-di-a-good-snowman)
 
 **6 novembre — distribuzione M1 .85 FATTA, obiettivo generale IN CORSO:** ricetteCPUidle/late-texture-init e v19 conservata, bundle/runtime/Windows allineati. QA/main protette e probevideo/OpenGL PASS; residui UI dopo fullscreen e lag non qualificato restano distinti. Prossimo passo residuo osservabile, criterio grafica completa nell’uso reale. [Evidenze](VERIFICATION.md#6-novembre--pull-rebuild-e-guest-tools-0285-sul-m1).
 

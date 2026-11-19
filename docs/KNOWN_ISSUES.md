@@ -439,7 +439,8 @@ Il ciclo RAM protetto 4→2→4 GiB con dati conservati resta la qualifica prece
 
 - **Stato:** avvio ripristinato per la versione Windows x86 1.1.1 nella VM principale. Il gioco si chiudeva con `0xc0000005` sia da Downloads condivisa sia da una copia locale. Dalla stessa copia con Mesa OpenGL x86 e llvmpipe si apre il giardino.
 - **Distribuzione locale:** collegamento **A Good Snowman** sul desktop di Windows e due DLL nella copia locale del gioco. Ricetta e pin condivisi, con verifica delle DLL prima e dopo la copia. Clone non eseguito. Le correzioni Direct3D x86 di GFX-011 riguardano un altro percorso grafico.
-- **Limite:** OpenAL segnala un errore di inizializzazione e Windows non espone dispositivi di riproduzione. L'audio resta fuori dalla verifica di avvio. L'utente ha ritirato la segnalazione di lag. [Procedura ed evidenze](VERIFICATION.md#19-novembre--avvio-di-a-good-snowman-nella-vm-principale)
+- **Prestazioni, 19 novembre:** al nuovo riscontro di lag e CPU satura, confermato carico del gioco di 9,03 vCPU su 10 a schermo intero (2940×1846). Disattivato **Fullscreen** nelle impostazioni di Snowman. Nello stesso processo e giardino, la finestra 756×504 scende a 2,19 vCPU su 10. Nella schermata iniziale del giardino il contatore Mesa mostra circa 60 FPS. La preferenza è salvata dal gioco e il rendering resta CPU. [Confronto](VERIFICATION.md#19-novembre--carico-cpu-di-a-good-snowman)
+- **Limite:** OpenAL segnala un errore di inizializzazione e Windows non espone dispositivi di riproduzione. L'audio resta fuori dalla verifica di avvio. [Procedura ed evidenze](VERIFICATION.md#19-novembre--avvio-di-a-good-snowman-nella-vm-principale)
 
 ### GFX-011 — Avvio Unity x86 interrotto sul percorso Direct3D
 
