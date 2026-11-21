@@ -1,5 +1,15 @@
 # Diario delle verifiche
 
+## 21 novembre — pulizia M1 e sola VM corrente
+
+L'utente ha chiesto di recuperare spazio conservando soltanto la VM corrente. Sul MacBookPro17,1 l'app canonica 0.2.99 e la configurazione selezionavano la stessa Memory IoT `0795218c`. App e QEMU erano chiusi. Prima della rimozione, la lettura con `qemu-img info --backing-chain` ha confermato un disco autonomo, senza immagine base o file dati esterno.
+
+Rimossi N1 Trial, QA video, QA LOK e i due ambienti della prima installazione, inclusa la ISO di prova generata. Rimossi anche i tre punti di ripristino della principale. In totale sono state eliminate 18 immagini disco di macchine o checkpoint. Ritirati inoltre tre bundle di prova, cinque archivi di vecchi bundle e due pacchetti OBS di test. Due copie di header e librerie LLVM15 erano identiche alla copia di riferimento. Il confronto ricorsivo e quello delle destinazioni dei link sono passati. Le copie sono state sostituite da collegamenti verificati verso la toolchain conservata. Restano la ISO Windows originale in Download, i sorgenti, le ricette di build e le piccole evidenze archiviate.
+
+Al controllo finale il Mac aveva **59.988.119.552 byte disponibili**, da **3.934.203.904 byte** all'inizio. L'aumento netto sul volume è stato **56.053.915.648 byte**. La misura è quella dello spazio effettivamente disponibile durante l'intervento. I cloni APFS condividono blocchi e le dimensioni delle singole immagini non sono sommabili.
+
+**Verifica locale FATTA:** i percorsi selezionati sono assenti e l'inventario dei percorsi accessibili in home e `/Users/Shared` identifica un solo disco di VM, quello della principale. Firma dell'app verificata prima e dopo. Inode, dimensione, data di modifica e hash del primo MiB del disco invariati. Hash integrali e metadati verificati per plist, configurazione, firmware, variabili EFI e stato TPM. Windows è rimasto spento durante l'intervento. Verifica di avvio e verifica funzionale in clone NON ESEGUITE. Nessuna modifica al prodotto o nuova distribuzione. Ricevuta privata in `QA/cleanup-20261121/receipt.json` sotto la radice IoT.
+
 ## 14 novembre — prima installazione automatica da ISO
 
 **Requisito/obiettivo attivo TODO-026:** app distribuibile su GitHub, ISO Windows fornita dall'utente, creazione e installazione fino al desktop pronto senza operazioni manuali Windows. App .99 e VM IoT esistenti da preservare. L'utente esclude esplicitamente Apple Developer/notarizzazione e accetta l'autorizzazione di apertura da Privacy e sicurezza; licenza Windows della ISO di prova accettata esplicitamente. Non un'autorizzazione a includere Windows o credenziali nella release.

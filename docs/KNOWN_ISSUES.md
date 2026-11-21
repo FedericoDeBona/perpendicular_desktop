@@ -680,6 +680,8 @@ Il ciclo RAM protetto 4→2→4 GiB con dati conservati resta la qualifica prece
 
 ### SYS-002 — Spazio host esaurito durante le scritture VM
 
+- **21 novembre, M1/0795218c:** pulizia autorizzata completata. Recuperati 56,05 GB netti, 59,99 GB disponibili al controllo. Rimane la sola Memory IoT corrente. Rimosse 18 immagini di prova o ripristino e altri artefatti pesanti. Conservazione della principale verificata offline. La prevenzione nel prodotto resta aperta. [Evidenze](VERIFICATION.md#21-novembre--pulizia-m1-e-sola-vm-corrente).
+
 - **3 novembre, M1/0795218c:** nuova pulizia esplicita con VM/app spente:28.946.391.040→53.752.737.792 byte liberi, delta24.806.346.752 byte.18 dischi autonomi superati e altri artefatti ritirati; tre VM correnti e un checkpoint completo per ciascuna conservati.107.805 record protetti invariati, gate/firme app PASS; nessuna nuova prova I/O/UI né prevenzione prodotto implementata. SYS-002 resta aperto, TODO-010 non riattivato. [Evidenze](VERIFICATION.md#3-novembre--pulizia-delle-vecchie-copie-e-base-conservata).
 
 - **Seconda pulizia27 ottobre, stesso Mac:** liberi36.468.113.408→77.154.340.864 byte, delta40.686.227.456 byte durante rimozione degli artefatti del vecchio progetto. La misura parte dal nuovo inventario, distinto dal primo recupero e con altri processi attivi; non attribuire ogni variazione di spazio a QEMU. Stesso processo e dischi collegati, nessun nuovo errore I/O riprodotto. Prevenzione nel prodotto ancora aperta. [Evidenze](VERIFICATION.md#27-ottobre--seconda-pulizia-del-vecchio-progetto-e-degli-artefatti).
