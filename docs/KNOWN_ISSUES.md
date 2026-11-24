@@ -362,6 +362,8 @@ Il ciclo RAM protetto 4→2→4 GiB con dati conservati resta la qualifica prece
 
 ### FS-004 — Collegamento directory a un volume non più presente
 
+**24 novembre, main .87:** durante un avvio lento la preparazione automatica è scaduta perché Windows non ha risposto in tempo. Il desktop e il servizio si sono ripresi nello stesso avvio. Il nuovo collegamento delle cartelle resta da verificare una volta che Windows risponde normalmente. [Evidenze](VERIFICATION.md#24-novembre--avvio-lento-di-windows-nella-vm-principale).
+
 **6 novembre, M1 .85 — APERTO:** QA e main con helper aggiornati riproducono lo stesso errore Connect/logon-session; cartelle ancora non collegate, selezione conservata. Nessuna nuova diagnosi o attribuzione ai consensi. [Verifica](VERIFICATION.md#6-novembre--pull-rebuild-e-guest-tools-0285-sul-m1).
 
 **6 novembre, consegna .84 M4:** primo boot con audit execute avviato durante preparazione cartelle: collegamento fallito, recuperato con un solo Riprova ordinario; nessuna causa CPU isolata. Successivo arresto/avvio normale, audit ritardato fino alla preparazione conclusa:3cartelle collegate automaticamente. Difetto intermittente APERTO, nessun nuovo fix filesystem o roundtrip dichiarato. [Evidenze](VERIFICATION.md#consegna-84-nellapp-principale-e-misura-finale).
@@ -590,6 +592,8 @@ Il ciclo RAM protetto 4→2→4 GiB con dati conservati resta la qualifica prece
 - **Criterio soddisfatto:** stesso runtime locale e configurazione fissa avviati nella main con Windows collegato, senza errore PCI; Guest Tools aggiornati Running/hash concorde. [Diario](VERIFICATION.md#28-ottobre--pull-rebuild-0228-sulla-iot0795218c-in-attesa-del-consenso-macos).
 
 ### SYS-001 — Arresto HVF durante riavvio o arresto
+
+**24 novembre, main .87:** il tentativo segnalato dall’utente è avanzato durante i rilievi, fino al desktop utilizzabile dopo circa cinque minuti e mezzo nello stesso processo. Il menu Start ha risposto al clic e l’utente conferma la ripresa. Causa del ritardo aperta. Se ricorre, correlare le fasi dell’evento Windows 100 al tempo osservato fino al desktop. [Evidenze](VERIFICATION.md#24-novembre--avvio-lento-di-windows-nella-vm-principale).
 
 **16 novembre, TODO-026:** assertion `!qemu_in_vcpu_thread()` in `perp_hvf_quiesce`, stack `perp_balloon_output_bh→aio_poll→blk_pwrite→pflash_write` durante reagentc/enable. Runtime0.2.86 effettivo già conforme29/29; nuovo caso reentrante distinto dal deadlock precedentemente corretto. Checkqcow2 offline senza riparazione PASS; riavvio, RAM temporaneamente mantenuta8192MiB e riparazione dei riferimentiBCD WinRE riusciti. RAM originale ripristinata e boot finale verificato. Nessun fixQEMU promosso; prossimo passo soltanto su richiesta: proteggere il percorsoBH reentrante e verificare lo stesso contestoEFI con sorgenti/ricetta/pin/gate. [Evidenze](VERIFICATION.md#16-novembre--disco-160gib-e-supporti-tia-v21-pronti).
 

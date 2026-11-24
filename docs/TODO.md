@@ -807,6 +807,8 @@ Prossimo passo: quando si affronta il singolo difetto, conservare un caso reale 
 
 ### TODO-009 — Arresto, riavvio e recupero
 
+**24 novembre — episodio main .87 recuperato e verificato.** Desktop e menu Start utilizzabili sullo stesso avvio dopo circa cinque minuti e mezzo, con conferma dell’utente. Implementazione e distribuzione invariate, clone non eseguito. Affidabilità generale IN CORSO. Se il ritardo ricorre, confrontare il tempo fino a Start con le fasi dell’evento Windows 100. Il criterio resta un avvio utilizzabile verificato nella main dopo un eventuale intervento causale. Il timeout delle cartelle resta aperto in FS-004/TODO-003. [Evidenze](VERIFICATION.md#24-novembre--avvio-lento-di-windows-nella-vm-principale).
+
 **6 novembre — manutenzione M1 .85 verificata nel perimetro:** arresto normale QA, avvio main nuovo/runtime effettivo e guest installato PASS. App principale lasciata pronta; nessuna nuova qualifica generale di reboot/ibernazione o chiusura SYS-001. [Evidenze](VERIFICATION.md#6-novembre--pull-rebuild-e-guest-tools-0285-sul-m1).
 
 **27 ottobre0.2.20:** osservata uscita QEMU86332 durante il tentativo di avvio Command Prompt, senza assertion causale identificata nel campione; nuovo boot normale87434 non è una soluzione. Nessun arresto forzato o cambio runtime. Prossimo passo raccogliere causa/contesto della terminazione se il caso viene ripreso, distinguendolo dalle assertion HVF già note. [Diario](VERIFICATION.md#27-ottobre--launcher-glass-nativo-e-temi-0220).
