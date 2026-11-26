@@ -23,6 +23,7 @@ repo=Path(__file__).resolve().parent.parent
 root=arguments.machine_directory.resolve(strict=True)
 configuration=json.loads((root/'machine.json').read_text())
 executable=repo/'guest/target/aarch64-pc-windows-msvc/release/perpendicular-guest.exe'
+subprocess.run([sys.executable,str(repo/'scripts/check-cursor-guest.py'),str(executable)],check=True)
 sources=[executable,repo/'guest/install.ps1',repo/'guest/install.cmd',repo/'guest/diagnostics.ps1']
 if arguments.network_driver_dir or arguments.graphics_driver_dir or arguments.memory_driver_dir:
     sources += [repo/'guest/setup-machine.cmd',repo/'guest/setup-machine.ps1']

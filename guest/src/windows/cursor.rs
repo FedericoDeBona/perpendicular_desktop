@@ -7,9 +7,15 @@ use std::{
 };
 use windows::{
     Win32::{
-        Foundation::{CloseHandle, HANDLE, HWND, WAIT_FAILED},
-        Graphics::Gdi::*,
+        Foundation::{CloseHandle, HANDLE, HMODULE, HWND, POINT, WAIT_FAILED},
+        Graphics::{
+            Direct3D::{D3D_DRIVER_TYPE_HARDWARE, D3D_FEATURE_LEVEL_11_0},
+            Direct3D11::{D3D11_CREATE_DEVICE_BGRA_SUPPORT, D3D11_SDK_VERSION, D3D11CreateDevice},
+            Dxgi::{DXGI_OUTDUPL_FRAME_INFO, IDXGIDevice, IDXGIOutput1},
+            Gdi::*,
+        },
         System::{
+            Com::{COINIT_MULTITHREADED, CoInitializeEx, CoUninitialize},
             StationsAndDesktops::{
                 CloseDesktop, DESKTOP_READOBJECTS, GetUserObjectInformationW, OpenInputDesktop,
                 UOI_NAME,
@@ -22,7 +28,7 @@ use windows::{
             WindowsAndMessaging::*,
         },
     },
-    core::PCWSTR,
+    core::{Interface, PCWSTR},
 };
 
 const LEASE: Duration = Duration::from_millis(2500);
@@ -116,6 +122,7 @@ unsafe extern "system" fn cursor_event(
 
 struct HiddenCursor {
     hooks: [HWINEVENTHOOK; 2],
+    compositor_attempts: u8,
 }
 
 impl HiddenCursor {
@@ -139,8 +146,59 @@ impl HiddenCursor {
                     WINEVENT_SKIPOWNPROCESS,
                 )
             });
-            Some(Self { hooks })
+            Some(Self {
+                hooks,
+                compositor_attempts: 2,
+            })
         }
+    }
+
+    fn prepare_compositor(&mut self) {
+        if self.compositor_attempts == 0 {
+            return;
+        }
+        self.compositor_attempts -= 1;
+        if refresh_pointer_compositor().is_some() {
+            self.compositor_attempts = 0;
+        }
+    }
+}
+
+// VioGpu3D can leave the software pointer in the primary scanout after
+// MagShowSystemCursor(false). One DXGI duplication frame makes Windows update
+// its pointer composition. Release it immediately without mapping any pixels.
+fn refresh_pointer_compositor() -> Option<()> {
+    unsafe {
+        CoInitializeEx(None, COINIT_MULTITHREADED).ok().ok()?;
+        let result = (|| {
+            let mut device = None;
+            D3D11CreateDevice(
+                None,
+                D3D_DRIVER_TYPE_HARDWARE,
+                HMODULE::default(),
+                D3D11_CREATE_DEVICE_BGRA_SUPPORT,
+                Some(&[D3D_FEATURE_LEVEL_11_0]),
+                D3D11_SDK_VERSION,
+                Some(&mut device),
+                None,
+                None,
+            ).ok()?;
+            let device = device?;
+            let dxgi: IDXGIDevice = device.cast().ok()?;
+            let output = dxgi.GetAdapter().ok()?.EnumOutputs(0).ok()?;
+            if output.GetDesc().ok()?.Monitor != MonitorFromPoint(POINT::default(), MONITOR_DEFAULTTOPRIMARY) {
+                return None;
+            }
+            let output: IDXGIOutput1 = output.cast().ok()?;
+            let duplication = output.DuplicateOutput(&device).ok()?;
+            let mut frame_info = DXGI_OUTDUPL_FRAME_INFO::default();
+            let mut resource = None;
+            duplication.AcquireNextFrame(500, &mut frame_info, &mut resource).ok()?;
+            drop(resource);
+            duplication.ReleaseFrame().ok()
+        })();
+        CoUninitialize();
+        result
     }
 }
 
@@ -294,6 +352,13 @@ fn watch(receiver: mpsc::Receiver<Update>, outbox: Arc<Outbox>, wake: Option<&Wa
             );
         } else if renewed {
             outbox.control(json!({"type":"desktop_cursor","lease":id,"hidden":true}));
+        }
+        // Send the current shape before the bounded DXGI wait. Try again on
+        // the next renewal if the display was still starting or resizing.
+        if renewed {
+            if let Some(hidden) = hidden.as_mut() {
+                hidden.prepare_compositor();
+            }
         }
     }
 }

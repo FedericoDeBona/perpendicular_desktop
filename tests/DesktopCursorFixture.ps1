@@ -61,6 +61,8 @@ $timer = [Windows.Forms.Timer]::new()
 $timer.Interval = 50
 $script:tick = 0
 $script:lastShape = 0
+$previousPosition = [Windows.Forms.Cursor]::Position
+$shapeOffsets = @(-24, 0, 24)
 $duration = $(if ($Automated) { 15 } else { 50 })
 $timer.Add_Tick({
     $elapsed = $clock.Elapsed.TotalSeconds
@@ -69,10 +71,16 @@ $timer.Add_Tick({
     $beacon.BackColor = $(if ($script:tick % 2) { [Drawing.Color]::White } else { [Drawing.Color]::Black })
     if (!$Automated -or $elapsed -lt 3) { return }
     $marker.Visible = $false
-    if ($script:tick % 5 -ne 0 -or !$form.Bounds.Contains([Windows.Forms.Cursor]::Position)) { return }
+    if ($script:tick % 5 -ne 0) { return }
     $script:lastShape = ($script:lastShape + 1) % $shapes.Count
+    # Keep the hotspot in the sampled region on high-DPI displays, too.
+    [Windows.Forms.Cursor]::Position = [Drawing.Point]::new(($midX + $shapeOffsets[$script:lastShape]), ($midY - 8))
     [Windows.Forms.Cursor]::Current = $shapes[$script:lastShape]
 })
 $form.Add_Shown({ $form.Activate(); $clock.Start(); $timer.Start() })
 try { [void]$form.ShowDialog() }
-finally { $timer.Dispose(); $form.Dispose() }
+finally {
+    $timer.Dispose()
+    $form.Dispose()
+    if ($Automated) { [Windows.Forms.Cursor]::Position = $previousPosition }
+}

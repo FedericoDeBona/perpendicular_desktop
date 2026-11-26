@@ -305,6 +305,8 @@ Il ciclo RAM protetto 4→2→4 GiB con dati conservati resta la qualifica prece
 
 ### WIN-006 — Doppio puntatore e scroll troppo sensibile in Desktop Mode
 
+- **Esito .94, APERTO:** la main installata ha superato il campione automatico dopo il riavvio. Nella prova al trackpad a finestra attiva l'utente ha visto soltanto il puntatore Mac, accompagnato da sfarfallio delle forme e ritorno temporaneo alla freccia. La mano centrale riprende per un istante l'aspetto Windows. I fotogrammi nativi misurati sono uniformi. Restano stabilità delle forme e verifica a finestra inattiva. [Diario](VERIFICATION.md#26-novembre--riallineamento-del-puntatore-nel-compositore-windows)
+
 - **Esito .93, APERTO:** corretta nella main la mano di WinForms che il Mac riproduceva con aspetto Windows. Dopo il riavvio, la prova automatica conferma la mano nativa del Mac e riproduce tracce Windows. La cattura WGC senza cursore è risultata pulita. L'uscita nativa è passata a fotogrammi senza tracce durante la cattura ed è rimasta pulita fino alla fine del campione. Da qualificare un intervento minimo al riavvio e i passaggi reali con la finestra inattiva. [Diario](VERIFICATION.md#26-novembre--mano-nativa-del-mac-per-winforms)
 
 - **Esito .92, APERTO:** nella main il puntatore Windows è già impresso nei fotogrammi accelerati prima della presentazione Mac. Il riarmo immediato della Magnification API non ha eliminato le tracce. Il successivo campione automatico è risultato pulito, confermando la natura intermittente. Criterio di chiusura: forme Mac sincronizzate senza tracce Windows e passaggio fisico con Desktop Mode inattivo. Clone non eseguito. [Diario](VERIFICATION.md#26-novembre--misura-della-traccia-del-puntatore)
