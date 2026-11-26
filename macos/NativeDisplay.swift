@@ -22,6 +22,32 @@ final class NativeDisplayFrame:@unchecked Sendable {
     init(texture:any MTLTexture,backing:any MTLBuffer,traceID:String,retired:@escaping @Sendable ()->Void){
         self.texture=texture;self.backing=backing;self.traceID=traceID;self.retirement=retired
     }
+    // Inspect the ready, still-owned scanout before Metal displays it. Only
+    // counts and coordinates are returned, and no desktop pixels are saved.
+    func measureCursorRegion(background:UInt32)->[String:Any] {
+        let width=min(texture.width,256),height=min(texture.height,160)
+        let x=(texture.width-width)/2,y=(texture.height-height)/2
+        let stride=texture.bufferBytesPerRow
+        let pixels=backing.contents().assumingMemoryBound(to:UInt8.self)
+        let blue=Int(background & 255),green=Int((background>>8) & 255),red=Int(background>>16)
+        let tolerance=4
+        var different=0,left=width,top=height,right = -1,bottom = -1
+        for row in 0..<height {
+            let line=pixels.advanced(by:(y+row)*stride+x*4)
+            for column in 0..<width {
+                let pixel=line.advanced(by:column*4)
+                guard abs(Int(pixel[0])-blue)>tolerance || abs(Int(pixel[1])-green)>tolerance ||
+                    abs(Int(pixel[2])-red)>tolerance else{continue}
+                different+=1
+                left=min(left,column);right=max(right,column)
+                top=min(top,row);bottom=max(bottom,row)
+            }
+        }
+        let marks:[String:Int]?=different>0 ? ["x":x+left,"y":y+top,"width":right-left+1,"height":bottom-top+1]:nil
+        // Mark frames without the flat test background as inconclusive.
+        return ["region":["x":x,"y":y,"width":width,"height":height],"backgroundMatched":different<=width*height/8,
+                "differentPixels":different,"bounds":marks as Any? ?? NSNull()]
+    }
     /// Call only after the last GPU read. Metal may retain a completed command's
     /// handler, so object deallocation is not a timely producer acknowledgement.
     func finishReading(){

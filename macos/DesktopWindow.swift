@@ -246,6 +246,15 @@ private final class DesktopSurface:NSView {
 
 @MainActor
 final class DesktopWindow:NSObject,NSWindowDelegate {
+    private struct CursorProbe {
+        let id=UUID()
+        let started=ProcessInfo.processInfo.systemUptime
+        let background:UInt32
+        let size:NSSize
+        let reply:([String:Any])->Void
+        var samples=[[String:Any]]()
+    }
+
     let window:NSWindow
     private let surface:DesktopSurface
     private let socket:String
@@ -262,6 +271,7 @@ final class DesktopWindow:NSObject,NSWindowDelegate {
     private var cursorLease:String?
     private var cursorName:String?
     private var cursorLastReply=0.0
+    private var cursorProbe:CursorProbe?
     private var nativeReceivedFrames:UInt64=0
     private var presentedDrawables:UInt64=0
     private var lastNativeReceiveSeconds=0.0
@@ -318,11 +328,46 @@ final class DesktopWindow:NSObject,NSWindowDelegate {
         }
     }
     func cursorConnectionChanged(){releaseCursorLease();refreshCursorLease()}
+    func probeCursorFrames(background:UInt32,reply:@escaping ([String:Any])->Void){
+        guard visible,nativeActive,pendingResolution == nil,cursorProbe == nil else {
+            reply(["ok":false,"error":"Open an idle, accelerated Desktop Mode window before starting a cursor probe."]);return
+        }
+        let probe=CursorProbe(background:background,size:surface.source,reply:reply)
+        cursorProbe=probe
+        Task { @MainActor [self,id=probe.id] in
+            try? await Task.sleep(for:.seconds(8))
+            guard cursorProbe?.id == id else{return}
+            finishCursorProbe()
+        }
+    }
+    private func sampleCursorFrame(_ frame:NativeDisplayFrame){
+        guard let started=cursorProbe?.started,let background=cursorProbe?.background else{return}
+        guard surface.source == cursorProbe?.size else {
+            finishCursorProbe(error:"The desktop resolution changed during the cursor probe.");return
+        }
+        var sample=frame.measureCursorRegion(background:background)
+        sample["milliseconds"]=Int((ProcessInfo.processInfo.systemUptime-started)*1000)
+        sample["frame"]=frame.traceID
+        sample["cursor"]=cursorName as Any? ?? NSNull()
+        sample["usingMacCursor"]=surface.usesDesktopCursor
+        cursorProbe?.samples.append(sample)
+        if cursorProbe?.samples.count == 640 {finishCursorProbe()}
+    }
+    private func finishCursorProbe(error:String?=nil){
+        guard let probe=cursorProbe else{return}
+        cursorProbe=nil
+        if let error {probe.reply(["ok":false,"error":error]);return}
+        let matched=probe.samples.filter{$0["backgroundMatched"] as? Bool == true}
+        let marked=matched.filter{($0["differentPixels"] as? Int ?? 0)>0}.count
+        probe.reply(["ok":true,"result":["frames":probe.samples.count,"backgroundFrames":matched.count,
+                     "framesWithMarks":marked,"samples":probe.samples]])
+    }
     private func publishSize(){
         guard visible,!fullScreenTransition,!window.inLiveResize else{return}
         resized(surface.convertToBacking(surface.bounds).size)
     }
     func beginResolutionChange(_ size:NSSize){
+        finishCursorProbe(error:"The desktop started resizing during the cursor probe.")
         pendingResolution=size;surface.releaseInput();surface.inputAvailable=false;releaseCursorLease()
     }
     func finishResolutionChange(){pendingResolution=nil;surface.inputAvailable=true;refreshCursorLease()}
@@ -335,6 +380,7 @@ final class DesktopWindow:NSObject,NSWindowDelegate {
         }}
     }
     func stop(){
+        finishCursorProbe(error:"Desktop Mode closed during the cursor probe.")
         visible=false;timer?.invalidate();timer=nil;releaseCursorLease();surface.cancelClipboard();surface.releaseInput()
         connectionID=nil;readerID=nil;surface.connection=nil
         desktop?.stop();desktop=nil;native?.stop();native=nil;nativeActive=false;surface.renderer.clear()
@@ -369,11 +415,13 @@ final class DesktopWindow:NSObject,NSWindowDelegate {
                 self.lastNativeReceiveSeconds=ProcessInfo.processInfo.systemUptime
                 self.surface.source=NSSize(width:frame.texture.width,height:frame.texture.height)
                 self.surface.inputScreen=DesktopScreen(id:0,x:0,y:0,width:frame.texture.width,height:frame.texture.height)
+                self.sampleCursorFrame(frame)
                 self.surface.renderer.present(frame);self.window.title="Desktop Mode"
             },failed:{[weak self] message in
                 guard let self,self.readerID == id else{return}
                 let wasNative=self.nativeActive
                 self.readerID=nil;self.native?.stop();self.native=nil;self.nativeActive=false
+                self.finishCursorProbe(error:"The accelerated desktop disconnected during the cursor probe.")
                 if wasNative {
                     if self.pendingResolution == nil {self.surface.renderer.clear()}
                     self.desktop?.requestPixels(true)

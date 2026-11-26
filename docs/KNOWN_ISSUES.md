@@ -305,6 +305,8 @@ Il ciclo RAM protetto 4→2→4 GiB con dati conservati resta la qualifica prece
 
 ### WIN-006 — Doppio puntatore e scroll troppo sensibile in Desktop Mode
 
+- **Esito .92, APERTO:** nella main il puntatore Windows è già impresso nei fotogrammi accelerati prima della presentazione Mac. Finestra di prova con sfondo piatto, segno di controllo riconosciuto e tre forme riprodotte automaticamente. Il riarmo immediato della Magnification API non ha eliminato le tracce. Criterio di chiusura: forme Mac sincronizzate senza tracce Windows e passaggio fisico con Desktop Mode inattivo. Clone non eseguito. [Diario](VERIFICATION.md#26-novembre--misura-della-traccia-del-puntatore)
+
 - **Ripresa 26 novembre, APERTO:** confermata dall'utente nella .90 l'immagine ferma del puntatore Windows dopo un cambio di forma. Segnalato anche movimento sopra Desktop Mode inattivo. Distribuita .91 con hover limitato alla finestra attiva e soppressione Windows mantenuta nella vista visibile. Verificati nella main richiesta fuori focus e cambio forme. Resta da verificare il passaggio fisico nella finestra inattiva e da eliminare l'immagine ferma. Nessun clone. [Diario](VERIFICATION.md#26-novembre--ricomparsa-del-puntatore-e-finestra-inattiva)
 
 - **Seguito 26 novembre, APERTO e IN PAUSA su richiesta:** la .89 installata usa il puntatore Mac locale con forme sincronizzate. L'utente conferma che funziona ma vede ricomparire a tratti il cursore Windows, soprattutto al cambio di forma. Il prossimo intervento richiede una prova di questi passaggi senza ricomparsa. [Diario](VERIFICATION.md#26-novembre--puntatore-mac-con-forma-windows)

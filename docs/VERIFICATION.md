@@ -1,5 +1,12 @@
 # Diario delle verifiche
 
+## 26 novembre — Misura della traccia del puntatore
+
+- **Preparazione.** Canonica .91 firmata, desktop nativo visibile e servizio Windows Running con l'hash atteso `0ab87382…`. Nella .92 il comando locale `desktop_cursor_probe 2a89aa` legge per otto secondi una regione centrale di 256×160 pixel dal buffer nativo pronto. Registra forma Mac, contatore e rettangolo dei pixel diversi dallo sfondo. Nessuna immagine o pixel di Windows viene salvato. I fotogrammi senza sfondo uniforme sufficiente sono inconcludenti. Un piccolo segno noto nella finestra Windows consente di verificare la sensibilità della misura prima del movimento manuale.
+- **Distribuzione.** Arresto regolare di Windows, installazione della .92 nell'app principale e riavvio. Firma, cinque controlli dei payload e confronto dei 567 file host passati. Il servizio Windows conserva l'hash della .91 e il desktop nativo è collegato a 2940×1782 con richieste attive per il puntatore. Clone non eseguito.
+- **Misura automatica.** Il primo tentativo è stato inconcludente perché il comando delle cartelle occupava il servizio e la finestra di prova non era aperta. Al secondo tentativo i 130 fotogrammi ricevuti hanno lo sfondo atteso: 50 con il quadrato di controllo (529 pixel), 13 interamente uniformi e 67 con tracce compatibili con freccia, mano e testo (263, 373 e 94 pixel). Le tracce compaiono anche quando il Mac usa il proprio puntatore. Sono quindi già nei fotogrammi ricevuti.
+- **Tentativo scartato.** Riarmo immediato della Magnification API al cambio forma, dalla stessa finestra di prova: 128 fotogrammi con sfondo atteso, 60 con il quadrato, 6 uniformi e 62 con altre tracce. La ricomparsa resta riproducibile.
+
 ## 26 novembre — Ricomparsa del puntatore e finestra inattiva
 
 - **Ripresa e allineamento.** L'utente ha terminato l'uso della VM e ha autorizzato la ripresa. Canonica .89 firmata, cinque controlli passati, 567 file host conformi. Il servizio Windows iniziale era Running con lo stesso hash del bundle `957d7741…` e Secure Boot attivo. Rimossi il task .89 concluso e il suo CD dopo verifica.

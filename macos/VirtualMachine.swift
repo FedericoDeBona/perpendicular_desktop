@@ -60,6 +60,10 @@ final class VirtualMachineController {
     var desktopState:[String:Any] {desktop?.state ?? ["visible":false]}
     func acceptDesktopCursor(_ header:[String:Any]){desktop?.acceptCursor(header)}
     func desktopCursorConnectionChanged(){desktop?.cursorConnectionChanged()}
+    func probeDesktopCursor(background:UInt32,reply:@escaping ([String:Any])->Void){
+        guard let desktop else{reply(["ok":false,"error":"Desktop Mode is closed."]);return}
+        desktop.probeCursorFrames(background:background,reply:reply)
+    }
     private var desktop:DesktopWindow?
     private var displayControl:DesktopConnection?
     private var displayRequest:UUID?

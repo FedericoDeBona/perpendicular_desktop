@@ -680,6 +680,15 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
               let command=request["command"] as? String else {
             localResponse(["ok":false,"error":"Expected a JSON command."],reply:reply);return
         }
+        if command == "desktop_cursor_probe" {
+            guard Set(request.keys) == ["command","background"],
+                  let color=request["background"] as? String,color.utf8.count==6,
+                  let rgb=UInt32(color,radix:16),let machine else {
+                localResponse(["ok":false,"error":"Expected the solid test background as six hex digits."],reply:reply);return
+            }
+            machine.probeDesktopCursor(background:rgb){[weak self] result in self?.localResponse(result,reply:reply)}
+            return
+        }
         let allowed:Set<String>=["status","memory_status","execute","display_info","display_topology","driver_info","graphics_info","geometry_snapshot","application_status","process_list","process_terminate","pipeline_clock","pipeline_trace_start","pipeline_trace_stop","window_refresh","window_image","window_copy_mode","window_presentation_mode","window_capture_source","window_geometry","window_transport_check"]
         guard allowed.contains(command) else {
             localResponse(["ok":false,"error":"This local command is not supported."],reply:reply);return

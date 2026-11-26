@@ -36,6 +36,8 @@ def main():
     commands = parser.add_subparsers(dest="command", required=True)
     for name in ("status", "memory_status", "display_info", "display_topology", "driver_info", "graphics_info", "geometry_snapshot", "application_status", "process_list", "pipeline_clock", "pipeline_trace_start", "pipeline_trace_stop"):
         commands.add_parser(name)
+    cursor_probe = commands.add_parser("desktop_cursor_probe", help="Measure a solid-color region in incoming desktop frames for eight seconds.")
+    cursor_probe.add_argument("background", help="Six hex digits for the test window background, without #.")
     terminate = commands.add_parser("process_terminate", help="Terminate one process using its exact identity from process_list.")
     terminate.add_argument("pid", type=int)
     terminate.add_argument("creation")
@@ -64,6 +66,8 @@ def main():
     execute.add_argument("args", nargs=argparse.REMAINDER)
     options = parser.parse_args()
     request = {"command": options.command}
+    if options.command == "desktop_cursor_probe":
+        request["background"] = options.background
     if options.command in ("window_refresh", "window_image", "window_transport_check"):
         request["window"] = options.window
     if options.command == "window_geometry":
