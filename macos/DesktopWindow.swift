@@ -2,7 +2,7 @@ import AppKit
 
 @MainActor
 private final class DesktopSurface:NSView {
-    private static let desktopCursor=NSCursor(image:NSImage(size:NSSize(width:1,height:1)),hotSpot:.zero)
+    private static let concealedCursor=NSCursor(image:NSImage(size:NSSize(width:1,height:1)),hotSpot:.zero)
     private static let scrollPointsPerNotch=40.0
     let renderer:WindowRenderer
     var onResize:(()->Void)?
@@ -20,7 +20,9 @@ private final class DesktopSurface:NSView {
     private var modifiers=Set<UInt32>()
     private var cursor=NSPoint.zero
     private var scrollRemainder=0.0
-    var usesDesktopCursor:Bool {window?.isKeyWindow == true && NSCursor.current === Self.desktopCursor}
+    private var desktopCursor=concealedCursor
+    private var activeForHover:Bool {NSApp.isActive && window?.isKeyWindow == true}
+    var usesDesktopCursor:Bool {activeForHover && NSCursor.current === desktopCursor}
     override var isFlipped:Bool {true}
     override var acceptsFirstResponder:Bool {true}
     override func acceptsFirstMouse(for event:NSEvent?)->Bool{true}
@@ -40,9 +42,46 @@ private final class DesktopSurface:NSView {
         super.updateTrackingAreas()
     }
     override func resetCursorRects(){
-        // Windows draws its own pointer. A cursor rect lets AppKit restore
-        // its cursor over the title bar and when leaving the desktop window.
-        addCursorRect(visibleRect,cursor:Self.desktopCursor)
+        addCursorRect(visibleRect,cursor:activeForHover ? desktopCursor:.arrow)
+    }
+    func setDesktopCursor(_ value:[String:Any]?){
+        desktopCursor=cursorShape(value)
+        updateDesktopCursor()
+    }
+    func updateDesktopCursor(){
+        guard let window else{return}
+        window.invalidateCursorRects(for:self)
+        if activeForHover,window.attachedSheet == nil,
+           visibleRect.contains(convert(window.mouseLocationOutsideOfEventStream,from:nil)) {
+            desktopCursor.set()
+        }
+    }
+    private func cursorShape(_ value:[String:Any]?)->NSCursor {
+        switch value?["name"] as? String {
+        case nil,"hidden":return Self.concealedCursor
+        case "hand":return .pointingHand
+        case "text":return .iBeam
+        case "crosshair":return .crosshair
+        case "forbidden":return .operationNotAllowed
+        case "move":return .openHand
+        case "resizeHorizontal":return .resizeLeftRight
+        case "resizeVertical":return .resizeUpDown
+        case "resizeNWSE":return ResizeEdges([.top,.left]).cursor
+        case "resizeNESW":return ResizeEdges([.top,.right]).cursor
+        case "image":
+            guard let value,let w=value["width"] as? Int,let h=value["height"] as? Int,
+                  (1...128).contains(w),(1...128).contains(h),
+                  let x=value["x"] as? Int,let y=value["y"] as? Int,(0..<w).contains(x),(0..<h).contains(y),
+                  let encoded=value["bgra"] as? String,encoded.utf8.count==((w*h*4+2)/3)*4,
+                  let data=Data(base64Encoded:encoded),data.count==w*h*4,let provider=CGDataProvider(data:data as CFData),
+                  let cg=CGImage(width:w,height:h,bitsPerComponent:8,bitsPerPixel:32,bytesPerRow:w*4,
+                      space:CGColorSpaceCreateDeviceRGB(),bitmapInfo:[.byteOrder32Little,CGBitmapInfo(rawValue:CGImageAlphaInfo.premultipliedFirst.rawValue)],
+                      provider:provider,decode:nil,shouldInterpolate:true,intent:.defaultIntent) else{return .arrow}
+            let scale=window?.backingScaleFactor ?? 1
+            let image=NSImage(cgImage:cg,size:NSSize(width:Double(w)/scale,height:Double(h)/scale))
+            return NSCursor(image:image,hotSpot:NSPoint(x:Double(x)/scale,y:Double(y)/scale))
+        default:return .arrow
+        }
     }
     private func mouse(_ event:NSEvent){
         guard inputAvailable,source.width>0,source.height>0,bounds.width>0,bounds.height>0 else{return}
@@ -54,8 +93,8 @@ private final class DesktopSurface:NSView {
         cursor=NSPoint(x:inputScreen.x+Int((x*Double(inputScreen.width-1)).rounded()),y:inputScreen.y+Int((y*Double(inputScreen.height-1)).rounded()))
         connection?.pointer(x:Int(cursor.x),y:Int(cursor.y),buttons:buttons)
     }
-    override func mouseMoved(with event:NSEvent){mouse(event)}
-    override func mouseEntered(with event:NSEvent){mouse(event)}
+    override func mouseMoved(with event:NSEvent){if activeForHover {mouse(event)}}
+    override func mouseEntered(with event:NSEvent){if activeForHover {mouse(event)}}
     override func mouseExited(with event:NSEvent){scrollRemainder=0}
     override func mouseDragged(with event:NSEvent){mouse(event)}
     override func rightMouseDragged(with event:NSEvent){mouse(event)}
@@ -220,13 +259,16 @@ final class DesktopWindow:NSObject,NSWindowDelegate {
     private var visible=false
     private var fullScreenTransition=false
     private var pendingResolution:NSSize?
+    private var cursorLease:String?
+    private var cursorName:String?
+    private var cursorLastReply=0.0
     private var nativeReceivedFrames:UInt64=0
     private var presentedDrawables:UInt64=0
     private var lastNativeReceiveSeconds=0.0
     private var lastPresentationSeconds=0.0
     private let resized:(NSSize)->Void
 
-    var state:[String:Any] {["visible":visible,"fullScreen":window.styleMask.contains(.fullScreen),"fullScreenTransition":fullScreenTransition,"resolutionPending":pendingResolution != nil,"viewWidth":Int(surface.bounds.width),"viewHeight":Int(surface.bounds.height),"backingScale":window.backingScaleFactor,"nativeActive":nativeActive,"width":Int(surface.source.width),"height":Int(surface.source.height),"nativeReceivedFrames":nativeReceivedFrames,"presentedDrawables":presentedDrawables,"lastNativeReceiveHostSeconds":lastNativeReceiveSeconds,"lastPresentationHostSeconds":lastPresentationSeconds,"usesDesktopCursor":surface.usesDesktopCursor]}
+    var state:[String:Any] {["visible":visible,"fullScreen":window.styleMask.contains(.fullScreen),"fullScreenTransition":fullScreenTransition,"resolutionPending":pendingResolution != nil,"viewWidth":Int(surface.bounds.width),"viewHeight":Int(surface.bounds.height),"backingScale":window.backingScaleFactor,"nativeActive":nativeActive,"width":Int(surface.source.width),"height":Int(surface.source.height),"nativeReceivedFrames":nativeReceivedFrames,"presentedDrawables":presentedDrawables,"lastNativeReceiveHostSeconds":lastNativeReceiveSeconds,"lastPresentationHostSeconds":lastPresentationSeconds,"usesDesktopCursor":surface.usesDesktopCursor,"cursorShape":cursorName as Any? ?? NSNull(),"cursorTracking":cursorLease != nil]}
     init(socket:String,endpoint:@escaping ()->NativeDisplayEndpoint?,resized:@escaping (NSSize)->Void = {_ in},input:@escaping ()->Void = {})throws{
         self.socket=socket;self.endpoint=endpoint;self.resized=resized;surface=DesktopSurface(renderer:try WindowRenderer(opaque:true,fillBounds:true))
         window=NSWindow(contentRect:NSRect(x:140,y:120,width:960,height:640),styleMask:[.titled,.closable,.miniaturizable,.resizable],backing:.buffered,defer:false)
@@ -244,21 +286,56 @@ final class DesktopWindow:NSObject,NSWindowDelegate {
         window.minSize=NSSize(width:480,height:320);window.acceptsMouseMovedEvents=true
     }
     func configureClipboard(_ bridge:GuestBridge?){surface.bridge=bridge}
+    private var cursorEligible:Bool {
+        visible && window.isVisible && !window.isMiniaturized &&
+            surface.inputAvailable && surface.connection != nil && surface.bridge?.desktopCursorAvailable == true
+    }
+    private func refreshCursorLease(){
+        guard cursorEligible else{releaseCursorLease();return}
+        // Ask for a fresh shape after a delayed reply without explicitly
+        // showing the Windows pointer between consecutive active leases.
+        if cursorLease != nil,ProcessInfo.processInfo.systemUptime-cursorLastReply>2.5 {
+            cursorLease=nil;cursorName=nil;surface.setDesktopCursor(nil)
+        }
+        let lease=cursorLease ?? UUID().uuidString.replacingOccurrences(of:"-",with:"")
+        if cursorLease == nil {cursorLease=lease;cursorLastReply=ProcessInfo.processInfo.systemUptime}
+        surface.bridge?.desktopCursorLease(lease,active:true)
+    }
+    private func releaseCursorLease(){
+        guard let lease=cursorLease else{return}
+        cursorLease=nil;cursorName=nil
+        surface.setDesktopCursor(nil)
+        surface.bridge?.desktopCursorLease(lease,active:false)
+    }
+    func acceptCursor(_ header:[String:Any]){
+        guard cursorEligible,let cursorLease,header["lease"] as? String == cursorLease else{return}
+        cursorLastReply=ProcessInfo.processInfo.systemUptime
+        guard header["hidden"] as? Bool == true else{
+            cursorName=nil;surface.setDesktopCursor(nil);return
+        }
+        if let shape=header["cursor"] as? [String:Any],let name=shape["name"] as? String {
+            cursorName=name;surface.setDesktopCursor(shape)
+        }
+    }
+    func cursorConnectionChanged(){releaseCursorLease();refreshCursorLease()}
     private func publishSize(){
         guard visible,!fullScreenTransition,!window.inLiveResize else{return}
         resized(surface.convertToBacking(surface.bounds).size)
     }
     func beginResolutionChange(_ size:NSSize){
-        pendingResolution=size;surface.releaseInput();surface.inputAvailable=false
+        pendingResolution=size;surface.releaseInput();surface.inputAvailable=false;releaseCursorLease()
     }
-    func finishResolutionChange(){pendingResolution=nil;surface.inputAvailable=true}
+    func finishResolutionChange(){pendingResolution=nil;surface.inputAvailable=true;refreshCursorLease()}
     func show(){
         visible=true;window.makeKeyAndOrderFront(nil);window.makeFirstResponder(surface)
         NSApp.activate(ignoringOtherApps:true);connect();surface.onResize?()
-        if timer == nil {timer=Timer.scheduledTimer(withTimeInterval:1,repeats:true){[weak self] _ in Task{@MainActor in self?.connect()}}}
+        refreshCursorLease()
+        if timer == nil {timer=Timer.scheduledTimer(withTimeInterval:1,repeats:true){[weak self] _ in
+            Task{@MainActor in self?.connect();self?.refreshCursorLease()}
+        }}
     }
     func stop(){
-        visible=false;timer?.invalidate();timer=nil;surface.cancelClipboard();surface.releaseInput()
+        visible=false;timer?.invalidate();timer=nil;releaseCursorLease();surface.cancelClipboard();surface.releaseInput()
         connectionID=nil;readerID=nil;surface.connection=nil
         desktop?.stop();desktop=nil;native?.stop();native=nil;nativeActive=false;surface.renderer.clear()
     }
@@ -274,7 +351,7 @@ final class DesktopWindow:NSObject,NSWindowDelegate {
                 guard let self,self.connectionID == id,!self.nativeActive else{return};self.surface.inputScreen=screen
             },failed:{[weak self] message in
                 guard let self,self.connectionID == id else{return}
-                self.desktop=nil;self.surface.connection=nil
+                self.desktop=nil;self.surface.connection=nil;self.releaseCursorLease()
                 if !self.nativeActive {self.window.title="Desktop Mode — \(message)"}
             })
             desktop=client;surface.connection=client;client.start()
@@ -313,7 +390,10 @@ final class DesktopWindow:NSObject,NSWindowDelegate {
         }
     }
     func windowWillClose(_ notification:Notification){stop()}
-    func windowDidResignKey(_ notification:Notification){surface.cancelClipboard();surface.releaseInput()}
+    func windowDidBecomeKey(_ notification:Notification){surface.updateDesktopCursor();refreshCursorLease()}
+    func windowDidResignKey(_ notification:Notification){surface.updateDesktopCursor();surface.cancelClipboard();surface.releaseInput()}
+    func windowDidMiniaturize(_ notification:Notification){releaseCursorLease()}
+    func windowDidDeminiaturize(_ notification:Notification){refreshCursorLease()}
     func windowWillEnterFullScreen(_ notification:Notification){fullScreenTransition=true}
     func windowWillExitFullScreen(_ notification:Notification){fullScreenTransition=true}
     func windowDidEnterFullScreen(_ notification:Notification){fullScreenTransition=false;publishSize()}

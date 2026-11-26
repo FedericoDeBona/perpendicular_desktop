@@ -2,7 +2,7 @@ use super::{
     Configuration, app_process,
     capture::{self, Target},
     catalogue::{self, Catalogue},
-    clipboard, cloak, display, display_topology, error, execute, identity, window_control,
+    clipboard, cloak, cursor, display, display_topology, error, execute, identity, window_control,
     wire::{self, Outbox},
 };
 use serde_json::{Value, json};
@@ -241,13 +241,24 @@ impl Worker {
         outbox.control(
             json!({"type":"hello","protocol":1,"token":config.token,"epoch":self.epoch,
             "sid":self.sid,"session":self.session,"version":env!("CARGO_PKG_VERSION"),
-            "capabilities":{"capture":"wgc-hardware-readback-with-software-recovery","windows":4,"transients":12,"windowRoles":true,"input":true,"catalogue":true,"appIcon":true,"frameChannel":true,"windowRefresh":true,"windowCaptureSource":true,"nativeAppInput":true,"modeFocus":true,"deviceFocus":true,"devicePlacement":true,"gpuFramesOnly":true,"frameEncodings":[],"displayInfo":true,"displayTopology":true,"driverInfo":true,"graphicsInfo":true,"displayConfigure":true,"sharedGeometry":true,"processControl":true,"clipboard":true,"clipboardTextBytes":262144,"applicationStatus":true,"memoryStatus":true,"execute":true,"executeTimeoutSeconds":60,"executeOutputBytes":65536,"displayEvents":self.display_observer.is_some()}}),
+            "capabilities":{"capture":"wgc-hardware-readback-with-software-recovery","windows":4,"transients":12,"windowRoles":true,"input":true,"catalogue":true,"appIcon":true,"frameChannel":true,"windowRefresh":true,"windowCaptureSource":true,"nativeAppInput":true,"modeFocus":true,"deviceFocus":true,"devicePlacement":true,"gpuFramesOnly":true,"frameEncodings":[],"displayInfo":true,"displayTopology":true,"driverInfo":true,"graphicsInfo":true,"displayConfigure":true,"sharedGeometry":true,"processControl":true,"clipboard":true,"clipboardTextBytes":262144,"applicationStatus":true,"memoryStatus":true,"execute":true,"executeTimeoutSeconds":60,"executeOutputBytes":65536,"desktopCursor":true,"displayEvents":self.display_observer.is_some()}}),
         );
         let (sender, receiver) = mpsc::sync_channel(128);
         let state = outbox.clone();
         std::thread::spawn(move || {
+            let mut cursor_monitor = None;
             while state.connected.load(Ordering::Acquire) {
                 match wire::read(&mut stream) {
+                    Ok(value) if value["operation"] == "desktop_cursor" => {
+                        if let (Some(lease), Some(active)) = (value["lease"].as_str(), value["active"].as_bool()) {
+                            if lease.len() == 32 && lease.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+                                if active || cursor_monitor.is_some() {
+                                    cursor_monitor.get_or_insert_with(|| cursor::Monitor::start(state.clone()))
+                                        .update(lease, active);
+                                }
+                            }
+                        }
+                    }
                     Ok(value) => {
                         // A burst of typing must wait for the bounded consumer,
                         // not sever the session and discard already committed text.

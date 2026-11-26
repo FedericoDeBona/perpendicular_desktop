@@ -58,6 +58,8 @@ final class VirtualMachineController {
     var onDesktopInput:(()->Void)?
     var beforeDesktop:(()async throws->Void)?
     var desktopState:[String:Any] {desktop?.state ?? ["visible":false]}
+    func acceptDesktopCursor(_ header:[String:Any]){desktop?.acceptCursor(header)}
+    func desktopCursorConnectionChanged(){desktop?.cursorConnectionChanged()}
     private var desktop:DesktopWindow?
     private var displayControl:DesktopConnection?
     private var displayRequest:UUID?

@@ -195,6 +195,7 @@ final class GuestBridge {
     private(set) var windowRefreshAvailable=false
     private(set) var deviceFocusAvailable=false
     private(set) var devicePlacementAvailable=false
+    private(set) var desktopCursorAvailable=false
 
     init(port: UInt16, token: String, individualWindows:Bool=true) throws {
         self.individualWindows=individualWindows
@@ -247,6 +248,7 @@ final class GuestBridge {
             windowRefreshAvailable=(h["capabilities"] as? [String:Any])?["windowRefresh"] as? Bool == true
             deviceFocusAvailable=(h["capabilities"] as? [String:Any])?["deviceFocus"] as? Bool == true
             devicePlacementAvailable=(h["capabilities"] as? [String:Any])?["devicePlacement"] as? Bool == true
+            desktopCursorAvailable=(h["capabilities"] as? [String:Any])?["desktopCursor"] as? Bool == true
             active=id;lastPacket=Date();onConnection?(true)
             if individualWindows,(h["capabilities"] as? [String:Any])?["frameChannel"] as? Bool == true {
                 let channel=UUID().uuidString.replacingOccurrences(of:"-",with:"").lowercased()
@@ -299,7 +301,7 @@ final class GuestBridge {
         clients.removeValue(forKey:id)
         if activeFrames == id {activeFrames=nil;if let active{clients[active]?.cancel()}}
         guard active==id else { return }
-        active=nil;identity=nil;frameChannel=nil;lastFrameTimings=[:];frameReceiveMilliseconds=0;windowRefreshAvailable=false;deviceFocusAvailable=false;devicePlacementAvailable=false
+        active=nil;identity=nil;frameChannel=nil;lastFrameTimings=[:];frameReceiveMilliseconds=0;windowRefreshAvailable=false;deviceFocusAvailable=false;devicePlacementAvailable=false;desktopCursorAvailable=false
         if let frame=activeFrames {activeFrames=nil;clients.removeValue(forKey:frame)?.cancel()}
         let pending=replies;replies.removeAll()
         sentAt.removeAll()
@@ -310,6 +312,10 @@ final class GuestBridge {
         guard let id=active else { return }
         if Date().timeIntervalSince(lastPacket)>8 { clients[id]?.cancel(); return }
         clients[id]?.send(["operation":"heartbeat"])
+    }
+    func desktopCursorLease(_ lease:String,active:Bool){
+        guard desktopCursorAvailable,let id=self.active else{return}
+        clients[id]?.send(["operation":"desktop_cursor","lease":lease,"active":active])
     }
     func command(_ operation:String,_ values:[String:Any]=[:], timeout:Duration = .seconds(12), completion:((Result<[String:Any],Error>)->Void)?=nil) {
         guard let id=active, let client=clients[id] else {

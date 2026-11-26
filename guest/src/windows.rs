@@ -3,6 +3,7 @@ mod capture;
 mod catalogue;
 mod clipboard;
 mod cloak;
+mod cursor;
 mod display;
 mod display_topology;
 mod drivers;

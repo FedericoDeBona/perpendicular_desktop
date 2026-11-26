@@ -147,6 +147,7 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
             configureMachineControllers();loadVMSettings()
             bridge.onConnection={ [weak self] value in
                 guard let self else{return};self.connected=value;self.status=value ? "Windows connected":"Reconnecting to Windows…"
+                self.machine?.desktopCursorConnectionChanged()
                 if value {self.awaitingInitialGuest=false;self.guestContactEstablished=true}
                 self.launcherEpoch=UUID();self.catalogueLoading=false;self.loadingIconID=nil;self.failedIcons=[]
                 self.focusWarnedWindows=[]
@@ -1556,6 +1557,8 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
                     }
                 }
             }
+        case "desktop_cursor":
+            machine?.acceptDesktopCursor(value)
         case "display_changed":
             guard value["epoch"] as? String == displayEpoch else{return}
             if desktopResizeRequest != nil {

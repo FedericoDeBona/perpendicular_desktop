@@ -305,6 +305,10 @@ Il ciclo RAM protetto 4→2→4 GiB con dati conservati resta la qualifica prece
 
 ### WIN-006 — Doppio puntatore e scroll troppo sensibile in Desktop Mode
 
+- **Ripresa 26 novembre, APERTO:** confermata dall'utente nella .90 l'immagine ferma del puntatore Windows dopo un cambio di forma. Segnalato anche movimento sopra Desktop Mode inattivo. Distribuita .91 con hover limitato alla finestra attiva e soppressione Windows mantenuta nella vista visibile. Verificati nella main richiesta fuori focus e cambio forme. Resta da verificare il passaggio fisico nella finestra inattiva e da eliminare l'immagine ferma. Nessun clone. [Diario](VERIFICATION.md#26-novembre--ricomparsa-del-puntatore-e-finestra-inattiva)
+
+- **Seguito 26 novembre, APERTO e IN PAUSA su richiesta:** la .89 installata usa il puntatore Mac locale con forme sincronizzate. L'utente conferma che funziona ma vede ricomparire a tratti il cursore Windows, soprattutto al cambio di forma. Il prossimo intervento richiede una prova di questi passaggi senza ricomparsa. [Diario](VERIFICATION.md#26-novembre--puntatore-mac-con-forma-windows)
+
 - **26 novembre:** la finestra mostra il puntatore Windows nel frame e il puntatore Mac sopra la stessa area. Prima della correzione, ogni evento verticale del trackpad generava uno scatto Windows, anche per movimenti minimi.
 - **Stato:** CORRETTO e verificato nell'app principale .88. Windows ha ricevuto lo scroll in entrambe le direzioni e nessuno scatto per il gesto breve automatizzato. L'utente ha confermato un solo puntatore nel passaggio tra desktop Windows e barra del titolo. Clone non eseguito. [Diario](VERIFICATION.md#26-novembre--puntatore-e-scroll-in-desktop-mode)
 
@@ -366,6 +370,8 @@ Il ciclo RAM protetto 4→2→4 GiB con dati conservati resta la qualifica prece
 - **Criterio soddisfatto:** secondo installer reale sul medesimo259, INF/CAT/SYS esatti verificati, ricevuta installed/Running con hash guest atteso, nuovo task cartelle presente e sei servizi Running/UI6collegate. Nessuna deduzione dal solo disconnect. Preservare il controllo dei pin; altri errori/pacchetti non qualificati. [Diario](VERIFICATION.md#28-ottobre--pull-rebuild-e-guest-tools-sul-mac93be6687).
 
 ### FS-004 — Collegamento directory a un volume non più presente
+
+- **26 novembre, .90 e .91:** avviso automatico ancora presente. Scrivania, Documenti e Download sono raggiungibili nella prova Windows, sia come cartelle personali sia come condivisioni SMB. I registri Windows di Download, Immagini, Musica e Video contengono byte nulli e il preparatore li rifiuta. Dati e registri conservati. Per recuperare l'automatismo serve una copia verificata dei registri di configurazione dello stesso profilo. [Diario](VERIFICATION.md#26-novembre--ricomparsa-del-puntatore-e-finestra-inattiva)
 
 - **26 novembre:** dopo il nuovo avvio della VM, preparazione automatica e primo tentativo manuale respinti con `A command is already running`. Un tentativo a prova scroll conclusa è riuscito. L'app principale conferma tre cartelle collegate. La riuscita riguarda quella sessione. [Diario](VERIFICATION.md#26-novembre--puntatore-e-scroll-in-desktop-mode)
 
@@ -599,6 +605,8 @@ Il ciclo RAM protetto 4→2→4 GiB con dati conservati resta la qualifica prece
 - **Criterio soddisfatto:** stesso runtime locale e configurazione fissa avviati nella main con Windows collegato, senza errore PCI; Guest Tools aggiornati Running/hash concorde. [Diario](VERIFICATION.md#28-ottobre--pull-rebuild-0228-sulla-iot0795218c-in-attesa-del-consenso-macos).
 
 ### SYS-001 — Arresto HVF durante riavvio o arresto
+
+- **26 novembre, secondo episodio:** l'uscita mirata del PID del solo frontend ha lasciato QEMU temporaneamente vivo, poi QEMU ha ricevuto SIGTERM da `loginwindow`. Lo scambio del bundle si è annullato. QCOW2 in sola lettura con zero errori, installazione .89 a VM offline e nuovo avvio riusciti. [Diario](VERIFICATION.md#26-novembre--puntatore-mac-con-forma-windows)
 
 - **26 novembre:** durante l'uscita dal frontend .87 tramite «Quit and Keep Windows», QEMU è terminato per SIGTERM da `loginwindow`, come nei campioni del 27 e 30 ottobre. L'intenzione di mantenere la sessione non è stata soddisfatta. Nessuna nuova causa isolata. Il controllo QCOW2 in sola lettura ha restituito zero errori e la main è tornata operativa con la .88. [Diario](VERIFICATION.md#26-novembre--puntatore-e-scroll-in-desktop-mode)
 
