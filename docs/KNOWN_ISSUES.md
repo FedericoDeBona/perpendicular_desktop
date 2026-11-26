@@ -385,6 +385,8 @@ Il ciclo RAM protetto 4→2→4 GiB con dati conservati resta la qualifica prece
 
 - **26 novembre, .90 e .91:** avviso automatico ancora presente. Scrivania, Documenti e Download sono raggiungibili nella prova Windows, sia come cartelle personali sia come condivisioni SMB. I registri Windows di Download, Immagini, Musica e Video contengono byte nulli e il preparatore li rifiuta. Dati e registri conservati. Per recuperare l'automatismo serve una copia verificata dei registri di configurazione dello stesso profilo. [Diario](VERIFICATION.md#26-novembre--ricomparsa-del-puntatore-e-finestra-inattiva)
 
+- **26 novembre, .100:** dopo l'avvio l'avviso è ancora presente. Riprova collegamento raggiunge il preparatore e riproduce `Invalid JSON primitive` sui quattro registri già segnalati. [Diario](VERIFICATION.md#26-novembre--risoluzione-iniziale-e-scala-del-desktop)
+
 - **26 novembre:** dopo il nuovo avvio della VM, preparazione automatica e primo tentativo manuale respinti con `A command is already running`. Un tentativo a prova scroll conclusa è riuscito. L'app principale conferma tre cartelle collegate. La riuscita riguarda quella sessione. [Diario](VERIFICATION.md#26-novembre--puntatore-e-scroll-in-desktop-mode)
 
 **24 novembre, main .87:** durante un avvio lento la preparazione automatica è scaduta perché Windows non ha risposto in tempo. Il desktop e il servizio si sono ripresi nello stesso avvio. Il nuovo collegamento delle cartelle resta da verificare una volta che Windows risponde normalmente. [Evidenze](VERIFICATION.md#24-novembre--avvio-lento-di-windows-nella-vm-principale).
