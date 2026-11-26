@@ -312,8 +312,8 @@ final class DesktopWindow:NSObject,NSWindowDelegate {
 
     let window:NSWindow
     private let surface:DesktopSurface
-    private let socket:String
-    private let endpoint:()->NativeDisplayEndpoint?
+    private let launch:()->DesktopLaunch?
+    private let frameKey:String?
     private var desktop:DesktopConnection?
     private var native:NativeDisplayReader?
     private var connectionID:UUID?
@@ -334,8 +334,8 @@ final class DesktopWindow:NSObject,NSWindowDelegate {
     private let resized:(DesktopViewport)->Void
 
     var state:[String:Any] {["visible":visible,"fullScreen":window.styleMask.contains(.fullScreen),"fullScreenTransition":fullScreenTransition,"resolutionPending":pendingResolution != nil,"viewWidth":Int(surface.bounds.width),"viewHeight":Int(surface.bounds.height),"backingScale":window.backingScaleFactor,"nativeActive":nativeActive,"width":Int(surface.source.width),"height":Int(surface.source.height),"nativeReceivedFrames":nativeReceivedFrames,"presentedDrawables":presentedDrawables,"lastNativeReceiveHostSeconds":lastNativeReceiveSeconds,"lastPresentationHostSeconds":lastPresentationSeconds,"usesDesktopCursor":surface.usesDesktopCursor,"cursorShape":cursorName as Any? ?? NSNull(),"cursorTracking":cursorLease != nil]}
-    init(socket:String,endpoint:@escaping ()->NativeDisplayEndpoint?,resized:@escaping (DesktopViewport)->Void = {_ in},input:@escaping ()->Void = {})throws{
-        self.socket=socket;self.endpoint=endpoint;self.resized=resized;surface=DesktopSurface(renderer:try WindowRenderer(opaque:true))
+    init(launch:@escaping ()->DesktopLaunch?,frameKey:String?,resized:@escaping (DesktopViewport)->Void,input:@escaping ()->Void)throws{
+        self.launch=launch;self.frameKey=frameKey;self.resized=resized;surface=DesktopSurface(renderer:try WindowRenderer(opaque:true))
         window=NSWindow(contentRect:NSRect(x:140,y:120,width:960,height:640),styleMask:[.titled,.closable,.miniaturizable,.resizable],backing:.buffered,defer:false)
         super.init()
         surface.renderer.onPresented={ [weak self] _ in
@@ -349,6 +349,7 @@ final class DesktopWindow:NSObject,NSWindowDelegate {
         window.collectionBehavior.insert(.fullScreenPrimary)
         window.backgroundColor = .black
         window.minSize=NSSize(width:480,height:320);window.acceptsMouseMovedEvents=true
+        restoreFrame()
     }
     func configureClipboard(_ bridge:GuestBridge?){surface.bridge=bridge}
     private var cursorEligible:Bool {
@@ -419,11 +420,36 @@ final class DesktopWindow:NSObject,NSWindowDelegate {
         probe.reply(["ok":true,"result":["frames":probe.samples.count,"backgroundFrames":matched.count,
                      "framesWithMarks":marked,"samples":probe.samples]])
     }
-    private func publishSize(){
-        guard visible,!fullScreenTransition,!window.inLiveResize else{return}
+    var viewport:DesktopViewport? {
         let pixels=surface.convertToBacking(surface.bounds).size
-        guard pixels.width>0,pixels.height>0 else{return}
-        resized(DesktopViewport(pixels:pixels,backingScale:window.backingScaleFactor))
+        guard pixels.width>0,pixels.height>0 else{return nil}
+        return DesktopViewport(pixels:pixels,backingScale:window.backingScaleFactor)
+    }
+    private func restoreFrame(){
+        guard let frameKey,let saved=UserDefaults.standard.string(forKey:frameKey) else{return}
+        let frame=NSRectFromString(saved)
+        guard frame.minX.isFinite,frame.minY.isFinite,frame.width.isFinite,frame.height.isFinite,
+              frame.width>=window.minSize.width,frame.height>=window.minSize.height else{return}
+        // Restore a plain rectangle. AppKit can otherwise reapply a saved
+        // tiling state on a different monitor after the VM has started.
+        let screens=NSScreen.screens.map(\.visibleFrame)
+        func overlap(_ screen:NSRect)->CGFloat {
+            let intersection=screen.intersection(frame)
+            return intersection.width*intersection.height
+        }
+        guard let bounds=screens.filter({overlap($0)>0}).max(by:{overlap($0)<overlap($1)}) ?? screens.first else{return}
+        let width=min(frame.width,bounds.width),height=min(frame.height,bounds.height)
+        window.setFrame(NSRect(x:min(max(bounds.minX,frame.minX),bounds.maxX-width),
+            y:min(max(bounds.minY,frame.minY),bounds.maxY-height),width:width,height:height),display:false)
+    }
+    private func rememberFrame(){
+        guard visible,!fullScreenTransition,!window.inLiveResize,!window.styleMask.contains(.fullScreen),let frameKey else{return}
+        UserDefaults.standard.set(NSStringFromRect(window.frame),forKey:frameKey)
+    }
+    private func publishSize(){
+        guard visible,!fullScreenTransition,!window.inLiveResize,let viewport else{return}
+        rememberFrame()
+        resized(viewport)
     }
     func beginResolutionChange(_ size:NSSize){
         finishCursorProbe(error:"The desktop started resizing during the cursor probe.")
@@ -445,10 +471,10 @@ final class DesktopWindow:NSObject,NSWindowDelegate {
         desktop?.stop();desktop=nil;native?.stop();native=nil;nativeActive=false;surface.renderer.clear()
     }
     private func connect(){
-        guard visible else{return}
+        guard visible,desktop == nil || native == nil,let launch=launch() else{return}
         if desktop == nil {
             let id=UUID();connectionID=id
-            let client=DesktopConnection(path:socket,receive:{[weak self] pixels,width,height in
+            let client=DesktopConnection(path:launch.socket,receive:{[weak self] pixels,width,height in
                 guard let self,self.visible,self.connectionID == id,!self.nativeActive,self.pendingResolution == nil else{return}
                 self.surface.source=NSSize(width:width,height:height)
                 self.surface.renderer.present(pixels,width:width,height:height)
@@ -462,7 +488,7 @@ final class DesktopWindow:NSObject,NSWindowDelegate {
             })
             desktop=client;surface.connection=client;client.start()
         }
-        if native == nil,let endpoint=endpoint(),FileManager.default.fileExists(atPath:endpoint.socketPath){
+        if native == nil,let endpoint=launch.native,FileManager.default.fileExists(atPath:endpoint.socketPath){
             let id=UUID();readerID=id
             let reader=NativeDisplayReader(endpoint:endpoint,device:surface.renderer.device,receive:{[weak self] frame in
                 guard let self,self.visible,self.readerID == id else{return}
@@ -512,6 +538,7 @@ final class DesktopWindow:NSObject,NSWindowDelegate {
     func windowDidFailToEnterFullScreen(_ window:NSWindow){fullScreenTransition=false;publishSize()}
     func windowDidFailToExitFullScreen(_ window:NSWindow){fullScreenTransition=false;publishSize()}
     func windowDidResize(_ notification:Notification){publishSize()}
+    func windowDidMove(_ notification:Notification){rememberFrame()}
     func windowDidChangeScreen(_ notification:Notification){publishSize()}
     func windowDidChangeBackingProperties(_ notification:Notification){publishSize()}
 }

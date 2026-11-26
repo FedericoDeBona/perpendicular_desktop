@@ -68,6 +68,7 @@ final class VirtualMachineController {
     private var displayControl:DesktopConnection?
     private var displayRequest:UUID?
     private(set) var desktopResolutionPending=false
+    private(set) var desktopBootMode:NSSize?
     let controlSocket: String
 
     init(directory: URL, runtime: URL) throws {
@@ -129,10 +130,11 @@ final class VirtualMachineController {
         }.value
     }
     var nativeGraphicsEnabled:Bool {configuration.graphics == "native3D" && configuration.recoveryDisplay != true}
+    private var desktopOnly:Bool {Bundle.main.object(forInfoDictionaryKey:"PerpendicularDesktopOnly") as? Bool == true}
     // Desktop mode exposes only its primary output. Keep the existing PCI
     // identity below so Windows continues using the installed 3D driver.
     var mixedDisplaysEnabled:Bool {nativeGraphicsEnabled && configuration.mixedDisplays == true
-        && Bundle.main.object(forInfoDictionaryKey:"PerpendicularDesktopOnly") as? Bool != true}
+        && !desktopOnly}
     var virtualDisplayEnabled:Bool {nativeGraphicsEnabled}
     var desktopIsKey:Bool {desktop?.window.isKeyWindow == true}
     var appDisplayBindings:AppDisplayBindings? {
@@ -192,14 +194,20 @@ final class VirtualMachineController {
     func showDesktop() async throws {
         try await start()
         try await beforeDesktop?()
-        if let launch=desktopLaunch() {
-            if desktop == nil {desktop=try DesktopWindow(socket:launch.socket,endpoint:{[weak self] in self?.desktopLaunch()?.native},resized:{[weak self] size in self?.onDesktopSize?(size)},input:{[weak self] in self?.onDesktopInput?()})}
+        if desktopLaunch() != nil {
+            try prepareDesktopWindow()
             desktop?.configureClipboard(desktopClipboardBridge);desktop?.show();return
         }
         let path=directory.appendingPathComponent("qemu-system-aarch64.pid")
         guard let text=try? String(contentsOf:path,encoding:.utf8),let pid=Int32(text),
               let application=NSRunningApplication(processIdentifier:pid) else {return}
         application.unhide();application.activate(options:[])
+    }
+    private func prepareDesktopWindow() throws {
+        guard desktop == nil else{return}
+        desktop=try DesktopWindow(launch:{[weak self] in self?.desktopLaunch()},
+            frameKey:desktopOnly ? "DesktopModeFrame.\(configuration.id)":nil,
+            resized:{[weak self] viewport in self?.onDesktopSize?(viewport)},input:{[weak self] in self?.onDesktopInput?()})
     }
     /// Publish exact modes to the dedicated app consoles. The primary VNC
     /// connection and its input stay bound to the reserved Windows desktop.
@@ -339,6 +347,7 @@ final class VirtualMachineController {
         case .stopped:break
         }
         closeDesktop()
+        desktopBootMode=nil
         let vm = directory.appendingPathComponent("Windows")
         guard configuration.graphics != "virtio2D" || configuration.recoveryDisplay == true else {
             throw CocoaError(.executableRuntimeMismatch,userInfo:[NSLocalizedDescriptionKey:"The reference 2D experiment is not an available display backend. Choose Standard or Recovery Display."])
@@ -417,8 +426,8 @@ final class VirtualMachineController {
             // Retina window capture needs contiguous 16 MiB driver pools. The
             // measured 256 MiB aperture fragmented below that size with two
             // ordinary apps; use the next PCI BAR size for this local 3D path.
-            // Windows caches the monitor's initial mode envelope. Include the
-            // full display, not only its work area, so fullscreen also fits.
+            // Seamless uses the full display's mode envelope or reserves the
+            // primary for Desktop in the mixed topology below.
             let fullDisplay=hostDisplays.first.map {
                 let scale=mixedDisplaysEnabled ? CGFloat(MixedDisplayPlan.rasterScale(hostDisplays)):$0.scale
                 return NSSize(width:$0.frame.width*scale,height:$0.frame.height*scale)
@@ -428,7 +437,12 @@ final class VirtualMachineController {
             // the existing native resize path still sets its requested size.
             let bootDisplay=mixedDisplaysEnabled ? NSSize(width:1920,height:1280):fullDisplay
             let scale=min(1,4096/bootDisplay.width,4096/bootDisplay.height,sqrt(8_388_608/(bootDisplay.width*bootDisplay.height)))
-            let initialDisplay=NSSize(width:max(640,(bootDisplay.width*scale).rounded()),height:max(480,(bootDisplay.height*scale).rounded()))
+            let fallback=NSSize(width:max(640,(bootDisplay.width*scale).rounded()),height:max(480,(bootDisplay.height*scale).rounded()))
+            // Prepare the actual Desktop Mode window before launching QEMU so
+            // Windows sees its raster when it initializes the virtual monitor.
+            if desktopOnly {try? prepareDesktopWindow()}
+            desktopBootMode=desktop?.viewport?.mode
+            let initialDisplay=desktopBootMode ?? fallback
             let venus=native?.supportsVenus == true ? ",venus=on":""
             arguments += ["-device","virtio-ramfb-gl,id=display0,addr=0x8,disable-legacy=on,neptune=on\(venus),blob=on,hostmem=512M,max_outputs=1,xres=\(Int(initialDisplay.width)),yres=\(Int(initialDisplay.height))"]
             if mixedDisplaysEnabled {

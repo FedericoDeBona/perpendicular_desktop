@@ -1439,7 +1439,6 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
         desktopResizeReport=["targetWidth":width,"targetHeight":height,"phase":"publishing","fallback":false,"events":0]
         if let dpi=target.dpi {desktopResizeReport["targetDPI"]=dpi}
         displayReadTask?.cancel();displayReadTask=nil
-        if publishRaster {machine?.requestDesktopResolution(target.size)}
 
         func isCurrent()->Bool {
             !Task.isCancelled && connected && displayEpoch==epoch && desktopResizeRequest==request
@@ -1466,13 +1465,37 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
                 desktopConfirmed=target.size;readMixedDisplay()
             }else if phase=="failed" || phase=="scaleFailed" {readDisplay()}
         }
+        func frameMatches()->Bool {
+            guard machine?.nativeGraphicsEnabled == true else{return true}
+            let frame=machine?.desktopState ?? [:]
+            return frame["nativeActive"] as? Bool == true && frame["width"] as? Int == width && frame["height"] as? Int == height
+        }
         defer {if desktopResizeRequest==request {complete("cancelled")}}
 
+        // The boot raster is already advertised. When Windows starts in a
+        // different mode, use its topology API to apply and save the exact
+        // raster before resorting to disconnecting the virtual monitor.
+        var bootFrameDeadline:TimeInterval?
+        if publishRaster,desktopOnly,machine?.desktopBootMode == target.size,desktopConfirmed != target.size,
+           guestCapabilities["displayTopology"] == true,launcherDisplays.count==1,let primary=launcherDisplays.first,
+           let device=primary["device"] as? String,let modes=primary["modes"] as? [[String:Any]],
+           modes.contains(where:{$0["width"] as? Int == width && $0["height"] as? Int == height}) {
+            desktopResizeReport["phase"]="applyingBootLayout"
+            let layout:[String:Any]=["device":device,"x":0,"y":0,"width":width,"height":height,"primary":true]
+            let applied=await command("display_layout",["layout":[layout]])
+            guard isCurrent() else{return}
+            if applied != nil {bootFrameDeadline=ProcessInfo.processInfo.systemUptime+1.5}
+        }
+        if publishRaster,bootFrameDeadline == nil {machine?.requestDesktopResolution(target.size)}
         var slowRetry=false
         let deadline=started+16
         while ProcessInfo.processInfo.systemUptime<deadline {
             try? await Task.sleep(for:.milliseconds(150))
             guard isCurrent() else{return}
+            if let frameDeadline=bootFrameDeadline,ProcessInfo.processInfo.systemUptime>=frameDeadline {
+                bootFrameDeadline=nil
+                if !frameMatches() {machine?.requestDesktopResolution(target.size)}
+            }
             // The underlying monitor must be reattached before applying DPI.
             if machine?.desktopResolutionPending == true {continue}
             desktopResizeReport["phase"]="confirming"
@@ -1488,9 +1511,7 @@ final class ApplicationModel:NSObject,NSApplicationDelegate,NSMenuItemValidation
                 }
                 continue
             }
-            let frame=machine?.desktopState ?? [:]
-            if machine?.nativeGraphicsEnabled == true,
-               frame["nativeActive"] as? Bool != true || frame["width"] as? Int != width || frame["height"] as? Int != height {
+            if !frameMatches() {
                 desktopResizeReport["phase"]="waitingFrame"
                 continue
             }

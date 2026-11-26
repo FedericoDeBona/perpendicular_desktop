@@ -589,6 +589,8 @@ Il ciclo RAM protetto 4→2→4 GiB con dati conservati resta la qualifica prece
 
 ### GFX-006 — Risoluzione e DPI errati dopo installazione a caldo
 
+- **26 novembre, latenza di avvio del Desktop:** nella main .104, con la finestra salvata, il nuovo avvio ha prodotto direttamente il primo frame Windows 2940×1782 al raster richiesto. Il recupero automatico dalla modalità 4K è verificato in una prova a Windows avviato. La negoziazione ordinaria resta disponibile per le configurazioni in cui Windows non espone il raster iniziale. [Diario](VERIFICATION.md#26-novembre--risoluzione-del-desktop-prima-dellavvio-di-windows)
+
 - **26 novembre, desktop iniziale e scala:** correzione .100 verificata nell'app principale per l'avvio senza resize manuale, il cambio di schermo 2×→1×→2× e il resize a 1×. Desktop proporzionato durante la transizione, raster e DPI confermati da Windows a ogni passaggio. Questo chiude i due casi segnalati della modalità Desktop. Clone non eseguito. [Diario](VERIFICATION.md#26-novembre--risoluzione-iniziale-e-scala-del-desktop)
 
 **3 novembre, integrazione0.2.62:** Resize/fullscreen0.2.61 integrato con video nella0.2.62. QA1920→1720→2880→1720 concorde con vista, applies2/invalidations3 invariati e inputSearch PASS. Verifica finale main in attesa del consenso cartelle; limite diagnostica dopo chiusura resta aperto. [Evidenze](VERIFICATION.md#3-novembre--build-unica-resize-e-video0262-sul-m1).
