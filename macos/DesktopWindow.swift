@@ -6,9 +6,10 @@ private final class DesktopSurface:NSView {
     private static let concealedCursor=NSCursor(image:NSImage(size:NSSize(width:1,height:1)),hotSpot:.zero)
     private static let scrollPointsPerNotch=40.0
     // .NET Framework WinForms loads its embedded Hand.cur as a custom cursor.
-    private static let winFormsHandDigest: [UInt8] = [
-        0x62,0xf1,0x45,0x1b,0xb7,0x65,0x86,0x8f,0x36,0x62,0x79,0x9a,0x88,0x90,0x10,0x21,
-        0xf5,0x8d,0x08,0x31,0x11,0x0a,0xaa,0x44,0x68,0xb7,0x88,0x54,0x32,0x67,0x46,0x3b
+    // Windows can give the worker a DPI-scaled bitmap of that same hand.
+    private static let winFormsHandSignatures:Set<String> = [
+        "32x32@5,0/62f1451bb765868f3662799a88901021f58d0831110aaa4468b788543267463b",
+        "96x96@15,0/2cf931e77ba08bd33d311490055c3a0cd452ae082809fd8879c77992de6cdbc4"
     ]
     let renderer:WindowRenderer
     var onResize:(()->Void)?
@@ -27,6 +28,7 @@ private final class DesktopSurface:NSView {
     private var cursor=NSPoint.zero
     private var scrollRemainder=0.0
     private var desktopCursor=concealedCursor
+    private(set) var cursorImageSignature:String?
     private var activeForHover:Bool {NSApp.isActive && window?.isKeyWindow == true}
     var usesDesktopCursor:Bool {activeForHover && NSCursor.current === desktopCursor}
     var usesMacPointingHand:Bool {usesDesktopCursor && desktopCursor === NSCursor.pointingHand}
@@ -45,19 +47,24 @@ private final class DesktopSurface:NSView {
     override func viewDidEndLiveResize(){super.viewDidEndLiveResize();onResize?()}
     override func updateTrackingAreas(){
         for area in trackingAreas {removeTrackingArea(area)}
-        addTrackingArea(NSTrackingArea(rect:bounds,options:[.mouseMoved,.mouseEnteredAndExited,.activeInKeyWindow,.inVisibleRect],owner:self))
+        addTrackingArea(NSTrackingArea(rect:bounds,
+            options:[.cursorUpdate,.mouseMoved,.mouseEnteredAndExited,.activeInKeyWindow,.inVisibleRect],owner:self))
         super.updateTrackingAreas()
     }
-    override func resetCursorRects(){
-        addCursorRect(visibleRect,cursor:activeForHover ? desktopCursor:.arrow)
+    override func cursorUpdate(with event:NSEvent){
+        guard activeForHover,window?.attachedSheet == nil else {
+            super.cursorUpdate(with:event)
+            return
+        }
+        desktopCursor.set()
     }
     func setDesktopCursor(_ value:[String:Any]?){
+        cursorImageSignature=nil
         desktopCursor=cursorShape(value)
         updateDesktopCursor()
     }
     func updateDesktopCursor(){
         guard let window else{return}
-        window.invalidateCursorRects(for:self)
         if activeForHover,window.attachedSheet == nil,
            visibleRect.contains(convert(window.mouseLocationOutsideOfEventStream,from:nil)) {
             desktopCursor.set()
@@ -81,7 +88,10 @@ private final class DesktopSurface:NSView {
                   let x=value["x"] as? Int,let y=value["y"] as? Int,(0..<w).contains(x),(0..<h).contains(y),
                   let encoded=value["bgra"] as? String,encoded.utf8.count==((w*h*4+2)/3)*4,
                   let data=Data(base64Encoded:encoded),data.count==w*h*4 else{return .arrow}
-            if w == 32,h == 32,x == 5,y == 0,SHA256.hash(data:data).elementsEqual(Self.winFormsHandDigest) {
+            let digest=SHA256.hash(data:data).map{String(format:"%02x",$0)}.joined()
+            let signature="\(w)x\(h)@\(x),\(y)/\(digest)"
+            cursorImageSignature=signature
+            if Self.winFormsHandSignatures.contains(signature) {
                 return .pointingHand
             }
             guard let provider=CGDataProvider(data:data as CFData),
@@ -96,7 +106,7 @@ private final class DesktopSurface:NSView {
     }
     private func mouse(_ event:NSEvent){
         guard inputAvailable,source.width>0,source.height>0,bounds.width>0,bounds.height>0 else{return}
-        window?.makeFirstResponder(self)
+        if window?.firstResponder !== self {window?.makeFirstResponder(self)}
         // Desktop presentation fills the view on both axes. Input must use
         // that same transform, including the taskbar and all four corners.
         let local=convert(event.locationInWindow,from:nil)
@@ -104,8 +114,16 @@ private final class DesktopSurface:NSView {
         cursor=NSPoint(x:inputScreen.x+Int((x*Double(inputScreen.width-1)).rounded()),y:inputScreen.y+Int((y*Double(inputScreen.height-1)).rounded()))
         connection?.pointer(x:Int(cursor.x),y:Int(cursor.y),buttons:buttons)
     }
-    override func mouseMoved(with event:NSEvent){if activeForHover {mouse(event)}}
-    override func mouseEntered(with event:NSEvent){if activeForHover {mouse(event)}}
+    override func mouseMoved(with event:NSEvent){
+        guard activeForHover else{return}
+        if NSCursor.current !== desktopCursor {updateDesktopCursor()}
+        mouse(event)
+    }
+    override func mouseEntered(with event:NSEvent){
+        guard activeForHover else{return}
+        updateDesktopCursor()
+        mouse(event)
+    }
     override func mouseExited(with event:NSEvent){scrollRemainder=0}
     override func mouseDragged(with event:NSEvent){mouse(event)}
     override func rightMouseDragged(with event:NSEvent){mouse(event)}
@@ -362,6 +380,7 @@ final class DesktopWindow:NSObject,NSWindowDelegate {
         sample["cursor"]=cursorName as Any? ?? NSNull()
         sample["usingMacCursor"]=surface.usesDesktopCursor
         sample["usingMacPointingHand"]=surface.usesMacPointingHand
+        sample["cursorImageSignature"]=surface.cursorImageSignature as Any? ?? NSNull()
         cursorProbe?.samples.append(sample)
         if cursorProbe?.samples.count == 640 {finishCursorProbe()}
     }
@@ -404,7 +423,8 @@ final class DesktopWindow:NSObject,NSWindowDelegate {
             let client=DesktopConnection(path:socket,receive:{[weak self] pixels,width,height in
                 guard let self,self.visible,self.connectionID == id,!self.nativeActive,self.pendingResolution == nil else{return}
                 self.surface.source=NSSize(width:width,height:height)
-                self.surface.renderer.present(pixels,width:width,height:height);self.window.title="Desktop Mode"
+                self.surface.renderer.present(pixels,width:width,height:height)
+                if self.window.title != "Desktop Mode" {self.window.title="Desktop Mode"}
             },layout:{[weak self] screen in
                 guard let self,self.connectionID == id,!self.nativeActive else{return};self.surface.inputScreen=screen
             },failed:{[weak self] message in
@@ -428,7 +448,8 @@ final class DesktopWindow:NSObject,NSWindowDelegate {
                 self.surface.source=NSSize(width:frame.texture.width,height:frame.texture.height)
                 self.surface.inputScreen=DesktopScreen(id:0,x:0,y:0,width:frame.texture.width,height:frame.texture.height)
                 self.sampleCursorFrame(frame)
-                self.surface.renderer.present(frame);self.window.title="Desktop Mode"
+                self.surface.renderer.present(frame)
+                if self.window.title != "Desktop Mode" {self.window.title="Desktop Mode"}
             },failed:{[weak self] message in
                 guard let self,self.readerID == id else{return}
                 let wasNative=self.nativeActive
