@@ -1,6 +1,26 @@
 import AppKit
 import CryptoKit
 
+struct DesktopViewport:Equatable {
+    let pixels:NSSize
+    let backingScale:CGFloat
+
+    var mode:NSSize {
+        let limit=min(4096/pixels.width,4096/pixels.height,sqrt(8_388_608/(pixels.width*pixels.height)))
+        let factor=min(limit,max(1,640/pixels.width,480/pixels.height))
+        let rounding:FloatingPointRoundingRule=factor<1 ? .down:.toNearestOrAwayFromZero
+        return NSSize(width:max(640,(pixels.width*factor).rounded(rounding)),
+                      height:max(480,(pixels.height*factor).rounded(rounding)))
+    }
+
+    func windowsDPI(for mode:NSSize)->Int {
+        // If the guest's raster limit reduces the pixel density, preserve the
+        // size of Windows controls by using the closest available scale step.
+        let scale=backingScale*min(1,mode.width/pixels.width,mode.height/pixels.height)
+        return 96+24*Int(max(0,min(4,(4*(scale-1)).rounded())))
+    }
+}
+
 @MainActor
 private final class DesktopSurface:NSView {
     private static let concealedCursor=NSCursor(image:NSImage(size:NSSize(width:1,height:1)),hotSpot:.zero)
@@ -105,13 +125,20 @@ private final class DesktopSurface:NSView {
         default:return .arrow
         }
     }
-    private func mouse(_ event:NSEvent){
+    private var desktopImageRect:NSRect {WindowRenderer.fittedRect(source:source,in:bounds)}
+    private func mouseInDesktop(_ event:NSEvent)->Bool {
+        desktopImageRect.contains(convert(event.locationInWindow,from:nil))
+    }
+    private func mouse(_ event:NSEvent,released:Bool=false){
         guard inputAvailable,source.width>0,source.height>0,bounds.width>0,bounds.height>0 else{return}
         if window?.firstResponder !== self {window?.makeFirstResponder(self)}
-        // Desktop presentation fills the view on both axes. Input must use
-        // that same transform, including the taskbar and all four corners.
         let local=convert(event.locationInWindow,from:nil)
-        let x=max(0,min(1,local.x/bounds.width)),y=max(0,min(1,local.y/bounds.height))
+        // During a mode change the renderer fits the old scanout. Keep clicks
+        // and the Windows taskbar aligned with that same rectangle.
+        let image=desktopImageRect
+        guard released || buttons != 0 || image.contains(local) else{return}
+        let x=max(0,min(1,(local.x-image.minX)/image.width))
+        let y=max(0,min(1,(local.y-image.minY)/image.height))
         cursor=NSPoint(x:inputScreen.x+Int((x*Double(inputScreen.width-1)).rounded()),y:inputScreen.y+Int((y*Double(inputScreen.height-1)).rounded()))
         connection?.pointer(x:Int(cursor.x),y:Int(cursor.y),buttons:buttons)
     }
@@ -126,12 +153,12 @@ private final class DesktopSurface:NSView {
     override func mouseExited(with event:NSEvent){scrollRemainder=0}
     override func mouseDragged(with event:NSEvent){mouse(event)}
     override func rightMouseDragged(with event:NSEvent){mouse(event)}
-    override func mouseDown(with event:NSEvent){guard inputAvailable else{return};buttons |= 1;mouse(event);onUserInput?()}
-    override func mouseUp(with event:NSEvent){buttons &= ~1;mouse(event)}
-    override func rightMouseDown(with event:NSEvent){guard inputAvailable else{return};buttons |= 4;mouse(event);onUserInput?()}
-    override func rightMouseUp(with event:NSEvent){buttons &= ~4;mouse(event)}
+    override func mouseDown(with event:NSEvent){guard inputAvailable,mouseInDesktop(event) else{return};buttons |= 1;mouse(event);onUserInput?()}
+    override func mouseUp(with event:NSEvent){guard buttons & 1 != 0 else{return};buttons &= ~1;mouse(event,released:true)}
+    override func rightMouseDown(with event:NSEvent){guard inputAvailable,mouseInDesktop(event) else{return};buttons |= 4;mouse(event);onUserInput?()}
+    override func rightMouseUp(with event:NSEvent){guard buttons & 4 != 0 else{return};buttons &= ~4;mouse(event,released:true)}
     override func scrollWheel(with event:NSEvent){
-        guard inputAvailable,let connection else{return}
+        guard inputAvailable,mouseInDesktop(event),let connection else{return}
         let delta=Double(event.scrollingDeltaY)
         let notches:Int
         if event.hasPreciseScrollingDeltas {
@@ -304,11 +331,11 @@ final class DesktopWindow:NSObject,NSWindowDelegate {
     private var presentedDrawables:UInt64=0
     private var lastNativeReceiveSeconds=0.0
     private var lastPresentationSeconds=0.0
-    private let resized:(NSSize)->Void
+    private let resized:(DesktopViewport)->Void
 
     var state:[String:Any] {["visible":visible,"fullScreen":window.styleMask.contains(.fullScreen),"fullScreenTransition":fullScreenTransition,"resolutionPending":pendingResolution != nil,"viewWidth":Int(surface.bounds.width),"viewHeight":Int(surface.bounds.height),"backingScale":window.backingScaleFactor,"nativeActive":nativeActive,"width":Int(surface.source.width),"height":Int(surface.source.height),"nativeReceivedFrames":nativeReceivedFrames,"presentedDrawables":presentedDrawables,"lastNativeReceiveHostSeconds":lastNativeReceiveSeconds,"lastPresentationHostSeconds":lastPresentationSeconds,"usesDesktopCursor":surface.usesDesktopCursor,"cursorShape":cursorName as Any? ?? NSNull(),"cursorTracking":cursorLease != nil]}
-    init(socket:String,endpoint:@escaping ()->NativeDisplayEndpoint?,resized:@escaping (NSSize)->Void = {_ in},input:@escaping ()->Void = {})throws{
-        self.socket=socket;self.endpoint=endpoint;self.resized=resized;surface=DesktopSurface(renderer:try WindowRenderer(opaque:true,fillBounds:true))
+    init(socket:String,endpoint:@escaping ()->NativeDisplayEndpoint?,resized:@escaping (DesktopViewport)->Void = {_ in},input:@escaping ()->Void = {})throws{
+        self.socket=socket;self.endpoint=endpoint;self.resized=resized;surface=DesktopSurface(renderer:try WindowRenderer(opaque:true))
         window=NSWindow(contentRect:NSRect(x:140,y:120,width:960,height:640),styleMask:[.titled,.closable,.miniaturizable,.resizable],backing:.buffered,defer:false)
         super.init()
         surface.renderer.onPresented={ [weak self] _ in
@@ -394,7 +421,9 @@ final class DesktopWindow:NSObject,NSWindowDelegate {
     }
     private func publishSize(){
         guard visible,!fullScreenTransition,!window.inLiveResize else{return}
-        resized(surface.convertToBacking(surface.bounds).size)
+        let pixels=surface.convertToBacking(surface.bounds).size
+        guard pixels.width>0,pixels.height>0 else{return}
+        resized(DesktopViewport(pixels:pixels,backingScale:window.backingScaleFactor))
     }
     func beginResolutionChange(_ size:NSSize){
         finishCursorProbe(error:"The desktop started resizing during the cursor probe.")
@@ -441,6 +470,7 @@ final class DesktopWindow:NSObject,NSWindowDelegate {
                    frame.texture.width != Int(pending.width) || frame.texture.height != Int(pending.height) {
                     frame.finishReading();return
                 }
+                let firstFrame = !self.nativeActive
                 self.nativeActive=true;self.desktop?.requestPixels(false)
                 self.nativeReceivedFrames &+= 1
                 self.lastNativeReceiveSeconds=ProcessInfo.processInfo.systemUptime
@@ -448,6 +478,7 @@ final class DesktopWindow:NSObject,NSWindowDelegate {
                 self.surface.inputScreen=DesktopScreen(id:0,x:0,y:0,width:frame.texture.width,height:frame.texture.height)
                 self.sampleCursorFrame(frame)
                 self.surface.renderer.present(frame)
+                if firstFrame {self.publishSize()}
                 if self.window.title != "Desktop Mode" {self.window.title="Desktop Mode"}
             },failed:{[weak self] message in
                 guard let self,self.readerID == id else{return}

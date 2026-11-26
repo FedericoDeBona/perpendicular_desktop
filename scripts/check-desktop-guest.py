@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Require the ARM64 guest with the Desktop Mode pointer compositor fix."""
+"""Require the ARM64 guest with the Desktop Mode pointer and scale fixes."""
 
 import argparse
 from pathlib import Path
@@ -18,7 +18,9 @@ def main():
         parser.exit(1, f"Cannot inspect the Windows guest: {error}\n")
     if not arm64 or b"desktopCursorCompositorRefresh" not in data:
         parser.exit(1, "Rebuild the ARM64 guest with scripts/build-guest.sh for the Desktop Mode pointer fix.\n")
-    print("Desktop Mode pointer compositor fix is present in the ARM64 guest.")
+    if b"desktopScaleAfterModeset" not in data:
+        parser.exit(1, "Rebuild the ARM64 guest with scripts/build-guest.sh for the Desktop Mode scale fix.\n")
+    print("Desktop Mode pointer and scale fixes are present in the ARM64 guest.")
 
 
 if __name__ == "__main__":

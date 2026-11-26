@@ -587,6 +587,8 @@ Il ciclo RAM protetto 4→2→4 GiB con dati conservati resta la qualifica prece
 
 ### GFX-006 — Risoluzione e DPI errati dopo installazione a caldo
 
+- **26 novembre, desktop iniziale e scala:** correzione .100 verificata nell'app principale per l'avvio senza resize manuale, il cambio di schermo 2×→1×→2× e il resize a 1×. Desktop proporzionato durante la transizione, raster e DPI confermati da Windows a ogni passaggio. Questo chiude i due casi segnalati della modalità Desktop. Clone non eseguito. [Diario](VERIFICATION.md#26-novembre--risoluzione-iniziale-e-scala-del-desktop)
+
 **3 novembre, integrazione0.2.62:** Resize/fullscreen0.2.61 integrato con video nella0.2.62. QA1920→1720→2880→1720 concorde con vista, applies2/invalidations3 invariati e inputSearch PASS. Verifica finale main in attesa del consenso cartelle; limite diagnostica dopo chiusura resta aperto. [Evidenze](VERIFICATION.md#3-novembre--build-unica-resize-e-video0262-sul-m1).
 
 - **0.2.61,3novembre: fullscreen/resize confermati dall’utente.** “ora va abbastanza bene. funziona tutto: fullscreen+resize”. Candidata distribuita: callback finali fullscreen, frame valido trattenuto, padding app monitor stabile e reconnect250ms con ripiego singolo1s. Primo raster1920×1280 confermato in1982ms senza ripiego (non tempo del ciclo fullscreen). Due controlli taskbar PASS; nessuna misura di flicker zero o confronto generale. Alla chiusura Desktop durante l’ultima richiesta, Windows1846×1356 corrisponde alla vista923×678@2 ma la diagnostica attende un frame non più ricevuto e termina failed: limite del caso chiuso, non prova negativa del fullscreen confermato. Questo annullamento e qualifica generale restano aperti. [Evidenze](VERIFICATION.md#3-novembre--fullscreen-e-resize-confermati-nella0261).

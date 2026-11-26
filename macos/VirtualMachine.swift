@@ -53,7 +53,7 @@ final class VirtualMachineController {
     let configuration: MachineConfiguration
     private var machine: Process?
     private var tpm: Process?
-    var onDesktopSize:((NSSize)->Void)?
+    var onDesktopSize:((DesktopViewport)->Void)?
     var desktopClipboardBridge:GuestBridge?
     var onDesktopInput:(()->Void)?
     var beforeDesktop:(()async throws->Void)?

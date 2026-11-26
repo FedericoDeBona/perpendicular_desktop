@@ -33,7 +33,6 @@ final class WindowRenderer {
     private var shared:GuestFrameSurface?
     private var nativeCache=false
     private var opaque:Bool
-    private let fillBounds:Bool
     private var pixels=Data()
     private var pixelStride=0
     private var size=NSSize.zero
@@ -96,8 +95,14 @@ final class WindowRenderer {
         metalResources=resources
         return resources
     }
-    init(opaque:Bool=false,fillBounds:Bool=false) throws {
-        self.opaque=opaque;self.fillBounds=fillBounds
+    static func fittedRect(source:NSSize,in bounds:NSRect)->NSRect {
+        guard source.width>0,source.height>0 else{return .zero}
+        let factor=min(bounds.width/source.width,bounds.height/source.height)
+        let width=source.width*factor,height=source.height*factor
+        return NSRect(x:bounds.midX-width/2,y:bounds.midY-height/2,width:width,height:height)
+    }
+    init(opaque:Bool=false) throws {
+        self.opaque=opaque
         let resources=try Self.resources()
         guard let queue=resources.device.makeCommandQueue() else {throw CocoaError(.featureUnsupported)}
         device=resources.device;pipeline=resources.pipeline;self.queue=queue
@@ -236,8 +241,8 @@ final class WindowRenderer {
         pass.colorAttachments[0].loadAction = .clear;pass.colorAttachments[0].storeAction = .store
         pass.colorAttachments[0].clearColor=MTLClearColorMake(0,0,0,0)
         guard let encoder=command.makeRenderCommandEncoder(descriptor:pass) else{return}
-        let fit=min(drawableSize.width/size.width,drawableSize.height/size.height)
-        var scale=fillBounds ? SIMD2<Float>(1,1):SIMD2<Float>(Float(size.width*fit/drawableSize.width),Float(size.height*fit/drawableSize.height))
+        let image=Self.fittedRect(source:size,in:NSRect(origin:.zero,size:drawableSize))
+        var scale=SIMD2<Float>(Float(image.width/drawableSize.width),Float(image.height/drawableSize.height))
         encoder.setRenderPipelineState(pipeline)
         encoder.setVertexBytes(&scale,length:MemoryLayout<SIMD2<Float>>.size,index:0)
         encoder.setFragmentTexture(sampledTexture,index:0)

@@ -316,12 +316,14 @@ fn set_dpi(path: &DISPLAYCONFIG_PATH_INFO, dpi: u32) -> Result<(), String> {
         size: 32, adapterId: path.sourceInfo.adapterId, id: path.sourceInfo.id };
     let code = unsafe { DisplayConfigGetDeviceInfo(&mut get.header) };
     if code != 0 { return Err(format!("Read live display scaling: {code}")); }
-    if !(-11..=0).contains(&get.minimum) || !(0..=11).contains(&get.maximum)
-        || get.current < get.minimum || get.current > get.maximum {
+    let last = scales.len() as i32 - 1;
+    if !(-last..=0).contains(&get.minimum) || !(0..=last + get.minimum).contains(&get.maximum) {
         return Err("Unsupported live DPI range".into());
     }
     let desired = scales.iter().position(|&s|s==dpi).ok_or("Unsupported DPI value")? as i32 + get.minimum;
     if desired < get.minimum || desired > get.maximum { return Err("Requested DPI is outside this monitor's range".into()); }
+    // After a mode switch Windows can report a current scale outside the new
+    // selectable range. Only the requested setting must be within that range.
     if desired == get.current { return Ok(()); }
     let set = DpiSet { header: DISPLAYCONFIG_DEVICE_INFO_HEADER {r#type:DISPLAYCONFIG_DEVICE_INFO_TYPE(-4),
         size:24,adapterId:path.sourceInfo.adapterId,id:path.sourceInfo.id},relative:desired };
