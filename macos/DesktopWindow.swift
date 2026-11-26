@@ -48,15 +48,13 @@ private final class DesktopSurface:NSView {
     override func updateTrackingAreas(){
         for area in trackingAreas {removeTrackingArea(area)}
         addTrackingArea(NSTrackingArea(rect:bounds,
-            options:[.cursorUpdate,.mouseMoved,.mouseEnteredAndExited,.activeInKeyWindow,.inVisibleRect],owner:self))
+            options:[.mouseMoved,.mouseEnteredAndExited,.activeInKeyWindow,.inVisibleRect],owner:self))
         super.updateTrackingAreas()
     }
-    override func cursorUpdate(with event:NSEvent){
-        guard activeForHover,window?.attachedSheet == nil else {
-            super.cursorUpdate(with:event)
-            return
-        }
-        desktopCursor.set()
+    override func resetCursorRects(){
+        super.resetCursorRects()
+        guard activeForHover,window?.attachedSheet == nil,!visibleRect.isEmpty else{return}
+        addCursorRect(visibleRect,cursor:desktopCursor)
     }
     func setDesktopCursor(_ value:[String:Any]?){
         cursorImageSignature=nil
@@ -65,6 +63,9 @@ private final class DesktopSurface:NSView {
     }
     func updateDesktopCursor(){
         guard let window else{return}
+        // Register the current shape with AppKit so the window server can
+        // preserve it between mouse events while the pointer stays in the view.
+        window.invalidateCursorRects(for:self)
         if activeForHover,window.attachedSheet == nil,
            visibleRect.contains(convert(window.mouseLocationOutsideOfEventStream,from:nil)) {
             desktopCursor.set()
@@ -116,12 +117,10 @@ private final class DesktopSurface:NSView {
     }
     override func mouseMoved(with event:NSEvent){
         guard activeForHover else{return}
-        if NSCursor.current !== desktopCursor {updateDesktopCursor()}
         mouse(event)
     }
     override func mouseEntered(with event:NSEvent){
         guard activeForHover else{return}
-        updateDesktopCursor()
         mouse(event)
     }
     override func mouseExited(with event:NSEvent){scrollRemainder=0}
