@@ -305,6 +305,8 @@ Il ciclo RAM protetto 4→2→4 GiB con dati conservati resta la qualifica prece
 
 ### WIN-006 — Doppio puntatore e scroll troppo sensibile in Desktop Mode
 
+- **Esito .97, APERTO:** confermata dall'utente la sola freccia Mac in secondo piano. In primo piano il cursore di sistema ritorna ancora alla freccia con forma Windows invariata e fotogrammi puliti. La diagnosi è circoscritta alla forma visibile su Mac. [Diario](VERIFICATION.md#26-novembre--stabilit%C3%A0-della-forma-del-puntatore-su-mac)
+
 - **Esito .96, APERTO:** mano WinForms a 96×96 e 32×32 associate alla mano Mac. L'utente vede un solo puntatore e riconosce la mano nativa e il testo in transizione. Entrambe tornano per un istante alla freccia Mac. La correzione già convalidata nel launcher per lo stesso comportamento va applicata alla finestra Desktop Mode. Verifica a finestra inattiva ancora aperta. [Diario](VERIFICATION.md#26-novembre--stabilit%C3%A0-della-forma-del-puntatore-su-mac)
 
 - **Esito .94, APERTO:** la main installata ha superato il campione automatico dopo il riavvio. Nella prova al trackpad a finestra attiva l'utente ha visto soltanto il puntatore Mac, accompagnato da sfarfallio delle forme e ritorno temporaneo alla freccia. La mano centrale riprende per un istante l'aspetto Windows. I fotogrammi nativi misurati sono uniformi. Restano stabilità delle forme e verifica a finestra inattiva. [Diario](VERIFICATION.md#26-novembre--riallineamento-del-puntatore-nel-compositore-windows)
