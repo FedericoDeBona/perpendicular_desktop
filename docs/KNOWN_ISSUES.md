@@ -303,6 +303,12 @@ Il ciclo RAM protetto 4→2→4 GiB con dati conservati resta la qualifica prece
 
 ## Problemi pertinenti al desktop
 
+### WIN-006 — Doppio puntatore e scroll troppo sensibile in Desktop Mode
+
+- **26 novembre:** la finestra mostra il puntatore Windows nel frame e il puntatore Mac sopra la stessa area. Prima della correzione, ogni evento verticale del trackpad generava uno scatto Windows, anche per movimenti minimi.
+- **Stato:** correzione .88 implementata e distribuita nell'app principale. Windows ha ricevuto lo scroll in entrambe le direzioni e nessuno scatto per il gesto breve automatizzato. I puntatori sono distinti nel codice tramite il rettangolo AppKit del solo contenuto Windows. Manca la conferma visiva con puntatore fisico su contenuto e barra del titolo. Clone non eseguito.
+- **Criterio di chiusura:** verificare nella .88 il solo puntatore Windows sopra il desktop e il ritorno del puntatore Mac sulla cornice e fuori dalla finestra. [Diario](VERIFICATION.md#26-novembre--puntatore-e-scroll-in-desktop-mode)
+
 ### NET-001 — Flash LED TIA non disponibile nel percorso NAT/ARM attuale
 
 - **Distinzione verificata17novembre:** obiettivo alternativo esplicito compilare/caricare sulPLC raggiunto; programmaI0.0→Q0.0 effettivamente caricato e comportamento fisico confermato nei due stati dall’utente. Questo non corregge/chiudeFlashLED; nessuna implementazioneDCP o modifica alle protezioniWindows effettuata. [Diario](VERIFICATION.md#17-novembre--obiettivo-plc-reale-backup-e-programma-di-verifica).
@@ -361,6 +367,8 @@ Il ciclo RAM protetto 4→2→4 GiB con dati conservati resta la qualifica prece
 - **Criterio soddisfatto:** secondo installer reale sul medesimo259, INF/CAT/SYS esatti verificati, ricevuta installed/Running con hash guest atteso, nuovo task cartelle presente e sei servizi Running/UI6collegate. Nessuna deduzione dal solo disconnect. Preservare il controllo dei pin; altri errori/pacchetti non qualificati. [Diario](VERIFICATION.md#28-ottobre--pull-rebuild-e-guest-tools-sul-mac93be6687).
 
 ### FS-004 — Collegamento directory a un volume non più presente
+
+- **26 novembre:** dopo il nuovo avvio della VM, preparazione automatica e primo tentativo manuale respinti con `A command is already running`. Un tentativo a prova scroll conclusa è riuscito. L'app principale conferma tre cartelle collegate. La riuscita riguarda quella sessione. [Diario](VERIFICATION.md#26-novembre--puntatore-e-scroll-in-desktop-mode)
 
 **24 novembre, main .87:** durante un avvio lento la preparazione automatica è scaduta perché Windows non ha risposto in tempo. Il desktop e il servizio si sono ripresi nello stesso avvio. Il nuovo collegamento delle cartelle resta da verificare una volta che Windows risponde normalmente. [Evidenze](VERIFICATION.md#24-novembre--avvio-lento-di-windows-nella-vm-principale).
 
@@ -592,6 +600,8 @@ Il ciclo RAM protetto 4→2→4 GiB con dati conservati resta la qualifica prece
 - **Criterio soddisfatto:** stesso runtime locale e configurazione fissa avviati nella main con Windows collegato, senza errore PCI; Guest Tools aggiornati Running/hash concorde. [Diario](VERIFICATION.md#28-ottobre--pull-rebuild-0228-sulla-iot0795218c-in-attesa-del-consenso-macos).
 
 ### SYS-001 — Arresto HVF durante riavvio o arresto
+
+- **26 novembre:** durante l'uscita dal frontend .87 tramite «Quit and Keep Windows», QEMU è terminato per SIGTERM da `loginwindow`, come nei campioni del 27 e 30 ottobre. L'intenzione di mantenere la sessione non è stata soddisfatta. Nessuna nuova causa isolata. Il controllo QCOW2 in sola lettura ha restituito zero errori e la main è tornata operativa con la .88. [Diario](VERIFICATION.md#26-novembre--puntatore-e-scroll-in-desktop-mode)
 
 **24 novembre, main .87:** il tentativo segnalato dall’utente è avanzato durante i rilievi, fino al desktop utilizzabile dopo circa cinque minuti e mezzo nello stesso processo. Il menu Start ha risposto al clic e l’utente conferma la ripresa. Causa del ritardo aperta. Se ricorre, correlare le fasi dell’evento Windows 100 al tempo osservato fino al desktop. [Evidenze](VERIFICATION.md#24-novembre--avvio-lento-di-windows-nella-vm-principale).
 

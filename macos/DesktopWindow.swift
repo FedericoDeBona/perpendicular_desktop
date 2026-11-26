@@ -2,10 +2,12 @@ import AppKit
 
 @MainActor
 private final class DesktopSurface:NSView {
+    private static let desktopCursor=NSCursor(image:NSImage(size:NSSize(width:1,height:1)),hotSpot:.zero)
+    private static let scrollPointsPerNotch=40.0
     let renderer:WindowRenderer
     var onResize:(()->Void)?
     var onUserInput:(()->Void)?
-    var connection:DesktopConnection?
+    var connection:DesktopConnection? {didSet{if oldValue !== connection {scrollRemainder=0}}}
     var bridge:GuestBridge?
     var inputAvailable=true
     private var clipboardRequest:UUID?
@@ -17,6 +19,8 @@ private final class DesktopSurface:NSView {
     private var keys:[UInt16:UInt32]=[:]
     private var modifiers=Set<UInt32>()
     private var cursor=NSPoint.zero
+    private var scrollRemainder=0.0
+    var usesDesktopCursor:Bool {window?.isKeyWindow == true && NSCursor.current === Self.desktopCursor}
     override var isFlipped:Bool {true}
     override var acceptsFirstResponder:Bool {true}
     override func acceptsFirstMouse(for event:NSEvent?)->Bool{true}
@@ -32,8 +36,13 @@ private final class DesktopSurface:NSView {
     override func viewDidEndLiveResize(){super.viewDidEndLiveResize();onResize?()}
     override func updateTrackingAreas(){
         for area in trackingAreas {removeTrackingArea(area)}
-        addTrackingArea(NSTrackingArea(rect:bounds,options:[.mouseMoved,.activeInKeyWindow,.inVisibleRect],owner:self))
+        addTrackingArea(NSTrackingArea(rect:bounds,options:[.mouseMoved,.mouseEnteredAndExited,.activeInKeyWindow,.inVisibleRect],owner:self))
         super.updateTrackingAreas()
+    }
+    override func resetCursorRects(){
+        // Windows draws its own pointer. A cursor rect lets AppKit restore
+        // its cursor over the title bar and when leaving the desktop window.
+        addCursorRect(visibleRect,cursor:Self.desktopCursor)
     }
     private func mouse(_ event:NSEvent){
         guard inputAvailable,source.width>0,source.height>0,bounds.width>0,bounds.height>0 else{return}
@@ -46,6 +55,8 @@ private final class DesktopSurface:NSView {
         connection?.pointer(x:Int(cursor.x),y:Int(cursor.y),buttons:buttons)
     }
     override func mouseMoved(with event:NSEvent){mouse(event)}
+    override func mouseEntered(with event:NSEvent){mouse(event)}
+    override func mouseExited(with event:NSEvent){scrollRemainder=0}
     override func mouseDragged(with event:NSEvent){mouse(event)}
     override func rightMouseDragged(with event:NSEvent){mouse(event)}
     override func mouseDown(with event:NSEvent){guard inputAvailable else{return};buttons |= 1;mouse(event);onUserInput?()}
@@ -53,10 +64,33 @@ private final class DesktopSurface:NSView {
     override func rightMouseDown(with event:NSEvent){guard inputAvailable else{return};buttons |= 4;mouse(event);onUserInput?()}
     override func rightMouseUp(with event:NSEvent){buttons &= ~4;mouse(event)}
     override func scrollWheel(with event:NSEvent){
-        guard inputAvailable else{return}
-        mouse(event);guard event.scrollingDeltaY != 0 else{return}
-        connection?.pointer(x:Int(cursor.x),y:Int(cursor.y),buttons:buttons | (event.scrollingDeltaY>0 ? 8:16))
-        connection?.pointer(x:Int(cursor.x),y:Int(cursor.y),buttons:buttons)
+        guard inputAvailable,let connection else{return}
+        let delta=Double(event.scrollingDeltaY)
+        let notches:Int
+        if event.hasPreciseScrollingDeltas {
+            if event.phase.contains(.began) || event.momentumPhase.contains(.began) {scrollRemainder=0}
+            defer {
+                if !event.phase.intersection([.ended,.cancelled]).isEmpty || event.momentumPhase.contains(.ended) {
+                    scrollRemainder=0
+                }
+            }
+            // RFB carries whole wheel notches. Retain sub-notch movement
+            // within the gesture instead of sending a notch per trackpad event.
+            let limit=Self.scrollPointsPerNotch*8
+            scrollRemainder+=max(-limit,min(limit,delta))
+            notches=Int(scrollRemainder/Self.scrollPointsPerNotch)
+            scrollRemainder-=Double(notches)*Self.scrollPointsPerNotch
+        }else{
+            scrollRemainder=0
+            notches=delta == 0 ? 0 : (delta>0 ? 1:-1)
+        }
+        guard notches != 0 else{return}
+        mouse(event)
+        let wheel:UInt8=notches>0 ? 8:16
+        for _ in 0..<abs(notches) {
+            connection.pointer(x:Int(cursor.x),y:Int(cursor.y),buttons:buttons | wheel)
+            connection.pointer(x:Int(cursor.x),y:Int(cursor.y),buttons:buttons)
+        }
     }
     private func symbol(_ event:NSEvent)->UInt32?{
         let specials:[UInt16:UInt32]=[36:0xff0d,48:0xff09,51:0xff08,53:0xff1b,117:0xffff,
@@ -166,7 +200,7 @@ private final class DesktopSurface:NSView {
     func cancelClipboard(){clipboardRequest=nil;clipboardBusy=false}
     func releaseInput(){
         for key in Set(keys.values).union(modifiers){connection?.key(key,down:false)}
-        keys.removeAll();modifiers.removeAll();buttons=0
+        keys.removeAll();modifiers.removeAll();buttons=0;scrollRemainder=0
         connection?.pointer(x:Int(cursor.x),y:Int(cursor.y),buttons:0)
     }
 }
@@ -192,7 +226,7 @@ final class DesktopWindow:NSObject,NSWindowDelegate {
     private var lastPresentationSeconds=0.0
     private let resized:(NSSize)->Void
 
-    var state:[String:Any] {["visible":visible,"fullScreen":window.styleMask.contains(.fullScreen),"fullScreenTransition":fullScreenTransition,"resolutionPending":pendingResolution != nil,"viewWidth":Int(surface.bounds.width),"viewHeight":Int(surface.bounds.height),"backingScale":window.backingScaleFactor,"nativeActive":nativeActive,"width":Int(surface.source.width),"height":Int(surface.source.height),"nativeReceivedFrames":nativeReceivedFrames,"presentedDrawables":presentedDrawables,"lastNativeReceiveHostSeconds":lastNativeReceiveSeconds,"lastPresentationHostSeconds":lastPresentationSeconds]}
+    var state:[String:Any] {["visible":visible,"fullScreen":window.styleMask.contains(.fullScreen),"fullScreenTransition":fullScreenTransition,"resolutionPending":pendingResolution != nil,"viewWidth":Int(surface.bounds.width),"viewHeight":Int(surface.bounds.height),"backingScale":window.backingScaleFactor,"nativeActive":nativeActive,"width":Int(surface.source.width),"height":Int(surface.source.height),"nativeReceivedFrames":nativeReceivedFrames,"presentedDrawables":presentedDrawables,"lastNativeReceiveHostSeconds":lastNativeReceiveSeconds,"lastPresentationHostSeconds":lastPresentationSeconds,"usesDesktopCursor":surface.usesDesktopCursor]}
     init(socket:String,endpoint:@escaping ()->NativeDisplayEndpoint?,resized:@escaping (NSSize)->Void = {_ in},input:@escaping ()->Void = {})throws{
         self.socket=socket;self.endpoint=endpoint;self.resized=resized;surface=DesktopSurface(renderer:try WindowRenderer(opaque:true,fillBounds:true))
         window=NSWindow(contentRect:NSRect(x:140,y:120,width:960,height:640),styleMask:[.titled,.closable,.miniaturizable,.resizable],backing:.buffered,defer:false)
