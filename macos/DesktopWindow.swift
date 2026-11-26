@@ -1,9 +1,15 @@
 import AppKit
+import CryptoKit
 
 @MainActor
 private final class DesktopSurface:NSView {
     private static let concealedCursor=NSCursor(image:NSImage(size:NSSize(width:1,height:1)),hotSpot:.zero)
     private static let scrollPointsPerNotch=40.0
+    // .NET Framework WinForms loads its embedded Hand.cur as a custom cursor.
+    private static let winFormsHandDigest: [UInt8] = [
+        0x62,0xf1,0x45,0x1b,0xb7,0x65,0x86,0x8f,0x36,0x62,0x79,0x9a,0x88,0x90,0x10,0x21,
+        0xf5,0x8d,0x08,0x31,0x11,0x0a,0xaa,0x44,0x68,0xb7,0x88,0x54,0x32,0x67,0x46,0x3b
+    ]
     let renderer:WindowRenderer
     var onResize:(()->Void)?
     var onUserInput:(()->Void)?
@@ -23,6 +29,7 @@ private final class DesktopSurface:NSView {
     private var desktopCursor=concealedCursor
     private var activeForHover:Bool {NSApp.isActive && window?.isKeyWindow == true}
     var usesDesktopCursor:Bool {activeForHover && NSCursor.current === desktopCursor}
+    var usesMacPointingHand:Bool {usesDesktopCursor && desktopCursor === NSCursor.pointingHand}
     override var isFlipped:Bool {true}
     override var acceptsFirstResponder:Bool {true}
     override func acceptsFirstMouse(for event:NSEvent?)->Bool{true}
@@ -73,7 +80,11 @@ private final class DesktopSurface:NSView {
                   (1...128).contains(w),(1...128).contains(h),
                   let x=value["x"] as? Int,let y=value["y"] as? Int,(0..<w).contains(x),(0..<h).contains(y),
                   let encoded=value["bgra"] as? String,encoded.utf8.count==((w*h*4+2)/3)*4,
-                  let data=Data(base64Encoded:encoded),data.count==w*h*4,let provider=CGDataProvider(data:data as CFData),
+                  let data=Data(base64Encoded:encoded),data.count==w*h*4 else{return .arrow}
+            if w == 32,h == 32,x == 5,y == 0,SHA256.hash(data:data).elementsEqual(Self.winFormsHandDigest) {
+                return .pointingHand
+            }
+            guard let provider=CGDataProvider(data:data as CFData),
                   let cg=CGImage(width:w,height:h,bitsPerComponent:8,bitsPerPixel:32,bytesPerRow:w*4,
                       space:CGColorSpaceCreateDeviceRGB(),bitmapInfo:[.byteOrder32Little,CGBitmapInfo(rawValue:CGImageAlphaInfo.premultipliedFirst.rawValue)],
                       provider:provider,decode:nil,shouldInterpolate:true,intent:.defaultIntent) else{return .arrow}
@@ -350,6 +361,7 @@ final class DesktopWindow:NSObject,NSWindowDelegate {
         sample["frame"]=frame.traceID
         sample["cursor"]=cursorName as Any? ?? NSNull()
         sample["usingMacCursor"]=surface.usesDesktopCursor
+        sample["usingMacPointingHand"]=surface.usesMacPointingHand
         cursorProbe?.samples.append(sample)
         if cursorProbe?.samples.count == 640 {finishCursorProbe()}
     }

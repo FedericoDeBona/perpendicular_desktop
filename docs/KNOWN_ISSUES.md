@@ -305,7 +305,9 @@ Il ciclo RAM protetto 4→2→4 GiB con dati conservati resta la qualifica prece
 
 ### WIN-006 — Doppio puntatore e scroll troppo sensibile in Desktop Mode
 
-- **Esito .92, APERTO:** nella main il puntatore Windows è già impresso nei fotogrammi accelerati prima della presentazione Mac. Finestra di prova con sfondo piatto, segno di controllo riconosciuto e tre forme riprodotte automaticamente. Il riarmo immediato della Magnification API non ha eliminato le tracce. Criterio di chiusura: forme Mac sincronizzate senza tracce Windows e passaggio fisico con Desktop Mode inattivo. Clone non eseguito. [Diario](VERIFICATION.md#26-novembre--misura-della-traccia-del-puntatore)
+- **Esito .93, APERTO:** corretta nella main la mano di WinForms che il Mac riproduceva con aspetto Windows. Dopo il riavvio, la prova automatica conferma la mano nativa del Mac e registra ancora tracce Windows nei fotogrammi nativi. Resta da correggere la soppressione dei pixel Windows e qualificare i passaggi reali con la finestra inattiva. [Diario](VERIFICATION.md#26-novembre--mano-nativa-del-mac-per-winforms)
+
+- **Esito .92, APERTO:** nella main il puntatore Windows è già impresso nei fotogrammi accelerati prima della presentazione Mac. Il riarmo immediato della Magnification API non ha eliminato le tracce. Il successivo campione automatico è risultato pulito, confermando la natura intermittente. Criterio di chiusura: forme Mac sincronizzate senza tracce Windows e passaggio fisico con Desktop Mode inattivo. Clone non eseguito. [Diario](VERIFICATION.md#26-novembre--misura-della-traccia-del-puntatore)
 
 - **Ripresa 26 novembre, APERTO:** confermata dall'utente nella .90 l'immagine ferma del puntatore Windows dopo un cambio di forma. Segnalato anche movimento sopra Desktop Mode inattivo. Distribuita .91 con hover limitato alla finestra attiva e soppressione Windows mantenuta nella vista visibile. Verificati nella main richiesta fuori focus e cambio forme. Resta da verificare il passaggio fisico nella finestra inattiva e da eliminare l'immagine ferma. Nessun clone. [Diario](VERIFICATION.md#26-novembre--ricomparsa-del-puntatore-e-finestra-inattiva)
 
