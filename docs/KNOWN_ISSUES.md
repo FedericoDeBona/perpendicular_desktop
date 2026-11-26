@@ -306,8 +306,7 @@ Il ciclo RAM protetto 4→2→4 GiB con dati conservati resta la qualifica prece
 ### WIN-006 — Doppio puntatore e scroll troppo sensibile in Desktop Mode
 
 - **26 novembre:** la finestra mostra il puntatore Windows nel frame e il puntatore Mac sopra la stessa area. Prima della correzione, ogni evento verticale del trackpad generava uno scatto Windows, anche per movimenti minimi.
-- **Stato:** correzione .88 implementata e distribuita nell'app principale. Windows ha ricevuto lo scroll in entrambe le direzioni e nessuno scatto per il gesto breve automatizzato. I puntatori sono distinti nel codice tramite il rettangolo AppKit del solo contenuto Windows. Manca la conferma visiva con puntatore fisico su contenuto e barra del titolo. Clone non eseguito.
-- **Criterio di chiusura:** verificare nella .88 il solo puntatore Windows sopra il desktop e il ritorno del puntatore Mac sulla cornice e fuori dalla finestra. [Diario](VERIFICATION.md#26-novembre--puntatore-e-scroll-in-desktop-mode)
+- **Stato:** CORRETTO e verificato nell'app principale .88. Windows ha ricevuto lo scroll in entrambe le direzioni e nessuno scatto per il gesto breve automatizzato. L'utente ha confermato un solo puntatore nel passaggio tra desktop Windows e barra del titolo. Clone non eseguito. [Diario](VERIFICATION.md#26-novembre--puntatore-e-scroll-in-desktop-mode)
 
 ### NET-001 — Flash LED TIA non disponibile nel percorso NAT/ARM attuale
 
